@@ -92,7 +92,8 @@ const (
 	// batches).
 	ScenarioPartialImages Scenario = "partial-images"
 	// ScenarioConcurrencyLimit answers HTTP 429 for a full provider concurrency
-	// pool (Tripo code 2000), distinct from request rate limiting.
+	// pool (Tripo code 2000, Meshy "NoMorePendingTasks" on task creation),
+	// distinct from request rate limiting.
 	ScenarioConcurrencyLimit Scenario = "concurrency-limit"
 	// ScenarioRigNonHumanoid answers the documented 422 pose-estimation refusal
 	// for rigging.

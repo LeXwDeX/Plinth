@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from './product-schema';
-import { AgentConfigurationError, createAgentConfigurationClient, resolveSessionSkill, type AgentConfiguration, type AgentEffectiveConfiguration } from './agent-configuration';
+import { AgentConfigurationError, createAgentConfigurationClient, promptsAtDefault, resolveSessionSkill, withDefaultPrompts, type AgentConfiguration, type AgentEffectiveConfiguration } from './agent-configuration';
 import { AgentConfigurationResource, sessionSkillId } from './agent-configuration-resource';
 import type { ChatSkill } from './chat/browser-client';
 
@@ -42,6 +42,28 @@ describe('agent configuration browser contracts', () => {
     const client = createAgentConfigurationClient(schema, vi.fn(async () => response({ detail: 'error.agent_configuration_conflict', raw: 'private-data' }, 409)));
     await expect(client.publish('stale', configuration)).rejects.toMatchObject({ detail: 'error.agent_configuration_conflict', status: 409 });
     await expect(client.get()).rejects.toBeInstanceOf(AgentConfigurationError);
+  });
+});
+
+describe('prompts that follow the Schema default (#525)', () => {
+  const presets: AgentConfiguration = { ...configuration, system_prompt: 'default prompt', domain_context: { image: 'default 2D', 'model-3d': 'default 3D' } };
+  it('restores the system prompt and the domain contexts the draft has, and nothing else', () => {
+    const draft: AgentConfiguration = { ...configuration, system_prompt: 'my prompt', domain_context: { image: 'my 2D' }, enabled_tool_names: ['get_task', 'inspect_image'] };
+    const reset = withDefaultPrompts(draft, presets);
+    expect(reset.system_prompt).toBe('default prompt');
+    expect(reset.domain_context).toEqual({ image: 'default 2D' });
+    expect(reset.enabled_tool_names).toEqual(['get_task', 'inspect_image']);
+    expect(draft.system_prompt).toBe('my prompt');
+  });
+  it('says whether the draft is already at the defaults', () => {
+    expect(promptsAtDefault(configuration, presets)).toBe(false);
+    expect(promptsAtDefault(withDefaultPrompts(configuration, presets), presets)).toBe(true);
+  });
+  it('declares the page messages in Chinese and English', () => {
+    for (const key of ['prompt_following', 'prompt_customized', 'follow_default']) {
+      expect(schema.agent_configuration.ui[key]).toBeTruthy();
+      expect(JSON.stringify(defaultCatalog)).toContain(`"agent_configuration.ui.${key}"`);
+    }
   });
 });
 

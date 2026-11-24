@@ -14,7 +14,7 @@ export function runIsTerminal(run: AssetListRun | null | undefined): boolean {
   return run?.status === 'stopped' || run?.status === 'completed';
 }
 
-/** The run status line: running, the pause reason, stopped, completed or idle (waiting). */
+/** The run status line: running, the pause reason, stopped, completed or idle (not started: the person starts it). */
 export function runStatusText(schema: ProductSchema, run: AssetListRun): string {
   const key = (() => {
     switch (run.status) {

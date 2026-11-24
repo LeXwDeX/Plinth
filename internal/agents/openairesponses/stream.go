@@ -57,9 +57,12 @@ func (adapter *Adapter) Stream(
 	defer func() {
 		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
 	}()
-	response, bodyBytes, err = adapter.send(ctx, request, true)
+	// An upstream that sends nothing ends at the first-byte timeout (#509).
+	guard := upstreamhttp.GuardFirstByte(ctx, adapter.firstByteTimeout)
+	defer guard.Release()
+	response, bodyBytes, err = adapter.send(guard.Context(), request, true)
 	if err != nil {
-		return agents.Completion{}, err
+		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
 	if err = adapter.requireSuccess(response, request); err != nil {
@@ -68,14 +71,19 @@ func (adapter *Adapter) Stream(
 	state := &streamState{adapter: adapter, emit: emit, outputs: newOutputs()}
 	lines := upstreamhttp.NewLines(response.Body, adapter.scannerMaxBytes)
 	event := "" // the event: line of the frame being read
+	// framed: some data: line came; plain is the first line that is no SSE
+	// frame, for a 200 answer that is not a stream at all (#509).
+	framed, plain := false, ""
 read:
 	for lines.Scan() {
 		if first == 0 {
 			// The first frame is what a person waits through: a slow model
 			// shows up as its own number, apart from the whole call.
 			first = time.Since(started)
+			guard.Arrived()
 		}
 		if lines.Oversized() {
+			framed = true
 			state.skipOversized(event)
 			event = ""
 			if state.terminal {
@@ -92,6 +100,7 @@ read:
 		case strings.HasPrefix(line, "event:"):
 			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
+			framed = true
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			hint := event
 			event = ""
@@ -104,15 +113,21 @@ read:
 			if state.terminal {
 				break read
 			}
+		case plain == "" && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:"):
+			plain = line
 		}
 	}
 	if err := lines.Err(); err != nil {
-		return agents.Completion{}, fmt.Errorf("read agent stream: %w", err)
+		return agents.Completion{}, guard.Err(fmt.Errorf("read agent stream: %w", err))
 	}
 	if !state.terminal {
+		if !framed && plain != "" {
+			return agents.Completion{}, upstreamhttp.NotAStream(response.Header.Get("Content-Type"), plain, adapter.exhaustedQuota)
+		}
 		// A stream that stops before its last event is a cut one: the text or
-		// the call arguments so far may be half of what the model wrote.
-		return agents.Completion{}, errors.New("agent stream ended before the response completed")
+		// the call arguments so far may be half of what the model wrote. It
+		// is transient, as in the Chat Completions Adapter (#509).
+		return agents.Completion{}, agents.Transient(errors.New("agent stream ended before the response completed"), 0)
 	}
 	if state.failure != nil {
 		return agents.Completion{}, state.failure
@@ -234,7 +249,15 @@ func (state *streamState) handle(hint, payload string) error {
 			wire = &wireError{Code: event.Code, Message: event.Message, Param: event.Param}
 		}
 		state.terminal = true
-		state.failure = state.adapter.failure(200, wire)
+		// The upstream broke off a response it had accepted: transient, as an
+		// error frame of a Chat Completions stream is, unless it is a
+		// content-safety refusal or a used-up quota (#509). A response that
+		// ended failed (response.failed) is the model's own end and is not.
+		failure := state.adapter.failure(200, wire)
+		if !errors.Is(failure, agents.ErrContentRejected) && !errors.Is(failure, agents.ErrQuotaExhausted) {
+			failure = agents.Transient(failure, 0)
+		}
+		state.failure = failure
 	}
 	return nil
 }

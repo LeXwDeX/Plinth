@@ -27,7 +27,8 @@ func (s *Server) mcpInspectModel(call *mcpCall) (mcpOutcome, error) {
 	}
 	purpose := mcpStringArgument(call, "purpose")
 	if purpose != "" && !s.mcpModelPurposeKnown(purpose) {
-		return s.mcpInvalidArguments(call.locale, "$.purpose: 未知用途，可用 "+s.mcpModelPurposeIDs()), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.purpose",
+			s.application.MCPPublic.Messages.InvalidDetails.PurposeUnknown, "{purposes}", s.mcpModelPurposeIDs())), nil
 	}
 	assetID := mcpStringArgument(call, "asset_id")
 	if s.modelInspector == nil {

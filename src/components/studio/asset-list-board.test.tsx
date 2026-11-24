@@ -9,6 +9,7 @@ import { AssetListBoard } from '@/components/studio/asset-list-board';
 import { inputAssetPath } from '@/lib/asset-lists/board';
 import { AssetListError, type AssetListBoard as AssetListBoardData, type AssetListBoardItem, type AssetListClient } from '@/lib/asset-lists/client';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
+import { useConnectivityStore } from '@/store/connectivity-store';
 import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
 import { useStudioStore } from '@/store/studio-store';
 
@@ -242,6 +243,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  useConnectivityStore.setState({ sessionExpired: false });
   vi.restoreAllMocks();
 });
 
@@ -380,6 +382,18 @@ describe('AssetListBoard (#329)', () => {
     // Opening through the button's own click is what Enter and Space fire on a native button.
     fireEvent.click(cell);
     expect(screen.getByTestId('asset-board-detail')).toBeTruthy();
+  });
+
+  // #508: an item whose turn waits for an approval card is marked, so the
+  // person knows to open its session and decide the card.
+  it('marks an item that waits for an approval card', async () => {
+    const waiting = boardItem({ id: 'item-card', name: '待批角色', state: 'working', block: 'awaiting_approval' });
+    const plain = boardItem({ id: 'item-plain', name: '普通角色', state: 'working' });
+    renderBoard(board([waiting, plain]));
+    await waitFor(() => expect(screen.getByTestId('asset-board-awaiting-approval-item-card')).toBeTruthy());
+    expect(screen.getByTestId('asset-board-awaiting-approval-item-card').textContent)
+      .toBe(text('ui.asset_list.item_awaiting_approval'));
+    expect(screen.queryByTestId('asset-board-awaiting-approval-item-plain')).toBeNull();
   });
 
   // #330 step 5C: a capped item reads "used / limit" with the person's grant,
@@ -731,6 +745,7 @@ describe('AssetListBoard board actions (#329d)', () => {
     const getBoard = vi.fn()
       .mockResolvedValueOnce(running)
       .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(running)
       .mockResolvedValue(done);
     renderBoard(running, { getBoard, pollIntervalMs: 5000 });
 
@@ -745,14 +760,55 @@ describe('AssetListBoard board actions (#329d)', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(getBoard).toHaveBeenCalledTimes(2);
 
+    // Shown again: one read at once (#385), then the board's own interval.
     visibility = 'visible';
     act(() => { document.dispatchEvent(new Event('visibilitychange')); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(getBoard).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getBoard).toHaveBeenCalledTimes(4);
 
-    // The last read returned a completed run, so the interval is gone.
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(getBoard).toHaveBeenCalledTimes(3);
+    // The last read returned a completed run, so the polling is gone.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(getBoard).toHaveBeenCalledTimes(4);
+  });
+
+  // #511 (#385): the board's poll follows the page's polling rules.
+  it('reads nothing once the login has ended and reads again after signing in', async () => {
+    vi.useFakeTimers();
+    const running = withRun(boardFixture(), 'running');
+    const getBoard = vi.fn(async () => running);
+    renderBoard(running, { getBoard, pollIntervalMs: 5000 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: true }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: false }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getBoard).toHaveBeenCalledTimes(2);
+  });
+
+  it('slows down while a paused list waits on review and nothing changes', async () => {
+    vi.useFakeTimers();
+    const idle = schema.runtime.frontend.idle_polling;
+    const waiting = withRun(board([boardItem({ id: 'item-2d', name: '图标', kind: 'image', state: 'review' })]), 'paused');
+    const getBoard = vi.fn(async () => waiting);
+    renderBoard(waiting, { getBoard, pollIntervalMs: 1000 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+
+    // The first poll finds the same board; every later wait is multiplied by the Schema's factor.
+    let wait = 1000;
+    for (let read = 2; read <= 4; read += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(wait - 1); });
+      expect(getBoard).toHaveBeenCalledTimes(read - 1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(getBoard).toHaveBeenCalledTimes(read);
+      wait = Math.min(idle.max_interval_milliseconds, wait * idle.backoff_factor);
+    }
   });
 });
 
@@ -842,7 +898,7 @@ describe('AssetListBoard dialog behaviour (#425)', () => {
     expect(checkbox.closest('label')?.className).toMatch(HIT_AREA);
   });
 
-  it('re-reads every five seconds while the list produces, without a test seam', async () => {
+  it('re-reads at the Schema\'s task polling interval while the list produces, without a test seam', async () => {
     vi.useFakeTimers();
     const running = withRun(boardFixture(), 'running');
     const getBoard = vi.fn(async () => running);
@@ -851,8 +907,9 @@ describe('AssetListBoard dialog behaviour (#425)', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(getBoard).toHaveBeenCalledTimes(1);
 
-    // The default interval is the documented five seconds.
-    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    // #511: the interval is the Schema's `runtime.frontend.task_polling_interval_milliseconds`, not a page constant.
+    const interval = schema.runtime.frontend.task_polling_interval_milliseconds;
+    await act(async () => { await vi.advanceTimersByTimeAsync(interval - 1); });
     expect(getBoard).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(getBoard).toHaveBeenCalledTimes(2);

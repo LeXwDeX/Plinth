@@ -579,6 +579,16 @@ func TestShippedUsageBudgetsAndScales(t *testing.T) {
 		} else if profile.ScaleRangeM != nil {
 			t.Errorf("%s scale_range_m = %+v, want none", profile.ID, profile.ScaleRangeM)
 		}
+		// #512: only the game purposes place their model by its base, so only
+		// they declare an origin tolerance; display, Web/AR and print never judge it.
+		wantPivot := map[string]float64{"game_character": 0.05, "game_prop": 0.05}
+		if tolerance, judged := wantPivot[profile.ID]; judged {
+			if profile.PivotBottomCenterRatio == nil || *profile.PivotBottomCenterRatio != tolerance {
+				t.Errorf("%s pivot_bottom_center_ratio = %v, want %v", profile.ID, profile.PivotBottomCenterRatio, tolerance)
+			}
+		} else if profile.PivotBottomCenterRatio != nil {
+			t.Errorf("%s pivot_bottom_center_ratio = %v, want none", profile.ID, *profile.PivotBottomCenterRatio)
+		}
 	}
 }
 
@@ -714,6 +724,22 @@ func TestModel3DUsageShapeRejectsInvalidDeclarations(t *testing.T) {
 				a.Chat.Model3DUsage.Profiles[1].ScaleRangeM = &ChatModel3DUsageScaleRange{Min: 5, Max: 1}
 			},
 			want: "scale_range_m",
+		},
+		{
+			name: "an origin tolerance of zero",
+			mutate: func(a *ApplicationSchema) {
+				ratio := 0.0
+				a.Chat.Model3DUsage.Profiles[1].PivotBottomCenterRatio = &ratio
+			},
+			want: "pivot_bottom_center_ratio",
+		},
+		{
+			name: "an origin tolerance above one",
+			mutate: func(a *ApplicationSchema) {
+				ratio := 1.1
+				a.Chat.Model3DUsage.Profiles[1].PivotBottomCenterRatio = &ratio
+			},
+			want: "pivot_bottom_center_ratio",
 		},
 		{
 			name: "a pipeline capability the application does not declare",

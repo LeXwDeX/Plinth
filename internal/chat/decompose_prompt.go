@@ -64,5 +64,12 @@ func (orchestrator *Orchestrator) decomposePrompt(
 		orchestrator.text(ctx, decompose.AgentPrompt),
 		"{maximum}", strconv.Itoa(decompose.MaximumItemsPerImage),
 	)
+	// With automatic production off a confirmed list starts nothing (#508):
+	// the guidance says so, so the Agent makes the items itself after the
+	// confirmation instead of waiting for a run that never comes.
+	if note := strings.TrimSpace(policy.Schema.Messages.ManualProduction); note != "" &&
+		!assetListProductionAutomatic(policy.Schema) {
+		prompt += "\n" + orchestrator.text(ctx, note)
+	}
 	return "\n\n" + prompt
 }

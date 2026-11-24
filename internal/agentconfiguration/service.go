@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,13 +20,46 @@ import (
 var ErrConflict = errors.New("agent configuration revision conflict")
 var ErrNotFound = errors.New("agent configuration revision not found")
 
+// ConfigurationFormat marks a stored version that records what an
+// administrator chose relative to the Schema (#525), not a frozen copy of it:
+// tools are stored as the ones turned off, so a built-in tool a later release
+// adds is on unless someone turns it off, and a prompt nobody customized is
+// stored as "follows the default", so a release that improves it reaches the
+// version without a republish. A version without the marker is the older
+// frozen form and is converted when it is read (see resolve).
+const ConfigurationFormat = 2
+
+// Configuration is both the effective configuration the API, the admin page
+// and a turn see, and the stored form of a version. The stored-only fields
+// (Format, DisabledToolNames, FollowsSchema) are empty in every effective configuration and
+// are rejected when a client submits them.
 type Configuration struct {
 	SystemPrompt        string                `json:"system_prompt"`
 	DomainContext       map[string]string     `json:"domain_context"`
 	Skills              []catalog.SkillSchema `json:"skills"`
 	EnabledToolNames    []string              `json:"enabled_tool_names"`
 	EnabledMCPPresetIDs []string              `json:"enabled_mcp_preset_ids"`
+	// Format is ConfigurationFormat for a version stored in the current form.
+	// A format 2 version still carries enabled_tool_names, as a compatibility
+	// mirror limited to tools the v1.8.0 Schema declared: an older build that
+	// does not know the format reads it as an ordinary frozen list and finds
+	// no tool name it does not declare, so rolling back never reports an
+	// unknown selection. Format 2 readers ignore the mirror.
+	Format int `json:"format,omitempty"`
+	// DisabledToolNames lists the declared tools the administrator turned off.
+	DisabledToolNames []string `json:"disabled_tool_names,omitempty"`
+	// FollowsSchema lists the prompt parts ("system_prompt",
+	// "domain_context.<key>") the administrator never customized: they read as
+	// the Schema's current default whatever text this version stored for them
+	// (the stored text is a mirror for older builds). A part not listed is a
+	// customization and stays frozen.
+	FollowsSchema []string `json:"follows_schema,omitempty"`
 }
+
+const promptPartSystem = "system_prompt"
+
+func promptPartDomain(key string) string { return "domain_context." + key }
+
 type Snapshot struct {
 	Revision      string        `json:"revision"`
 	Configuration Configuration `json:"configuration"`
@@ -49,10 +83,14 @@ type Tool struct {
 }
 type Management struct {
 	Snapshot
-	Presets    Configuration `json:"presets"`
-	Tools      []Tool        `json:"tools"`
-	MCPPresets []MCPPreset   `json:"mcp_presets"`
-	History    []History     `json:"history"`
+	// PromptCustomized is true when the published version froze its own system
+	// prompt or a domain context instead of following the Schema default; those
+	// texts do not change with an upgrade (#525).
+	PromptCustomized bool          `json:"prompt_customized"`
+	Presets          Configuration `json:"presets"`
+	Tools            []Tool        `json:"tools"`
+	MCPPresets       []MCPPreset   `json:"mcp_presets"`
+	History          []History     `json:"history"`
 }
 type MCPPreset struct {
 	Available       bool     `json:"available"`
@@ -83,6 +121,10 @@ type Service struct {
 	retiredBuiltIns     map[string]string
 	packagedSkillImages map[string]bool
 	personalSkills      PersonalSkillStore
+	// legacy and toolBaseline are what a version without a format marker is
+	// read against (see resolve).
+	legacy       legacyDefaults
+	toolBaseline map[string]bool
 }
 
 type Option func(*Service)
@@ -101,6 +143,11 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	for _, option := range options {
 		option(s)
 	}
+	legacy, err := loadLegacyDefaults()
+	if err != nil {
+		return nil, err
+	}
+	s.legacy, s.toolBaseline = legacy, legacy.toolBaseline()
 	s.packagedSkillImages = map[string]bool{}
 	retired, err := catalog.RetiredBuiltInSkills()
 	if err != nil {
@@ -209,20 +256,28 @@ func clone(c Configuration) Configuration {
 	return result
 }
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
+	snapshot, _, err := s.current(ctx)
+	return snapshot, err
+}
+
+// current reads the latest version as the effective configuration, and
+// whether it carries a customized prompt.
+func (s *Service) current(ctx context.Context) (Snapshot, bool, error) {
 	v, err := s.store.LatestAgentConfiguration(ctx)
 	if errors.Is(err, ErrNotFound) {
-		return Snapshot{"0", clone(s.defaults)}, nil
+		return Snapshot{"0", clone(s.defaults)}, false, nil
 	}
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, false, err
 	}
-	if err = s.Validate(v.Configuration); err != nil {
-		return Snapshot{}, err
+	stored, customized := s.resolve(v)
+	if err = s.Validate(stored); err != nil {
+		return Snapshot{}, false, err
 	}
-	return Snapshot{v.Revision, s.project(v.Configuration)}, nil
+	return Snapshot{v.Revision, s.project(stored)}, customized, nil
 }
 func (s *Service) Management(ctx context.Context) (Management, error) {
-	v, err := s.Snapshot(ctx)
+	v, customized, err := s.current(ctx)
 	if err != nil {
 		return Management{}, err
 	}
@@ -230,7 +285,7 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 	if err != nil {
 		return Management{}, err
 	}
-	result := Management{Snapshot: v, Presets: clone(s.defaults), Tools: append([]Tool(nil), s.tools...), MCPPresets: []MCPPreset{}, History: []History{}}
+	result := Management{Snapshot: v, PromptCustomized: customized, Presets: clone(s.defaults), Tools: append([]Tool(nil), s.tools...), MCPPresets: []MCPPreset{}, History: []History{}}
 	for _, preset := range s.schema.AgentConfiguration.MCPPresets {
 		names := []string{}
 		for _, tool := range preset.Tools {
@@ -248,6 +303,9 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 	return result, nil
 }
 func (s *Service) Validate(c Configuration) error {
+	if c.Format != 0 || len(c.DisabledToolNames) > 0 || len(c.FollowsSchema) > 0 {
+		return errors.New("format, disabled_tool_names and follows_schema are stored by the server")
+	}
 	limits := s.schema.AgentConfiguration.Limits
 	if strings.TrimSpace(c.SystemPrompt) == "" || utf8.RuneCountInString(c.SystemPrompt) > limits.MaxPromptCharacters {
 		return errors.New("invalid system_prompt length")
@@ -303,23 +361,59 @@ func (s *Service) Validate(c Configuration) error {
 			}
 		}
 	}
-	allowed := map[string]bool{}
-	for _, t := range s.tools {
-		allowed[t.Name] = true
-	}
-	// A declared tool without an enabled Offering stays acceptable, so an older
-	// client or version can still be validated; Publish drops it.
-	for name := range s.hiddenTools {
-		allowed[name] = true
-	}
-	if err := validateIDs(c.EnabledToolNames, allowed); err != nil {
+	tools, presets := s.declaredSelections()
+	if err := validateIDs(c.EnabledToolNames, tools); err != nil {
 		return err
 	}
-	allowed = map[string]bool{}
-	for _, p := range s.schema.AgentConfiguration.MCPPresets {
-		allowed[p.ID] = true
+	return validateIDs(c.EnabledMCPPresetIDs, presets)
+}
+
+// declaredSelections lists the tool names and MCP preset IDs the current
+// Schema declares. A declared tool without an enabled Offering stays
+// acceptable, so an older client or version can still be validated; Publish
+// drops it.
+func (s *Service) declaredSelections() (tools, presets map[string]bool) {
+	tools = map[string]bool{}
+	for _, t := range s.tools {
+		tools[t.Name] = true
 	}
-	return validateIDs(c.EnabledMCPPresetIDs, allowed)
+	for name := range s.hiddenTools {
+		tools[name] = true
+	}
+	presets = map[string]bool{}
+	for _, p := range s.schema.AgentConfiguration.MCPPresets {
+		presets[p.ID] = true
+	}
+	return tools, presets
+}
+
+// withoutUndeclaredSelections is the read view of a stored version (#500): a
+// tool or MCP preset the Schema no longer declares, such as observe_task and
+// request_consent after #491, was valid when the version was published, so it
+// is left out instead of making the whole version unreadable. Validate stays
+// strict, so a new submission naming it is still rejected. The stored version
+// is never rewritten.
+func (s *Service) withoutUndeclaredSelections(c Configuration) (Configuration, bool) {
+	legacy := c.Format < ConfigurationFormat
+	tools, presets := s.declaredSelections()
+	cleaned := clone(c)
+	keep := func(ids []string, allowed map[string]bool) ([]string, bool) {
+		kept := make([]string, 0, len(ids))
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if allowed[id] && !seen[id] {
+				seen[id] = true
+				kept = append(kept, id)
+			}
+		}
+		return kept, len(kept) != len(ids)
+	}
+	var droppedTools, droppedPresets bool
+	cleaned.EnabledToolNames, droppedTools = keep(cleaned.EnabledToolNames, tools)
+	cleaned.EnabledMCPPresetIDs, droppedPresets = keep(cleaned.EnabledMCPPresetIDs, presets)
+	// A format 2 version keeps tools as a disabled list and a compatibility
+	// mirror that resolve ignores, so a name in the mirror is not a defect.
+	return cleaned, (legacy && droppedTools) || droppedPresets
 }
 func validateIDs(ids []string, allowed map[string]bool) error {
 	seen := map[string]bool{}
@@ -338,7 +432,9 @@ func (s *Service) Publish(ctx context.Context, expected, actor, source string, c
 	if _, err := strconv.ParseUint(expected, 10, 64); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.project(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.toStored(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	// The caller gets the effective configuration, not the stored form.
+	v.Snapshot.Configuration = s.project(c)
 	return v.Snapshot, err
 }
 func (s *Service) Restore(ctx context.Context, expected, target, actor string) (Snapshot, error) {
@@ -349,7 +445,11 @@ func (s *Service) Restore(ctx context.Context, expected, target, actor string) (
 	if err != nil {
 		return Snapshot{}, err
 	}
-	cleaned, _, err := s.withoutRetiredBuiltIns(v.Configuration)
+	// The old version is restored as the administrator chose it: read through
+	// resolve like any other read, so tools the old version predates are on and
+	// a prompt it never customized is the current default.
+	resolved, _ := s.resolve(v)
+	cleaned, _, err := s.withoutRetiredBuiltIns(resolved)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -384,6 +484,8 @@ func (s *Service) withoutRetiredBuiltIns(c Configuration) (Configuration, bool, 
 // ReconcileRetiredBuiltInSkills publishes a new version before any new Agent
 // turn can freeze a configuration. Historical versions and checkpoints stay
 // intact. A concurrent writer is handled through the store's revision CAS.
+// The same version also leaves out tools and MCP presets the Schema no longer
+// declares (#500), so the latest version matches what is read from it.
 func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 	if s.retiredBuiltIns == nil {
 		return nil
@@ -396,14 +498,20 @@ func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		cleaned, changed, err := s.withoutRetiredBuiltIns(latest.Configuration)
+		resolved, _ := s.resolve(latest)
+		cleaned, retiredSkills, err := s.withoutRetiredBuiltIns(resolved)
 		if err != nil {
 			return err
 		}
-		if !changed {
-			return s.Validate(latest.Configuration)
+		_, undeclared := s.withoutUndeclaredSelections(latest.Configuration)
+		if !retiredSkills && !undeclared {
+			return s.Validate(cleaned)
 		}
-		_, err = s.Publish(ctx, latest.Revision, "system", "retire_builtin_skills", cleaned)
+		source := "retire_builtin_skills"
+		if !retiredSkills {
+			source = "retire_undeclared_selections"
+		}
+		_, err = s.Publish(ctx, latest.Revision, "system", source, cleaned)
 		if errors.Is(err, ErrConflict) {
 			continue
 		}
@@ -421,4 +529,123 @@ func (s *Service) ToolSummaries() []Tool {
 		result[i].Domains = append([]string(nil), tool.Domains...)
 	}
 	return result
+}
+
+// resolve turns a stored version into the effective configuration (#525) and
+// reports whether it carries a customized prompt. A tool is on unless the
+// administrator turned it off, and a prompt nobody customized is the Schema's
+// current default, so what a release adds or improves arrives without a
+// republish. Everything else a version carries is returned as stored, minus
+// names the Schema no longer declares.
+func (s *Service) resolve(v Version) (Configuration, bool) {
+	resolved, _ := s.withoutUndeclaredSelections(v.Configuration)
+	resolved.EnabledToolNames = s.resolveTools(v.Configuration)
+	follows := s.followedPrompts(v)
+	customized := false
+	if follows[promptPartSystem] {
+		resolved.SystemPrompt = s.defaults.SystemPrompt
+	} else {
+		customized = true
+	}
+	for key := range resolved.DomainContext {
+		if def, declared := s.defaults.DomainContext[key]; follows[promptPartDomain(key)] && declared {
+			resolved.DomainContext[key] = def
+		} else {
+			customized = true
+		}
+	}
+	resolved.Format, resolved.DisabledToolNames, resolved.FollowsSchema = 0, nil, nil
+	return resolved, customized
+}
+
+// followedPrompts is the set of prompt parts a stored version leaves to the
+// Schema default. A format 2 version says so itself. An older version did not
+// record it, so a part counts as followed only when the version was a reset to
+// the default, or its text is exactly a default an earlier release shipped;
+// anything else is read as a customization and stays frozen, never guessed.
+func (s *Service) followedPrompts(v Version) map[string]bool {
+	c := v.Configuration
+	follows := map[string]bool{}
+	if c.Format >= ConfigurationFormat {
+		for _, part := range c.FollowsSchema {
+			follows[part] = true
+		}
+		return follows
+	}
+	reset := v.Source == "reset"
+	if reset || s.legacy.matchesDefaultText(promptPartSystem, c.SystemPrompt) {
+		follows[promptPartSystem] = true
+	}
+	for key, text := range c.DomainContext {
+		if reset || s.legacy.matchesDefaultText(promptPartDomain(key), text) {
+			follows[promptPartDomain(key)] = true
+		}
+	}
+	return follows
+}
+
+// resolveTools is the declared, offered tools minus the ones turned off. A
+// version without the format marker did not record what was turned off, only
+// what was on: a tool of the v1.8.0 baseline it does not list was turned off,
+// a tool outside the baseline did not exist yet and stays on.
+func (s *Service) resolveTools(stored Configuration) []string {
+	off := map[string]bool{}
+	if stored.Format >= ConfigurationFormat {
+		for _, name := range stored.DisabledToolNames {
+			off[name] = true
+		}
+	} else {
+		on := map[string]bool{}
+		for _, name := range stored.EnabledToolNames {
+			on[name] = true
+		}
+		for name := range s.toolBaseline {
+			if !on[name] {
+				off[name] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(s.tools))
+	for _, tool := range s.tools {
+		if !off[tool.Name] {
+			result = append(result, tool.Name)
+		}
+	}
+	return result
+}
+
+// toStored is the form a new version is written in: the effective
+// configuration the administrator submitted, with tools recorded as the ones
+// turned off and a compatibility mirror of the enabled list an older build can
+// still read (see Configuration.Format).
+func (s *Service) toStored(c Configuration) Configuration {
+	effective := s.project(c)
+	stored := effective
+	stored.Format = ConfigurationFormat
+	on := make(map[string]bool, len(effective.EnabledToolNames))
+	stored.EnabledToolNames = []string{}
+	for _, name := range effective.EnabledToolNames {
+		on[name] = true
+		if s.toolBaseline[name] {
+			stored.EnabledToolNames = append(stored.EnabledToolNames, name)
+		}
+	}
+	for _, tool := range s.tools {
+		if !on[tool.Name] {
+			stored.DisabledToolNames = append(stored.DisabledToolNames, tool.Name)
+		}
+	}
+	// A prompt equal to the current default is not a customization: it is
+	// stored as "follows", so it moves with the Schema. This is also how an
+	// administrator returns a customized prompt to the default.
+	if effective.SystemPrompt == s.defaults.SystemPrompt {
+		stored.FollowsSchema = append(stored.FollowsSchema, promptPartSystem)
+	}
+	for key, text := range effective.DomainContext {
+		if def, declared := s.defaults.DomainContext[key]; declared && text == def {
+			stored.FollowsSchema = append(stored.FollowsSchema, promptPartDomain(key))
+		}
+	}
+	slices.Sort(stored.FollowsSchema)
+	return stored
 }

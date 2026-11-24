@@ -12,20 +12,29 @@ Everything that decides a result is a plain function so
 `scripts/tests/test_agent_quality.py` can cover it without a server.
 """
 
+import datetime
 import decimal
 import hashlib
 import json
 import os
+import re
 import time
 
 import l5_common as common
 
 REQUESTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-quality", "requests.json")
 RUBRIC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-quality", "rubric.json")
+BASELINES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-quality", "baselines")
 
 SUCCESS = common.SUCCESS_STATE
 FAILED_STATES = common.FAILED_STATES
 CHECK_PASS, CHECK_FAIL, CHECK_SKIP = "pass", "fail", "skip"
+# #498: a fact that is recorded for calibration but never decides PASS/FAIL.
+# The request set's budget thresholds are the case: a healthy live run of the
+# fixed set exceeds them (13/13 over at version 5), so counting them as failures
+# drowns the real regressions the report exists to show. The value stays in the
+# check detail, where it is still readable.
+CHECK_INFO = "info"
 
 # #444: the #407 baseline took Meshy's 3MF delivery for the model and the GLB
 # inspector refused it, so its output:model verdicts say nothing about the
@@ -192,6 +201,48 @@ def load_requests(path=REQUESTS_PATH):
     return data, path, file_sha256(path)
 
 
+def find_baseline(mode, request_set_version=None, directory=BASELINES_PATH, kind="agent-quality"):
+    """The stored report this run can be compared with, or the reason there is none.
+
+    #498: the output baselines were never recorded from a live run (all nine
+    stored reports are `trajectory-fake`), so a live candidate has nothing to be
+    compared against. A report that does not say so reads like one that passed
+    the comparison. A stored report matches when its kind and mode are this
+    run's and, when a version is given, it was written for the same request set.
+    """
+    label = os.path.basename(os.path.normpath(directory)) + "/"
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except OSError as error:
+        return {"available": False, "path": "", "revision": "",
+                "note": f"无法与基线对比：读不到基线目录 {label}（{error}）"}
+    reports = []
+    for name in names:
+        try:
+            data = load_json(os.path.join(directory, name))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            reports.append((name, data))
+    modes = sorted({(str(data.get("mode") or "?"), str((data.get("request_set") or {}).get("version") or "?"))
+                    for _, data in reports if data.get("kind") == kind})
+    candidates = [(name, data) for name, data in reports
+                  if data.get("kind") == kind and data.get("mode") == mode
+                  and (request_set_version is None
+                       or (data.get("request_set") or {}).get("version") == request_set_version)]
+    if candidates:
+        name, data = max(candidates, key=lambda item: str(item[1].get("generated_at") or ""))
+        revision = str(data.get("revision") or "未知")
+        return {"available": True, "path": name, "revision": revision,
+                "note": f"基线 {name}（revision {revision}，mode {mode}）；用 eval-agent-compare.py 对比"}
+    wanted = f"mode={mode}" + ("" if request_set_version is None else f"、请求集 v{request_set_version}")
+    detail = f"{label}下没有 {wanted} 的 {kind} 报告"
+    if modes:
+        detail += "（现有：" + "、".join(f"mode {name} 请求集 v{version}" for name, version in modes) + "）"
+    return {"available": False, "path": "", "revision": "",
+            "note": f"无法与基线对比：{detail}；没有可比基线，本次结果不能说明是否有回退"}
+
+
 # ------------------------------------------------------------------- tools
 
 def collect_tools(messages):
@@ -276,7 +327,164 @@ def interruption_cards(cards):
     return [card for card in cards or [] if card.get("kind") in ("choice", "approval", "plan")]
 
 
+# ------------------------------------------------------------------ #407 metrics
+#
+# The server writes a refused tool call as one JSON log line, "agent tool call refused", with
+# tool, call_id, owner_id, session_id, assistant_message_id and code
+# (internal/chat/generationtool/refusal.go). The public chat wire keeps no tool result, so the
+# counts come from a local copy of that log; if a later wire exposes the refusal on the call, the
+# API is read first. A text question is a heuristic for an Agent that asked in prose instead of
+# using a card; the message wire cannot tell whether a card was shown in the same turn.
+
+REFUSAL_LOG_MESSAGE = "agent tool call refused"
+# The log time comes from the server clock, so a case's window is padded; the session id is the
+# primary key, so a wide pad cannot mix two cases.
+REFUSAL_WINDOW_PAD_SECONDS = 600
+QUESTION_ENDINGS = ("?", "？")
+_LOG_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$")
+
+
+def parse_log_time(value):
+    """Epoch seconds of a structured log's RFC3339 time, or None. Accepts Go's nanosecond fraction."""
+    match = _LOG_TIME.match(str(value or "").strip())
+    if not match:
+        return None
+    fraction = (match.group(2) or "")[:6].ljust(6, "0")
+    zone = "+00:00" if match.group(3) == "Z" else match.group(3)
+    try:
+        parsed = datetime.datetime.fromisoformat(f"{match.group(1)}.{fraction}{zone}")
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+def refusal_records(lines):
+    """Records ({time, session_id, code, tool}) of the refusal lines in a structured server log.
+
+    `lines` is an iterable of text or bytes lines. Malformed JSON, other messages and lines without
+    a code are skipped; `time` is epoch seconds, or None when the line's time cannot be read.
+    """
+    records = []
+    for raw in lines or []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw or "")
+        line = line.strip()
+        if not line or REFUSAL_LOG_MESSAGE not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("msg") != REFUSAL_LOG_MESSAGE:
+            continue
+        code = entry.get("code")
+        if not isinstance(code, str) or not code.strip():
+            continue
+        records.append({"time": parse_log_time(entry.get("time")), "session_id": entry.get("session_id"),
+                        "code": code.strip(), "tool": entry.get("tool")})
+    return records
+
+
+def read_refusal_log(path):
+    """The refusal records of a local copy of the stack's structured log."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        return refusal_records(handle)
+
+
+def refusal_counts_in_window(records, session_id, since=None, until=None, pad=REFUSAL_WINDOW_PAD_SECONDS):
+    """{code: count} for one session inside [since - pad, until + pad].
+
+    A record whose time cannot be read is counted on the session id alone; a timed record outside
+    the padded window is dropped. since/until are epoch seconds, or None to ignore that side.
+    """
+    counts = {}
+    for record in records or []:
+        if record.get("session_id") != session_id:
+            continue
+        at = record.get("time")
+        if at is not None and since is not None and at < since - pad:
+            continue
+        if at is not None and until is not None and at > until + pad:
+            continue
+        code = record.get("code")
+        counts[code] = counts.get(code, 0) + 1
+    return counts
+
+
+def agent_rounds(messages):
+    """Assistant messages that carried tool calls: the public wire's proxy for the tool-using
+    rounds of a reply (one assistant message holds every round of a turn, so this counts replies
+    that used tools, not each model call)."""
+    return sum(1 for message in messages or []
+               if (message or {}).get("role") == "assistant" and common.parse_tool_calls(message))
+
+
+def text_questions(messages):
+    """Heuristic count of assistant replies that end with a question and call no tool: the Agent
+    stopped to ask in prose. A reply that also showed a choice card can be counted here because
+    the message wire carries no card; the report keeps the card count next to it."""
+    count = 0
+    for message in messages or []:
+        message = message if isinstance(message, dict) else {}
+        if message.get("role") != "assistant" or common.parse_tool_calls(message):
+            continue
+        content = (message.get("content") or "").strip()
+        if content and content != common.GENERATING_PLACEHOLDER and content.endswith(QUESTION_ENDINGS):
+            count += 1
+    return count
+
+
+def refusal_metrics(messages, external=None):
+    """(by_code, source) of the refused tool calls: the public API first, else the log counts.
+
+    `external` is a runner's {code: count} or {"by_code": {code: count}} read from the server log
+    for this case's session and time window.
+    """
+    api = common.visible_refusal_counts(messages)
+    if api:
+        return dict(sorted(api.items())), "api"
+    if isinstance(external, dict) and isinstance(external.get("by_code"), dict):
+        external = external["by_code"]
+    if isinstance(external, dict):
+        counted = {str(code): int(count) for code, count in external.items() if isinstance(count, int) and count > 0}
+        if counted:
+            return dict(sorted(counted.items())), "log"
+    return {}, "none"
+
+
 # --------------------------------------------------------------- evaluation
+
+# #498: what a run's upstream shape can and cannot compare. Only the shape
+# decides, never the environment: the generation side may be fake while the chat
+# side is a real gateway (#416), and placeholder artifacts then feed back into
+# the chat side, because the model refines and inspects what it was given.
+# metric group -> what it covers, so the report names what is lost.
+COMPARABILITY = {
+    "live": (["chat", "artifacts"], [],
+             "上游形态 live：生成侧与 chat 侧都是真实上游，chat 与产物指标都可与 live 基线比较"),
+    "mixed": (["chat"], ["artifacts"],
+              "上游形态 mixed：生成侧是 fake（占位图、夹具模型），产物指标不可比；"
+              "占位产物还会反过来影响模型的 refine/inspect/提问，chat 指标只能与另一个 mixed 运行比较，"
+              "不能与 live 基线比较"),
+}
+COMPARABILITY_GROUPS = {
+    "chat": "chat 指标（回合、工具调用、打断、返工、检查点）",
+    "artifacts": "产物指标（output 的 2D 尺寸/背景/主体覆盖、3D 面数/拓扑/UV/贴图/缩放，以及 output:* 检查）",
+}
+
+
+def comparability(shape):
+    """(comparable groups, incomparable groups, note) for one upstream shape."""
+    if shape in COMPARABILITY:
+        comparable, incomparable, note = COMPARABILITY[shape]
+        return list(comparable), list(incomparable), note
+    return ([], ["chat", "artifacts"],
+            f"上游形态 {shape}：生成侧与 chat 侧都不是真实上游，产物是占位物，"
+            "chat 与产物指标都不能与 live/mixed 运行比较（只能与同形态的轨迹运行比较）")
+
+
+def group_labels(groups):
+    return "；".join(f"{COMPARABILITY_GROUPS.get(group, group)}" for group in groups)
+
 
 def evaluate_case(request, run):
     """Hard checks and recorded metrics for one finished request.
@@ -296,6 +504,10 @@ def evaluate_case(request, run):
     def check(check_id, ok, detail=""):
         checks.append({"id": check_id, "status": CHECK_PASS if ok else CHECK_FAIL, "detail": detail})
         return ok
+
+    def record(check_id, detail=""):
+        """#498: a fact that is recorded for calibration but never decides PASS/FAIL."""
+        checks.append({"id": check_id, "status": CHECK_INFO, "detail": detail})
 
     reply = run.get("final_reply") or {}
     content = (reply.get("content") or "").strip()
@@ -330,15 +542,29 @@ def evaluate_case(request, run):
         check(f"order:{'+'.join(rule.get('before') or [])}<{'+'.join(rule.get('after') or [])}", ok, detail)
 
     paid = len(tasks)
-    check("budget:paid_calls", paid <= budgets.get("max_paid_calls", 10 ** 9), f"{paid} task(s)")
-    check("budget:tool_calls", len(names) <= budgets.get("max_tool_calls", 10 ** 9), f"{len(names)} call(s)")
-    check("budget:interruptions", len(cards) <= budgets.get("max_interruptions", 10 ** 9), f"{len(cards)} card(s)")
+    # #498: recorded, never enforced. The thresholds come from the fixed request
+    # set and are calibration values: the 2026-11-24 live run (and the recorded
+    # baseline) is over all three, so a fail here says nothing about the system.
+    record("budget:paid_calls", f"{paid} task(s), 阈值 {budgets.get('max_paid_calls', 10 ** 9)}")
+    record("budget:tool_calls", f"{len(names)} call(s), 阈值 {budgets.get('max_tool_calls', 10 ** 9)}")
+    record("budget:interruptions", f"{len(cards)} card(s), 阈值 {budgets.get('max_interruptions', 10 ** 9)}")
     checks.extend(run.get("output_checks") or [])
 
     # #241: the feedback facts and the prompts the fake-only convention
     # produced from them at each stage.
     preference_expectations = expected.get("preferences") or {}
-    if preference_expectations:
+    if preference_expectations and run.get("preference_supported") is False:
+        # #498: only a runner that sends the feedback actions (pick, reject,
+        # compact, edit, delete) can measure these; the live output runner sends
+        # the request set's user prompts alone. The runner states what it does —
+        # not the environment — so an unexercised preference is skipped rather
+        # than reported as a failure of the system under test.
+        for name in PREFERENCE_CHECKS:
+            if preference_expectations.get(name):
+                checks.append({"id": f"preference:{name}", "status": CHECK_SKIP,
+                               "detail": "该 runner 不发送 feedback（pick/reject/compact/edit/delete），"
+                                         "preference 未被驱动"})
+    elif preference_expectations:
         facts = run.get("preference_facts") or {}
         captured = run.get("preference_captured") or []
         kinds = {preference.get("kind") for preference in captured}
@@ -422,6 +648,7 @@ def evaluate_case(request, run):
                 self_check_status[role] = self_check_status.get(role, 0) + 1
     prices = common.call_prices(run.get("messages") or [])
     credits = common.spend_by_unit(prices.values())
+    refusal_by_code, refusal_source = refusal_metrics(run.get("messages") or [], run.get("refusals"))
     metrics = {
         "tool_call_count": len(names),
         "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
@@ -430,6 +657,10 @@ def evaluate_case(request, run):
         "choice_card_count": sum(1 for card in cards if card.get("kind") == "choice"),
         "approval_card_count": sum(1 for card in cards if card.get("kind") == "approval"),
         "plan_card_count": sum(1 for card in cards if card.get("kind") == "plan"),
+        "agent_rounds": agent_rounds(run.get("messages") or []),
+        "text_questions": text_questions(run.get("messages") or []),
+        "refusals": {"total": sum(refusal_by_code.values()), "by_code": refusal_by_code,
+                     "source": refusal_source},
         "tool_counts": counts,
         "rework": {
             "count": rework_count,
@@ -486,7 +717,7 @@ def case_hard_failures(case):
     return [check for check in case.get("checks") or [] if check.get("status") == CHECK_FAIL]
 
 
-def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at=None, shape="live"):
+def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at=None, shape="live", baseline=None):
     hard = [check for case in cases for check in case_hard_failures(case)]
     total_cards = sum(case["metrics"]["interruption_count"] for case in cases)
     total_paid = sum(case["metrics"]["paid_call_count"] for case in cases)
@@ -505,6 +736,20 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
             checkpoint_totals[name] += checkpoints.get(name, 0)
     passed_cases = len(cases) - len({case["id"] for case in cases if case_hard_failures(case)})
     success_rate = round(100.0 * passed_cases / len(cases), 1) if cases else 0.0
+    total_rounds = sum(case["metrics"].get("agent_rounds", 0) for case in cases)
+    total_questions = sum(case["metrics"].get("text_questions", 0) for case in cases)
+    total_refusals = sum((case["metrics"].get("refusals") or {}).get("total", 0) for case in cases)
+    refusal_codes = {}
+    for case in cases:
+        for code, count in ((case["metrics"].get("refusals") or {}).get("by_code") or {}).items():
+            refusal_codes[code] = refusal_codes.get(code, 0) + count
+    recorded_checks = sum(1 for case in cases for check in case.get("checks") or []
+                          if check.get("status") == CHECK_INFO)
+    skipped_checks = sum(1 for case in cases for check in case.get("checks") or []
+                         if check.get("status") == CHECK_SKIP)
+    comparable, incomparable, note = comparability(shape)
+    if baseline is None:
+        baseline = find_baseline(mode, (request_set or {}).get("version"))
     credits = {}
     for case in cases:
         for unit, amount in (case["metrics"].get("credits") or {}).items():
@@ -520,10 +765,16 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
         # The shape decides which metrics are comparable with a run on another
         # shape: only the artifacts need real generation, while the chat metrics
         # (turns, refusals, questions, tool calls) depend on the chat side alone
-        # (#407, #416 mixed shape).
+        # (#407, #416 mixed shape). #498: the report states both lists and names
+        # the metric groups that are lost, so a run on a non-real generation side
+        # cannot pass for a comparable one.
         "upstream_shape": shape,
-        "comparable_metrics": (["chat"] if shape in ("live", "mixed") else [])
-        + (["artifacts"] if shape == "live" else []),
+        "comparable_metrics": comparable,
+        "incomparable_metrics": incomparable,
+        "comparability_note": note,
+        # #498: a report with no stored baseline to compare against must say so;
+        # "no regressions" is a statement about a comparison that did not happen.
+        "baseline": baseline,
         "cases": cases,
         "summary": {
             "cases": len(cases),
@@ -545,7 +796,15 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
                 "checkpoint_failed": checkpoint_totals["failed"],
                 "checkpoint_waived": checkpoint_totals["waived"],
                 "checkpoint_unknown": checkpoint_totals["unknown"],
+                "agent_rounds": total_rounds,
+                "text_questions": total_questions,
+                "refusals": total_refusals,
+                "refusal_codes": dict(sorted(refusal_codes.items())),
                 "success_rate": success_rate,
+                # #498: recorded and skipped checks, so a reader of the JSON sees
+                # how much of the case verdict was not measured.
+                "recorded_checks": recorded_checks,
+                "skipped_checks": skipped_checks,
                 "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
                 "elapsed_ms": sum((case["metrics"].get("elapsed_ms") or 0) for case in cases),
             },
@@ -574,32 +833,52 @@ def write_report(report, directory, name="agent-quality"):
 def report_markdown(report):
     summary = report.get("summary") or {}
     metrics = summary.get("metrics") or {}
+    comparable = report.get("comparable_metrics") or []
+    incomparable = report.get("incomparable_metrics") or []
+    baseline = report.get("baseline") or {}
     lines = [
         f"# Agent 产出质量评测（{report.get('mode')}）",
         "",
         f"- revision: `{report.get('revision')}`{' (dirty)' if report.get('dirty') else ''}",
         f"- 请求集: version {report.get('request_set', {}).get('version')}, sha256 `{report.get('request_set', {}).get('sha256')}`",
+        # #498: the shape and what it costs go at the top: a run whose generation
+        # side is fake produces placeholder artifacts, and a reader who only sees
+        # the case table cannot tell that from a comparable run.
+        f"- 上游形态: `{report.get('upstream_shape')}`；可比指标: {group_labels(comparable) or '（无）'}",
+        f"- 不可比指标: {group_labels(incomparable) or '（无）'}",
     ]
+    if incomparable:
+        lines[-1] = f"- **不可比指标: {group_labels(incomparable)}**"
+    if report.get("comparability_note"):
+        lines.append(f"- 可比性: {report['comparability_note']}")
+    if baseline:
+        lines.append(f"- 基线: {baseline['note']}" if baseline.get("available")
+                     else f"- **{baseline.get('note') or '无法与基线对比'}**")
     if report.get("rubric"):
         lines.append(f"- 量表: version {report['rubric'].get('version')}, sha256 `{report['rubric'].get('sha256')}`")
     lines += [
         f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}；成功率: {metrics.get('success_rate', 0)}%",
+        f"- 仅记录（不参与通过判定）: {metrics.get('recorded_checks', 0)} 项；已跳过（不参与通过判定）: {metrics.get('skipped_checks', 0)} 项",
         f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，对照 {metrics.get('compare_model_reference', 0)}，自检记录 {metrics.get('self_check_records', 0)}，计费 {metrics.get('credits', {})}",
+        f"- 交互形态（#407）: Agent 轮数 {metrics.get('agent_rounds', 0)}，文本反问 {metrics.get('text_questions', 0)}，被拒绝的工具调用 {metrics.get('refusals', 0)} {metrics.get('refusal_codes', {})}",
         f"- 返工: {metrics.get('rework_count', 0)}（修订 {metrics.get('revision_count', 0)}）；检查点 {metrics.get('checkpoint_count', 0)}（失败 {metrics.get('checkpoint_failed', 0)}，放弃 {metrics.get('checkpoint_waived', 0)}，无法判断 {metrics.get('checkpoint_unknown', 0)}）",
         "",
-        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 对照 | 自检 | 返工 | 修订 | 检查点 | 耗时 |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| 用例 | 结果 | 工具 | 付费 | 打断 | 轮数 | 反问 | 拒绝 | inspect | render | 对照 | 自检 | 返工 | 修订 | 检查点 | 耗时 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in report.get("cases") or []:
         case_metrics = case.get("metrics") or {}
         status = "FAIL" if case_hard_failures(case) else "PASS"
         elapsed = case_metrics.get("elapsed_ms")
         lines.append(
-            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {reference} | {check} | {rework} | {revisions} | {checkpoints} | {elapsed} |".format(
+            "| {id} | {status} | {tools} | {paid} | {cards} | {rounds} | {questions} | {refusals} | {inspect} | {render} | {reference} | {check} | {rework} | {revisions} | {checkpoints} | {elapsed} |".format(
                 id=case.get("id"), status=status,
                 tools=case_metrics.get("tool_call_count", 0),
                 paid=case_metrics.get("paid_call_count", 0),
                 cards=case_metrics.get("interruption_count", 0),
+                rounds=case_metrics.get("agent_rounds", 0),
+                questions=case_metrics.get("text_questions", 0),
+                refusals=(case_metrics.get("refusals") or {}).get("total", 0),
                 inspect=case_metrics.get("self_inspection", {}).get("inspect_model", 0),
                 render=case_metrics.get("self_inspection", {}).get("render_model_views", 0),
                 reference=case_metrics.get("self_inspection", {}).get("compare_model_reference", 0),
@@ -621,6 +900,8 @@ def report_markdown(report):
         lines.append(f"### {case['id']} — {case['title']}")
         lines.append("")
         lines.append(f"- 工具：{case_metrics.get('tool_counts')}")
+        lines.append(f"- 交互形态：轮数 {case_metrics.get('agent_rounds', 0)}，文本反问 {case_metrics.get('text_questions', 0)}，"
+                     f"拒绝 {(case_metrics.get('refusals') or {}).get('total', 0)} {case_metrics.get('refusals')}")
         lines.append(f"- 自检：{case_metrics.get('self_inspection')}")
         lines.append(f"- 返工：{case_metrics.get('rework')}")
         lines.append(f"- 检查点：{case_metrics.get('checkpoints')}")
@@ -633,6 +914,17 @@ def report_markdown(report):
                          f"被拒 {sends.get('rejected', 0)} 次")
         if case_metrics.get("output"):
             lines.append(f"- 产出指标：`{json.dumps(case_metrics['output'], ensure_ascii=False)}`")
+        # #498: the recorded and skipped checks keep their values in the report;
+        # they just do not decide the verdict.
+        case_recorded = [check for check in case.get("checks") or [] if check.get("status") == CHECK_INFO]
+        if case_recorded:
+            lines.append("- 仅记录（不参与通过判定）：" + "；".join(
+                f"`{check['id']}` {check.get('detail') or ''}" for check in case_recorded))
+        case_skipped = [check for check in case.get("checks") or [] if check.get("status") == CHECK_SKIP]
+        if case_skipped:
+            reasons = {check.get("detail") or "" for check in case_skipped}
+            lines.append("- 已跳过（不参与通过判定）：" + "；".join(f"`{check['id']}`" for check in case_skipped)
+                         + (f"（{case_skipped[0]['detail']}）" if len(reasons) == 1 else ""))
         lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -815,6 +1107,10 @@ TAIL_METRICS = {
     "tool_calls": "lower",
     "paid_calls": "lower",
     "interruptions": "lower",
+    # #407: a refusal means the Agent asked for something the server refused; a tool-using round
+    # more means more model/tool cycles for the same request.
+    "refusals": "lower",
+    "agent_rounds": "lower",
     "inspect_model": "higher",
     "render_model_views": "higher",
     "compare_model_reference": "higher",
@@ -850,6 +1146,7 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False, exc
     base_cases = {case.get("id"): case for case in baseline.get("cases") or []}
     cand_cases = {case.get("id"): case for case in candidate.get("cases") or []}
     regressions, improvements, changed, excluded, incomparable = [], [], [], [], []
+    recorded = []
     for case_id in sorted(set(base_cases) | set(cand_cases)):
         if case_id not in cand_cases:
             if new_request_set:
@@ -876,6 +1173,13 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False, exc
             before = (base_checks.get(check_id) or {}).get("status")
             after = (cand_checks.get(check_id) or {}).get("status")
             if before == after:
+                continue
+            if after == CHECK_INFO:
+                # #498: a recorded check (the budget thresholds) does not decide
+                # the verdict, so its status change is neither a regression nor
+                # an improvement; the values stay visible in the report.
+                recorded.append({"case": case_id, "check": check_id, "before": before, "after": after,
+                                 "reason": "候选按「仅记录」处理（不参与通过判定）"})
                 continue
             entry = {"case": case_id, "check": check_id, "before": before, "after": after}
             if before == CHECK_PASS and after != CHECK_PASS:
@@ -918,12 +1222,13 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False, exc
         "changed": changed,
         "excluded": excluded,
         "incomparable": incomparable,
+        "recorded": recorded,
         "exclude_check_prefixes": list(prefixes),
         "metrics": deltas,
         "new_request_set": new_request_set,
         "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
                                      new_request_set=new_request_set, excluded=excluded,
-                                     incomparable=incomparable, prefixes=prefixes),
+                                     incomparable=incomparable, prefixes=prefixes, recorded=recorded),
     }
 
 
@@ -932,6 +1237,8 @@ CASE_METRIC_PATHS = {
     "tool_calls": ("tool_call_count",),
     "paid_calls": ("paid_call_count",),
     "interruptions": ("interruption_count",),
+    "refusals": ("refusals", "total"),
+    "agent_rounds": ("agent_rounds",),
     "inspect_model": ("self_inspection", "inspect_model"),
     "render_model_views": ("self_inspection", "render_model_views"),
     "compare_model_reference": ("self_inspection", "compare_model_reference"),
@@ -956,7 +1263,7 @@ def case_metric_totals(cases, case_ids):
 
 
 def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
-                     new_request_set=False, excluded=(), incomparable=(), prefixes=()):
+                     new_request_set=False, excluded=(), incomparable=(), prefixes=(), recorded=()):
     lines = [
         "# Agent 产出质量评测对比",
         "",
@@ -964,6 +1271,10 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
         f"- 候选: `{candidate.get('revision')}`",
         f"- 结论: {'无回退' if not regressions and not problems else '存在回退或不可比项'}",
     ]
+    if baseline.get("upstream_shape") or candidate.get("upstream_shape"):
+        before, after = baseline.get("upstream_shape"), candidate.get("upstream_shape")
+        lines.append(f"- 上游形态: 基线 `{before}`，候选 `{after}`"
+                     + ("" if before == after else "；**两侧形态不同，只有 comparable_metrics 里的指标组可比**"))
     if new_request_set:
         lines.append("- 请求集: 显式按新请求集对比（新增用例计为新增，汇总指标只比较两边共有的用例且仅作参考）")
     if prefixes:
@@ -971,10 +1282,10 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
     lines.append("")
     if problems:
         lines += ["## 不可比", ""] + [f"- {problem}" for problem in problems] + [""]
-    if excluded or incomparable:
+    if excluded or incomparable or recorded:
         lines += ["## 不可比检查（不参与回退判定）", "", "| 用例 | 检查 | 原因 |", "|---|---|---|"]
-        lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('reason')} |" for item in excluded]
-        lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('reason')} |" for item in incomparable]
+        lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('reason')} |"
+                  for item in list(excluded) + list(incomparable) + list(recorded)]
         lines.append("")
     if regressions:
         lines += ["## 回退", "", "| 用例 | 检查 | 基线 | 候选 |", "|---|---|---|---|"]
@@ -995,7 +1306,7 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
     base_summary = (baseline.get("summary") or {}).get("metrics") or {}
     cand_summary = (candidate.get("summary") or {}).get("metrics") or {}
     quality_metrics = ("success_rate", "rework_count", "revision_count", "checkpoint_count",
-                       "checkpoint_failed", "checkpoint_waived")
+                       "checkpoint_failed", "checkpoint_waived", "text_questions")
     if any(name in base_summary or name in cand_summary for name in quality_metrics):
         # #251: recorded for the #238 comparison. Rework is intentionally not
         # a TAIL_METRICS regression gate: a base without checkpoints may rework

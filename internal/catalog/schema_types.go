@@ -3018,9 +3018,9 @@ func ModelReviewUsageCheckIDs() []string {
 // ChatModelInspectProductionSchema holds the thresholds, words and fix
 // suggestions of the purpose check. Ratio thresholds are fractions of one.
 type ChatModelInspectProductionSchema struct {
-	// PivotBottomCenterRatio bounds the distance from the bbox bottom centre
-	// to the origin, relative to the bbox diagonal.
-	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
+	// The origin tolerance is not here: each purpose declares its own
+	// (ChatModel3DUsageProfile.PivotBottomCenterRatio, #512).
+	//
 	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
 	// when its shortest edge is at most this fraction of its longest edge.
 	YUpFlatRatio float64 `json:"y_up_flat_ratio"`
@@ -3801,6 +3801,13 @@ type ChatModel3DUsageProfile struct {
 	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
 	// the purpose does not judge scale (render).
 	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+	// PivotBottomCenterRatio is the purpose's tolerance for the origin: the
+	// distance from the bbox bottom centre to the origin, relative to the bbox
+	// diagonal, in (0, 1]. Only a purpose whose model is placed by its feet or
+	// base (a game character or prop) declares it; nil means the purpose does not
+	// judge where the origin sits (display, Web/AR, print), so the check stays
+	// unknown and never fails (#512).
+	PivotBottomCenterRatio *float64 `json:"pivot_bottom_center_ratio,omitempty"`
 }
 
 // ChatModel3DUsagePlatform is one platform variant of a purpose (#275). IDs
@@ -4050,9 +4057,6 @@ type ChatThreeViewSchema struct {
 	// step of the recipe is one view (slot) of the group. It is the recipe of
 	// the default purpose and the one a historical run used.
 	RecipeID string `json:"recipe_id"`
-	// PurposeArgument names the create_three_view argument whose value picks one
-	// of Purposes; an absent or empty value means DefaultPurpose (#409).
-	PurposeArgument string `json:"purpose_argument,omitempty"`
 	// DefaultPurpose is the use a call that names none takes.
 	DefaultPurpose string `json:"default_purpose,omitempty"`
 	// Purposes are the uses the tool declares: a design sheet keeps the source's
@@ -5280,6 +5284,27 @@ type ChatThinkingModelProfile struct {
 	DSMLToolCalls bool `json:"dsml_tool_calls,omitempty"`
 }
 
+// ChatAgentRetrySchema is the retry of a model call after a transient failure
+// (#509): HTTP 408, 429 that error_mapping does not read as a used-up quota,
+// 500, 502, 503 and 504, a broken connection, no first byte in time, and a
+// stream that reported an error or stopped before its end. Only streamed Agent
+// rounds are retried, and only while they have passed nothing on to the
+// person; a non-streamed call (title, context summary, prompt enhancement,
+// connection test) is sent once.
+type ChatAgentRetrySchema struct {
+	// MaxAttempts is how many times one call is sent at most, the first
+	// included.
+	MaxAttempts int `json:"max_attempts"`
+	// InitialBackoffMillis is the wait before the second attempt; each later
+	// wait doubles, up to MaxBackoffMillis.
+	InitialBackoffMillis int `json:"initial_backoff_millis"`
+	MaxBackoffMillis     int `json:"max_backoff_millis"`
+	// MaxRetryAfterSeconds bounds the upstream's Retry-After: a failure that
+	// asks for a longer wait is not retried. The wait is the longer of the
+	// backoff and the Retry-After.
+	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
+}
+
 type ChatAgentSchema struct {
 	AdapterKey        string              `json:"adapter_key"`
 	ConnectionID      string              `json:"connection_id,omitempty"`
@@ -5306,6 +5331,18 @@ type ChatAgentSchema struct {
 	ContextWindowSetting  string `json:"context_window_setting,omitempty"`
 	Vision                bool   `json:"vision"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
+	// FirstByteTimeoutSeconds bounds how long one streamed model call waits
+	// for its first frame, the response headers included; a call that gets
+	// none in time fails as transient and may be retried (#509). 0 or absent:
+	// only request_timeout_seconds bounds the call.
+	FirstByteTimeoutSeconds int `json:"first_byte_timeout_seconds,omitempty"`
+	// RoundTimeoutSeconds bounds one streamed Agent round: a call with all its
+	// retries and the waits between them (#509). 0 or absent: no bound beyond
+	// each attempt's request_timeout_seconds.
+	RoundTimeoutSeconds int `json:"round_timeout_seconds,omitempty"`
+	// Retry is how a model call meets a transient failure (#509); absent: it
+	// is sent once.
+	Retry *ChatAgentRetrySchema `json:"retry,omitempty"`
 	// ConsentWaitTimeoutSeconds 界定一轮对话因等待用户批准决定而挂起的
 	// 最长时长（AGT-12：挂起不占 worker；由 orchestrator 消费，不得在
 	// 代码中硬编码）。
@@ -5325,11 +5362,12 @@ type ChatAgentSchema struct {
 	// MaxListedModels bounds how many of the session's succeeded 3D tasks
 	// the list_session_models tool returns (most recent first).
 	MaxListedModels int `json:"max_listed_models"`
-	// Consent*Content 是付费硬门禁回给对话 LLM 的工具内容文案（B16：
-	// 原代码常量迁入 Schema，禁止硬编码）。
-	ConsentApprovedContent string `json:"consent_approved_content"`
-	ConsentDeniedContent   string `json:"consent_denied_content"`
-	ConsentWaitingContent  string `json:"consent_waiting_content"`
+	// Consent*Content 是付费批准回给对话 LLM 的工具内容文案（B16：
+	// 原代码常量迁入 Schema，禁止硬编码）。#491 之后批准只有执行授权一条
+	// 路径，以前给旧同意状态机用的 consent_approved_content、
+	// consent_blocked_content 与 consent_required_content 已删除。
+	ConsentDeniedContent  string `json:"consent_denied_content"`
+	ConsentWaitingContent string `json:"consent_waiting_content"`
 	// ConsentWaitingStatus is the state of a step that waits on its approval
 	// card, in words the Agent uses as they are (#327: a reply called such a
 	// step "resubmitted"). Tool results carry it as status_text; optional.
@@ -5350,8 +5388,6 @@ type ChatAgentSchema struct {
 	// when the recover_task_result tool is declared.
 	RefetchStartedContent     string            `json:"refetch_started_content,omitempty"`
 	RefetchUnavailableContent map[string]string `json:"refetch_unavailable_content,omitempty"`
-	ConsentBlockedContent     string            `json:"consent_blocked_content"`
-	ConsentRequiredContent    string            `json:"consent_required_content"`
 	ConsentLimitContent       string            `json:"consent_limit_content"`
 	ConsentReconcileContent   string            `json:"consent_reconcile_content"`
 	// UpstreamQueueContent is the note get_task attaches while the Provider
@@ -5415,6 +5451,22 @@ type ChatAgentSchema struct {
 	// more with it, so the Agent learns why it cannot see the picture and
 	// adjusts by itself. Empty turns the retry off.
 	ModeratedImageNote string `json:"moderated_image_note,omitempty"`
+	// InvalidImageNote replaces each picture of an Agent request that the
+	// upstream read and refused as a bad picture (#522, after #497); the
+	// request is sent once more with it, followed by what the upstream
+	// objected to, so the Agent says which picture was skipped and carries on.
+	// Empty turns that retry off.
+	InvalidImageNote string `json:"invalid_image_note,omitempty"`
+	// InvalidImageUnsureNote replaces the pictures an invalid-picture refusal
+	// stripped without telling which one was bad (several pictures, none of
+	// them shown unreadable by the Schema's bounds): the Agent is told they
+	// were skipped for this request only, not that each is invalid. Empty
+	// falls back to InvalidImageNote.
+	InvalidImageUnsureNote string `json:"invalid_image_unsure_note,omitempty"`
+	// ImagesUnsupportedNote replaces every picture of an Agent request that
+	// the model refused because it takes no picture input (#522, after #253);
+	// the request is sent once more with it. Empty turns that retry off.
+	ImagesUnsupportedNote string `json:"images_unsupported_note,omitempty"`
 	// TitleTimeoutSeconds bounds the background title summary call.
 	TitleTimeoutSeconds int    `json:"title_timeout_seconds"`
 	WorkerCount         int    `json:"worker_count"`
@@ -5713,7 +5765,6 @@ type ChatStreamSchema struct {
 	RetryMilliseconds        int                   `json:"retry_milliseconds"`
 	HeartbeatMilliseconds    int                   `json:"heartbeat_milliseconds"`
 	CleanupTTLMilliseconds   int                   `json:"cleanup_ttl_milliseconds"`
-	CompletionFlushMillis    int                   `json:"completion_flush_milliseconds"`
 	StatusCheckMilliseconds  int                   `json:"status_check_milliseconds"`
 	SubscriberBufferSize     int                   `json:"subscriber_buffer_size"`
 	EventPrefix              string                `json:"event_prefix"`
@@ -6492,13 +6543,39 @@ type ChatMessageTexts struct {
 	// the turn reports that it is still in progress instead of a failure, with
 	// the Task ID ({task_id}) so the Agent can tell the person to keep waiting.
 	GenerationPending string `json:"generation_pending,omitempty"`
-	GenerationError   string `json:"generation_error"`
-	SummaryFailed     string `json:"summary_failed"`
-	NoResult          string `json:"no_result"`
-	UnknownError      string `json:"unknown_error"`
+	// GenerationInputStale is the tool result of a step the generation kernel
+	// refused before writing any Task because its frozen input no longer
+	// matches today's Schema, Offering, assets, dependencies or canvas, or its
+	// adapter is gone (#516). Nothing was submitted or charged; the Agent
+	// prepares the step again instead of the turn replaying it. Optional:
+	// without it the generic generation error text is returned.
+	GenerationInputStale string `json:"generation_input_stale,omitempty"`
+	// SubmissionUnconfirmed is the failure text of a turn whose paid call could
+	// not be confirmed submitted or not within the Agent request timeout: the
+	// turn stops replaying it and ends failed, and a Task that was accepted
+	// stays with the generation kernel (#516). Optional: without it the
+	// unknown error text is shown.
+	SubmissionUnconfirmed string `json:"submission_unconfirmed,omitempty"`
+	GenerationError       string `json:"generation_error"`
+	SummaryFailed         string `json:"summary_failed"`
+	NoResult              string `json:"no_result"`
+	UnknownError          string `json:"unknown_error"`
 	// AgentImagesUnsupported replaces UnknownError when the Agent model
 	// refused a request that carried pictures (#253).
 	AgentImagesUnsupported string `json:"agent_images_unsupported"`
+	// AgentImageInvalid replaces UnknownError when the upstream read the
+	// request's picture and refused that picture: its dimensions, size, format
+	// or number is outside what the model takes (#497). It says the picture is
+	// the problem, so the person is not sent to change a model that reads
+	// images fine. Optional: without it such a refusal reads as the unknown
+	// error. AgentImageInvalidReasons follows it with what the upstream
+	// objected to ({reasons}), labelled by AgentImageInvalidReasonLabels and
+	// joined with AgentImageInvalidReasonSeparator, the way a content-safety
+	// refusal reads its reasons.
+	AgentImageInvalid                string            `json:"agent_image_invalid,omitempty"`
+	AgentImageInvalidReasons         string            `json:"agent_image_invalid_reasons,omitempty"`
+	AgentImageInvalidReasonLabels    map[string]string `json:"agent_image_invalid_reason_labels,omitempty"`
+	AgentImageInvalidReasonSeparator string            `json:"agent_image_invalid_reason_separator,omitempty"`
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
@@ -6509,6 +6586,11 @@ type ChatMessageTexts struct {
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
+	// AgentUpstreamInterrupted replaces UnknownError when the chat model call
+	// failed transiently and its retries did not help, or the reply broke off
+	// after it had started streaming (#509): the person may send the message
+	// again. Optional: without it the unknown error is shown.
+	AgentUpstreamInterrupted string `json:"agent_upstream_interrupted,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The
@@ -6931,7 +7013,6 @@ type CoreHTTPRoutesSchema struct {
 	ModelFormatsComplete    string `json:"model_formats_complete,omitempty"`
 	ModelArchive            string `json:"model_archive,omitempty"`
 	AgentParams             string `json:"agent_params"`
-	AgentBind               string `json:"agent_bind"`
 	AgentConsent            string `json:"agent_consent"`
 	TaskCancel              string `json:"task_cancel"`
 	TaskRetry               string `json:"task_retry"`
@@ -7891,6 +7972,32 @@ type ChatVisionSchema struct {
 	// ModelProfiles narrow the budget or turn vision off for a model family,
 	// matched case-insensitively by prefix; the first match wins.
 	ModelProfiles []ChatVisionModelProfileSchema `json:"model_profiles,omitempty"`
+	// InvalidPicture is the policy for a picture the upstream cannot read
+	// (#522): the smallest picture worth sending and what a session remembers
+	// of the pictures it refused. The zero value keeps the pictures as they are.
+	InvalidPicture ChatVisionInvalidPictureSchema `json:"invalid_picture"`
+}
+
+// ChatVisionInvalidPictureSchema declares which pictures never reach the model
+// and how a refused one is remembered (#522). Every bound is a Product Schema
+// value: the code only compares.
+type ChatVisionInvalidPictureSchema struct {
+	// MinimumEdgePixels is the shortest edge of a picture that is sent; a
+	// picture with a shorter edge is skipped before the request (an upstream
+	// answers a one-pixel strip with a 400 that blocks every later round). 0
+	// turns the check off.
+	MinimumEdgePixels int `json:"minimum_edge_pixels"`
+	// MaximumAspectRatio is the longest side divided by the shortest that is
+	// sent; a longer strip is skipped. 0 turns the check off.
+	MaximumAspectRatio int `json:"maximum_aspect_ratio"`
+	// MaximumExcluded bounds the pictures one session remembers as refused;
+	// the oldest are forgotten first. A refusal can only be remembered when
+	// this is positive.
+	MaximumExcluded int `json:"maximum_excluded"`
+	// SkippedTemplate ({handles}, space separated) tells the Agent which
+	// pictures of the session were skipped because the upstream refuses them,
+	// so it can say so instead of describing a picture it cannot see.
+	SkippedTemplate string `json:"skipped_template,omitempty"`
 }
 
 // Vision role sources. A picture belongs to exactly one source: the artboard

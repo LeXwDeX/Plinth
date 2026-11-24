@@ -40,13 +40,15 @@ const (
 
 // Item block values are the second axis of an item and never change its
 // state. awaiting_approval and step_cap release the parallel slot: the person
-// resolves them later and the scheduler keeps claiming other items. step_cap
-// is the "3D steps used up" marker of one item; it pauses the run only while
-// no other item can progress. paused stays reserved for a later step.
+// resolves them later and the scheduler keeps claiming other items.
+// awaiting_approval is written by the runner when an item's turn ended on an
+// approval card and cleared once the card was decided or expired (#508).
+// step_cap is the "3D steps used up" marker of one item; it pauses the run
+// only while no other item can progress. The reserved paused value was never
+// written and is gone (#508); the column's CHECK still admits it.
 const (
 	BlockNone             = ""
 	BlockAwaitingApproval = "awaiting_approval"
-	BlockPaused           = "paused"
 	BlockStepCap          = "step_cap"
 )
 
@@ -178,6 +180,54 @@ func (service *Service) EnsureRun(
 	})
 }
 
+// backfillBatch bounds one tick's run backfill; the next tick takes the rest.
+const backfillBatch = 50
+
+// BackfillIdleRuns stores an idle run for confirmed lists that have none
+// (#508). Confirm creates the run best-effort, and a list confirmed while
+// automatic production was off never got one; without a run the list has no
+// start control and the runner never sees it. The backfilled run is idle, not
+// running: the person starts it from the card, so turning automatic
+// production on never starts paid work for a list on its own. It reports how
+// many runs it created; CreateRun keeps one run per list, so a concurrent
+// confirm's run is returned untouched.
+func (service *Service) BackfillIdleRuns(ctx context.Context) (int, error) {
+	if service.runs == nil {
+		return 0, ErrRunUnavailable
+	}
+	if !service.executionEnabled {
+		return 0, ErrExecutionDisabled
+	}
+	missing, err := service.runs.ConfirmedListsWithoutRun(ctx, backfillBatch)
+	if err != nil {
+		return 0, err
+	}
+	created := 0
+	for _, key := range missing {
+		id, err := service.newID("run_")
+		if err != nil {
+			return created, err
+		}
+		now := service.clock()
+		run, err := service.runs.CreateRun(ctx, Run{
+			ID:        id,
+			OwnerID:   key.OwnerID,
+			ProjectID: key.ProjectID,
+			ListID:    key.ListID,
+			Status:    RunIdle,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			return created, err
+		}
+		if run.ID == id {
+			created++
+		}
+	}
+	return created, nil
+}
+
 // SetItemSession binds one item to its sub-session (#328), bumping the item
 // version. expectedVersion is the version the caller read; VersionUnchecked
 // skips the CAS. Chat calls this while creating the item's session, so it does
@@ -247,6 +297,10 @@ type RunStore interface {
 	GetRunByListID(ctx context.Context, ownerID, listID string) (Run, error)
 	// RunsByStatus scans runs of every owner for the runner's tick.
 	RunsByStatus(ctx context.Context, status string) ([]Run, error)
+	// ConfirmedListsWithoutRun scans every owner's confirmed lists that have
+	// no run (#508), at most limit of them. A result names the owner, project
+	// and list; its ID is empty.
+	ConfirmedListsWithoutRun(ctx context.Context, limit int) ([]Run, error)
 	UpdateRunStatus(ctx context.Context, ownerID, listID, from, to, pauseReason string, at time.Time) (Run, error)
 	// TransitionRun applies one person-requested transition under a CAS on
 	// expectedUpdatedAt, the run's updated_at version token. A current status

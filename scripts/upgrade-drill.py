@@ -7,6 +7,15 @@ image against a *copy* of a database that already holds data, inside a one-shot
 directory: start the container, let it apply every migration, check health, then
 read the migrated database back without writing to it.
 
+Before the start it publishes, in the copy only, one Agent configuration version
+in the shape a v1.8.0 build stored (#500, #525): a frozen tool list that still
+enables the tools the Catalog has retired and has one tool turned off by an
+administrator, and the default prompts of that release. The candidate must start
+over it; its startup reconcile must publish a version without the retired tools,
+in the current format, that turns off exactly the one tool (a tool added after
+v1.8.0 must not be turned off) and leaves the prompts following the default
+instead of freezing the old text.
+
 It never writes to the source and never talks to a running instance. By default
 it refuses to read a path that belongs to an environment (a release root from the
 environments file, or a database that still has -wal/-shm sidecars); pointing it
@@ -21,6 +30,7 @@ Exit codes: 0 the drill passed, 1 it ran and a check failed, 2 usage, guard or
 environment error (nothing was started).
 """
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -58,6 +68,39 @@ SMOKE_TABLES = (
     "asset_lists",
     "asset_list_items",
 )
+# Agent tools the Catalog removed (#491). A configuration published before then
+# still enables them; the candidate must read it rather than fail to start (#500).
+RETIRED_AGENT_TOOLS = ("observe_task", "request_consent")
+DRILL_ACTOR = "upgrade-drill"
+# The tool the seeded version turns off, as an administrator would have (#525).
+DRILL_DISABLED_TOOL = "create_motion_clip"
+# A tool the v1.8.0 Schema did not have: it must stay on after the upgrade.
+DRILL_ADDED_TOOL = "analyze_model"
+# The tool names a version without the current format speaks for: the v1.8.0 set.
+LEGACY_DEFAULTS = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "legacy_defaults.json"
+# The default prompts v1.8.0 shipped, kept as the Go tests' fixtures.
+V180_PROMPT_DIR = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "testdata"
+FOLLOWED_PROMPT_PARTS = ["domain_context.image", "domain_context.model-3d", "system_prompt"]
+
+
+def v180_default_prompts():
+    try:
+        system = (V180_PROMPT_DIR / "v1.8.0-system-prompt.txt").read_text(encoding="utf-8")
+        contexts = {key: (V180_PROMPT_DIR / ("v1.8.0-domain-%s.txt" % key)).read_text(encoding="utf-8")
+                    for key in ("image", "model-3d")}
+    except OSError as error:
+        raise DrillError("读不到 v1.8.0 默认提示词 %s：%s" % (V180_PROMPT_DIR, error))
+    return system, contexts
+
+
+def legacy_tool_baseline():
+    try:
+        names = json.loads(LEGACY_DEFAULTS.read_text(encoding="utf-8"))["tool_baseline"]
+    except (OSError, ValueError, KeyError) as error:
+        raise DrillError("读不到 v1.8.0 工具名清单 %s：%s" % (LEGACY_DEFAULTS, error))
+    if not names or DRILL_DISABLED_TOOL not in names or DRILL_ADDED_TOOL in names:
+        raise DrillError("v1.8.0 工具名清单 %s 与演练假设不符" % LEGACY_DEFAULTS)
+    return names
 
 
 class DrillError(Exception):
@@ -112,6 +155,94 @@ def copy_database(source, data_dir):
             shutil.copyfile(sidecar, target.with_name(target.name + suffix))
             notes.append("同时复制了 %s" % sidecar.name)
     return target, notes
+
+
+def seed_legacy_agent_configuration(db_path):
+    """Publish, in the drill copy, a version in the v1.8.0 shape.
+
+    It extends the copy's latest version (or a minimal one when nothing was
+    published) the way the service appends one, replacing the tool list with the
+    v1.8.0 set (retired tools included) minus one tool an administrator turned
+    off. Returns the seeded revision, or None and why it could not be seeded.
+    """
+    baseline = legacy_tool_baseline()
+    system_prompt, domain_context = v180_default_prompts()
+    try:
+        connection = sqlite3.connect(str(db_path))
+    except sqlite3.Error as error:
+        raise DrillError("演练副本打不开，无法注入旧 Agent 配置（%s）：%s" % (db_path, error))
+    try:
+        present = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+            ("agent_configuration_versions",)).fetchone()[0]
+        if not present:
+            return None, "副本没有 agent_configuration_versions 表（早于 0041），无法注入"
+        row = connection.execute(
+            "SELECT revision, configuration_json FROM agent_configuration_versions"
+            " ORDER BY revision DESC LIMIT 1").fetchone()
+        if row:
+            revision, configuration = row[0], json.loads(row[1])
+        else:
+            revision, configuration = 0, {
+                "system_prompt": "升级演练（#500）", "domain_context": {}, "skills": [],
+                "enabled_tool_names": [], "enabled_mcp_preset_ids": []}
+        configuration["enabled_tool_names"] = [name for name in baseline if name != DRILL_DISABLED_TOOL]
+        configuration["system_prompt"], configuration["domain_context"] = system_prompt, domain_context
+        for key in ("format", "disabled_tool_names", "follows_schema"):
+            configuration.pop(key, None)
+        created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        connection.execute(
+            "INSERT INTO agent_configuration_versions"
+            "(revision, configuration_json, actor_id, source, created_at) VALUES (?, ?, ?, ?, ?)",
+            (revision + 1, json.dumps(configuration, ensure_ascii=False), DRILL_ACTOR, "publish", created))
+        connection.commit()
+    except (sqlite3.Error, ValueError) as error:
+        raise DrillError("向演练副本注入旧 Agent 配置失败：%s" % error)
+    finally:
+        connection.close()
+    return revision + 1, "基于 revision %d 注入 revision %d：v1.8.0 工具清单（含 %s），关闭 %s，v1.8.0 默认提示词" % (
+        revision, revision + 1, "、".join(RETIRED_AGENT_TOOLS), DRILL_DISABLED_TOOL)
+
+
+def check_legacy_agent_configuration(db_path, seeded):
+    """After startup the seeded version is intact and a newer one drops the
+    retired tools. Read-only; returns (name, ok, detail) entries."""
+    connection = connect_readonly(db_path)
+    try:
+        row = connection.execute(
+            "SELECT configuration_json FROM agent_configuration_versions WHERE revision = ?",
+            (seeded,)).fetchone()
+        kept = bool(row) and all(name in json.loads(row[0]).get("enabled_tool_names", [])
+                                 for name in RETIRED_AGENT_TOOLS)
+        latest = connection.execute(
+            "SELECT revision, configuration_json, source FROM agent_configuration_versions"
+            " ORDER BY revision DESC LIMIT 1").fetchone()
+    finally:
+        connection.close()
+    results = [("旧 Agent 配置保留", kept,
+                "revision %d 原样保留" % seeded if kept else "revision %d 缺失或被改写" % seeded)]
+    if not latest or latest[0] <= seeded:
+        results.append(("旧 Agent 配置可读", False, "启动后没有发布清理版本（最新 revision %s）"
+                        % (latest[0] if latest else "无")))
+        return results
+    left = [name for name in RETIRED_AGENT_TOOLS
+            if name in json.loads(latest[1]).get("enabled_tool_names", [])]
+    results.append(("旧 Agent 配置可读", not left,
+                    "启动对账发布 revision %d（%s），不含已退役工具" % (latest[0], latest[2])
+                    if not left else "revision %d 仍启用 %s" % (latest[0], "、".join(left))))
+    stored = json.loads(latest[1])
+    disabled = stored.get("disabled_tool_names") or []
+    converted = stored.get("format") == 2 and disabled == [DRILL_DISABLED_TOOL]
+    results.append(("v1.8.0 配置工具换算", converted,
+                    "revision %d 为 format 2，只关闭 %s，其余（含 %s）默认开启" % (latest[0], DRILL_DISABLED_TOOL, DRILL_ADDED_TOOL)
+                    if converted else "revision %d 的 format=%r、disabled_tool_names=%r，应为 format 2 且只含 %s"
+                    % (latest[0], stored.get("format"), disabled, DRILL_DISABLED_TOOL)))
+    followed = sorted(stored.get("follows_schema") or [])
+    results.append(("v1.8.0 配置提示词跟随", followed == FOLLOWED_PROMPT_PARTS,
+                    "revision %d 的系统提示词与两个领域上下文都跟随默认" % latest[0]
+                    if followed == FOLLOWED_PROMPT_PARTS else "revision %d 的 follows_schema=%r，应为 %r"
+                    % (latest[0], followed, FOLLOWED_PROMPT_PARTS)))
+    return results
 
 
 def connect_readonly(path):
@@ -296,6 +427,8 @@ def drill(args):
                 os.chown(workdir / name, 100, 101)
             os.chown(workdir, 100, 101)
         target, notes = copy_database(source, workdir / "data")
+        seeded, seed_detail = seed_legacy_agent_configuration(target)
+        notes.append("旧 Agent 配置：%s" % seed_detail)
         before = read_state(target)
         port = args.port or free_port()
         started = time.time()
@@ -310,7 +443,11 @@ def drill(args):
             checks.append(("/healthz", health, "200" if health else "无响应"))
             try:
                 checks += smoke_readonly(target)
-            except sqlite3.Error as error:
+                if seeded is None:
+                    checks.append(("旧 Agent 配置可读", False, seed_detail))
+                else:
+                    checks += check_legacy_agent_configuration(target, seeded)
+            except (sqlite3.Error, ValueError) as error:
                 checks.append(("只读冒烟", False, "读回失败：%s" % error))
         else:
             checks.append(("容器启动", False, "在 %.0fs 内没有就绪" % args.timeout))

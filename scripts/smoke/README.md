@@ -78,7 +78,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
 - 因此待批准同意只能用 3D 请求取得。L1 免费、L2、L3 在需要待批准同意时都先 `PUT /api/v1/chat/sessions/{id}/approval`（`{"approvalMode":"manual"}`）显式设为手工方式，再发 3D 请求；3D 模型取自 `/api/v1/offerings?capability=text-to-3d`（第一个可用、推荐、无额外计费上限的模型，`SMOKE_3D_MODEL` 可覆盖）。**不要再用 2D 请求去等待同意**：它会花钱，并让免费冒烟变成付费冒烟。
 - 脚本代批同意只发生在同意确实待批准时（L2 的 3D 批准、L3 兜底、L4 的 `status=pending` 授权）；已由策略批准的授权不再 `PUT` 决定（会得到 409）。
 
-- L2/L3 都通过已登录 Cookie 写会话、发消息和批准/拒绝时携带同源 `Origin: $BASE`。L2/L3 必须先让 Agent 调用实际生成工具（L2 的 3D 部分 `create_model_3d`，L2 的 2D 部分和 L3 每张图 `refine_image`），以生成工具建立的 exact prepared execution 作为待批准对象；不依赖旧 `request_consent` 流程。批准卡片独立于轮次保存，旧的 `/api/v1/agent/consent` 不再反映它；脚本先 `GET /api/v1/chat/sessions/{id}/pending-approvals` 读取状态为 pending 的卡片及其 `request_id`、`capability`，再 `PUT /api/v1/tasks/grants/{request_id}` 提交 `{"<成员名>":"approve"}` 或 `{"<成员名>":"deny"}`；成员名与浏览器一样，按公开 Schema（`GET /api/v1/schema`）的 `chat.api.fields.decision` 读取，默认成员名为 `decision`（#120）。L2 停止 A 后和拒绝 B 后会拒绝会话里剩下的待批准卡片；L3 只批准 2D 图片步骤，其他卡片一律拒绝。批准动作只发生在产品外 smoke 脚本，产品本身仍要求明确人工批准。
+- L2/L3 都通过已登录 Cookie 写会话、发消息和批准/拒绝时携带同源 `Origin: $BASE`。L2/L3 必须先让 Agent 调用实际生成工具（L2 的 3D 部分 `create_model_3d`，L2 的 2D 部分和 L3 每张图 `refine_image`），以生成工具建立的 exact prepared execution 作为待批准对象（#491 已删除 `request_consent` 工具，付费步骤只由执行授权批准）。批准卡片独立于轮次保存，旧的 `/api/v1/agent/consent` 不再反映它；脚本先 `GET /api/v1/chat/sessions/{id}/pending-approvals` 读取状态为 pending 的卡片及其 `request_id`、`capability`，再 `PUT /api/v1/tasks/grants/{request_id}` 提交 `{"<成员名>":"approve"}` 或 `{"<成员名>":"deny"}`；成员名与浏览器一样，按公开 Schema（`GET /api/v1/schema`）的 `chat.api.fields.decision` 读取，默认成员名为 `decision`（#120）。L2 停止 A 后和拒绝 B 后会拒绝会话里剩下的待批准卡片；L3 只批准 2D 图片步骤，其他卡片一律拒绝。批准动作只发生在产品外 smoke 脚本，产品本身仍要求明确人工批准。
 - L3 协议：每模型每轮 `IMAGES_PER_MODEL` 张（默认 5，**协议上限 5**），满一轮即止不循环；零人工（脚本代批同意仅限产品外 smoke 操作，属测试操作授权）；断言 = 终态 SUCCEEDED + required 资产 READY + URL 200 + media_type 魔数一致 + sha256/size 与服务端声明字节级一致 + 连续回合必须出现**新 task id** + 跨用户任务/资产 403/404；报告缺省落服务器 `$ART_AI_SERVER_ROOT/production/reports/smoke-l3/`（`L3_REPORT_DIR` 可覆盖）。
   - 用法：`ART_AI_SERVER_ROOT=<root> ART_AI_LIVE_ACK=1 MODELS=gpt-image-2.6-sunburst bash smoke-l3-batch.sh --live`（`MODELS` 缺省 = schema 全部可用 text-to-image 模型；`IMAGES_PER_MODEL` 缺省 5）。
   - L3 不再等待同意：每个会话先设为手工方式；2D 由策略批准，脚本直接等新任务出现。若同意恰好待批准，仍由脚本按 pending-approvals → grants 批准后继续；两种情况都继续断言终态与字节。
@@ -122,7 +122,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scrip
 ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --live --report <目录>
 ```
 
-`release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；L5 只通过它在本地运行。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。
+`release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；L5 只通过它在本地运行。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片；四视图复现脚本另写 evidence，并把「复现到什么」记为 INFO，不计入三个计数）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。
 
 等待规则：先等本轮回复成为最终内容（不再是 `__GENERATING__` 占位），再等预期能力的任务都已创建并全部进入终态，任务未创建前不判定结束。硬断言只看工具调用、任务状态、必需产物和审批卡片，对 LLM 文字最多做关键词检查。
 
@@ -139,8 +139,23 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 | `smoke-l5-2d-split.py` | 2D 拆分：角色图拆成部件图（至少三张，且以角色图为参考）、部件抠图、部件图转 3D | 约 6 张图加一次 3D |
 | `smoke-l5-agent-hard.py` | 刁钻对话：一句话多步、中途改主意、按序号引用、前后矛盾、不支持的能力、超限尺寸、手工批准卡片、模糊指代、英文与中英混合、口语三视图；`L5_AGENT_HARD_ONLY=用例名,…` 可只跑部分 | 约 10 张图和两到三次 3D |
 | `smoke-l5-budget.py` | 预算（制作计划）批准方式（#103；新会话默认是自动方式，#406，所以两条链各用一个新会话并先显式切到预算方式）。批准链：读回的批准方式须为 `budget`，锁定一个有报价的文生 3D 模型（`L5_BUDGET_MODEL=<model_id>` 可指定，否则优先 Tripo P2，其次其他 Tripo 模型），发多步请求（生成游戏道具、检查、必要时优化）后须出现待批准的制作计划卡（预算 ID、按单位的限额 `budgets`、各单位报价 `estimated_totals` 与步骤，每个用到的单位都要有不低于报价的限额），按 Schema 的 `chat_session_budget` 路由像浏览器一样批准；批准响应须带 `turn_message_id`，脚本跟随服务端自动开启的这一轮（#134），不再补发消息；计划执行期间不出现逐步付费批准卡，任务价格逐单位不超过该单位的计划限额，服务端账本（会话预算 `units[]` 的已扣费加预留）也逐单位不超过限额，至少一个 3D 任务 SUCCEEDED 且必需产物 READY。拒绝链：同样请求，拒绝计划卡，拒绝响应不带 `turn_message_id`（不开新一轮），零任务、零扣费、没有遗留的待批准卡，回复说明没有执行；`L5_BUDGET_ONLY=approve,deny` 可只跑部分链路 | 一次 3D 生成，加计划内可能的检查或优化步骤；拒绝链不生成 |
+| `smoke-l5-four-view-multiview.py` | #417：美术反馈的「四视图 → Meshy 7.1 多视图 3D」在预算（计划卡）下复现。新会话 `PUT approval` 为 `budget`，3D 选择器锁 `meshy-7.1`（单视角），2D 锁 6 积分模型；上传一张角色图（`--image`，或 `--generate-image` 多付一张图）并说「先用这张图做四视图（front/left/back/right），再用四视图生成 3D」；记录计划卡的 `budgets`/`estimated_totals`/步骤并按 Schema 路由批准。`right` 是可选视角，服务端不会自动续跑：四视图组出现且 `right` 可启动时，脚本显式 `POST .../three-views/{run}/views/right`（429 重试），Agent 自己启动则跳过。计划外的 `image-to-image` 逐步卡按「人」批准并记录，`image-to-3D` 逐步卡保持待批准（这正是「第 5 步停住」的形态）。四视图全部成功后若回合结束而第 5 步没执行，再发一条 3D 域自然语言消息（**不**传结构化 multiview 参数），观察 Agent 是否调用 `create_model_3d_from_views`、是否省略 `model`。报告额外写 `smoke-l5-four-view-multiview-evidence.json`（工具调用与实参、计划估价与各任务 `native_quote` 逐单位对比、任务 Offering/状态、视角状态、耗时、`verdict`）；`verdict` 取 `reproduced` / `not_reproduced` / `inconclusive`，复现失败本身不算脚本失败。`--control/--no-control`（默认跑）另开自动方式会话锁 `meshy-7.1` 单视角，要求一个 image-to-3D 任务 SUCCEEDED。`--max-paid`（默认 6）是整轮付费任务上限，超过即停止并报告；可用 `L5_FOUR_VIEW_IMAGE`、`L5_FOUR_VIEW_MAX_PAID`、`L5_FOUR_VIEW_MODEL` 替代同名参数 | 四视图 4 张（约 24 积分）+ 多视图 3D 一次 + 对照单视角 3D 一次；`--generate-image` 再加一张图 |
+| `smoke-l5-astra-tools.py` | #417/#401：新会话用 `PUT /api/v1/chat/sessions/{id}/model` 选 `gpt-astra`（`--chat-model` 可改），发一条需要只读工具的话术（查可用 3D 模型并报最便宜的），断言回合正常结束、无失败文案与工具错误、`toolCalls` 含 `list_offerings`、会话零生成任务（只花对话 token）。部署未提供该模型时 SKIP 并列出可用模型 | 对话 token |
 
 测试数据按协议保留在 `dev-test`。纯逻辑的离线单元测试：`python3 -m unittest scripts.tests.test_l5_common`。
+
+#417 的两个脚本只有离线部分进门禁：`scripts/tests` 的单测门禁（`unittest discover`，见 `dev_test.md` §2 第 10 项）会自动收入 `test_l5_four_view.py`，两个脚本在缺开关时的拒绝（退出码 2）也由 `test_l5_common.py` 与 `test_upstream_shape.py` 覆盖；真实链路本身不进门禁，只在当次同意下手动运行。离线单测：`python3 -m unittest scripts.tests.test_l5_four_view` 覆盖四视图脚本的模型选择、计划/任务逐单位报价对比、视角终态与 `verdict` 判定，单测本身不访问网络。`smoke-l5-astra-tools.py` 的只读回合由 live 运行验证，离线只做脚本拒绝检查（无开关时退出码 2）。
+
+`smoke-l5-all.sh` 默认逐项运行对话模型与 `astra-tools`；四视图链最贵且需要源图，只有显式设置 `L5_INCLUDE_FOUR_VIEW=1` 才加入，源图用 `L5_FOUR_VIEW_IMAGE=<本地图片>` 传入（没有源图时 `four-view-multiview` 记为 SKIP 并说明 `--image`）。单跑四视图链：
+
+```
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
+  python3 scripts/smoke/smoke-l5-four-view-multiview.py --live --report <目录> --image <角色图路径> --max-paid 6
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
+  python3 scripts/smoke/smoke-l5-astra-tools.py --live --report <目录>
+```
+
+四视图链的 `--generate-image` 会先用自动方式会话生成一张角色图（多一次付费图任务，`--max-paid` 需相应加 1）；`--no-control` 跳过单视角对照组。脚本不批准计划外的 `image-to-3D` 逐步卡，故成功复现后该会话会留待处理的卡，属预期证据，不自动清理。
 
 ## Agent 产出质量评测（#238）
 
@@ -152,7 +167,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 python3 scripts/smoke/smoke-fake-stack.py --only agent-quality --report <目录>
 ```
 
-在 `smoke-fake-stack.py` 的隔离 fake 栈（真实 chat/编排/批准/Task/render 路径，fake LLM 只把请求集每个 step 的 tool 标记变成工具调用）上跑完整请求集。它评的是**系统对参考轨迹的实现**：用途卡、制作简报、付费批准、3D 任务、`inspect_model`、`render_model_views`、最终回复是否按请求集走通；不是模型自主选择的质量。`project` / `project_setup` 步骤只在轨迹运行器里搭建 #240 的项目夹具：建项目、把首张定稿图提升为标准形象、写项目风格指南、在项目里新开会话，不计入工具调用。硬断言是最终回复非失败、预期能力任务 SUCCEEDED、必需工具组与先后顺序、付费/工具/打断预算、无失败任务；`inspect_model` 与 `render_model_views` 次数作为软指标记录。`3d-multistep-rig-checkpoint` 还驱动预算计划卡、服务端检查点与 `revise_processing_plan`，报告记录 `rework_count`（失败任务加修订次数）、`revision_count`、检查点状态计数与用例成功率；这些质量指标只用于 base/分支对比展示，不进入自动回退门槛。零成本、离线、只用回环地址，结果稳定，可用于门禁（当前未接入 CI，需要时把 `agent-quality` 加进 `--only` 列表）。报告写 `agent-quality-trajectory.json` 与 `.md`；`main` 的基线放在 `scripts/smoke/agent-quality/baselines/`。#251 的请求集版本 3 对比记录包括 `agent-quality-trajectory-<分支 revision>`、`agent-quality-base-2829d2d6.*`（在临时 worktree 只复制请求集与评测 harness 后运行，因此报告标 dirty）以及 `agent-quality-compare-2829d2d6-<分支 revision>.*`；汇总指标里的工具/付费调用增长来自新增用例的检查点修正步骤，逐用例预算仍通过。
+在 `smoke-fake-stack.py` 的隔离 fake 栈（真实 chat/编排/批准/Task/render 路径，fake LLM 只把请求集每个 step 的 tool 标记变成工具调用）上跑完整请求集。它评的是**系统对参考轨迹的实现**：用途卡、制作简报、付费批准、3D 任务、`inspect_model`、`render_model_views`、最终回复是否按请求集走通；不是模型自主选择的质量。`project` / `project_setup` 步骤只在轨迹运行器里搭建 #240 的项目夹具：建项目、把首张定稿图提升为标准形象、写项目风格指南、在项目里新开会话，不计入工具调用。硬断言是最终回复非失败、预期能力任务 SUCCEEDED、必需工具组与先后顺序、无失败任务；付费/工具/打断预算的数值只记录、不参与通过判定（#498：阈值是调参基线，健康运行也会超过），`inspect_model` 与 `render_model_views` 次数作为软指标记录。`3d-multistep-rig-checkpoint` 还驱动预算计划卡、服务端检查点与 `revise_processing_plan`，报告记录 `rework_count`（失败任务加修订次数）、`revision_count`、检查点状态计数与用例成功率；这些质量指标只用于 base/分支对比展示，不进入自动回退门槛。零成本、离线、只用回环地址，结果稳定，可用于门禁（当前未接入 CI，需要时把 `agent-quality` 加进 `--only` 列表）。报告写 `agent-quality-trajectory.json` 与 `.md`；`main` 的基线放在 `scripts/smoke/agent-quality/baselines/`。#251 的请求集版本 3 对比记录包括 `agent-quality-trajectory-<分支 revision>`、`agent-quality-base-2829d2d6.*`（在临时 worktree 只复制请求集与评测 harness 后运行，因此报告标 dirty）以及 `agent-quality-compare-2829d2d6-<分支 revision>.*`；汇总指标里的工具/付费调用增长来自新增用例的检查点修正步骤，逐用例预算仍通过。
 
 ### 产出评测（真实上游，按次同意）
 
@@ -161,7 +176,7 @@ BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... ART_AI_LIVE_ACK=1 \
   python3 scripts/smoke/eval-agent-output.py --live --report <目录>
 ```
 
-只发送请求集的用户话术，由真实 Agent 自行决定轨迹；脚本自动回答用途卡、按 Schema 路由批准卡片（auto 批准方式下通常没有逐步卡），记录打断、工具调用、付费调用与任务。产出收集为 `artifacts/`：3D 模型用 `scripts/smoke/inspect_model_eval.go`（复用 `internal/modelinspect`，与 Agent 的 `inspect_model` 同一套事实）计算面数、拓扑、水密、UV、部件与用途预算判定；2D 记录尺寸、格式、背景/主体覆盖；`render_model_views` 的视图保存为评分图。报告写 `agent-quality-output.json` 与 `.md`，同时生成 `scoring-packet.json` 与 `scoring-sheet.md`：量表、提示词、参考图与渲染图都在里面，由人工或评审模型评分后写入 `scores.json`，再用 `--scores scores.json` 合并。评分文件形如 `{"<用例 id>": {"reference_fidelity": {"score": 4, "reason": "…"}, "craft": {"score": 3, "reason": "…"}}}`；维度取 `rubric.json` 的 `per_request_axes`。脚本不内置评审模型、调用次数或费用，也不自动重试真实上游。3D 产物按 GLB、glTF 的顺序选取（#444：Meshy 先交付 3MF，旧规则会把它当 GLB 检查）；没有 glTF 时检查结果写明交付的格式，不交给 GLB 解析器。追问与卡片回答在本会话回合结束后再发，会话忙的 409 有界重试，等待与重试次数写进各用例的 `sends`。
+只发送请求集的用户话术，由真实 Agent 自行决定轨迹；脚本自动回答用途卡、按 Schema 路由批准卡片（auto 批准方式下通常没有逐步卡），记录打断、工具调用、付费调用与任务。产出收集为 `artifacts/`：3D 模型用 `scripts/smoke/inspect_model_eval.go`（复用 `internal/modelinspect`，与 Agent 的 `inspect_model` 同一套事实）计算面数、拓扑、水密、UV、部件与用途预算判定；2D 记录尺寸、格式、背景/主体覆盖；`render_model_views` 的视图保存为评分图。报告写 `agent-quality-output.json` 与 `.md`，同时生成 `scoring-packet.json` 与 `scoring-sheet.md`：量表、提示词、参考图与渲染图都在里面，由人工或评审模型评分后写入 `scores.json`，再用 `--scores scores.json` 合并。评分文件形如 `{"<用例 id>": {"reference_fidelity": {"score": 4, "reason": "…"}, "craft": {"score": 3, "reason": "…"}}}`；维度取 `rubric.json` 的 `per_request_axes`。脚本不内置评审模型、调用次数或费用，也不自动重试真实上游。3D 产物按 GLB、glTF 的顺序选取（#444：Meshy 先交付 3MF，旧规则会把它当 GLB 检查）；没有 glTF 时检查结果写明交付的格式，不交给 GLB 解析器。追问与卡片回答在本会话回合结束后再发，会话忙的 409 有界重试，等待与重试次数写进各用例的 `sends`。报告头部固定列出 `upstream_shape`、可比指标与不可比指标（#498：生成侧是 fake 时产物指标不可比，占位产物还会反过来影响 chat 指标），并给出基线的可用性——`baselines/` 下没有同 mode 且请求集版本相同的报告时直接写「无法与基线对比」，不给出可比较的假象。该 runner 只发用户话术、不发 `steps` 里的 feedback，所以 `preference:*` 五项按 `skipped` 记录；付费/工具/打断预算的数值同样只记录，都不参与通过判定。任何异常退出都会留下错误行与非零退出码（中断 130，其余 1），跑到一半崩溃也会先写出报告再退出。
 
 ### 两次运行对比
 
@@ -170,6 +185,10 @@ python3 scripts/smoke/eval-agent-compare.py <基线.json> <候选.json> [--toler
 ```
 
 逐用例比较检查状态与汇总指标：检查 pass→fail、用例缺失、工具/付费/打断次数增加是回退；自检次数增加是改善。有回退时退出码 1，可直接用作门禁；`--no-fail` 只报告。`--exclude-check-prefix <前缀>`（可重复）把指定检查排除出回退判定；基线里 detail 含 `bad GLB magic` 的检查（#444 之前的误判）自动列为「不可比」，单独成表。`--new-request-set` 是请求集有意变更时的显式报告模式（#240）：请求集版本/内容差异不再算不可比，新增用例记为新增，汇总指标只比较两边共有的用例；`2d-series-project` 与 `2d-3d-input-concept` 的加入用该模式对比旧基线 `baselines/agent-quality-trajectory-77fc6878.json` 与新基线，退出码仍按共有用例的结果决定。
+
+### 交互形态指标（#407）
+
+报告里的 `metrics` 另记三项，用来比较提示词改写前后 Agent 的「手感」：`agent_rounds`（带工具调用的助手消息数，即 Agent 轮数）、`refusals`（被服务端拒绝的工具调用，按拒绝码分组：公开 API 的工具调用带拒绝码时读 API，否则给 `eval-agent-output.py` 传 `--refusals-log <本地结构化日志>`，按会话与时间窗统计「agent tool call refused」行）、`text_questions`（以问句结束且没有工具调用的助手回复，启发式）。比较时轮数与拒绝次数增加算回退，文本反问只记录。fake 栈的 `--only agent-quality` 用脚本化 LLM，改提示词前后这三项相同，只能证明评测链路与对话路径没坏；提示词是否让真实模型少反问、少被拒，要在真实对话形态下按同一名单前后各跑一次（需用户当次同意）。
 
 ## Fake 上游整栈自检（#96）
 

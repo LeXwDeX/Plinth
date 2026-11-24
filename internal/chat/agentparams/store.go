@@ -191,7 +191,8 @@ func (s *Store) Clear(scope string) {
 }
 
 // Delete 只移除指定键（scopes 与 userOverrides 两层），保留同 scope
-// 下的其他状态。供同意状态一次性消费等场景使用。
+// 下的其他状态，并同步删除持久层里的这些键。parameterOnly 的 Store 不删
+// 私有 Agent 状态键；Clear 在 parameterOnly 时也经由这里只清参数。
 func (s *Store) Delete(scope string, keys ...string) {
 	if s.parameterOnly {
 		filtered := keys[:0]

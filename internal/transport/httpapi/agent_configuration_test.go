@@ -103,7 +103,9 @@ func TestAgentConfigurationRoutesEnforcePermissionRevisionAndSafeProjection(t *t
 		t.Fatal("management lacks declared MCP tool names")
 	}
 	var managed struct {
-		MCPPresets []struct {
+		// #525: the page needs to know the saved prompt is a customization.
+		PromptCustomized *bool `json:"prompt_customized"`
+		MCPPresets       []struct {
 			ID        string `json:"id"`
 			Available bool   `json:"available"`
 		} `json:"mcp_presets"`
@@ -113,6 +115,18 @@ func TestAgentConfigurationRoutesEnforcePermissionRevisionAndSafeProjection(t *t
 	}
 	if len(managed.MCPPresets) != 1 || managed.MCPPresets[0].Available {
 		t.Fatal("nil runtime marked preset available")
+	}
+	if managed.PromptCustomized == nil || !*managed.PromptCustomized {
+		t.Fatalf("management does not report the published custom prompt as customized: %v", managed.PromptCustomized)
+	}
+	// The stored-only fields are never accepted from a client (#525).
+	if response := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": current.Configuration}); response.Code != 200 {
+		t.Fatalf("a valid configuration was rejected: %d %s", response.Code, response.Body.String())
+	}
+	submitted := current.Configuration
+	submitted.Format = agentconfiguration.ConfigurationFormat
+	if response := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": submitted}); response.Code != 400 {
+		t.Fatalf("format accepted from a client: %d %s", response.Code, response.Body.String())
 	}
 	if response := request("POST", schema.AgentConfiguration.Routes.Publish, body); response.Code != 409 {
 		t.Fatalf("stale publish: %d %s", response.Code, response.Body.String())

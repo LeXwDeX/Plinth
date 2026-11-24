@@ -27,6 +27,10 @@ def load():
     return module
 
 
+AGENT_CONFIGURATION = {"system_prompt": "p", "domain_context": {}, "skills": [],
+                       "enabled_tool_names": ["get_task"], "enabled_mcp_preset_ids": []}
+
+
 def make_database(path, head=93, rows=2, tables=None):
     """A database shaped like an older release: a ledger and the key tables."""
     connection = sqlite3.connect(path)
@@ -38,9 +42,44 @@ def make_database(path, head=93, rows=2, tables=None):
             "INSERT INTO go_schema_migrations (version, name, checksum, applied_at)"
             " VALUES (?, 'm', 'c', 't')", (version,))
     for table in tables or load().SMOKE_TABLES:
+        if table == "agent_configuration_versions":
+            # The shape of migration 0041: the drill appends a version to it.
+            connection.execute(
+                "CREATE TABLE agent_configuration_versions (revision INTEGER PRIMARY KEY,"
+                " configuration_json TEXT NOT NULL, actor_id TEXT NOT NULL, source TEXT NOT NULL,"
+                " created_at TEXT NOT NULL)")
+            for index in range(rows):
+                connection.execute(
+                    "INSERT INTO agent_configuration_versions VALUES (?, ?, 'admin', 'publish', 't')",
+                    (index + 1, json.dumps(AGENT_CONFIGURATION)))
+            continue
         connection.execute("CREATE TABLE %s (id TEXT PRIMARY KEY)" % table)
         for index in range(rows):
             connection.execute("INSERT INTO %s (id) VALUES (?)" % table, ("%s-%d" % (table, index),))
+    connection.commit()
+    connection.close()
+
+
+def reconcile_like_startup(image, workdir, port):
+    """Stand-in for the candidate's startup reconcile (#500, #525): append a
+    version in the current format that turns off the baseline tools the seeded
+    version did not list and leaves out the tools the Catalog retired."""
+    database = Path(workdir) / "data" / "art-ai.db"
+    connection = sqlite3.connect(database)
+    revision, encoded = connection.execute(
+        "SELECT revision, configuration_json FROM agent_configuration_versions"
+        " ORDER BY revision DESC LIMIT 1").fetchone()
+    configuration = json.loads(encoded)
+    baseline = load().legacy_tool_baseline()
+    enabled = configuration["enabled_tool_names"]
+    configuration["format"] = 2
+    configuration["follows_schema"] = ["domain_context.image", "domain_context.model-3d", "system_prompt"]
+    configuration["disabled_tool_names"] = [name for name in baseline if name not in enabled]
+    configuration["enabled_tool_names"] = [
+        name for name in enabled if name not in ("observe_task", "request_consent")]
+    connection.execute(
+        "INSERT INTO agent_configuration_versions VALUES (?, ?, 'system',"
+        " 'retire_undeclared_selections', 't')", (revision + 1, json.dumps(configuration)))
     connection.commit()
     connection.close()
 
@@ -77,7 +116,9 @@ class GuardTests(unittest.TestCase):
                                return_value=mock.Mock(returncode=0, stdout="image-id", stderr="")), \
              mock.patch.object(self.drill.shutil, "which", return_value="/usr/bin/docker"), \
              mock.patch.object(self.drill, "start_container",
-                               side_effect=lambda image, workdir, port: calls.append((image, port))), \
+                               side_effect=lambda image, workdir, port: (
+                                   calls.append((image, port)),
+                                   reconcile_like_startup(image, workdir, port))), \
              mock.patch.object(self.drill, "wait_ready", return_value=True), \
              mock.patch.object(self.drill, "container_logs", return_value="log line"):
             self.assertEqual(self.run_main([]), 0)
@@ -93,7 +134,7 @@ class GuardTests(unittest.TestCase):
         with mock.patch.object(self.drill, "run_command",
                                return_value=mock.Mock(returncode=0, stdout="image-id", stderr="")), \
              mock.patch.object(self.drill.shutil, "which", return_value="/usr/bin/docker"), \
-             mock.patch.object(self.drill, "start_container"), \
+             mock.patch.object(self.drill, "start_container", side_effect=reconcile_like_startup), \
              mock.patch.object(self.drill, "wait_ready", return_value=True), \
              mock.patch.object(self.drill, "container_logs", return_value=""):
             with mock.patch.dict(os.environ, {}, clear=False):
@@ -196,7 +237,7 @@ class DrillRunTests(unittest.TestCase):
         self.workdir = self.root / "work"
         self.report = self.root / "report.md"
 
-    def run_drill(self, ready=True, keep=False, report=None):
+    def run_drill(self, ready=True, keep=False, report=None, startup=reconcile_like_startup):
         argv = ["--image", "art-ai-go-production:drill", "--database", str(self.source),
                 "--workdir", str(self.workdir), "--report", str(report or self.report),
                 "--environments", str(self.environments)]
@@ -205,7 +246,7 @@ class DrillRunTests(unittest.TestCase):
         with mock.patch.object(self.drill, "run_command",
                                return_value=mock.Mock(returncode=0, stdout="image-id", stderr="")), \
              mock.patch.object(self.drill.shutil, "which", return_value="/usr/bin/docker"), \
-             mock.patch.object(self.drill, "start_container"), \
+             mock.patch.object(self.drill, "start_container", side_effect=startup), \
              mock.patch.object(self.drill, "wait_ready", return_value=ready), \
              mock.patch.object(self.drill, "container_logs", return_value="container log"):
             return self.drill.main(argv)
@@ -245,6 +286,85 @@ class DrillRunTests(unittest.TestCase):
         target = self.root / "missing" / "report.md"
         self.assertEqual(self.run_drill(report=target), 2)
         self.assertFalse(target.exists())
+
+    def test_the_copy_carries_a_version_in_the_v180_shape(self):
+        self.assertEqual(self.run_drill(keep=True), 0)
+        connection = sqlite3.connect(self.workdir / "data" / "art-ai.db")
+        rows = connection.execute(
+            "SELECT revision, configuration_json, actor_id FROM agent_configuration_versions"
+            " ORDER BY revision").fetchall()
+        connection.close()
+        seeded = json.loads(rows[2][1])
+        self.assertEqual(rows[2][2], "upgrade-drill")
+        baseline = self.drill.legacy_tool_baseline()
+        self.assertEqual(seeded["enabled_tool_names"], [n for n in baseline if n != "create_motion_clip"])
+        self.assertNotIn("format", seeded)
+        self.assertIn("observe_task", seeded["enabled_tool_names"])
+        self.assertEqual(seeded["system_prompt"], self.drill.v180_default_prompts()[0])
+        self.assertEqual(sorted(seeded["domain_context"]), ["image", "model-3d"])
+        reconciled = json.loads(rows[3][1])
+        self.assertNotIn("observe_task", reconciled["enabled_tool_names"])
+        self.assertEqual(reconciled["disabled_tool_names"], ["create_motion_clip"])
+        report = self.report.read_text(encoding="utf-8")
+        self.assertIn("PASS 旧 Agent 配置可读", report)
+        self.assertIn("PASS 旧 Agent 配置保留", report)
+        self.assertIn("PASS v1.8.0 配置工具换算", report)
+        self.assertIn("PASS v1.8.0 配置提示词跟随", report)
+
+    def test_a_cleaned_version_that_freezes_the_old_prompt_fails(self):
+        def startup(image, workdir, port):
+            reconcile_like_startup(image, workdir, port)
+            connection = sqlite3.connect(Path(workdir) / "data" / "art-ai.db")
+            revision, encoded = connection.execute(
+                "SELECT revision, configuration_json FROM agent_configuration_versions"
+                " ORDER BY revision DESC LIMIT 1").fetchone()
+            configuration = json.loads(encoded)
+            configuration["follows_schema"] = ["domain_context.image", "domain_context.model-3d"]
+            connection.execute("UPDATE agent_configuration_versions SET configuration_json = ?"
+                               " WHERE revision = ?", (json.dumps(configuration), revision))
+            connection.commit()
+            connection.close()
+        self.assertEqual(self.run_drill(startup=startup), 1)
+        self.assertIn("FAIL v1.8.0 配置提示词跟随", self.report.read_text(encoding="utf-8"))
+
+    def test_a_cleaned_version_that_turns_off_a_new_tool_fails(self):
+        def startup(image, workdir, port):
+            reconcile_like_startup(image, workdir, port)
+            connection = sqlite3.connect(Path(workdir) / "data" / "art-ai.db")
+            revision, encoded = connection.execute(
+                "SELECT revision, configuration_json FROM agent_configuration_versions"
+                " ORDER BY revision DESC LIMIT 1").fetchone()
+            configuration = json.loads(encoded)
+            configuration["disabled_tool_names"].append("analyze_model")
+            connection.execute("UPDATE agent_configuration_versions SET configuration_json = ?"
+                               " WHERE revision = ?", (json.dumps(configuration), revision))
+            connection.commit()
+            connection.close()
+        self.assertEqual(self.run_drill(startup=startup), 1)
+        self.assertIn("FAIL v1.8.0 配置工具换算", self.report.read_text(encoding="utf-8"))
+
+    def test_a_start_that_keeps_retired_agent_tools_fails_the_drill(self):
+        self.assertEqual(self.run_drill(startup=lambda image, workdir, port: None), 1)
+        self.assertIn("FAIL 旧 Agent 配置可读", self.report.read_text(encoding="utf-8"))
+
+    def test_a_cleaned_version_that_still_enables_a_retired_tool_fails(self):
+        def startup(image, workdir, port):
+            connection = sqlite3.connect(Path(workdir) / "data" / "art-ai.db")
+            connection.execute(
+                "INSERT INTO agent_configuration_versions SELECT revision + 1, configuration_json,"
+                " 'system', 'publish', 't' FROM agent_configuration_versions"
+                " ORDER BY revision DESC LIMIT 1")
+            connection.commit()
+            connection.close()
+        self.assertEqual(self.run_drill(startup=startup), 1)
+        self.assertIn("仍启用 observe_task、request_consent", self.report.read_text(encoding="utf-8"))
+
+    def test_a_copy_without_the_configuration_table_fails_the_check(self):
+        tables = tuple(t for t in self.drill.SMOKE_TABLES if t != "agent_configuration_versions")
+        self.source.unlink()
+        make_database(self.source, tables=tables)
+        self.assertEqual(self.run_drill(startup=lambda image, workdir, port: None), 1)
+        self.assertIn("早于 0041", self.report.read_text(encoding="utf-8"))
 
     def test_the_source_is_never_modified(self):
         before = hashlib.sha256(self.source.read_bytes()).hexdigest()

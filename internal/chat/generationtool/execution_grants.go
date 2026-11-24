@@ -434,6 +434,17 @@ func (executor *Executor) resumeAgentOperation(
 			executor.abandonBudgetReservation(ctx, op)
 			return executor.harnessRefusal(command, err)
 		}
+		if errors.Is(err, generation.ErrNotSubmitted) {
+			// The frozen input went stale before any Task was written (#516):
+			// the Agent reads why and prepares the step again; replaying this
+			// authorization would only meet the same refusal.
+			executor.abandonBudgetReservation(ctx, op)
+			message := executor.chat.Presentation.Messages.GenerationInputStale
+			if message == "" {
+				message = executor.chat.Presentation.Messages.GenerationError
+			}
+			return executor.rejectBecause(command, message, err)
+		}
 		failure := executor.executionFailure(command, "")
 		failure.NoSubmission = KnownNotSubmitted(err)
 		failure.RetryAfter = admissionRetryAfter(err)

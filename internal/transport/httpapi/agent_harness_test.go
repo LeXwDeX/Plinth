@@ -17,16 +17,29 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers"
 )
 
-func testConsentRequestID(t *testing.T, store *agentparams.Store, scope string) string {
+// seedRetiredConsentState writes the rows the retired conversational consent
+// state machine (#491) persisted, as an older version left them behind.
+func seedRetiredConsentState(t *testing.T, repository interface {
+	SaveAgentState(ownerID, scope, key string, value json.RawMessage) error
+}, owner, session string) {
 	t.Helper()
-	var requestID string
-	if err := json.Unmarshal(store.Get(scope)[agentparams.ConsentRequestIDKey], &requestID); err != nil || requestID == "" {
-		t.Fatalf("missing consent request ID: %q, %v", requestID, err)
+	for key, value := range map[string]string{
+		agentparams.ConsentPendingKey:   `{"reason":"first"}`,
+		agentparams.ConsentRequestIDKey: `"retired-request"`,
+		agentparams.ConsentDecisionKey:  `"pending"`,
+		agentparams.ConsentApprovedKey:  `false`,
+		agentparams.ConsentSnapshotKey:  `{"ai_model":"model-a"}`,
+	} {
+		if err := repository.SaveAgentState(owner, session, key, json.RawMessage(value)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return requestID
 }
 
-func TestConsentHTTPRejectsMissingAndStaleRequestIdentity(t *testing.T) {
+// With no execution grant the consent routes have nothing to read or decide:
+// a pending consent row an older version persisted is neither shown nor
+// decided, and a decision about it is the not-pending conflict (#491).
+func TestConsentHTTPHasNoStoredDecisionToReadOrDecide(t *testing.T) {
 	t.Parallel()
 	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
@@ -37,27 +50,19 @@ func TestConsentHTTPRejectsMissingAndStaleRequestIdentity(t *testing.T) {
 	server := &Server{agentState: state, ownsAgentSession: func(context.Context, string, string) bool { return true }}
 	owner := generation.OwnerID("owner")
 	scope := agentparams.ScopeKey(string(owner), "session")
-	snapshot := json.RawMessage(`{"ai_model":"model-a"}`)
-	if err := state.BeginConsent(scope, json.RawMessage(`{"reason":"first"}`), snapshot); err != nil {
-		t.Fatal(err)
-	}
-	oldID := testConsentRequestID(t, state, scope)
-	if err := state.BeginConsent(scope, json.RawMessage(`{"reason":"second"}`), snapshot); err != nil {
-		t.Fatal(err)
-	}
-	currentID := testConsentRequestID(t, state, scope)
+	seedRetiredConsentState(t, repository, string(owner), "session")
 	get := httptest.NewRecorder()
 	server.agentConsentGet(get, httptest.NewRequest(http.MethodGet, "/api/v1/agent/consent?scope=session", nil), owner)
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), currentID) {
-		t.Fatalf("GET omitted current consent identity: status=%d body=%s", get.Code, get.Body.String())
+	if get.Code != http.StatusOK || strings.TrimSpace(get.Body.String()) != `{"consent":{}}` {
+		t.Fatalf("GET showed retired consent state: status=%d body=%s", get.Code, get.Body.String())
 	}
 	for _, tc := range []struct {
 		body   string
 		status int
 	}{
 		{`{"approved":true}`, http.StatusBadRequest},
-		{`{"request_id":"` + currentID + `"}`, http.StatusBadRequest},
-		{`{"approved":true,"request_id":"` + oldID + `"}`, http.StatusConflict},
+		{`{"request_id":"retired-request"}`, http.StatusBadRequest},
+		{`{"approved":true,"request_id":"retired-request"}`, http.StatusConflict},
 	} {
 		response := httptest.NewRecorder()
 		server.agentConsentPut(response, httptest.NewRequest(http.MethodPut,
@@ -66,48 +71,12 @@ func TestConsentHTTPRejectsMissingAndStaleRequestIdentity(t *testing.T) {
 			t.Fatalf("PUT %s status=%d want=%d body=%s", tc.body, response.Code, tc.status, response.Body.String())
 		}
 	}
-	if _, allowed, err := state.ClaimConsent(scope, "call-b", "", snapshot); err != nil || allowed {
-		t.Fatalf("stale HTTP decision approved current request: allowed=%v err=%v", allowed, err)
+	if got := string(state.Get(scope)[agentparams.ConsentDecisionKey]); got != `"pending"` {
+		t.Fatalf("a decision rewrote the retired consent row: %s", got)
 	}
 }
 
-func TestBindingNewVersionPreservesSessionHarness(t *testing.T) {
-	t.Parallel()
-	server := &Server{
-		agentParams: agentparams.NewStore(),
-		agentState:  agentparams.NewStore(),
-		ownsAgentSession: func(context.Context, string, string) bool {
-			return true
-		},
-	}
-	owner := generation.OwnerID("owner")
-	scope := agentparams.ScopeKey(string(owner), "session")
-	bind := func(task string) {
-		t.Helper()
-		body, err := json.Marshal(map[string]string{"session": "session", "task": task})
-		if err != nil {
-			t.Fatal(err)
-		}
-		request := httptest.NewRequest(http.MethodPut, "/api/v1/agent/bind", strings.NewReader(string(body)))
-		response := httptest.NewRecorder()
-		server.agentBindPut(response, request, owner)
-		if response.Code != http.StatusOK {
-			t.Fatalf("bind %q status = %d body=%s", task, response.Code, response.Body.String())
-		}
-	}
-	bind("first")
-	server.agentParams.SetUser(scope, map[string]json.RawMessage{"size": json.RawMessage(`"large"`)})
-	bind("first")
-	if got := string(server.agentParams.Get(scope)["size"]); got != `"large"` {
-		t.Fatalf("same task lost harness size: %s", got)
-	}
-	bind("second")
-	if got := string(server.agentParams.Get(scope)["size"]); got != `"large"` {
-		t.Fatalf("new version lost session harness size: %s", got)
-	}
-}
-
-func TestAgentParamsPutCannotForgeOrEraseConsent(t *testing.T) {
+func TestAgentParamsPutCannotForgeOrEraseRetiredConsentRows(t *testing.T) {
 	t.Parallel()
 	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
@@ -122,7 +91,6 @@ func TestAgentParamsPutCannotForgeOrEraseConsent(t *testing.T) {
 	}
 	owner := generation.OwnerID("owner")
 	scope := agentparams.ScopeKey(string(owner), "session")
-	snapshot := json.RawMessage(`{"ai_model":"model-a","params_hash":""}`)
 	for _, payload := range []string{
 		`{"params":{"consent_pending":{"reason":"forged"},"consent_request_id":"forged","consent_decision":"approved","consent_snapshot":{"ai_model":"model-a","params_hash":""},"size":"large"}}`,
 		`{"params":{"consent_pending":null,"consent_decision":null,"consent_claim":null,"size":"medium"}}`,
@@ -137,29 +105,27 @@ func TestAgentParamsPutCannotForgeOrEraseConsent(t *testing.T) {
 			t.Fatalf("params response exposed private consent state: %s", response.Body.String())
 		}
 	}
-	if state.Get(scope)[agentparams.ConsentPendingKey] != nil {
-		t.Fatal("ordinary params created pending consent")
+	for _, key := range []string{agentparams.ConsentPendingKey, agentparams.ConsentDecisionKey,
+		agentparams.ConsentRequestIDKey, agentparams.ConsentSnapshotKey} {
+		if state.Get(scope)[key] != nil {
+			t.Fatalf("ordinary params wrote the retired consent key %s", key)
+		}
 	}
-	if _, allowed, err := state.ClaimConsent(scope, "call-a", "", snapshot); err != nil || allowed {
-		t.Fatalf("forged approval allowed claim: allowed=%v err=%v", allowed, err)
-	}
-	if err := state.BeginConsent(scope, json.RawMessage(`{"reason":"paid"}`), snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if decided, err := state.DecideConsent(scope, testConsentRequestID(t, state, scope), true); err != nil || !decided {
-		t.Fatalf("approve: decided=%v err=%v", decided, err)
-	}
-	if _, allowed, err := state.ClaimConsent(scope, "call-a", "", snapshot); err != nil || !allowed {
-		t.Fatalf("claim: allowed=%v err=%v", allowed, err)
-	}
-	request := httptest.NewRequest(http.MethodPut, "/api/v1/agent/params?scope=session", strings.NewReader(`{"params":{"consent_claim":null,"consent_decision":"approved"}}`))
+	// A row an older version persisted is private state: parameters can neither
+	// replace nor erase it, and it stays out of every parameter projection.
+	seedRetiredConsentState(t, repository, string(owner), "session")
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/agent/params?scope=session",
+		strings.NewReader(`{"params":{"consent_decision":"approved","consent_pending":null,"size":"small"}}`))
 	response := httptest.NewRecorder()
 	server.agentParamsPut(response, request, owner)
-	if response.Code != http.StatusOK {
-		t.Fatalf("params PUT after claim status=%d", response.Code)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "consent_") {
+		t.Fatalf("params PUT over retired rows: status=%d body=%s", response.Code, response.Body.String())
 	}
-	if _, allowed, err := state.ClaimConsent(scope, "call-b", "", snapshot); err != nil || allowed {
-		t.Fatalf("private claim erased or overwritten: allowed=%v err=%v", allowed, err)
+	if got := string(state.Get(scope)[agentparams.ConsentDecisionKey]); got != `"pending"` {
+		t.Fatalf("params overwrote the retired decision row: %s", got)
+	}
+	if state.Get(scope)[agentparams.ConsentPendingKey] == nil {
+		t.Fatal("params erased the retired pending row")
 	}
 }
 

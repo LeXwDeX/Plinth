@@ -78,6 +78,11 @@ type Config struct {
 	AuthorizationName string
 	AuthorizationType string
 	RequestTimeout    time.Duration
+	// FirstByteTimeout bounds how long a streamed call waits for its first
+	// frame, the response headers included (chat.agent.
+	// first_byte_timeout_seconds, #509); a call that gets none in time fails
+	// as transient. 0: only RequestTimeout bounds it.
+	FirstByteTimeout time.Duration
 	// ScannerMaxBytes bounds one stream line and a non-stream response body. A
 	// Responses event carries more than a Chat Completions chunk: the response
 	// objects of response.created, response.in_progress and response.completed
@@ -114,6 +119,7 @@ type Adapter struct {
 	authorizationType string
 	scannerMaxBytes   int
 	errorBodyMaxBytes int64
+	firstByteTimeout  time.Duration
 	client            *http.Client
 	optionsFor        func(model string) *Options
 	parallelToolCalls bool
@@ -142,6 +148,7 @@ func New(config Config) (*Adapter, error) {
 		authorizationType: config.AuthorizationType,
 		scannerMaxBytes:   config.ScannerMaxBytes,
 		errorBodyMaxBytes: config.ErrorBodyMaxBytes,
+		firstByteTimeout:  config.FirstByteTimeout,
 		client:            config.Client,
 		optionsFor:        config.OptionsFor,
 		parallelToolCalls: config.ParallelToolCalls,
@@ -176,9 +183,12 @@ func (adapter *Adapter) Complete(
 		}
 		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
 	}()
+	// The answer arrives whole, so only the request timeout bounds it; the
+	// guard only classifies a broken connection as transient (#509).
+	guard := upstreamhttp.GuardFirstByte(ctx, 0)
 	response, bodyBytes, err = adapter.send(ctx, request, false)
 	if err != nil {
-		return agents.Completion{}, err
+		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
 	if err = adapter.requireSuccess(response, request); err != nil {
@@ -191,7 +201,7 @@ func (adapter *Adapter) Complete(
 	bound := int64(adapter.scannerMaxBytes)
 	data, err := io.ReadAll(io.LimitReader(response.Body, bound+1))
 	if err != nil {
-		return agents.Completion{}, fmt.Errorf("read agent completion: %w", err)
+		return agents.Completion{}, guard.Err(fmt.Errorf("read agent completion: %w", err))
 	}
 	if int64(len(data)) > bound {
 		return agents.Completion{}, fmt.Errorf("agent completion exceeds %d bytes", bound)
@@ -279,5 +289,6 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		Body:           body,
 		HasImages:      upstreamhttp.RequestHasImages(request),
 		ExhaustedQuota: adapter.exhaustedQuota,
+		RetryAfter:     upstreamhttp.RetryAfter(response.Header, time.Now()),
 	}.Err()
 }

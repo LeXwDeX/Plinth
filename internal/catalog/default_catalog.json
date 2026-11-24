@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.493.1",
+    "revision": "2026-11-24.19.1",
     "terminology": {
       "user_facing": [
         {
@@ -2343,7 +2343,6 @@
           "model_formats_complete": "/api/v1/tasks/{taskID}/formats/complete",
           "model_archive": "/api/v1/tasks/{taskID}/archive",
           "agent_params": "/api/v1/agent/params",
-          "agent_bind": "/api/v1/agent/bind",
           "agent_consent": "/api/v1/agent/consent",
           "account_usage": "/api/v1/account/usage",
           "account_resources": "/api/v1/account/resources",
@@ -3053,7 +3052,7 @@
       "ui.asset_list.run_stop_confirm": "确定要停止自动制作吗？已完成的清单项会保留。",
       "ui.asset_list.run_skip": "跳过",
       "ui.asset_list.run_start": "开始制作",
-      "ui.asset_list.run_waiting": "等待前一份清单完成",
+      "ui.asset_list.run_waiting": "尚未开始制作",
       "ui.asset_list.item_awaiting_approval": "等待审批",
       "ui.asset_list.item_step_cap": "步数上限",
       "ui.asset_list.item_round_limit": "达到轮数上限",
@@ -3236,7 +3235,6 @@
         "error.conflict": "当前状态不允许执行此操作",
         "error.unavailable": "服务暂时不可用",
         "error.too_many_requests": "进行中的任务数量已达上限，请等待部分任务完成后再提交",
-        "error.consent_unavailable": "暂时无法保存同意结果，请稍后重试",
         "error.consent_not_pending": "这项同意请求已结束，请刷新后查看最新状态",
         "error.pending_approval_expired": "这项批准已过期，不能再批准。如仍需要，请在对话里重新发起这次生成。",
         "error.three_view_conflict": "这张视图现在不能这样操作：它可能已经在生成、已经完成，或失败原因不允许重试。请刷新后查看最新状态。",
@@ -4134,8 +4132,8 @@
         "ui.workspace.approval.mode_budget": "预算（制作计划）",
         "ui.workspace.approval.mode_manual": "严格（逐步批准）",
         "ui.workspace.approval.tooltip_auto": "自动：所有付费步骤都会自动批准，每一步都会显示它消耗的积分。",
-        "ui.workspace.approval.tooltip_budget": "预算：先批准一份制作计划和按积分单位分别给出的预算，计划内步骤自动连续执行；计划外、超出该单位剩余预算或会再次扣费的步骤仍需要你批准。",
-        "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：文生 3D、图生 3D、Gaussian Splat、换贴图需要你批准；其余步骤自动批准。",
+        "ui.workspace.approval.tooltip_budget": "预算：先批准一份制作计划和按积分单位分别给出的预算，计划内步骤自动连续执行；计划外、超出该单位剩余预算，或重复上一次已计费而结果没有保存的步骤仍需要你批准。",
+        "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：文生 3D、图生 3D、Gaussian Splat、换贴图，以及单步积分较高或会额外消耗积分的步骤需要你批准；其余步骤自动批准。",
         "ui.workspace.approval.step_credits": "本步消耗 {credits} 积分",
         "ui.workspace.approval.step_credits_one": "本步消耗 {credits} 积分",
         "ui.workspace.approval.session_credits": "本会话累计约 {credits} 积分（估算；失败且未扣费的任务不计入）",
@@ -4169,6 +4167,9 @@
         "ui.boundary.error.title": "出错了",
         "ui.boundary.error.description": "发生了意外错误，请重试或联系管理员。",
         "ui.boundary.error.retry": "重试",
+        "ui.boundary.reload.title": "页面已更新",
+        "ui.boundary.reload.description": "这一页的程序没能加载，多半是刚发布了新版本。请刷新页面后继续。",
+        "ui.boundary.reload.action": "刷新页面",
         "ui.boundary.not_found.title": "页面未找到",
         "ui.boundary.not_found.description": "抱歉，您访问的页面不存在或已被移除。",
         "ui.boundary.not_found.home": "返回首页",
@@ -5872,7 +5873,6 @@
       ],
       "item_blocks": [
         {"value": "awaiting_approval", "label": "等待审批"},
-        {"value": "paused", "label": "已暂停"},
         {"value": "step_cap", "label": "步数上限"}
       ],
       "review": {
@@ -5888,8 +5888,8 @@
         ],
         "max_rework_rounds": 3,
         "messages": {
-          "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成，修正后重新自检并调用 report_list_item 重新申报。",
-          "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限；只能通过、跳过或从头重试。",
+          "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成。修正后重新自检，等新的任务成功后调用 submit_asset_list_item（status=done）重新申报；被打回的上一版不能再次申报。确实做不成时用 status=failed 并写明原因。",
+          "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限，不能再打回。",
           "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。",
           "item_not_found": "这个清单项不在当前清单里。",
           "item_not_awaiting_review": "这个清单项已经不在待验收状态。",
@@ -5982,10 +5982,10 @@
         "awaiting_review": "有 {count} 项待验收。",
         "needs_you": "有 {count} 项需要你处理。",
         "item_failed": "清单项「{name}」制作失败。",
-        "item_failed_input": "清单项「{name}」失败：输入或参数不合法，请检查后重试。",
-        "item_failed_capacity": "清单项「{name}」失败：供应商容量不足，稍后重试。",
+        "item_failed_input": "清单项「{name}」失败：输入或参数不合法。",
+        "item_failed_capacity": "清单项「{name}」失败：供应商容量不足。",
         "item_failed_refused": "清单项「{name}」失败：供应商拒绝执行。",
-        "item_failed_internal": "清单项「{name}」失败：内部错误，请稍后重试。",
+        "item_failed_internal": "清单项「{name}」失败：内部错误。",
         "step_cap_blocked": "清单项「{name}」的 3D 步数已用完，这一步没有执行。",
         "needs_approval": "清单项「{name}」在等你审批这一步。",
         "run_waiting": "制作清单「{title}」在等待前一份清单完成。",
@@ -6003,6 +6003,8 @@
         "item_not_in_session": "这个工具只在制作清单项的会话里可用。",
         "item_not_working": "清单项当前不在制作中，无法报告结果。",
         "item_no_successful_task": "本会话没有成功的任务，不能报告完成；请先让生成任务成功。",
+        "manual_production": "自动制作未开启：用户确认清单不会自动开始制作。用户确认后，由你在本对话里按清单逐项制作，每一步照常走生成与批准流程；不要等待平台自动制作。",
+        "item_no_new_task": "被打回的上一版不能再次报告完成；请先按打回原因修正，让新的任务成功后再报告。",
         "item_delivery_pending": "清单项「{name}」的模型还在后台转换格式，交付尚未稳定，暂时不进入待验收；格式全部落地后会自动转入待验收，无需重新制作。",
         "item_report_failed": "清单项结果提交失败：清单可能已停止或完成，或服务暂时不可用，请稍后重试。"
       },
@@ -6021,7 +6023,7 @@
         "max_rounds_per_item": 3,
         "max_capacity_retries": 0,
         "presence": {"heartbeat_seconds": 15, "grace_seconds": 120},
-        "continuation": {"message": "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。先检查已有结果，不要重复提交已完成的步骤。"}
+        "continuation": {"message": "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。先检查已有结果，不要重复提交已完成的步骤。产物成功并自检后，调用 submit_asset_list_item（status=done）报告这一项；确实做不成时用 status=failed 并写明原因。不报告的话，轮次用完后这一项会记为失败。"}
       }
     },
     "step_policy": {
@@ -6332,7 +6334,29 @@
         "image_unavailable": "当前服务没有启用图片检查，暂时不能给出检查结果。",
         "image_busy": "图片检查正忙，请 {seconds} 秒后重试。",
         "asset_not_image": "该产物存在，但不是可检查的图片：需要已保存的 role=image 产物。请传该任务里 role 为 image 的产物 ID。",
-        "task_terminal": "任务已经结束（{state}），这次取消没有改变任何状态。"
+        "task_terminal": "任务已经结束（{state}），这次取消没有改变任何状态。",
+        "invalid_details": {
+          "prompt_or_images": "给提示词（文生 3D）或图片（图生 3D）",
+          "tool_not_offering": "这个工具不提供 {capability}",
+          "reason_text": "理由必须是 1 到 4096 字节的文字",
+          "reason_required": "这个参数建议不要改；要改请在 parameter_reasons 里说明理由",
+          "reason_not_taken": "这个参数不用写理由（只有建议不要改的参数才要）",
+          "parameter_not_settable": "不是这个服务允许调用方设置的参数（见 list_services）",
+          "prompt_in_parameters": "提示词请放在 prompt 参数里",
+          "parameters_not_encodable": "无法编码",
+          "prompt_not_taken": "这个服务不接受提示词",
+          "images_not_taken": "这个服务不接受图片",
+          "images_exactly_one": "这个服务只接受一张图片",
+          "mask_not_declared": "这个服务没有声明蒙版参数（见 list_services）",
+          "mask_without_image": "蒙版必须和它要编辑的图片一起给，图片放在 images 里",
+          "not_a_cursor": "不是这个列表的游标",
+          "capability_not_served": "这个能力不经 MCP 提供",
+          "purpose_unknown": "未知用途，可用 {purposes}",
+          "image_or_task_id": "与 task_id 二选一",
+          "image_or_task_id_missing": "image 或 task_id 必须给一个",
+          "asset_id_needs_task_id": "只能与 task_id 同用",
+          "purpose_with_input_checklist": "不能与 checklist=3d_input 同用"
+        }
       }
     },
     "chat": {
@@ -6946,6 +6970,14 @@
         "context_window_setting": "llm_context_window_tokens",
         "vision": true,
         "request_timeout_seconds": 600,
+        "first_byte_timeout_seconds": 120,
+        "round_timeout_seconds": 900,
+        "retry": {
+          "max_attempts": 3,
+          "initial_backoff_millis": 2000,
+          "max_backoff_millis": 20000,
+          "max_retry_after_seconds": 60
+        },
         "consent_wait_timeout_seconds": 120,
         "max_generation_calls_per_turn": 20,
         "max_parallel_generation_submissions": 8,
@@ -6954,7 +6986,6 @@
         "max_tool_calls_per_reply": 100,
         "max_tool_calls_per_reply_setting": "agent_max_tool_calls_per_reply",
         "max_tool_calls_per_reply_maximum": 100,
-        "consent_approved_content": "the user approved the frozen operation; resume that same tool call without changing its input",
         "consent_denied_content": "the user pressed Do not approve on the approval card: this step was not done and no credits were spent. Say plainly in the chat that the step was not done, then propose an alternative and let the user choose: when the step had extra credits (extra export formats or billed options), offer to run it again with fewer or no extra options, or on a model without extra charges, at the lower base price; otherwise offer a cheaper or different option. Do not resubmit on your own, and never ask the user to tick a checkbox or change a setting elsewhere to give consent: consent is only the approval card",
         "consent_waiting_content": "the frozen operation still awaits the user's decision and stays approvable on the approval card after this turn; the card states the base credits, any extra credits and what they are for, and the total, and has Approve and Do not approve buttons. Once the user decides, the result is posted into the session automatically. Nothing has been submitted or started yet: tell the user it is waiting for their approval on that card, in the words of status_text when the result has it, and never say the request was submitted, resubmitted, started or is running; do not submit another operation. Never ask the user to tick a checkbox or change a setting elsewhere: approving the card is the whole consent",
         "consent_duplicate_content": "an approval card for exactly this operation (same tool, same input, same source assets) already exists and is still waiting for the user; no second card was created and nothing was submitted. Tell the user it is waiting on that card and do not call the tool again for it",
@@ -6969,8 +7000,6 @@
           "repeated_failure": "重新取回这个结果已经失败，原因与任务本身完全相同（{cause}）。重新取回沿用任务生成时的设置和同一个供应商结果，再试也会以同样方式失败，所以不再提供。请如实告诉用户为什么无法恢复结果；重新生成会再次扣费，需要用户明确决定。不要为这个任务再次调用 recover_task_result",
           "delivered": "这个任务的结果已作为任务 {task_id} 重新取回并成功；没有剩余可取回的内容，也没有启动或扣费。请把 {task_id} 的结果作为已恢复的结果展示（对它使用 get_task），不要为这个任务再次调用 recover_task_result"
         },
-        "consent_blocked_content": "generation blocked: a consent request is awaiting user approval",
-        "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
         "consent_limit_content": "generation limit reached for this turn; summarize the results and ask the user how to continue",
         "consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request",
         "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止：选择停止等待、让任务在后台继续（这一轮结束，任务不取消，完成后在任务中心查看结果），或者停止并取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
@@ -6983,6 +7012,7 @@
             "create_model_3d_from_views",
             "retexture_model",
             "process_model",
+            "analyze_model",
             "convert_model_format",
             "create_motion_clip",
             "create_gaussian_splat",
@@ -7121,7 +7151,7 @@
               "create_multiview_images",
               "create_model_3d_from_views"
             ],
-            "text": "【三视图制作要领】\n逐张三视图、四视图和多视角设定图都只用 create_three_view：一个视角一张独立图片，绝不出横排合图或九宫格，也不要把四个视角画进同一张图。先出正面并自检，再用「原图 + 已通过的正面图」依次出左、背和可选的右侧；每一张都是独立任务，因此可以只重做或替换有问题的那一张。\n按目的选 purpose：\n- model_input（缺省）用于要给 3D 做输入的同一主体：正交投影、中性均匀光、统一姿态/比例/画幅；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图的姿态、画风和画幅比例，不强制 A/T 姿态；四张图的主体描述与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n两种用途里，每一张都是独立任务，完成后用 inspect_image 比较主体占比、背景和轮廓高度；model_input 的画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），design_sheet 的画幅直接取源图整张比例。服务端的一致性检查还会比对轮廓高度、配件等独立部件数量和左右镜像（design_sheet 停用主体占比差、主色和部件数），这些数字看不出款式和语义，所以完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准，不要假设不同模型价格相同。"
+            "text": "【三视图制作要领】\n逐张三视图、四视图和多视角设定图都只用 create_three_view：一个视角一张独立图片，绝不出横排合图或九宫格，也不要把四个视角画进同一张图。先出正面并自检，再用「原图 + 已通过的正面图」依次出左、背和可选的右侧；每一张都是独立任务，因此可以只重做或替换有问题的那一张。\n按目的选 purpose：\n- model_input（缺省）用于要给 3D 做输入的同一主体：正交投影、中性均匀光、统一姿态/比例/画幅；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图的姿态、画风和画幅比例，不强制 A/T 姿态；四张图的主体描述与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n两种用途里，每张完成后都用 inspect_image 比较主体占比、背景和轮廓高度；model_input 的画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），design_sheet 的画幅直接取源图整张比例。服务端的一致性检查还会比对轮廓高度、配件等独立部件数量和左右镜像（design_sheet 停用主体占比差、主色和部件数），这些数字看不出款式和语义，所以完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准。"
           },
           {
             "id": "image2d",
@@ -7132,7 +7162,7 @@
               "create_multiview_images",
               "edit_multiview_images"
             ],
-            "text": "【2D 自检】\n2D 结果交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\ndelivery 清单还会按制作简报的 2D 用途核对：最小短边（不达标时 hint 会点名能达到的推荐模型，换模型前先告诉用户，不要静默替换）、贴图是否可无缝平铺（接缝位置写在结果里，可用 region 放大看）、要透明底时是否有真正的 alpha 通道和干净的边缘（白边会被标出）。unknown 表示这张图无法判断，不是通过。\n提交图生 3D 前用 inspect_image（checklist=3d_input，带 show_picture 看图）：应单主体、完整不贴边、纯色或透明背景、均匀光、无投影阴影、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开，需要绑骨的角色必须是 A 或 T 姿态。姿态、透视和投影阴影要你看图判断，用 visual_review 逐项记入自检记录。不通过先修图；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}",
+            "text": "【2D 自检】\n2D 结果交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。\ndelivery 清单还会按制作简报的 2D 用途核对：最小短边（不达标时 hint 会点名能达到的推荐模型，换模型前先告诉用户，不要静默替换）、贴图是否可无缝平铺（接缝位置写在结果里，可用 region 放大看）、要透明底时是否有真正的 alpha 通道和干净的边缘（白边会被标出）。unknown 表示这张图无法判断，不是通过。\n提交图生 3D 前用 inspect_image（checklist=3d_input，带 show_picture 看图），逐项要求见结果；姿态、透视和投影阴影要你看图判断，用 visual_review 记入自检记录，需要绑骨的角色必须是 A 或 T 姿态。不通过先修图；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}",
             "offering_capabilities": ["text-to-image", "image-to-image"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
@@ -7148,7 +7178,7 @@
               "edit_multiview_images",
               "create_three_view"
             ],
-            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用途推荐的参数会进入冻结输入。用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板，也不必为此先确认；只有用户明确要求换尺寸时，才提示可以调整画板。工具结果里的 model_choice 说明模型来源，按实告诉用户。\n提示词：用英文写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景、无投影阴影、弱透视，角色用 A-pose 或 T-pose，四肢和手指分开。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时按用途推荐选择；带理由偏离时把理由写进参数说明。生成张数由用户决定：用户自己设的出图张数（本会话一个值，切换模型不变）是用户的期望，不是你的判断，也不是上游限制；按这个张数执行，不要自行加量，也不要靠多提交几次来凑数。"
+            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用途推荐的参数会进入冻结输入。用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板，也不必为此先确认；只有用户明确要求换尺寸时，才提示可以调整画板。\n提示词：用英文写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图按 3D 制作要领里的输入图要求画（单主体、纯色背景、角色 A/T 姿态）。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时按用途推荐选择；带理由偏离时把理由写进参数说明。生成张数由用户决定：用户自己设的出图张数（本会话一个值，切换模型不变）是用户的期望，不是你的判断，也不是上游限制；按这个张数执行，不要自行加量，也不要靠多提交几次来凑数。"
           },
           {
             "id": "model3d_assets",
@@ -7162,7 +7192,7 @@
             "text": "【资产类型与风格要点】\n先判断主体属于哪一类，再按要点准备输入图、写提示词和自检；简报里的目标引擎与目标平台决定尺度、面数和贴图的取舍。三视图主体类型：角色 humanoid、动物 quadruped、武器、载具与建筑等硬表面 hard_surface、其他 generic。\n资产类型：\n- 角色：A 姿态（需要绑骨时必须，T 姿态也可），四肢和手指分开、不互相遮挡，中性站姿与表情；手持物、背包、披风、长发分开做或做短，否则会粘连，绑骨后也会穿插。\n- 武器：硬表面，剪影与比例准确，边缘留小倒角让高光成立，刃口不要薄到零厚度；弹匣、鞘、拉栓等会动或可装卸的部件分件；按握持点定原点与朝向。\n- 道具：单件、剪影清晰，细节烘进法线贴图而不是堆面；原点放在底面中心（手持物放握持点）；成套道具统一比例与贴图精度。\n- 载具：左右严格对称，车轮、炮塔、舱门、旋翼等会动的部件分件并把轴心放在转动中心，车头朝向统一，尺度按真实大小（轿车约 4.5 米）；内部不建模。\n- 建筑与场景件：按统一的模块网格建模（如 1、2 或 4 米），两端接口对齐便于引擎拼接；墙面和地面用无缝可平铺的贴图；看不见的内部和背面不建；整栋建筑拆成外墙、屋顶、门窗等件；需要 LOD 时先出最高精度再逐档减面，不要每档单独生成。\n风格：\n- 写实 PBR：贴图只含固有色，不烘光影与阴影；法线、粗糙度、金属度走 PBR 通道；输入图用中性均匀光。\n- 手绘：光影和笔触可以直接画进贴图，材质简单，通常只用一张固有色贴图；轮廓概括，贴图分辨率要够。\n- 卡通渲染（toon/cel）：大块平涂、色阶分明，几何干净，贴图不烘光影；描边和明暗阶交给引擎的着色。\n- 低模：用剪影和转折处的面数表达形体，细节靠贴图；面数以用途预算为准。\n- 像素风：先定网格（每格像素数）与调色板，贴图用最近邻采样、关闭滤波与 mipmap；图生 3D 很难保住像素格，先如实告诉用户，必要时改用体素或低分辨率贴图的低模。"
           }
         ],
-        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 一次一张卡，一回合最多一张。需要用户在几个方向里选时用 ask_choice 开一张方向卡，不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n- 用户说的图不在本轮附件里时，先用 find_history_images 在本会话历史里找；找不到或分不清就简短地问。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 模型格式读不了（例如只交付 FBX，模型检查只认 GLB）时不得为此付费转换：记下真实的那次失败检查，用 record_self_check 写 not_inspectable，并在回复里如实说明没做模型检查。要看这个模型，只能先由用户同意付费转成 GLB。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 计划没做完就结束回合时，必须在这一轮的回复里说清三件事：停在哪一步（第几步、什么能力）、为什么停（例如本回合自检次数用完、某一步失败、在等用户决定）、怎么继续（例如在计划卡上点「继续」，或回一句继续）。不要把没做完的计划说成已完成，也不要既不说明就沉默结束。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。在等卡时让用户去卡上决定，不要说已提交。不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n- 写提示词、选模型前先读【偏好摘要】：已选用方向照原文沿用，已否决方向不要换说法重试；用户重新生成过只说明方向还没定，不是确认。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
+        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 需要用户在几个方向里选时开方向卡（ask_choice），不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 模型格式读不了（例如只交付 FBX，模型检查只认 GLB）时不得为此付费转换：同一模型有 GLB 文件就检查那个；没有就记下真实的那次失败检查，用 record_self_check 写 not_inspectable，并在回复里如实说明没做模型检查。要检查原文件，须先由用户同意付费转成 GLB。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 计划没做完就结束回合时，在这一轮的回复里说清停在哪一步（第几步、什么能力）、为什么停（自检次数用完、某一步失败、在等用户决定）、怎么继续（在计划卡上点「继续」，或回一句继续）；不把没做完的计划说成已完成，也不沉默结束。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。等卡时让用户去卡上决定，不要说已提交，也不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -7171,6 +7201,9 @@
         "title_max_characters": 12,
         "title_max_characters_by_locale": {"en": 40},
         "moderated_image_note": "[这张图片被上游模型服务的内容安全审核拦截（审核器判定疑似色情、暴力等不当内容；审核器较敏感，正常的美术素材也可能被误判），没有发送给你，你看不到它。它的图片标签和句柄仍然有效。请在回复里如实告诉用户这张图被审核拦截，然后主动调整：根据用户的文字和上下文理解意图继续完成；需要生成时改写成不含裸露、色情、暴力等描述的提示词（例如明确服装完整、姿态得体）；生图服务很可能同样拦截这张图，必要时请用户换一张图。不要建议更换模型或修改部署配置。]",
+        "invalid_image_note": "[这张图片没有被上游模型服务接受：模型能读图，是这张图本身不符合它的要求（例如尺寸过小、长宽比极端、体积或格式不被接受），所以没有发送给你，你看不到它。它的图片标签和句柄仍然有效。请在回复里如实告诉用户这张图被跳过了（按它后面的图片标签点名是哪一张），然后继续完成：根据用户的文字和上下文理解意图；需要这张图的画面时，请用户换一张或重新生成。不要建议更换模型或修改部署配置。]",
+        "invalid_image_unsure_note": "[上游模型服务拒绝了这次请求里的图片，但没有指出是哪一张有问题，所以这次请求里的图片都没有发送给你，你看不到它们，其中多数可能本身是合格的。它们的图片标签和句柄仍然有效，生成与处理工具仍然可以按句柄使用。请在回复里如实告诉用户：这次请求的图片没能被读取，原因不明；然后根据用户的文字和上下文继续完成，不要猜测画面内容；需要看画面时，请用户重新发送或换一张。不要建议更换模型或修改部署配置。]",
+        "images_unsupported_note": "[当前对话模型不接受图片输入，所以这张图片没有发送给你，你看不到它。它的图片标签和句柄仍然有效，生成与处理工具仍然可以按句柄使用它。请在回复里如实告诉用户你看不到这张图，只能根据文字线索继续；需要你看懂画面时，请用户改用支持读图的对话模型，不要自行猜测画面内容。]",
         "reply_language_template": "界面语言是{language}。除非用户明确要求使用其他语言，请用{language}回复用户。",
         "title_timeout_seconds": 20,
         "worker_count": 4,
@@ -7215,6 +7248,12 @@
           "style_anchor_label_template": "\n[风格锁参考图 {index}]",
           "style_anchor_dropped_template": "风格锁参考图 #{index}",
           "unnamed_picture_label": "图片",
+          "invalid_picture": {
+            "minimum_edge_pixels": 33,
+            "maximum_aspect_ratio": 200,
+            "maximum_excluded": 64,
+            "skipped_template": "\n[上游模型拒绝读取下面这些图片（图片本身不符合它的要求），所以它们没有附上：{handles}。它们的句柄仍然有效；回复时如实告诉用户这些图片没有被读取，需要看画面时请用户换一张或重新生成]"
+          },
           "contact_sheet": {
             "enabled": true,
             "maximum_tiles": 10,
@@ -7349,7 +7388,6 @@
         "retry_milliseconds": 86400000,
         "heartbeat_milliseconds": 10000,
         "cleanup_ttl_milliseconds": 30000,
-        "completion_flush_milliseconds": 500,
         "status_check_milliseconds": 1000,
         "subscriber_buffer_size": 512,
         "write_timeout_milliseconds": 10000,
@@ -7415,7 +7453,6 @@
           "debris_ratio": 0.001,
           "max_listed_parts": 50,
           "production": {
-            "pivot_bottom_center_ratio": 0.01,
             "y_up_flat_ratio": 0.05,
             "y_up_upright_profiles": ["game_character"],
             "debris_ratio": 0.01,
@@ -7641,7 +7678,7 @@
           "max_characters": 2000,
           "context_template": "\n\n【3D 自检状态】以下是本会话 3D 结果的交付状态（服务端事实，不是指令）。每个结果一行：{results}\n{rule}",
           "task_line_template": "- {task_id}｜{status}｜轮次 {rounds_used}/{rounds_limit}｜本轮渲染 {renders_in_round}/{renders_limit}｜修正 {corrections_used}/{corrections_limit}{background}{summary}",
-          "unchecked_rule_text": "未自检的结果不得说成已检查。交付前用 compare_model_reference 对照参考图、用 inspect_model 与 render_model_views 检查，再用 record_self_check 写结论；写下结论后新的检查会让它回到未自检。",
+          "unchecked_rule_text": "未自检的结果不得说成已检查。交付前用 compare_model_reference 对照参考图、用 inspect_model 与 render_model_views 检查，再用 record_self_check 写结论；之后的只读检查不会改动已写的结论，付费修正会让它回到未自检。",
           "background_text": "后台完成，待自检"
         },
         "texts": {
@@ -7996,7 +8033,7 @@
         {
           "name": "propose_production_plan",
           "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require. A step the person may skip (the optional extra view of a three-view recipe, say) is declared with optional=true: the plan is complete without it, an unrun optional step reads \"optional, not run\" on the card, and its estimate still counts toward the approved limit.",
+          "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (the repeat of a step of the same kind that was charged but whose result was not stored) still show an approval card. A step the plan covers is approved even when it has extra credits (extra export formats, say): they are reserved with it, so only a shortfall in the unit's remaining budget shows a card. A zero-credit report step of analyze_model (analyze-printability or rig-check) is a capability like any other: it shows an approval card unless the plan lists it as a step or in correction_capabilities, so list it there when you may need one. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require. A step the person may skip (the optional extra view of a three-view recipe, say) is declared with optional=true: the plan is complete without it, an unrun optional step reads \"optional, not run\" on the card, and its estimate still counts toward the approved limit.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8089,7 +8126,7 @@
               "correction_capabilities": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Capabilities the plan allows for self-check correction steps that are not listed as steps, such as retexture or process_model. Each must be a known capability."
+                "description": "Capability ids (never tool names) the plan allows for self-check correction steps that are not listed as steps, such as retexture, remesh or rig-check. Each must be a known capability id."
               },
               "checkpoints": {
                 "type": "array",
@@ -8175,7 +8212,7 @@
         {
           "name": "find_history_images",
           "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
-          "description": "Look through the pictures of this chat session when the user's words refer to images (for example 'keep the pose of the white-clad gunman and use the outfit of the other one') but this turn does not attach or select all of them. Without handles it lists the newest pictures of this session, newest first, with their handle, source (upload, generated, capture, canvas), the user's words that came with them, the generation prompt of a generated picture, and whether the picture is part of this turn or the current selection. With handles it also shows you those pictures so you can check them. Only this session's pictures are reachable. One reply may surface a limited number of distinct pictures (the server counts it and the result says how many remain); listing them again or looking at a listed picture costs nothing. Read-only: it never selects or changes anything; put the pictures you settle on into reference_handles of the generation tool yourself.",
+          "description": "Look through the pictures of this chat session when the user's words refer to images (for example 'keep the pose of the white-clad gunman and use the outfit of the other one') but this turn does not attach or select all of them. Without handles it lists the newest pictures of this session, newest first, with their handle, source (upload, generated, capture, canvas), the user's words that came with them, the generation prompt of a generated picture, and whether the picture is part of this turn or the current selection. With handles it also shows you those pictures so you can check them. Only this session's pictures are reachable. One reply may surface a limited number of distinct pictures (the server counts it and the result says how many remain); listing them again or looking at a listed picture costs nothing. Read-only: it never selects or changes anything; put the pictures you settle on into reference_handles of the generation tool yourself. If you cannot find the picture or cannot tell which one is meant, ask the user briefly instead of guessing.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8680,7 +8717,7 @@
         {
           "name": "propose_asset_list",
           "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Propose a production list of assets for the current project. The user must confirm the list before any work starts. Returns the list id, item count, planned steps and availability warnings.",
+          "description": "Propose a production list of assets for the current project. The user confirms or rejects it, and nothing is produced before the confirmation; the result's message says whether a confirmed list is produced automatically or by you, item by item, in this conversation. Returns the list id, item count, planned steps and availability warnings.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8723,11 +8760,11 @@
         {
           "name": "get_asset_list",
           "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
-          "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
+          "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Without list_id it reads, in this order: the item's own list inside a list item's session, the newest list this session proposed (it may still be a draft, or rejected), the project's confirmed list, or else the project's newest list; check the returned status. Pass list_id to read one named list; an unknown or foreign list reads as not found.",
           "parameters": {
             "type": "object",
             "properties": {
-              "list_id": {"type": "string", "description": "Optional list id; omit it to read the current list of this session's project."}
+              "list_id": {"type": "string", "description": "Optional list id; omit it to read the list resolved as the description says (this item's list, the session's newest proposal, or the project's confirmed list)."}
             },
             "additionalProperties": false
           }
@@ -9336,7 +9373,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval. Auto approves every paid step. In manual mode the capabilities the policy lists, any step whose own credit estimate reaches the server's threshold (so remesh, rigging, segmentation and completion usually need approval too; never guess the number) and any step with extra credits (for example Tripo rigging or decimation with additional export formats) wait for the person on an approval card. In budget mode a step the approved plan covers runs within its remaining budget without a card, and a step outside the plan or beyond what remains waits for the person; with no approved plan the manual rules apply. Read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9623,7 +9660,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Analyze one owned model with a zero-credit report step and get a report back: analyze-printability (Meshy, on one of its own successful tasks or a saved self-contained GLB) or rig-check (Tripo, on a native Tripo text-to-3D or image-to-3D task of this session). Both steps only read the model: they change nothing, deliver a report instead of a model, and each declares 0 estimated credits, so the result quotes no cost and the session approval mode has nothing to decide for them. Use this tool only for such a report. Anything that changes the model, its topology, its surface, its size or its file format is a process_model step (a pure file-format change is convert_model_format), and a chain of paid steps is a plan_model_processing plan; never call this tool to make a change. Before rigging a character that is not a plain biped humanoid, run rig-check here first and pass the report's recommended type as the rig_type of the rigging step. A report is not a model preview: do not describe it as a 3D model, and a printability report is a diagnostic, not a guarantee that the model is printable. Check list_offerings for source constraints and exact parameters. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine).",
+          "description": "Analyze one owned model with a zero-credit report step and get a report back: analyze-printability (Meshy, on one of its own successful tasks or a saved self-contained GLB) or rig-check (Tripo, on a native Tripo text-to-3D or image-to-3D task of this session). Both steps only read the model: they change nothing, deliver a report instead of a model, and each declares 0 estimated credits, so the result quotes no cost and auto and manual approval modes run them without an approval card. In budget mode with an approved plan, a report step that the plan lists neither as a step nor in correction_capabilities still shows an approval card, so put analyze-printability or rig-check in correction_capabilities when you may need one. Use this tool only for such a report. Anything that changes the model, its topology, its surface, its size or its file format is a process_model step (a pure file-format change is convert_model_format), and a chain of paid steps is a plan_model_processing plan; never call this tool to make a change. Before rigging a character that is not a plain biped humanoid, run rig-check here first and pass the report's recommended type as the rig_type of the rigging step. A report is not a model preview: do not describe it as a 3D model, and a printability report is a diagnostic, not a guarantee that the model is printable. Check list_offerings for source constraints and exact parameters. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine).",
           "ignore_user_model": true,
           "capability": "analyze-printability",
           "fallback_capability": "analyze-printability",
@@ -9727,7 +9764,7 @@
             "retexture",
             "format-conversion"
           ],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval. Auto approves every paid step. In manual mode the capabilities the policy lists and any step whose own credit estimate reaches the server's threshold (the estimate includes the step's extra credits; remesh, rigging, segmentation and completion usually reach it, so never guess the number) wait for the person. In budget mode a step the approved plan covers runs within its remaining budget without a card, and a step outside the plan or beyond what remains waits for the person; with no approved plan the manual rules apply. Read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -10610,6 +10647,8 @@
           "interrupted_prompt": "⚠️ 该生成任务已中断 (prompt: {prompt})。请重新描述需求。",
           "generation_failed": "生成失败",
           "generation_pending": "任务仍在进行或排队中，请稍后继续查看；任务 ID：{task_id}",
+          "generation_input_stale": "提交前核对发现这一步冻结的输入已经失效（服务配置已更新、服务暂不可用，或输入文件、依赖任务、画板内容已变化），没有提交任务，也没有扣费。请按当前状态重新调用该工具准备这一步；若再次被拒，请如实告诉用户原因并请用户决定，不要反复重试。",
+          "submission_unconfirmed": "这一步的付费提交在限定时间内一直无法确认是否已被受理，本轮已停止，系统没有重新提交。如果任务已经受理，它会照常继续，结果会出现在任务列表里；请稍后查看后再决定是否重新生成，重新生成会再次计费。",
           "generation_failed_by_class": {
             "upstream_queue_timeout": "这一步在服务商的队列里等待太久（超过上游排队等待上限），平台已停止等待，任务记为失败。服务商可能仍会执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：上游排队过久，可能已经扣费，结果未知。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
             "insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），这一步没有执行。请联系管理员处理",
@@ -10662,7 +10701,17 @@
           "unknown_error": "未知错误",
           "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_request_rejected": "对话模型拒绝了这次请求里的参数「{param}」，可能是所选模型不支持这项设置。请换一个对话模型后重试，或把本条消息的错误 ID 发给管理员查看日志。",
+          "agent_upstream_interrupted": "对话模型服务暂时出错（限流、服务端错误、连接中断或回复中途断开），自动重试后仍没有完成，本轮回复已停止。请稍后重新发送这条消息；本轮已经提交的生成任务不受影响，可以在任务中心查看。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
+          "agent_image_invalid": "这次请求里的图片没有被模型接受：模型能读图，是这张图不符合要求。请重新生成这张图、换一张，或裁剪后再试。",
+          "agent_image_invalid_reasons": "上游指出的问题：{reasons}。",
+          "agent_image_invalid_reason_labels": {
+            "dimensions": "图片尺寸不符合要求",
+            "size": "图片大小超限",
+            "format": "图片格式不被接受",
+            "count": "图片数量超限"
+          },
+          "agent_image_invalid_reason_separator": "；",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
           "agent_quota_exhausted": "对话模型的上游额度已用完（账户余额或 API Key 额度），暂时无法回复。请联系管理员处理，处理前重试也不会成功。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
@@ -10763,7 +10812,7 @@
           "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。预算按积分单位分别计算，不同供应商的单位不相加。当前制作计划：{state}；各单位预算 {limit}；已扣费 {spent}；执行中预留 {reserved}；剩余 {remaining}。计划：{plan}\n{auto_approval}需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和按单位的预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。\n验收标准：{acceptance}\n检查点：{checkpoints}\n预案（只在检查点未通过或任务失败时使用，估算已计入预算上限）：{contingencies}\n{report}",
           "legacy_unit_label": "历史积分估算",
           "unit_separator": " · ",
-          "auto_approval_note": "计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出该步骤所用单位的剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。",
+          "auto_approval_note": "计划内的步骤由系统按预算自动批准，不出批准卡，步骤的额外积分（例如额外导出格式）随批准一起占用预算；计划外的能力（0 积分的报告步骤 analyze-printability、rig-check 也一样，可能要用就写进计划步骤或 correction_capabilities）、超出该步骤所用单位的剩余预算（或计划没有该单位的预算）、以及重复上一次已计费而结果没有保存的同类步骤仍会出批准卡，由用户决定。",
           "completed_note": "这个计划已经做完：它的必需步骤都有成功的结果，不再有可按预算自动批准的步骤，剩余额度不再可用。后续步骤需要用户批准，或为新的制作提交新的计划。",
           "no_plan_state": "尚未提交计划",
           "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和按积分单位的预算提交给用户批准。",
@@ -10789,7 +10838,7 @@
           },
           "continuation": {
             "message": "已批准制作计划「{title}」，请按计划开始执行；步骤声明了自检检查点时，检查通过并写入自检记录后再继续。",
-            "agent_template": "\n【计划已批准】用户刚在计划卡上批准了当前制作计划（计划与各单位的剩余预算见系统上下文的【制作预算】）。现在就按计划顺序执行它的步骤：不要再请用户确认，也不要再提交新的计划。步骤声明了 check=self_check 时，该步完成后必须先 inspect/render（有参考图时用 compare_model_reference 对照）并用 record_self_check 写下结论，再进入下一步或交付；未自检的结果不得说成已检查。计划内、且不超出所用单位剩余预算的步骤会由系统按预算自动批准；计划外的能力、超出所用单位剩余预算的步骤，以及会再次扣费的步骤仍会出批准卡，由用户决定。"
+            "agent_template": "\n【计划已批准】用户刚在计划卡上批准了当前制作计划（计划与各单位的剩余预算见系统上下文的【制作预算】）。现在就按计划顺序执行它的步骤：不要再请用户确认，也不要再提交新的计划。步骤声明了 check=self_check 时，该步完成后必须先 inspect/render（有参考图时用 compare_model_reference 对照）并用 record_self_check 写下结论，再进入下一步或交付；未自检的结果不得说成已检查。计划内、且不超出所用单位剩余预算的步骤会由系统按预算自动批准；计划外的能力（含不在计划里的 0 积分报告步骤）、超出所用单位剩余预算的步骤，以及重复上一次已计费而结果没有保存的同类步骤仍会出批准卡，由用户决定。"
           }
         },
         "prompt": {
@@ -10803,7 +10852,7 @@
             {
               "id": "budget",
               "label": "预算（制作计划）",
-              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budgets（每个积分单位一项，如 tripo.credit、hyper3d.credit；按历史积分计价的步骤用 legacy.credits）和 correction_capabilities；不同供应商的单位分别限额、分别累计，从不相加。服务端会按 Catalog 重新估算每一步，某个单位的预算低于该单位步骤的估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且不超出所用单位的剩余预算，也自动执行。计划外的能力、超出该单位剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
+              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budgets（每个积分单位一项，如 tripo.credit、hyper3d.credit；按历史积分计价的步骤用 legacy.credits）和 correction_capabilities；不同供应商的单位分别限额、分别累计，从不相加。服务端会按 Catalog 重新估算每一步，某个单位的预算低于该单位步骤的估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且不超出所用单位的剩余预算，也自动执行。计划内步骤的额外积分（例如额外导出格式）随批准一起占用预算，不再单独出卡。计划外的能力（0 积分的报告步骤 analyze-printability、rig-check 也一样，可能要用就写进计划步骤或 correction_capabilities）、超出该单位剩余预算（或计划没有该单位的预算）、以及重复上一次已计费而结果没有保存的同类步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
             },
             {
               "id": "manual",
@@ -11133,7 +11182,8 @@
               "require_watertight": false,
               "require_skin": false
             },
-            "scale_range_m": {"min": 0.3, "max": 5}
+            "scale_range_m": {"min": 0.3, "max": 5},
+            "pivot_bottom_center_ratio": 0.05
           },
           {
             "id": "game_prop",
@@ -11257,7 +11307,8 @@
               "require_watertight": false,
               "require_skin": false
             },
-            "scale_range_m": {"min": 0.02, "max": 20}
+            "scale_range_m": {"min": 0.02, "max": 20},
+            "pivot_bottom_center_ratio": 0.05
           },
           {
             "id": "web_ar",
@@ -11738,7 +11789,6 @@
       },
       "three_view": {
         "recipe_id": "image-three-view",
-        "purpose_argument": "purpose",
         "default_purpose": "model_input",
         "purposes": [
           {
@@ -13440,7 +13490,8 @@
         "key_headers": [
           "x-webhook-key",
           "x-webhook-secret",
-          "x-meshy-webhook-key"
+          "x-meshy-webhook-key",
+          "x-meshy-api-webhook-secret-key"
         ],
         "payload_job_id_fields": [
           "id",
@@ -16671,7 +16722,8 @@
           "meshy/processing/convert"
         ],
         "scan_interval_milliseconds": 300000,
-        "max_inflight_plans": 1,
+        "slot_wait_interval_milliseconds": 15000,
+        "max_inflight_plans": 2,
         "max_credits_per_task": 30,
         "max_paid_runs_per_task": 1,
         "deadline_hours": 2,
@@ -17065,6 +17117,7 @@
                     "type": "string"
                   }
                 },
+                "required": ["task_id"],
                 "additionalProperties": false
               },
               "execution": {
@@ -17141,6 +17194,9 @@
         "mcp_unavailable": "当前接线不可执行",
         "mcp_tools": "MCP 工具",
         "mcp_default_off": "默认不启用（与内置工具重复）",
+        "prompt_following": "提示词未自定义，随版本升级自动更新",
+        "prompt_customized": "提示词已自定义，不随版本升级更新",
+        "follow_default": "恢复跟随默认",
         "configuration_source": "配置来源",
         "image_to_image_template": "图生图模板（保留 {user_input} 与 {skill_prompt}）",
         "invalid_configuration": "配置文档无效",
@@ -17293,6 +17349,9 @@
         "chat.agent.background_wait",
         "chat.agent.reply_language_template",
         "chat.agent.moderated_image_note",
+        "chat.agent.invalid_image_note",
+        "chat.agent.invalid_image_unsure_note",
+        "chat.agent.images_unsupported_note",
         "chat.agent.mock_summary",
         "chat.choice.mock_summary",
         "chat.agent.mock_failure_summary",
@@ -17511,7 +17570,7 @@
             "ui.asset_list.run_stop_confirm": "Stop automatic production? Finished items are kept.",
             "ui.asset_list.run_skip": "Skip",
             "ui.asset_list.run_start": "Start production",
-            "ui.asset_list.run_waiting": "Waiting for the previous list to finish",
+            "ui.asset_list.run_waiting": "Not started yet",
             "ui.asset_list.item_awaiting_approval": "Awaiting approval",
             "ui.asset_list.item_step_cap": "Step limit reached",
             "ui.asset_list.item_round_limit": "Round limit reached",
@@ -17694,7 +17753,6 @@
             "error.conflict": "This action isn't allowed in the current state",
             "error.unavailable": "Service temporarily unavailable",
             "error.too_many_requests": "The limit on tasks in progress has been reached. Wait for some tasks to finish before submitting more",
-            "error.consent_unavailable": "The consent result can't be saved right now. Please try again later",
             "error.consent_not_pending": "This consent request has ended. Refresh to see the latest status",
             "error.pending_approval_expired": "This approval has expired and can no longer be approved. If you still need it, start this generation again in the chat.",
             "error.three_view_conflict": "This view can't be acted on that way right now: it may already be generating or completed, or its failure reason doesn't allow a retry. Refresh to see the latest status.",
@@ -18592,8 +18650,8 @@
             "ui.workspace.approval.mode_budget": "Budget (production plan)",
             "ui.workspace.approval.mode_manual": "Strict (approve each step)",
             "ui.workspace.approval.tooltip_auto": "Auto: all paid steps are approved automatically, and each step shows the credits it uses.",
-            "ui.workspace.approval.tooltip_budget": "Budget: approve a production plan and its budget for each credit unit first; planned steps then run continuously. A step outside the plan, over the budget, or charging again still needs your approval.",
-            "ui.workspace.approval.tooltip_manual": "Strict (approve each step): text-to-3D, image-to-3D, Gaussian Splat, and retexture need your approval; other steps are approved automatically.",
+            "ui.workspace.approval.tooltip_budget": "Budget: approve a production plan and its budget for each credit unit first; planned steps then run continuously. A step outside the plan, over the budget, or repeating one that was charged without a stored result still needs your approval.",
+            "ui.workspace.approval.tooltip_manual": "Strict (approve each step): text-to-3D, image-to-3D, Gaussian Splat, retexture, and any step that costs many credits or uses extra credits need your approval; other steps are approved automatically.",
             "ui.workspace.approval.step_credits": "This step uses {credits} credits",
             "ui.workspace.approval.step_credits_one": "This step uses {credits} credit",
             "ui.workspace.approval.session_credits": "About {credits} credits this session (estimate; failed tasks that were not charged are not counted)",
@@ -18627,6 +18685,9 @@
             "ui.boundary.error.title": "Something went wrong",
             "ui.boundary.error.description": "An unexpected error occurred. Please try again or contact an administrator.",
             "ui.boundary.error.retry": "Retry",
+            "ui.boundary.reload.title": "This page has been updated",
+            "ui.boundary.reload.description": "Part of this page could not be loaded, most likely because a new version was just released. Reload the page to continue.",
+            "ui.boundary.reload.action": "Reload page",
             "ui.boundary.not_found.title": "Page not found",
             "ui.boundary.not_found.description": "Sorry, the page you're looking for doesn't exist or has been removed.",
             "ui.boundary.not_found.home": "Back to home",
@@ -20976,6 +21037,9 @@
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",
             "agent_configuration.ui.mcp_tools": "MCP tools",
             "agent_configuration.ui.mcp_default_off": "Off by default (repeats built-in tools)",
+            "agent_configuration.ui.prompt_following": "Prompts are not customized and update automatically with new versions",
+            "agent_configuration.ui.prompt_customized": "Prompts are customized and do not change with new versions",
+            "agent_configuration.ui.follow_default": "Restore default (follow updates)",
             "agent_configuration.ui.configuration_source": "Configuration source",
             "agent_configuration.ui.image_to_image_template": "Image-to-image template (keep {user_input} and {skill_prompt})",
             "agent_configuration.ui.invalid_configuration": "Invalid configuration document",
@@ -21100,7 +21164,6 @@
             "asset_list.item_states[id=failed].label": "Failed",
             "asset_list.item_states[id=skipped].label": "Skipped",
             "asset_list.item_blocks[value=awaiting_approval].label": "Awaiting approval",
-            "asset_list.item_blocks[value=paused].label": "Paused",
             "asset_list.item_blocks[value=step_cap].label": "Step limit reached",
             "asset_list.review.return_reasons[id=style].label": "The style is off",
             "asset_list.review.return_reasons[id=proportion].label": "The proportions are off",
@@ -21110,8 +21173,8 @@
             "asset_list.review.return_reasons[id=texture].label": "Textures have problems",
             "asset_list.review.return_reasons[id=rig].label": "Skeleton or pose has problems",
             "asset_list.review.return_reasons[id=other].label": "Other",
-            "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and call report_list_item to report the item again.",
-            "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds; it can only be accepted, skipped or retried from scratch.",
+            "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and, once a new task succeeded, call submit_asset_list_item with status=done to report the item again; the returned version cannot be reported again. If it really cannot be done, report status=failed with the reason.",
+            "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds and cannot be returned again.",
             "asset_list.review.messages.asset_limit": "The project already has its maximum of {maximum} assets, so list item \"{name}\" could not be registered as a project asset; clean up project assets before accepting.",
             "asset_list.review.messages.item_not_found": "This item is not part of the current list.",
             "asset_list.review.messages.item_not_awaiting_review": "This item is no longer awaiting review.",
@@ -21180,10 +21243,10 @@
             "asset_list.messages.awaiting_review": "{count} items are awaiting review.",
             "asset_list.messages.needs_you": "{count} items need you.",
             "asset_list.messages.item_failed": "Item \"{name}\" failed.",
-            "asset_list.messages.item_failed_input": "Item \"{name}\" failed: the input or arguments are invalid; check them and try again.",
-            "asset_list.messages.item_failed_capacity": "Item \"{name}\" failed: the provider has no capacity; try again later.",
+            "asset_list.messages.item_failed_input": "Item \"{name}\" failed: the input or arguments are invalid.",
+            "asset_list.messages.item_failed_capacity": "Item \"{name}\" failed: the provider has no capacity.",
             "asset_list.messages.item_failed_refused": "Item \"{name}\" failed: the provider refused to run it.",
-            "asset_list.messages.item_failed_internal": "Item \"{name}\" failed: internal error; try again later.",
+            "asset_list.messages.item_failed_internal": "Item \"{name}\" failed: internal error.",
             "asset_list.messages.step_cap_blocked": "Item \"{name}\" used up its 3D steps, so this step did not run.",
             "asset_list.messages.needs_approval": "Item \"{name}\" is waiting for your approval of this step.",
             "asset_list.messages.run_waiting": "The list \"{title}\" is waiting for the previous list to finish.",
@@ -21201,6 +21264,8 @@
             "asset_list.messages.item_not_in_session": "This tool is only available inside a production-list item's own session.",
             "asset_list.messages.item_not_working": "The list item is not in progress, so no result can be reported.",
             "asset_list.messages.item_no_successful_task": "This session has no successful task, so it cannot report done; let the generation task succeed first.",
+            "asset_list.messages.item_no_new_task": "The version that was returned cannot be reported done again; fix what the return pointed out and report once a new task succeeded.",
+            "asset_list.messages.manual_production": "Automatic production is off: confirming the list does not start any work. After the user confirms it, make the items one by one in this conversation, each step through the normal generation and approval flow; do not wait for the platform to produce them.",
             "asset_list.messages.item_delivery_pending": "The formats of item \"{name}\" are still converting in the background, so its delivery is not stable and it does not enter review yet; it moves to review on its own once every format has landed, with nothing to remake.",
             "asset_list.messages.item_report_failed": "The item report could not be stored: the list may be stopped or completed, or the service is temporarily unavailable; try again later.",
             "asset_list.ui.card_title": "Work list",
@@ -21209,7 +21274,7 @@
             "asset_list.ui.reject_button": "Reject",
             "asset_list.ui.replace_button": "Replace current list",
             "asset_list.ui.empty_text": "No work list yet. Ask the Agent for one in a chat; it shows here once confirmed.",
-            "asset_list.execution.continuation.message": "Continue working on list item \"{name}\" ({description}) along route {route}; this is round {round}. Check the existing results first and do not resubmit steps that already finished.",
+            "asset_list.execution.continuation.message": "Continue working on list item \"{name}\" ({description}) along route {route}; this is round {round}. Check the existing results first and do not resubmit steps that already finished. Once the result succeeded and passed your self-check, call submit_asset_list_item with status=done to report the item; if it really cannot be done, report status=failed with the reason. An item that is never reported fails when its rounds run out.",
             "mcp_public.instructions": "Plinth's external MCP service. Call it with your own access key as the Bearer token. Every tool response carries a status block (status in structuredContent): the 3D step mode, the 3D steps used by this asset and in total, the balances of the three 3D providers, and a failure attribution with a suggested action. By default you decide whether to continue with 3D steps; the platform does not block. A balance that could not be read says unknown, which does not mean zero.",
             "mcp_public.service_groups[id=image].label": "Images",
             "mcp_public.service_groups[id=model].label": "3D models",
@@ -21239,6 +21304,26 @@
             "mcp_public.messages.image_busy": "Picture inspection is busy; retry in {seconds} seconds.",
             "mcp_public.messages.asset_not_image": "That asset exists but is not an inspectable picture: a saved role=image output is required. Pass the ID of an output whose role is image in that task.",
 "mcp_public.messages.task_terminal": "The task has already ended ({state}); this cancellation changed nothing.",
+            "mcp_public.messages.invalid_details.prompt_or_images": "give a prompt (text-to-3D) or images (image-to-3D)",
+            "mcp_public.messages.invalid_details.tool_not_offering": "this tool does not offer {capability}",
+            "mcp_public.messages.invalid_details.reason_text": "must be a text of 1 to 4096 bytes",
+            "mcp_public.messages.invalid_details.reason_required": "this parameter is advised against changing; say why in parameter_reasons",
+            "mcp_public.messages.invalid_details.reason_not_taken": "this parameter takes no reason (only an advised parameter does)",
+            "mcp_public.messages.invalid_details.parameter_not_settable": "is not a parameter this service lets a caller set (see list_services)",
+            "mcp_public.messages.invalid_details.prompt_in_parameters": "give the prompt in the prompt argument",
+            "mcp_public.messages.invalid_details.parameters_not_encodable": "cannot be encoded",
+            "mcp_public.messages.invalid_details.prompt_not_taken": "this service takes no prompt",
+            "mcp_public.messages.invalid_details.images_not_taken": "this service takes no pictures",
+            "mcp_public.messages.invalid_details.images_exactly_one": "this service takes exactly one picture",
+            "mcp_public.messages.invalid_details.mask_not_declared": "this service declares no mask parameter (see list_services)",
+            "mcp_public.messages.invalid_details.mask_without_image": "a mask must name the picture it edits in images",
+            "mcp_public.messages.invalid_details.not_a_cursor": "is not a cursor of this list",
+            "mcp_public.messages.invalid_details.capability_not_served": "is not served through MCP",
+            "mcp_public.messages.invalid_details.purpose_unknown": "unknown purpose; use one of {purposes}",
+            "mcp_public.messages.invalid_details.image_or_task_id": "give either image or task_id, not both",
+            "mcp_public.messages.invalid_details.image_or_task_id_missing": "give image or task_id",
+            "mcp_public.messages.invalid_details.asset_id_needs_task_id": "only goes with task_id",
+            "mcp_public.messages.invalid_details.purpose_with_input_checklist": "does not go with checklist=3d_input",
             "mcp_public.tools[name=list_services].description": "Lists the services (offerings) usable through MCP, grouped by capability, with whether each is available right now, roughly what one step costs, which inputs it needs and which parameters can be tuned. A service whose inputs include mask takes an image-to-image edit mask. An unavailable service is said to be unavailable; it is never replaced by another model.",
             "mcp_public.tools[name=get_status].description": "Shows the 3D step mode, the 3D steps each of your MCP assets used, the running total and the balances of the three 3D providers. Reading counts no step and charges nothing. Every tool response carries the same status block, so there is no need to call this just to get it.",
             "mcp_public.tools[name=get_task].description": "Reads one task: state, progress, failure attribution with a suggested action, and the asset it belongs to. An unfinished task comes with a suggested polling interval. Only your own tasks can be read; another person's task is treated as missing.",
@@ -21515,6 +21600,8 @@
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_pending": "This task is still running or queued; check back later. Task ID: {task_id}",
+            "chat.presentation.messages.generation_input_stale": "A check before submitting found that this step's frozen input is no longer valid (the service configuration was updated, the service is unavailable, or an input file, a dependency task or the artboard changed). No task was submitted and no credits were spent. Call the tool again to prepare this step from the current state; if it is refused again, tell the user the reason plainly and let them decide, and do not keep retrying.",
+            "chat.presentation.messages.submission_unconfirmed": "The paid submission of this step could not be confirmed as accepted or not within the time limit, so this turn stopped and nothing was submitted again. If the task was accepted, it continues as usual and its result will appear in the task list; check it later before deciding whether to generate again, which charges again.",
             "chat.presentation.messages.generation_failed_ambiguous": "The provider accepted this step, or may have, but the platform could not confirm the result (for example the job timed out or the submission outcome is unknown); the provider may already have run it and charged credits, so it was not resubmitted automatically. Tell the user plainly that the result is unknown and that credits may already have been charged. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout": "This step waited too long in the provider's queue (past the upstream queue wait limit), so the platform stopped waiting and marked the task failed. The provider may still run it and charge credits, so it was not resubmitted automatically. Tell the user plainly that it waited too long in the provider's queue, that credits may already have been charged and that the result is unknown. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so this step was not run. Please contact an administrator",
@@ -21561,7 +21648,15 @@
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_request_rejected": "The chat model rejected the \"{param}\" parameter of this request, possibly because the selected model does not support that setting. Please switch to another chat model and retry, or send this message's error ID to an administrator to check the log.",
+            "chat.presentation.messages.agent_upstream_interrupted": "The chat model service failed for now (a rate limit, a server error, a broken connection or a reply cut off midway) and automatic retries did not help, so this reply stopped. Please send the message again later; generation tasks this turn already submitted are not affected and can be found in the task center.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
+            "chat.presentation.messages.agent_image_invalid": "The model did not accept the picture in this request: it does read images, but this picture does not meet its limits. Generate the picture again, use another one, or crop it and try again.",
+            "chat.presentation.messages.agent_image_invalid_reasons": "The upstream named this problem: {reasons}.",
+            "chat.presentation.messages.agent_image_invalid_reason_labels.dimensions": "the picture's dimensions are not accepted",
+            "chat.presentation.messages.agent_image_invalid_reason_labels.size": "the picture is too large",
+            "chat.presentation.messages.agent_image_invalid_reason_labels.format": "the picture's format is not accepted",
+            "chat.presentation.messages.agent_image_invalid_reason_labels.count": "too many pictures",
+            "chat.presentation.messages.agent_image_invalid_reason_separator": "; ",
             "chat.presentation.messages.agent_quota_exhausted": "The chat model's upstream quota is used up (account balance or API key quota), so no reply can be given for now. Please contact an administrator; retrying will not help until then.",
             "chat.presentation.messages.agent_content_rejected":"The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
@@ -21756,6 +21851,9 @@
             "runtime.asset_delivery.proxy.messages.fetch_failed": "Failed to fetch the proxied resource",
             "chat.agent.title_prompt": "Write a short English chat title of at most {maximum} characters for the first user message below. Return only the title itself, without quotes, punctuation, line breaks or explanation:\n{content}",
             "chat.agent.moderated_image_note": "[This image was blocked by the upstream model service's content-safety review (the classifier flagged it as possibly sexual, violent or otherwise inappropriate; the classifier is sensitive and ordinary art material can be flagged by mistake), so it was not sent to you and you cannot see it. Its image label and handle are still valid. Tell the user plainly that the image was blocked by the review, then adjust on your own: infer the intent from the user's text and the context and carry on; when generating, rewrite the prompt without nudity, sexual or violent descriptions (for example, state that the clothing is complete and the pose is modest); the image service will likely block this image too, so ask the user for another image when needed. Do not suggest switching models or changing the deployment configuration.]",
+            "chat.agent.invalid_image_note": "[The upstream model service did not accept this picture: the model does read images, but this picture itself does not meet its requirements (for example it is too small, its aspect ratio is extreme, or its size or format is not accepted), so it was not sent to you and you cannot see it. Its image label and handle are still valid. Tell the user plainly that this picture was skipped (name which one by the image label that follows it), then carry on: infer the intent from the user's text and the context; when the picture itself is needed, ask the user for another one or to generate it again. Do not suggest switching models or changing the deployment configuration.]",
+            "chat.agent.invalid_image_unsure_note": "[The upstream model service refused the pictures of this request without saying which one was at fault, so none of the pictures in this request were sent to you and you cannot see them; most of them may be fine. Their image labels and handles are still valid, and the generation and processing tools can still use them by handle. Tell the user plainly that the pictures of this request could not be read and why is unknown; then carry on from the user's text and the context, and do not guess what the pictures show; when you need to see a picture, ask the user to send it again or to send another one. Do not suggest switching models or changing the deployment configuration.]",
+            "chat.agent.images_unsupported_note": "[The current chat model takes no picture input, so this picture was not sent to you and you cannot see it. Its image label and handle are still valid, and the generation and processing tools can still use it by handle. Tell the user plainly that you cannot see this picture and can only go by the text; when you need to understand the picture, ask the user to switch to a chat model that reads images, and do not guess its content.]",
             "chat.agent.reply_language_template": "The interface language is {language}. Reply to the user in {language} unless they explicitly ask for another language.",
             "chat.agent.mock_summary": "The image task is done. Tell me anything you'd like to adjust.",
             "chat.agent.mock_failure_summary": "This step did not finish: {error}",
@@ -21776,12 +21874,12 @@
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
             "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
-            "chat.tools[name=process_model].description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval. Auto approves every paid step. In manual mode the capabilities the policy lists, any step whose own credit estimate reaches the server's threshold (so remesh, rigging, segmentation and completion usually need approval too; never guess the number) and any step with extra credits (for example Tripo rigging or decimation with additional export formats) wait for the person on an approval card. In budget mode a step the approved plan covers runs within its remaining budget without a card, and a step outside the plan or beyond what remains waits for the person; with no approved plan the manual rules apply. Read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval. Auto approves every paid step. In manual mode the capabilities the policy lists and any step whose own credit estimate reaches the server's threshold (the estimate includes the step's extra credits; remesh, rigging, segmentation and completion usually reach it, so never guess the number) wait for the person. In budget mode a step the approved plan covers runs within its remaining budget without a card, and a step outside the plan or beyond what remains waits for the person; with no approved plan the manual rules apply. Read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
-            "chat.agent_tools[name=get_asset_list].description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
+            "chat.agent_tools[name=get_asset_list].description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Without list_id it reads, in this order: the item's own list inside a list item's session, the newest list this session proposed (it may still be a draft, or rejected), the project's confirmed list, or else the project's newest list; check the returned status. Pass list_id to read one named list; an unknown or foreign list reads as not found.",
             "chat.tools[name=create_creative_lab_design].model_required_message": "Select a Creative Lab template first.",
             "chat.tools[name=build_creative_lab_item].model_required_message": "Select a Creative Lab design preview first.",
             "chat.three_view.label": "Three views",
@@ -27646,7 +27744,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "model_parameter": "ai_model",
         "result_assets": [
@@ -28099,7 +28198,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "result_assets": [
           {

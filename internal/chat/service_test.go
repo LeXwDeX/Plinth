@@ -604,6 +604,8 @@ type memoryChatRepository struct {
 	turns    map[string]chat.Turn
 	notes    map[string]string
 	picks    map[string]chat.Attachment
+	// visionExcluded holds the pictures a session remembers as refused (#522).
+	visionExcluded map[string][]string
 	// preferences holds the session's preference rows, active and inactive,
 	// in insertion order; ListPreferences returns the active ones newest first.
 	preferences map[string][]chat.Preference

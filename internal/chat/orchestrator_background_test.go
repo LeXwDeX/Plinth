@@ -16,8 +16,8 @@ import (
 )
 
 // backgroundFacts adds to the waiting executor's Tasks what #137 reads: when a
-// Task was submitted, whether the Provider queues it, and what stop and the
-// consent settlement were asked to do.
+// Task was submitted, whether the Provider queues it, and what stop was asked
+// to cancel.
 type backgroundFacts struct {
 	mu       sync.Mutex
 	created  map[string]time.Time
@@ -25,10 +25,6 @@ type backgroundFacts struct {
 	finished map[string]time.Time
 	failures map[string]*generation.Failure
 	canceled []string
-	settled  []string
-	// consentFailures makes that many upcoming consent settlements fail
-	// (#429): the background ending has to retry them.
-	consentFailures int
 	// readErr fails every Task read; logger receives the orchestrator's log.
 	readErr error
 	logger  *slog.Logger
@@ -42,12 +38,6 @@ func (f *backgroundFacts) cancellations() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.canceled...)
-}
-
-func (f *backgroundFacts) settlements() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.settled...)
 }
 
 // backgroundContextAgent answers without tools and keeps every system context it got.
@@ -141,17 +131,6 @@ func backgroundOrchestratorWith(t *testing.T, service *chat.Service, schema cata
 			return task, nil
 		},
 		TaskCanceler: cancel,
-		StopConsent: func(_, _, callID, _, taskID string) error {
-			facts.mu.Lock()
-			if facts.consentFailures > 0 {
-				facts.consentFailures--
-				facts.mu.Unlock()
-				return errors.New("consent store unavailable")
-			}
-			defer facts.mu.Unlock()
-			facts.settled = append(facts.settled, callID+"|"+taskID)
-			return nil
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +178,7 @@ func assistantOf(t *testing.T, service *chat.Service, command chat.ProcessTurn) 
 
 // #137: a single generation step queued at the Provider may stop being waited
 // for. The turn ends as done with the Schema note, the Task keeps running (no
-// cancel), its consent claim is settled as submitted, and the next turn tells
+// cancel), and the next turn tells
 // the Agent the Task still runs so it looks the Task up instead of paying for
 // the same generation again.
 func TestContinueInBackgroundKeepsTheTaskRunningAndTellsTheNextTurn(t *testing.T) {
@@ -248,9 +227,6 @@ func TestContinueInBackgroundKeepsTheTaskRunningAndTellsTheNextTurn(t *testing.T
 	executor.mu.Unlock()
 	if state != generation.TaskRunning {
 		t.Fatalf("task state = %s", state)
-	}
-	if settled := facts.settlements(); len(settled) != 1 || !strings.HasSuffix(settled[0], "|"+taskID) {
-		t.Fatalf("consent must be settled as submitted with the Task: %v", settled)
 	}
 	if _, submissions := executor.counts(command.SessionID); submissions != 1 {
 		t.Fatalf("submissions = %d", submissions)
@@ -458,9 +434,6 @@ func TestStopAfterContinueInBackgroundDoesNotCancel(t *testing.T) {
 	}
 	if canceled := facts.cancellations(); len(canceled) != 0 {
 		t.Fatalf("a later stop cancelled %v", canceled)
-	}
-	if settled := facts.settlements(); len(settled) != 1 {
-		t.Fatalf("settlements = %v", settled)
 	}
 	if !strings.Contains(assistantOf(t, service, command).Content, backgroundSchema(t).Agent.BackgroundWait.TurnContent) {
 		t.Fatal("the turn must say the Task continues")

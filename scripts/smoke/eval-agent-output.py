@@ -13,9 +13,20 @@ Without both --live and ART_AI_LIVE_ACK=1 it refuses (exit 2), and it refuses a
 target released in the fake upstream shape. The free trajectory evaluation is
 `smoke-fake-stack.py --only agent-quality` instead.
 
+The report states the upstream shape, which metric groups it can compare and
+which it cannot (a fake generation side delivers placeholder artifacts), and
+whether a stored baseline exists (#498). The preference checks are skipped here
+because this runner never sends feedback actions, and the request set's budget
+thresholds are recorded without deciding PASS/FAIL.
+
 The visual rubric lives in scripts/smoke/agent-quality/rubric.json; scores are
 filled by a person or a reviewer model and can be merged with --scores. The
 script never calls a reviewer model itself and never chooses one.
+
+--refusals-log points at a local copy of the stack's structured log: the
+"agent tool call refused" lines are counted per session id and the case's time
+window (#407), because the public chat wire keeps no tool result. The report
+also records the Agent round proxy and the text-question heuristic.
 """
 import argparse
 import json
@@ -35,6 +46,13 @@ import upstream_shape  # noqa: E402
 HELPER = os.path.join(HERE, "inspect_model_eval.go")
 SUCCESS = common.SUCCESS_STATE
 
+# #498: this runner sends the fixed request set's user prompts and answers the
+# cards the Agent asks about; it never sends the feedback actions (pick, reject,
+# compact, edit, delete) the #241 preference checks measure, because the live
+# request set has no feedback step. Every run says so, so those checks are
+# skipped instead of failing for something the runner never exercised.
+DRIVES_FEEDBACK = False
+
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -44,6 +62,9 @@ def parse_arguments(argv):
     parser.add_argument("--task-timeout", type=int, default=2400, help="seconds to wait for expected tasks")
     parser.add_argument("--only", default="", help="comma-separated request ids (default: the whole set)")
     parser.add_argument("--scores", default="", help="JSON file of visual scores to merge into the report")
+    parser.add_argument("--refusals-log", default="",
+                        help="local copy of the stack's structured log; refused tool calls (#407) are counted "
+                             "per session id and the case's time window")
     return parser.parse_args(argv)
 
 
@@ -297,10 +318,15 @@ def run_case(live, request, schema, offerings, args):
         "image_count": images,
         "turns": turns,
         "sends": sends,
+        "started_epoch": started,
+        "finished_epoch": time.time(),
         "elapsed_ms": int((time.time() - started) * 1000),
         "output_metrics": output_metrics,
         "output_checks": output_checks,
         "renders": renders,
+        # #498: see DRIVES_FEEDBACK — evaluate_case turns this into skipped
+        # preference checks instead of failures.
+        "preference_supported": DRIVES_FEEDBACK,
     }
 
 
@@ -571,8 +597,7 @@ def scoring_markdown(packet):
     return "\n".join(lines) + "\n"
 
 
-def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
+def run(argv):
     shape, refusal = upstream_shape.resolve("chat-live", "--live" in argv, os.environ)
     if refusal:
         print(refusal, file=sys.stderr)
@@ -592,33 +617,60 @@ def main(argv=None):
             return 2
     data, path, digest = quality.load_requests()
     requests = {request["id"]: request for request in data["requests"]}
-    selected = [request for request in data["requests"] if not args.only or request["id"] in args.only.split(",")]
+    asked = [name.strip() for name in args.only.split(",") if name.strip()] if args.only else []
+    unknown = [name for name in asked if name not in requests]
+    if unknown:
+        # #498: an unknown id used to be dropped silently, so a typo ran a subset
+        # (or nothing) and still exited 0.
+        print("unknown request id: " + ", ".join(unknown) + "; known: " + ", ".join(sorted(requests)), file=sys.stderr)
+        return 2
+    selected = [request for request in data["requests"] if not asked or request["id"] in asked]
     if not selected:
         print("no request selected", file=sys.stderr)
         return 2
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip())
+    refusal_records = []
+    if args.refusals_log:
+        try:
+            refusal_records = quality.read_refusal_log(args.refusals_log)
+        except OSError as error:
+            print(f"--refusals-log {args.refusals_log}: {error}", file=sys.stderr)
+            return 2
     report = common.Report("agent-quality-output-run", args.report)
-    live = common.Live(common.Client(os.environ["BASE"]), report, args)
-    if not live.login():
-        return 2
-    schema = live.public_schema()
-    offerings = offerings_by_id(live)
     cases = []
     try:
+        live = common.Live(common.Client(os.environ["BASE"]), report, args)
+        if not live.login():
+            print("error: login failed; check BASE, ADMIN_USERNAME and ADMIN_PASSWORD", file=sys.stderr)
+            return 2
+        schema = live.public_schema()
+        offerings = offerings_by_id(live)
         for request in selected:
-            run = run_case(live, request, schema, offerings, args)
-            case = quality.evaluate_case(request, run)
+            case_run = run_case(live, request, schema, offerings, args)
+            if refusal_records:
+                counts = quality.refusal_counts_in_window(
+                    refusal_records, case_run.get("session_id"), case_run.get("started_epoch"), case_run.get("finished_epoch"))
+                if counts:
+                    case_run["refusals"] = {"by_code": counts, "source": "log"}
+            case = quality.evaluate_case(request, case_run)
             cases.append(case)
             failed = quality.case_hard_failures(case)
+            skipped = [check for check in case["checks"] if check.get("status") == quality.CHECK_SKIP]
+            recorded = [check for check in case["checks"] if check.get("status") == quality.CHECK_INFO]
             report.check(f"agent-quality-output {request['id']}", not failed,
                          f"tools={case['metrics']['tool_call_count']} paid={case['metrics']['paid_call_count']} "
-                         f"cards={case['metrics']['interruption_count']}" + ("" if not failed else "; " + "; ".join(
+                         f"cards={case['metrics']['interruption_count']}"
+                         + (f" skipped={len(skipped)}" if skipped else "")
+                         + (f" recorded={len(recorded)}" if recorded else "")
+                         + ("" if not failed else "; " + "; ".join(
                              f"{check['id']}: {check['detail']}" for check in failed)))
     except KeyboardInterrupt:
         report.failed("interrupted")
+        print("error: interrupted before every case ran", file=sys.stderr)
     except Exception as error:  # a crash is a failure, never a silent pass
         report.failed("script error", f"{type(error).__name__}: {common.one_line(str(error), 120)}")
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
-    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip())
+        print(f"error: {type(error).__name__}: {common.one_line(str(error), 120)}", file=sys.stderr)
     rubric_path = os.path.join(HERE, "agent-quality", "rubric.json")
     rubric = {"version": quality.load_json(rubric_path).get("version"), "sha256": quality.file_sha256(rubric_path)}
     summary = quality.summarize(cases, "output-live", revision, dirty,
@@ -627,9 +679,29 @@ def main(argv=None):
     os.makedirs(args.report, exist_ok=True)
     packet_path, sheet_path = write_scoring(summary, rubric_path, requests, args.report, args.scores)
     json_path, markdown_path = quality.write_report(summary, args.report, "agent-quality-output")
+    # #498: the shape and the baseline go to the terminal too, so a run whose
+    # generation side was fake or that has no stored baseline does not read like
+    # a comparable PASS=13 run.
+    print(f"# upstream shape: {summary['upstream_shape']}; "
+          f"comparable: {', '.join(summary['comparable_metrics']) or '-'}; "
+          f"incomparable: {', '.join(summary['incomparable_metrics']) or '-'}", flush=True)
+    print(f"# baseline: {summary['baseline']['note']}", flush=True)
     print(f"# output report: {json_path} and {markdown_path}", flush=True)
     print(f"# scoring packet: {packet_path} and {sheet_path}", flush=True)
     return report.finish()
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    try:
+        return run(argv)
+    except KeyboardInterrupt:
+        # #498: a silent ^C leaves no summary and no line saying what happened.
+        print("error: interrupted; the run did not finish", file=sys.stderr)
+        return 130
+    except Exception as error:  # a crash is a failure, never a silent exit
+        print(f"error: {type(error).__name__}: {common.one_line(str(error), 200)}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

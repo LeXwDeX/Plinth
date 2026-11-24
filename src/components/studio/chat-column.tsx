@@ -98,7 +98,8 @@ import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D, flushExplicitModelImage } from '@/lib/chat/explicit-model';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
-import { continueSessionBudget, PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
+import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
+import { continuePlanOnce } from '@/lib/chat/plan-continue';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { recoverChatSession } from '@/lib/chat/session-recovery';
@@ -254,7 +255,6 @@ export function ChatColumn() {
       createAgentHarnessClient({
         routes: {
           params: schema.runtime.http.routes.agent_params,
-          bind: schema.runtime.http.routes.agent_bind,
           consent: schema.runtime.http.routes.agent_consent,
         },
       }),
@@ -802,7 +802,6 @@ export function ChatColumn() {
             progressMaximum:
               schema.runtime.frontend.percentage_multiplier,
           });
-          harness.bindTask(sessionId, event.taskID).catch(() => {});
           { const step = paidStepFromTaskRegistered(event);
             if (step) addStreamPaidStep(sessionId, step);
           }
@@ -847,7 +846,6 @@ export function ChatColumn() {
       updateSessionTitle,
       registerTask,
       applyTaskLive,
-      harness,
       refreshApproval,
       schema,
     ],
@@ -1731,54 +1729,55 @@ export function ChatColumn() {
 
   const decideDetached = useCallback(
     async (card: ApprovalCardModel, approved: boolean) => {
-      if (!activeSessionId || !deciding.current.begin(card.requestId)) return;
+      if (!activeSessionId) return;
       const sessionId = activeSessionId;
       const requestId = card.requestId;
-      setDecisionBusy((current) => new Set(current).add(requestId));
-      setDecisionError((current) => {
-        if (!(requestId in current)) return current;
-        const { [requestId]: _cleared, ...rest } = current;
-        return rest;
-      });
-      try {
-        const result = await pending.decide(requestId, approved);
-        if (approved) {
-          useStudioStore.getState().watchVersions();
-          if (result.taskId) {
-            registerTask({
-              taskId: result.taskId,
-              sessionId,
-              capability: card.capability,
-              prompt: card.prompt,
-              progressMaximum: schema.runtime.frontend.percentage_multiplier,
-            });
-          } else {
-            for (const delay of LATE_TASK_HYDRATE_MILLISECONDS) window.setTimeout(() => hydrateLateTasks(sessionId), delay);
-          }
-        }
-        // 服务端在对话里插入了"已批准 / 已拒绝"的结果消息：重新读取。
-        if (result.messageId) {
-          const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
-          if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
-        }
-        void refreshApproval();
-      } catch (error) {
-        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
-        const reason = detail || schemaText(schema, 'ui.studio.approval.card.decide_failed');
-        setDecisionError((current) => ({
-          ...current,
-          [requestId]: detail
-            ? formatSchemaText(schemaText(schema, 'ui.studio.approval.card.decide_error'), { reason: detail })
-            : reason,
-        }));
-      } finally {
-        deciding.current.end(requestId);
-        setDecisionBusy((current) => {
-          const next = new Set(current);
-          next.delete(requestId);
-          return next;
+      await deciding.current.run(requestId, async () => {
+        setDecisionBusy((current) => new Set(current).add(requestId));
+        setDecisionError((current) => {
+          if (!(requestId in current)) return current;
+          const { [requestId]: _cleared, ...rest } = current;
+          return rest;
         });
-      }
+        try {
+          const result = await pending.decide(requestId, approved);
+          if (approved) {
+            useStudioStore.getState().watchVersions();
+            if (result.taskId) {
+              registerTask({
+                taskId: result.taskId,
+                sessionId,
+                capability: card.capability,
+                prompt: card.prompt,
+                progressMaximum: schema.runtime.frontend.percentage_multiplier,
+              });
+            } else {
+              for (const delay of LATE_TASK_HYDRATE_MILLISECONDS) window.setTimeout(() => hydrateLateTasks(sessionId), delay);
+            }
+          }
+          // 服务端在对话里插入了"已批准 / 已拒绝"的结果消息：重新读取。
+          if (result.messageId) {
+            const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
+            if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
+          }
+          void refreshApproval();
+        } catch (error) {
+          const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+          const reason = detail || schemaText(schema, 'ui.studio.approval.card.decide_failed');
+          setDecisionError((current) => ({
+            ...current,
+            [requestId]: detail
+              ? formatSchemaText(schemaText(schema, 'ui.studio.approval.card.decide_error'), { reason: detail })
+              : reason,
+          }));
+        } finally {
+          setDecisionBusy((current) => {
+            const next = new Set(current);
+            next.delete(requestId);
+            return next;
+          });
+        }
+      });
     },
     [activeSessionId, applyNewestMessagePage, chatClient, hydrateLateTasks, messagePageSize, pending, refreshApproval, registerTask, schema],
   );
@@ -1813,27 +1812,27 @@ export function ChatColumn() {
   // Schema's text says which. A started turn is followed like any reply.
   const continuePlan = useCallback(
     async (budgetId: string) => {
-      if (!activeSessionId || deciding.current.begin(budgetId)) return;
+      if (!activeSessionId) return;
       const sessionId = activeSessionId;
-      setContinueBusy(budgetId);
-      setDecisionError((current) => {
-        if (!(budgetId in current)) return current;
-        const { [budgetId]: _cleared, ...rest } = current;
-        return rest;
+      await continuePlanOnce(deciding.current, schema, sessionId, budgetId, {
+        started: () => {
+          setContinueBusy(budgetId);
+          setDecisionError((current) => {
+            if (!(budgetId in current)) return current;
+            const { [budgetId]: _cleared, ...rest } = current;
+            return rest;
+          });
+        },
+        succeeded: () => setServerTurnTick((tick) => tick + 1),
+        failed: (error) => {
+          const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+          setDecisionError((current) => ({
+            ...current,
+            [budgetId]: detail || schemaText(schema, 'ui.studio.plan.continue_failed'),
+          }));
+        },
+        settled: () => setContinueBusy(null),
       });
-      try {
-        await continueSessionBudget(schema, sessionId, budgetId);
-        setServerTurnTick((tick) => tick + 1);
-      } catch (error) {
-        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
-        setDecisionError((current) => ({
-          ...current,
-          [budgetId]: detail || schemaText(schema, 'ui.studio.plan.continue_failed'),
-        }));
-      } finally {
-        deciding.current.end(budgetId);
-        setContinueBusy(null);
-      }
     },
     [activeSessionId, schema],
   );
@@ -1843,41 +1842,42 @@ export function ChatColumn() {
   // server's new spent/limit figures without waiting for another turn.
   const decidePlan = useCallback(
     async (budgetId: string, approved: boolean) => {
-      if (!activeSessionId || !deciding.current.begin(budgetId)) return;
+      if (!activeSessionId) return;
       const sessionId = activeSessionId;
-      setDecisionBusy((current) => new Set(current).add(budgetId));
-      setDecisionError((current) => {
-        if (!(budgetId in current)) return current;
-        const { [budgetId]: _cleared, ...rest } = current;
-        return rest;
-      });
-      try {
-        const result = await pending.decide(budgetId, approved, 'plan');
-        if (result.messageId) {
-          const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
-          if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
-        }
-        const reloaded = await refreshSessionBudget(sessionId);
-        if (!reloaded) toast.error(schemaText(schema, 'ui.studio.plan.reload_failed'));
-        void refreshApproval();
-        // #134: an approved plan runs in a turn the server started; follow its stream like any reply.
-        if (result.turnMessageId && useChatStore.getState().activeSessionId === sessionId) {
-          setServerTurnTick((tick) => tick + 1);
-        }
-      } catch (error) {
-        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
-        setDecisionError((current) => ({
-          ...current,
-          [budgetId]: detail || schemaText(schema, 'ui.studio.plan.decide_failed'),
-        }));
-      } finally {
-        deciding.current.end(budgetId);
-        setDecisionBusy((current) => {
-          const next = new Set(current);
-          next.delete(budgetId);
-          return next;
+      await deciding.current.run(budgetId, async () => {
+        setDecisionBusy((current) => new Set(current).add(budgetId));
+        setDecisionError((current) => {
+          if (!(budgetId in current)) return current;
+          const { [budgetId]: _cleared, ...rest } = current;
+          return rest;
         });
-      }
+        try {
+          const result = await pending.decide(budgetId, approved, 'plan');
+          if (result.messageId) {
+            const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
+            if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
+          }
+          const reloaded = await refreshSessionBudget(sessionId);
+          if (!reloaded) toast.error(schemaText(schema, 'ui.studio.plan.reload_failed'));
+          void refreshApproval();
+          // #134: an approved plan runs in a turn the server started; follow its stream like any reply.
+          if (result.turnMessageId && useChatStore.getState().activeSessionId === sessionId) {
+            setServerTurnTick((tick) => tick + 1);
+          }
+        } catch (error) {
+          const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+          setDecisionError((current) => ({
+            ...current,
+            [budgetId]: detail || schemaText(schema, 'ui.studio.plan.decide_failed'),
+          }));
+        } finally {
+          setDecisionBusy((current) => {
+            const next = new Set(current);
+            next.delete(budgetId);
+            return next;
+          });
+        }
+      });
     },
     [activeSessionId, applyNewestMessagePage, chatClient, messagePageSize, pending, refreshApproval, refreshSessionBudget, schema],
   );

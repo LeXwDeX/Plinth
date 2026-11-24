@@ -177,7 +177,8 @@ func (service *Service) ProposeAssetList(ctx context.Context, command ToolComman
 				"the asset list could not be proposed")), nil
 		}
 	}
-	content, err := json.Marshal(buildAssetListContent(stored, messages))
+	content, err := json.Marshal(buildAssetListContent(stored, messages,
+		assetListProductionAutomatic(policy.Schema)))
 	if err != nil {
 		return ToolResult{NoSubmission: true}, err
 	}
@@ -316,7 +317,11 @@ type assetListProposedContent struct {
 	Message                 string                     `json:"message"`
 }
 
-func buildAssetListContent(list assetlist.List, messages catalog.AssetListMessagesSchema) assetListProposedContent {
+// automatic reports whether a confirmed list is produced by the runner. With
+// automatic production off the message ends with the Schema's manual note
+// (#508): the Agent makes the items itself once the person confirms.
+func buildAssetListContent(list assetlist.List, messages catalog.AssetListMessagesSchema,
+	automatic bool) assetListProposedContent {
 	itemCount := list.ItemCount
 	if itemCount == 0 && len(list.Items) > 0 {
 		itemCount = len(list.Items)
@@ -354,6 +359,9 @@ func buildAssetListContent(list assetlist.List, messages catalog.AssetListMessag
 		"{steps}", strconv.Itoa(list.PlannedStepCount),
 	).Replace(assetListMessage(messages.Proposed,
 		"Asset list proposed; wait for the person to confirm it."))
+	if note := strings.TrimSpace(messages.ManualProduction); !automatic && note != "" {
+		message += " " + note
+	}
 	return assetListProposedContent{
 		ListID:                  list.ID,
 		Version:                 list.Version,
@@ -388,6 +396,14 @@ func assetListImageItemLimitRefusal(schema catalog.AssetListSchema, fallback str
 		}
 	}
 	return fallback
+}
+
+// assetListProductionAutomatic reports whether the Catalog declares automatic
+// production: only then does a confirmed list get a run the runner advances
+// (#328). The shipped default keeps it off (#494), and a confirmed list is a
+// plan the Agent works through in the conversation.
+func assetListProductionAutomatic(schema catalog.AssetListSchema) bool {
+	return schema.Execution != nil && schema.Execution.Enabled
 }
 
 // assetListMessage keeps a historical Catalog's empty copy readable instead of

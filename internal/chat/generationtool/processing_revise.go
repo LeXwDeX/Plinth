@@ -43,8 +43,16 @@ func (executor *Executor) ReviseProcessingPlan(ctx context.Context, command chat
 	decoder.DisallowUnknownFields()
 	if !json.Valid(command.Call.Arguments) || decoder.Decode(&arguments) != nil ||
 		decoder.Decode(new(any)) != io.EOF || arguments.PlanID == "" || arguments.ExpectedPlanVersion <= 0 ||
-		arguments.StepIndex < 0 || strings.TrimSpace(arguments.Reason) == "" {
+		arguments.StepIndex < 0 {
 		return executor.reject(command, executor.fillText(command, config.Messages.InvalidInput, "{detail}", "arguments"))
+	}
+	// The reason is what the plan card and the audit trail show for the change,
+	// so a revision without one is refused with the Schema's own wording.
+	if strings.TrimSpace(arguments.Reason) == "" {
+		if text := executor.chat.Processing.Failures.ReasonRequired; text != "" {
+			return executor.reject(command, text)
+		}
+		return executor.reject(command, executor.fillText(command, config.Messages.InvalidInput, "{detail}", "reason"))
 	}
 	plan, err := executor.plans.Get(ctx, generation.OwnerID(command.OwnerID), arguments.PlanID)
 	if errors.Is(err, processing.ErrMissing) || (err == nil && plan.SessionID != command.SessionID) {

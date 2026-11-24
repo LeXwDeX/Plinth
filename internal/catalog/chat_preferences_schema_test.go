@@ -51,13 +51,15 @@ func TestDefaultChatPreferencesDeclarationIsValid(t *testing.T) {
 			t.Fatalf("%s lacks a localized UI message", key)
 		}
 	}
-	// The Agent-facing use rule is stated once in the system prompt; the injected
-	// preference block carries the data and its framing (#407). The craft texts
-	// no longer repeat it.
-	if !strings.Contains(app.Chat.Agent.SystemPrompt, "偏好摘要") ||
-		!strings.Contains(app.Chat.Agent.SystemPrompt, "已否决") ||
-		!strings.Contains(app.Chat.Preferences.ContextTemplate, "已否决") {
-		t.Fatal("the Agent is not told to use the preference summary")
+	// The Agent-facing use rule is stated once, in the injected preference block
+	// that carries the data (#407); neither the system prompt nor the craft texts
+	// repeat it.
+	if !strings.Contains(app.Chat.Preferences.ContextTemplate, "已选用方向要沿用") ||
+		!strings.Contains(app.Chat.Preferences.ContextTemplate, "已否决方向") {
+		t.Fatal("the injected preference block does not tell the Agent to use the summary")
+	}
+	if strings.Contains(app.Chat.Agent.SystemPrompt, "偏好摘要") || strings.Contains(app.Chat.Agent.SystemPrompt, "已否决") {
+		t.Fatal("the system prompt repeats the preference rule that the injected block carries")
 	}
 	for _, craft := range app.Chat.Agent.CraftPrompts {
 		if strings.Contains(craft.Text, "偏好摘要") {

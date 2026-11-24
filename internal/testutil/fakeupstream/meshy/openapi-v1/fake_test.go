@@ -757,6 +757,17 @@ func TestResolutionOptionsEchoTheRequest(t *testing.T) {
 			t.Errorf("text-to-image carries %s: %v", field, imageBody)
 		}
 	}
+	// Multi Image to 3D repeats both geometry keys in every poll although its
+	// own sample was captured without them (2026-10-29, sent "standard"); the
+	// 2026-11-23 capture shows a "2k" request answering "2k" and ultra_mode
+	// true from the queued poll on.
+	multi := f.create("/multi-image-to-3d", map[string]any{
+		"image_urls": []string{"https://example.test/a.png"}, "geometry_resolution": "2k",
+	})
+	_, multiBody := f.finish("/multi-image-to-3d", multi, key)
+	if multiBody["geometry_resolution"] != "2k" || multiBody["ultra_mode"] != true {
+		t.Fatalf("multi-image-to-3d geometry = %v ultra_mode = %v", multiBody["geometry_resolution"], multiBody["ultra_mode"])
+	}
 }
 
 // The OBJ material library follows the model's texture: the 2026-11-20 capture

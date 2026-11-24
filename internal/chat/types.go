@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -232,6 +233,13 @@ type TurnCheckpoint struct {
 	// as arguments, never the raw text; the round answers each of them with the
 	// Schema's error text instead of running the tool, also after a restart.
 	MalformedCalls []string `json:"malformed_calls,omitempty"`
+	// UnexecutedCalls lists the calls of the whole turn, every round kept,
+	// that were answered with a result instead of running a tool (#501): a
+	// tool this reply is not offered, a scope refusal or invalid arguments.
+	// Such a call never reached the tool and cannot have submitted a Task,
+	// so a stop treats it as task-free. A checkpoint of an earlier version
+	// lacks the list and keeps the stop's protective branch for its calls.
+	UnexecutedCalls []string `json:"unexecuted_calls,omitempty"`
 	// Waiting lists the calls of this round that have no receipt yet: tasks
 	// in flight and submissions queued for a retry. It replaces the single
 	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.
@@ -248,6 +256,39 @@ type TurnCheckpoint struct {
 	// it without cancelling them, also after a restart, and a stop that comes
 	// later no longer cancels them.
 	Background bool `json:"background,omitempty"`
+	// Unconfirmed lists the paid calls whose submission could be neither
+	// confirmed nor ruled out, each with the time the turn first suspended on
+	// it (#516). Replays look for the Task again; once the Agent request
+	// timeout has passed since that time, the turn ends failed instead of
+	// suspending once more. A Task that was accepted stays with the kernel.
+	Unconfirmed []UnconfirmedCall `json:"unconfirmed,omitempty"`
+}
+
+// UnconfirmedCall is one entry of TurnCheckpoint.Unconfirmed.
+type UnconfirmedCall struct {
+	CallID string    `json:"call_id"`
+	Since  time.Time `json:"since"`
+}
+
+// unconfirmedSince is when the turn first suspended on the call's unknown
+// submission, if it did.
+func (checkpoint TurnCheckpoint) unconfirmedSince(callID string) (time.Time, bool) {
+	for _, entry := range checkpoint.Unconfirmed {
+		if entry.CallID == callID {
+			return entry.Since, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// clearUnconfirmed drops the call's entry once its outcome is known.
+func (checkpoint *TurnCheckpoint) clearUnconfirmed(callID string) {
+	checkpoint.Unconfirmed = slices.DeleteFunc(checkpoint.Unconfirmed, func(entry UnconfirmedCall) bool {
+		return entry.CallID == callID
+	})
+	if len(checkpoint.Unconfirmed) == 0 {
+		checkpoint.Unconfirmed = nil
+	}
 }
 
 // WithoutRequests is what a turn keeps once it has ended (#382): the request
@@ -264,6 +305,15 @@ func (checkpoint TurnCheckpoint) WithoutRequests() TurnCheckpoint {
 	checkpoint.ImageURLs = nil
 	checkpoint.Completion = checkpoint.Completion.WithoutReasoning()
 	return checkpoint
+}
+
+// markUnexecuted records that the call was answered without running a tool
+// (#501). Callers record only a call with no Task bound: a bound Task is
+// reconciled through its binding.
+func (checkpoint *TurnCheckpoint) markUnexecuted(callID string) {
+	if !slices.Contains(checkpoint.UnexecutedCalls, callID) {
+		checkpoint.UnexecutedCalls = append(checkpoint.UnexecutedCalls, callID)
+	}
 }
 
 // WaitingCall is one call of a tool round that still lacks its receipt.

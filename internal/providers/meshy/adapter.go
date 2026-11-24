@@ -508,6 +508,9 @@ func ValidateOffering(offering generation.Offering) error {
 	// 精细化声明不完整时不能静默退化成只交付预览网格：启动即拒绝。
 	if declaration := options.RefineAfterPreview; declaration != nil &&
 		(len(declaration.Set) > 0 || strings.TrimSpace(declaration.SourceParameter) != "") {
+		if declaration.RateLimitRetries < 0 {
+			return errors.New("refine_after_preview.rate_limit_retries 不能为负数")
+		}
 		resolved, ok := refineDeclarationOf(offering)
 		if !ok {
 			return errors.New("refine_after_preview 必须同时声明 set 与 source_parameter")

@@ -18,8 +18,29 @@ const (
 )
 
 // ErrImagesRejected marks an upstream refusal of a request that carried
-// pictures: most likely a model without image input (#253).
+// pictures, where the model or endpoint takes no picture input at all: most
+// likely a model without image input (#253). A picture the model read but
+// would not accept is ErrImageInvalid below, not this.
 var ErrImagesRejected = errors.New("agent model rejected a request with images")
+
+// ErrImageInvalid marks an upstream refusal of a request whose picture the
+// model read and rejected as a picture: its dimensions, its size, its format
+// or the number of pictures is outside what the model takes (#497). The model
+// does read images, so the person is asked for another picture, not for
+// another model.
+var ErrImageInvalid = errors.New("agent upstream refused the request's picture")
+
+// ImageInvalidity is an ErrImageInvalid that carries what the upstream
+// objected to, as tokens of a closed vocabulary (dimensions, size, format,
+// count) and never as the upstream's own wording: upstream bytes must not
+// steer what a person reads.
+type ImageInvalidity struct {
+	Reasons []string
+}
+
+func (invalidity *ImageInvalidity) Error() string { return ErrImageInvalid.Error() }
+
+func (invalidity *ImageInvalidity) Is(target error) bool { return target == ErrImageInvalid }
 
 // ErrInlineImageOutput marks a reply in which the Agent model drew a picture
 // itself (delta.images) instead of answering in text or calling a generation
@@ -93,6 +114,15 @@ func ContentRejectedReasons(err error) []string {
 	var rejection *ContentRejection
 	if errors.As(err, &rejection) {
 		return rejection.Reasons
+	}
+	return nil
+}
+
+// ImageInvalidReasons are the reason tokens of a picture refusal in err.
+func ImageInvalidReasons(err error) []string {
+	var invalidity *ImageInvalidity
+	if errors.As(err, &invalidity) {
+		return invalidity.Reasons
 	}
 	return nil
 }

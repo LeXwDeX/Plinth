@@ -259,12 +259,12 @@ func TestAutoCompletionFillsTheFreeRouteForEveryProvider(t *testing.T) {
 // is paid for exactly once even when the first run left formats missing.
 func TestAutoCompletionPaysTheSecondRouteOnceForOneTask(t *testing.T) {
 	f := newAutoFixture(t)
+	f.service.schema.AutoCompletion.MaxInflightPlans = 1
 	task := f.meshyGlbOnly("meshy-task", "owner")
 	f.candidate(task)
 
-	// The platform runs one plan of its own at a time
-	// (auto_completion.max_inflight_plans = 1): the free route goes first and
-	// the paid one waits for it.
+	// With one plan of its own at a time (auto_completion.max_inflight_plans =
+	// 1), the free route goes first and the paid one waits for it.
 	f.reconcile(t)
 	plans := f.plansOf(t, task.ID)
 	if len(plans) != 1 || plans[0].Steps[0].OfferingID != generatedGltf {
@@ -397,6 +397,7 @@ func TestAutoCompletionReportsASourceOverTheRoutesLimit(t *testing.T) {
 // platform runs at most auto_completion.max_inflight_plans of its own plans.
 func TestAutoCompletionWaitsForTheInflightLimit(t *testing.T) {
 	f := newAutoFixture(t)
+	f.service.schema.AutoCompletion.MaxInflightPlans = 1
 	f.store.plans["other-plan"] = processing.Plan{
 		ID: "other-plan", OwnerID: "owner", State: processing.Running,
 		Origin: processing.OriginDelivery, SourceTaskID: "other-task",
@@ -588,8 +589,10 @@ func TestAutoCompletionRecordsEveryCandidateBeforeTheRound(t *testing.T) {
 	}
 
 	// The Task can be read again: both are looked at, so the second one was not
-	// skipped by the first one's failed round.
+	// skipped by the first one's failed round. The failed round is put off
+	// (#510), so it comes due again at the next scan.
 	delete(f.getErrs, first.ID)
+	f.pass()
 	f.reconcile(t)
 	for _, id := range []generation.TaskID{first.ID, second.ID} {
 		if plans := f.plansOf(t, id); len(plans) != 1 {
@@ -719,6 +722,7 @@ func TestAutoCompletionDoesNotPayAgainForARunItAlreadyGaveUp(t *testing.T) {
 // waits must not move that base, or the deadline never arrives.
 func TestAutoCompletionStopsAtTheDeadlineFromTheFirstRound(t *testing.T) {
 	f := newAutoFixture(t)
+	f.service.schema.AutoCompletion.MaxInflightPlans = 1
 	task := f.tripoMissing("tripo-task", "owner", "usdz")
 	first := f.clock
 	f.record(AutoCompletionRecord{

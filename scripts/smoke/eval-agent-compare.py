@@ -6,6 +6,10 @@
 Prints a Markdown comparison and exits 1 when a check regressed or a budget
 metric grew. A pass-to-fail check, a missing case, or a higher tool/paid/
 interruption count is a regression; more self-inspection is an improvement.
+#407 adds the refused tool calls (by code, from the API when visible or the
+--refusals-log of the output runner) and the Agent round proxy to that
+comparison: more refusals or more tool-using rounds are regressions; the text
+question count is recorded without gating.
 --new-request-set is the explicit report mode for an intentionally changed
 fixed request set: new cases are recorded as additions, the request-set
 version/content change no longer blocks, and the summary metrics compare the

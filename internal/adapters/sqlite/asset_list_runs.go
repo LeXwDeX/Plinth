@@ -212,6 +212,34 @@ func (r *AssetListRunRepository) RunsByStatus(ctx context.Context, status string
 	return result, rows.Err()
 }
 
+// ConfirmedListsWithoutRun lists up to limit confirmed lists of every owner
+// that have no run row (#508): the run write at confirm failed, or the list was
+// confirmed while automatic production was off. Each result carries the
+// owner, project and list only; ID is empty because no run exists yet.
+func (r *AssetListRunRepository) ConfirmedListsWithoutRun(ctx context.Context, limit int) ([]assetlist.Run, error) {
+	if limit <= 0 {
+		return []assetlist.Run{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT l.owner_id, l.project_id, l.id FROM asset_lists l
+		WHERE l.status = ? AND NOT EXISTS (
+			SELECT 1 FROM asset_list_runs r WHERE r.list_id = l.id)
+		ORDER BY l.updated_at, l.id LIMIT ?`, assetlist.StatusConfirmed, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list confirmed asset lists without a run: %w", err)
+	}
+	defer rows.Close()
+	result := make([]assetlist.Run, 0)
+	for rows.Next() {
+		var run assetlist.Run
+		if err := rows.Scan(&run.OwnerID, &run.ProjectID, &run.ListID); err != nil {
+			return nil, fmt.Errorf("scan confirmed asset list without a run: %w", err)
+		}
+		result = append(result, run)
+	}
+	return result, rows.Err()
+}
+
 // UpdateRunStatus applies one guarded run transition. Repeating the target
 // status returns the current run (a double click pauses once); any other
 // status mismatch or an illegal transition is ErrConflict. A pause must name
@@ -580,7 +608,7 @@ func (r *AssetListRunRepository) SetItemBlock(
 ) (assetlist.Item, error) {
 	switch block {
 	case assetlist.BlockNone, assetlist.BlockAwaitingApproval,
-		assetlist.BlockPaused, assetlist.BlockStepCap:
+		assetlist.BlockStepCap:
 	default:
 		return assetlist.Item{}, fmt.Errorf("%w: item block %q", assetlist.ErrInvalid, block)
 	}

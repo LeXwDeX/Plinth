@@ -13,7 +13,9 @@ import {
   type AssetListRun,
   type AssetListSummary,
 } from '@/lib/asset-lists/client';
+import { swrPollingConfig } from '@/lib/polling';
 import type { ProductSchema } from '@/lib/product-schema';
+import { useConnectivityStore } from '@/store/connectivity-store';
 import { latestConfirmedList, useAssetListRun, type UseAssetListRunOptions } from './use-asset-list-run';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
@@ -92,8 +94,19 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>{children}</SWRConfig>;
 }
 
+/** The page's own SWR configuration (`web/src/main.tsx`), so the #385 gate is the one under test. */
+function pageWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <SWRConfig value={{ ...swrPollingConfig, provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+      {children}
+    </SWRConfig>
+  );
+}
+
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  useConnectivityStore.setState({ sessionExpired: false });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -220,5 +233,59 @@ describe('useAssetListRun (#328)', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await waitFor(() => expect(client.listProjectLists).toHaveBeenCalled());
+  });
+
+  // #511 (#385): the chip's read follows the page's polling rules: the Schema's task polling interval (no fixed 4s of
+  // its own), a wait that grows while a list that is not running stays the same, and no read after the login ended.
+  const base = schema.runtime.frontend.task_polling_interval_milliseconds;
+  const idle = schema.runtime.frontend.idle_polling;
+
+  it('reads a running list again at the Schema\'s task polling interval', async () => {
+    vi.useFakeTimers();
+    const client = clientWith();
+    renderHook(() => useAssetListRun({ projectId: 'prj_1', client }), { wrapper: pageWrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(1);
+
+    for (let read = 2; read <= 4; read += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(base - 1); });
+      expect(client.listProjectLists).toHaveBeenCalledTimes(read - 1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(client.listProjectLists).toHaveBeenCalledTimes(read);
+    }
+  });
+
+  it('slows down while a list that is not running stays the same', async () => {
+    vi.useFakeTimers();
+    const client = clientWith({
+      listProjectLists: vi.fn(async () => [summary({ run: run({ status: 'paused', pause_reason: 'user' }) })]),
+    });
+    renderHook(() => useAssetListRun({ projectId: 'prj_1', client }), { wrapper: pageWrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(1);
+
+    // The first answer counts as a change; the reads after it find the same list.
+    await act(async () => { await vi.advanceTimersByTimeAsync(base); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(base); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(3);
+    // The next wait is the interval times the Schema's factor.
+    const grown = Math.min(idle.max_interval_milliseconds, base * idle.backoff_factor);
+    await act(async () => { await vi.advanceTimersByTimeAsync(grown - 1); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(4);
+  });
+
+  it('reads nothing once the login has ended', async () => {
+    vi.useFakeTimers();
+    const client = clientWith();
+    renderHook(() => useAssetListRun({ projectId: 'prj_1', client }), { wrapper: pageWrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(1);
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: true }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * base); });
+    expect(client.listProjectLists).toHaveBeenCalledTimes(1);
   });
 });

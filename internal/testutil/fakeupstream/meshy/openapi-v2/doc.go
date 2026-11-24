@@ -11,5 +11,8 @@
 // PENDING carries started_at/finished_at 0 and preceding_tasks; a refine with
 // enable_pbr=true carries metallic/normal/roughness; a preview OBJ has no MTL.
 // geometry_resolution and the deprecated ultra_mode are not echoed: the Adapter
-// does not read them.
+// does not read them. The two 429s follow https://docs.meshy.ai/en/api/rate-limits
+// (read 2026-11-24): ScenarioRateLimit answers "Rate limit exceeded." with
+// Retry-After, ScenarioConcurrencyLimit answers a create with a message
+// starting "NoMorePendingTasks" and no Retry-After (#504).
 package meshyopenapiv2

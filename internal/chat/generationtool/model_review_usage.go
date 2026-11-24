@@ -160,7 +160,7 @@ func newModelReviewUsageCheckFor(
 		modelReviewUsageWatertightCheck(report, budget),
 		modelReviewUsageSkinCheck(report, budget),
 		modelReviewUsageTextureSizeCheck(report, budget, sized, production, text),
-		modelReviewUsagePivotCheck(report, production),
+		modelReviewUsagePivotCheck(report, profile),
 		modelReviewUsageYUpCheck(report, production, profile),
 		modelReviewUsageScaleCheck(report, profile),
 		modelReviewUsageDebrisCheck(report, production),
@@ -481,11 +481,19 @@ func modelReviewUsageShortestEdge(report modelinspect.Report) float64 {
 	return min(size[0], size[1], size[2])
 }
 
+// modelReviewUsagePivotCheck judges the origin against the purpose's own
+// tolerance (#512). A purpose that places its model by its feet or base (a game
+// character or prop) declares one; every other purpose (display, Web/AR, print)
+// does not, and its pivot is unknown: the measured ratio is still reported, but
+// it never fails, so it never asks the Agent to move an origin nobody needs.
 func modelReviewUsagePivotCheck(
 	report modelinspect.Report,
-	production catalog.ChatModelInspectProductionSchema,
+	profile catalog.ChatModel3DUsageProfile,
 ) modelReviewUsageCheckItem {
-	values := map[string]any{"maximum_ratio": production.PivotBottomCenterRatio}
+	values := map[string]any{}
+	if profile.PivotBottomCenterRatio != nil {
+		values["maximum_ratio"] = *profile.PivotBottomCenterRatio
+	}
 	actual := 0.0
 	status := modelReviewUsageStatusUnknown
 	diagonal := modelReviewUsageBBoxDiagonal(report)
@@ -493,9 +501,11 @@ func modelReviewUsagePivotCheck(
 		offset := report.BBox.BottomCenterOffset
 		distance := math.Sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2])
 		actual = distance / diagonal
-		status = modelReviewUsageStatusPass
-		if actual > production.PivotBottomCenterRatio {
-			status = modelReviewUsageStatusFail
+		if profile.PivotBottomCenterRatio != nil {
+			status = modelReviewUsageStatusPass
+			if actual > *profile.PivotBottomCenterRatio {
+				status = modelReviewUsageStatusFail
+			}
 		}
 	}
 	return modelReviewUsageItem(catalog.ModelReviewUsageCheckPivotBottomCenter, status, actual, values)

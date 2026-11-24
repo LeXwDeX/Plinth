@@ -187,6 +187,11 @@ var ErrTurnAwaitTask = errors.New("chat orchestrator: turn awaiting task")
 // 真正的版本冲突仍是 ErrTurnCheckpointConflict，轮次留给那个写入方。
 var ErrTurnCheckpointUnsaved = errors.New("chat orchestrator: turn checkpoint not saved")
 
+// ErrTurnSubmissionUnconfirmed 表示付费调用的提交结果一直无法确认（#516）：
+// 自第一次因此挂起起已超过 Schema 的 Agent 请求超时，回合不再挂起重放，
+// 以 failed 收尾。可能已受理的任务仍归生成内核，不取消、不重新提交。
+var ErrTurnSubmissionUnconfirmed = errors.New("chat orchestrator: paid submission unconfirmed past the request timeout")
+
 // ErrWakeNotReleased 表示唤醒入队时原 Process 尚未返回（命令 ID 仍在
 // queued 去重集合），需要稍后重试；见 enqueueForWake。
 var ErrWakeNotReleased = errors.New("chat orchestrator: wake target not released yet")
@@ -265,8 +270,6 @@ type OrchestratorConfig struct {
 	// was lost before the assistant message could be updated.
 	TaskLookup func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	TaskGet    func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
-	// StopConsent settles only the matching durable claim after task lookup.
-	StopConsent func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
 	// ToolAllowed 声明 capability 是否属于当前会话领域（B14：2D 会话
 	// 不收 3D 工具）。nil 时不过滤（测试）。
 	ToolAllowed func(capability, domain string) bool
@@ -344,7 +347,6 @@ type Orchestrator struct {
 	capabilities   []catalog.CapabilityPresentation
 	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
-	stopConsent    func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
 	texts          *catalog.TextLocalizer
 	// stepPolicy, stepUsage, stepBalances and stepCosts render the Agent's
 	// 「3D 步数」segment (#330); a nil policy keeps the segment out.
@@ -377,6 +379,12 @@ type Orchestrator struct {
 	// （用户决定/超时/停止）只允许一个来源生效——弹出即失效。
 	suspendMu    sync.Mutex
 	consentWaits map[string]*consentSuspend
+
+	// stranded holds the running turns the last reclaim pass found held by no
+	// worker and no consent wait of this process (#516); a turn still
+	// unheld on the next pass is enqueued again. See ReclaimStrandedTurns.
+	strandedMu sync.Mutex
+	stranded   map[string]struct{}
 
 	// compacting serializes the context compactions of each session (#322).
 	compactMu  sync.Mutex
@@ -448,8 +456,10 @@ func (orchestrator *Orchestrator) clearTurnCanceled(key string) {
 // reconcileStoppedTasks observes only persisted task identities and frozen
 // idempotency keys. A transient read/cancel error keeps the durable turn open
 // for restart recovery; a missing key never triggers a new paid submission.
+// unexecuted is the checkpoint's list of calls answered without running a
+// tool (#501): those are task-free whatever the registry says about them.
 func (orchestrator *Orchestrator) reconcileStoppedTasks(
-	ctx context.Context, ownerID, sessionID, assistantID string, calls []ToolCall, options TurnOptions,
+	ctx context.Context, ownerID, sessionID, assistantID string, calls []ToolCall, unexecuted []string, options TurnOptions,
 ) error {
 	var combined error
 	registry := orchestrator.turnRegistry(ctx)
@@ -502,6 +512,12 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 			calls[index] = call
 		}
 		if call.TaskID == "" && call.IdempotencyKey == "" {
+			// #501: the turn answered this call without running a tool (an
+			// unknown or unavailable tool, a scope refusal, invalid
+			// arguments), so it never submitted anything.
+			if slices.Contains(unexecuted, call.ID) {
+				continue
+			}
 			// Pre-upgrade tool_calls_json has no frozen key. A generation
 			// call (or a tool since removed from the registry) might have
 			// committed a paid Task without a binding. Keep stop recoverable
@@ -525,17 +541,11 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 				taskID = string(task.ID)
 			case generation.IsCode(err, generation.ErrNotFound):
 				if taskID == "" {
-					if orchestrator.stopConsent != nil {
-						combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, ""))
-					}
 					continue
 				}
 			case generation.IsCode(err, generation.ErrConflict):
 				// A tombstoned key is permanently consumed, with no live Task
-				// left to cancel. Settle only this call's claim and continue.
-				if orchestrator.stopConsent != nil {
-					combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, taskID))
-				}
+				// left to cancel.
 				continue
 			default:
 				combined = errors.Join(combined, fmt.Errorf("lookup stopped turn task for call %s: %w", call.ID, err))
@@ -557,9 +567,6 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 			}
 		}
 		calls[index].TaskID = taskID
-		if orchestrator.stopConsent != nil {
-			combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, taskID))
-		}
 		if orchestrator.taskCanceler != nil {
 			if err := orchestrator.taskCanceler(ctx, ownerID, taskID); err != nil {
 				combined = errors.Join(combined, fmt.Errorf("cancel stopped turn task %s: %w", taskID, err))
@@ -646,7 +653,8 @@ func (orchestrator *Orchestrator) CancelTurn(
 			continue
 		}
 		if err := orchestrator.reconcileStoppedTasks(context.WithoutCancel(ctx),
-			ownerID, sessionID, turn.AssistantMessageID, messages[index].ToolCalls, turn.Options); err != nil {
+			ownerID, sessionID, turn.AssistantMessageID, messages[index].ToolCalls,
+			stored.Checkpoint.UnexecutedCalls, turn.Options); err != nil {
 			orchestrator.logger.Warn("停止轮次即时核对任务失败，等待恢复重试", "error", err)
 		}
 		break
@@ -682,9 +690,16 @@ func (orchestrator *Orchestrator) finalizeStoppedTurn(
 	} else {
 		return err
 	}
+	// The durable checkpoint says which calls were answered without running
+	// a tool (#501); a read failure keeps the turn open for a retry.
+	stored, err := orchestrator.service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if err != nil {
+		return err
+	}
 	// 停止收尾兜底取消在飞任务：CancelTurn 扫描与工具提交之间的
 	// TOCTOU 窗口里落库的绑定也在这里被取消（计费止损）。
-	if err := orchestrator.reconcileStoppedTasks(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID, assistant.ToolCalls, command.Options); err != nil {
+	if err := orchestrator.reconcileStoppedTasks(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID,
+		assistant.ToolCalls, stored.Checkpoint.UnexecutedCalls, command.Options); err != nil {
 		return err
 	}
 	stopped := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.TurnStopped)
@@ -752,7 +767,6 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		capabilities:       config.Capabilities,
 		taskLookup:         config.TaskLookup,
 		taskGet:            config.TaskGet,
-		stopConsent:        config.StopConsent,
 		texts:              config.Texts,
 		stepPolicy:         config.StepPolicy,
 		stepUsage:          config.StepUsage,
@@ -766,6 +780,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		activeAssistant:    map[string]string{},
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
+		stranded:           map[string]struct{}{},
 		compacting:         map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
@@ -1228,6 +1243,14 @@ func (orchestrator *Orchestrator) markQueued(
 	}
 	orchestrator.queued[assistantMessageID] = struct{}{}
 	return true
+}
+
+// isQueued reports whether the turn's command is queued or being processed.
+func (orchestrator *Orchestrator) isQueued(assistantMessageID string) bool {
+	orchestrator.queueMu.Lock()
+	defer orchestrator.queueMu.Unlock()
+	_, exists := orchestrator.queued[assistantMessageID]
+	return exists
 }
 
 func (orchestrator *Orchestrator) unmarkQueued(
@@ -1898,7 +1921,10 @@ func (orchestrator *Orchestrator) Process(
 			assistant.ToolCalls = assistant.ToolCalls[:executedCalls+remainingCalls]
 		}
 		if !checkpointResuming || round != startRound {
-			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls}
+			// The calls answered without running stay listed for the whole
+			// turn (#501): a stop in a later round still reconciles them.
+			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls,
+				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls}
 			version, saveErr := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), turn,
 				orchestrator.service.TurnRunningState(), turn.Checkpoint, false)
 			if saveErr != nil {
@@ -2006,12 +2032,13 @@ func (orchestrator *Orchestrator) Process(
 			suspended = true
 			return nil
 		}
-		if errors.Is(toolErr, ErrTurnCheckpointUnsaved) {
+		if errors.Is(toolErr, ErrTurnCheckpointUnsaved) || errors.Is(toolErr, ErrTurnSubmissionUnconfirmed) {
 			// #429: 工具执行阶段的检查点写入失败没有人重试，挂起会让会话一直
 			// 忙、SSE 一直开着。本轮的调用可能已经提交了付费任务：先把内存里
 			// 的绑定并回回复（消息上已持久化的绑定保持不变），再按 #378 的
 			// 同一语义以 failed 结束。任务归生成内核，不会被取消，也不会被
 			// 这次失败重新提交；failed 轮次不在 RecoverTurns 的续跑范围内。
+			// #516: 付费提交结果超过请求超时仍无法确认时同样这样收尾。
 			orchestrator.mergeDurableToolCalls(ctx, command, &assistant)
 			for index := range assistant.ToolCalls {
 				if assistant.ToolCalls[index].TaskID == "" {
@@ -2019,7 +2046,11 @@ func (orchestrator *Orchestrator) Process(
 						taskBindings[assistant.ToolCalls[index].ID]
 				}
 			}
-			return endUnsaved("保存工具执行结果", toolErr)
+			stage := "保存工具执行结果"
+			if errors.Is(toolErr, ErrTurnSubmissionUnconfirmed) {
+				stage = "确认付费提交"
+			}
+			return endUnsaved(stage, toolErr)
 		}
 		// A submit callback persisted the task binding together with its estimated
 		// credits and approval source. Merge them before the next write so that
@@ -2084,10 +2115,10 @@ func (orchestrator *Orchestrator) Process(
 				return followUpRound.receive(delta, streamFilter)
 			},
 		)
-		if requestHasPictures(followUp) && !requestHasPictures(sentFollowUp) {
-			// The upstream blocked a picture of this context: later rounds
+		if requestHasPictures(followUp) {
+			// The upstream refused a picture of this context: later rounds
 			// start from the request without it, so they do not hit it again.
-			request = orchestrator.withoutPictures(processCtx, request, "")
+			request = carryStrippedPictures(request, followUp, sentFollowUp)
 		}
 		followUp = sentFollowUp
 		if streamErr != nil {
@@ -2139,10 +2170,16 @@ func (orchestrator *Orchestrator) Process(
 		// instead of asking for a retry that cannot succeed.
 		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
 			assistant.Content = message
+		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
+			assistant.Content = message
 		}
 		if failed {
 			assistant.Content = orchestrator.withErrorReference(ctx, assistant.Content, assistant.ID)
 		}
+	} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
+		// #509: the follow-up broke off after its retries; the reply so far
+		// stays and says it was cut, so the person knows to send it again.
+		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
 	if err := orchestrator.service.UpdateMessage(
@@ -2449,7 +2486,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	// with the latest user message: image parts are not valid in assistant turns.
 	generatedParts := orchestrator.plannedGeneratedParts(plan)
 	styleParts := orchestrator.plannedStyleParts(plan)
-	overflowNote := budget.overflowText(plan.Dropped)
+	overflowNote := budget.overflowText(plan.Dropped) + budget.skippedText(plan.Skipped)
 	visionOffNote := ""
 	if plan.Off {
 		visionOffNote = budget.VisionOff
@@ -3037,6 +3074,30 @@ func (orchestrator *Orchestrator) executeTools(
 	turn.Checkpoint.SetWaiting(waiting)
 	requestTimeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
 	maxParallel := max(1, orchestrator.schema.Agent.MaxParallelGenerationSubmissions)
+	// suspendUnconfirmed suspends the turn on a paid call whose submission
+	// could be neither confirmed nor ruled out, so a replay looks for its Task
+	// again. The first suspension is stored with the call; once the Schema
+	// request timeout has passed since then the turn stops replaying and ends
+	// failed (#516). A Task that was accepted stays with the kernel.
+	suspendUnconfirmed := func(callID string) error {
+		now := time.Now()
+		since, found := turn.Checkpoint.unconfirmedSince(callID)
+		if !found {
+			since = now
+			turn.Checkpoint.Unconfirmed = append(turn.Checkpoint.Unconfirmed,
+				UnconfirmedCall{CallID: callID, Since: since})
+			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
+				return err
+			}
+		}
+		if requestTimeout > 0 && !now.Before(since.Add(requestTimeout)) {
+			orchestrator.logger.Warn("付费调用的提交结果超时仍无法确认，回合不再重放",
+				"session_id", command.SessionID, "assistant_message_id", command.AssistantMessageID,
+				"call_id", callID, "unconfirmed_since", since)
+			return ErrTurnSubmissionUnconfirmed
+		}
+		return ErrTurnSuspended
+	}
 	var inflight []WaitingCall
 	// 提交阶段：按调用顺序逐个执行。付费步骤提交后若要等待任务，不再立即
 	// 挂起轮次，记为在途并继续提交同批互不依赖的下一个付费步骤；本批提交
@@ -3060,6 +3121,7 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			turn.Checkpoint.markUnexecuted(call.ID)
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
@@ -3111,7 +3173,7 @@ func (orchestrator *Orchestrator) executeTools(
 					if errors.Is(readErr, ErrTurnCheckpointConflict) {
 						return results, imageURLs, taskBindings, readErr
 					}
-					return results, imageURLs, taskBindings, ErrTurnSuspended
+					return results, imageURLs, taskBindings, suspendUnconfirmed(call.ID)
 				}
 				if candidate != "" {
 					boundTaskID = candidate
@@ -3141,6 +3203,9 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			if boundTaskID == "" {
+				turn.Checkpoint.markUnexecuted(call.ID)
+			}
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
@@ -3164,6 +3229,9 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			if boundTaskID == "" {
+				turn.Checkpoint.markUnexecuted(call.ID)
+			}
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
@@ -3219,9 +3287,11 @@ func (orchestrator *Orchestrator) executeTools(
 			// Task acceptance may have committed while the response or chat
 			// binding was lost. Keep this call outside Checkpoint.Completed so
 			// restart can read its durable grant/idempotency binding and observe
-			// the original paid Task. Never plan a fresh paid call here.
-			return results, imageURLs, taskBindings, ErrTurnSuspended
+			// the original paid Task. Never plan a fresh paid call here. The
+			// replays are bounded (#516): see suspendUnconfirmed.
+			return results, imageURLs, taskBindings, suspendUnconfirmed(call.ID)
 		}
+		turn.Checkpoint.clearUnconfirmed(call.ID)
 		if err != nil && result.AwaitTask && result.TaskID != "" {
 			// The Task identity is known, but observation or chat binding failed.
 			// Preserve the original Task for the waiting scanner to retry.
@@ -3761,12 +3831,22 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	target.Background = target.Background || stored.Background
 }
 
-// streamAgent streams one Agent request. When the upstream's content-safety
-// review refused a request that carried pictures (#35), it sends the request
-// once more with every picture replaced by the Schema note, so the Agent can
-// answer knowing the picture was blocked instead of the turn failing. It
-// returns the request actually sent. The refusal comes before any delta, so
-// nothing was streamed from the refused attempt.
+// streamAgent streams one Agent request. When the upstream refused a request
+// that carried pictures, it sends the request once more with the pictures
+// replaced by a Schema note, so the Agent can answer knowing it could not see
+// them instead of the turn failing:
+//   - the upstream's content-safety review (#35): every picture;
+//   - a picture the model read and refused as a bad picture (#497, #522): the
+//     pictures the Schema's size bounds show to be unreadable if the request has
+//     any, else every picture; a refusal that remains is answered once more with
+//     every picture. The pictures stripped are remembered by the session, so no
+//     later round or turn sends them again;
+//   - a model that takes no picture input (#253, #522): every picture, for this
+//     request only, because the next model the person picks may read them.
+//
+// It returns the request actually sent. The refusal comes before any delta, so
+// nothing was streamed from the refused attempt. A refusal that is none of
+// these (a refused tool declaration, a context too long) is returned as it is.
 func (orchestrator *Orchestrator) streamAgent(
 	ctx context.Context,
 	command ProcessTurn,
@@ -3774,19 +3854,158 @@ func (orchestrator *Orchestrator) streamAgent(
 	emit func(agents.Delta) error,
 ) (agents.Completion, agents.Request, error) {
 	completion, err := orchestrator.agent.Stream(ctx, request, emit)
-	if err == nil || !errors.Is(err, agents.ErrContentRejected) ||
-		orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+	refusal := classifyPictureRefusal(err)
+	if refusal == pictureRefusalNone || !requestHasPictures(request) {
 		return completion, request, err
 	}
-	orchestrator.logger.Warn(
-		"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
-		"session_id", command.SessionID,
-		"assistant_message_id", command.AssistantMessageID,
-		"error", err,
-	)
-	stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
-	completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
-	return completion, stripped, err
+	switch refusal {
+	case pictureRefusalContent:
+		if orchestrator.schema.Agent.ModeratedImageNote == "" {
+			return completion, request, err
+		}
+		orchestrator.logger.Warn(
+			"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+		stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
+		completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+		return completion, stripped, err
+	case pictureRefusalInvalid:
+		return orchestrator.retryWithoutInvalidPictures(ctx, command, request, err, emit)
+	case pictureRefusalUnsupported:
+		if orchestrator.schema.Agent.ImagesUnsupportedNote == "" {
+			return completion, request, err
+		}
+		orchestrator.logger.Warn(
+			"Agent 模型不接受图片输入，去掉图片后重试（不记入会话）",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+		stripped := orchestrator.replacePictures(
+			request, orchestrator.text(ctx, orchestrator.schema.Agent.ImagesUnsupportedNote), nil)
+		completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+		return completion, stripped, err
+	}
+	return completion, request, err
+}
+
+// retryWithoutInvalidPictures answers an upstream refusal of a picture it read
+// (#522). The refusal does not say which picture, so the pictures the Schema's
+// bounds show to be unreadable go first when the request has some; a refusal
+// that remains, or a request with none, strips every picture for this request.
+// Only pictures known to be bad are remembered by the session: those the
+// Schema's bounds name, or the one picture of a request that has only one. A
+// request stripped of pictures it could not tell apart, or refused over their
+// number, leaves the session's memory alone, and the Agent is told that the
+// pictures were skipped without being judged. A failure of another kind ends
+// the retry and is returned as it is.
+func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
+	ctx context.Context,
+	command ProcessTurn,
+	request agents.Request,
+	refused error,
+	emit func(agents.Delta) error,
+) (agents.Completion, agents.Request, error) {
+	agent := orchestrator.schema.Agent
+	if agent.InvalidImageNote == "" {
+		return agents.Completion{}, request, refused
+	}
+	reasons := orchestrator.imageInvalidReasons(ctx, refused)
+	confirmedNote := orchestrator.text(ctx, agent.InvalidImageNote) + reasons
+	unsureNote := confirmedNote
+	if agent.InvalidImageUnsureNote != "" {
+		unsureNote = orchestrator.text(ctx, agent.InvalidImageUnsureNote) + reasons
+	}
+	every := requestPictureKeys(request)
+	suspects := orchestrator.unreadablePictureKeys(request)
+	// confirmed are the pictures known to be bad: the ones the Schema's bounds
+	// show to be unreadable, or the only picture of the request.
+	confirmed := suspects
+	if len(every) == 1 {
+		confirmed = map[string]bool{every[0]: true}
+	}
+	stages := []map[string]bool{nil}
+	if len(suspects) > 0 && len(suspects) < len(every) {
+		stages = []map[string]bool{suspects, nil}
+	}
+	var completion agents.Completion
+	err := refused
+	sent := request
+	for _, stage := range stages {
+		count := len(stage)
+		note := confirmedNote
+		if stage == nil {
+			count = len(every)
+			if len(confirmed) < len(every) {
+				note = unsureNote
+			}
+		}
+		orchestrator.logger.Warn(
+			"Agent 请求的图片被上游模型拒绝读取，去掉图片后重试",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"stripped_pictures", count,
+			"error", err,
+		)
+		sent = orchestrator.replacePictures(sent, note, stage)
+		completion, err = orchestrator.agent.Stream(ctx, sent, emit)
+		if err == nil {
+			orchestrator.rememberRefusedPictures(ctx, command, refusedPictureKeys(every, confirmed, refused))
+			return completion, sent, nil
+		}
+		if classifyPictureRefusal(err) != pictureRefusalInvalid {
+			break
+		}
+	}
+	return completion, sent, err
+}
+
+// refusedPictureKeys are the keys of the pictures a request was answered
+// without that the session should remember: the confirmed ones, in request
+// order. A refusal over the number of pictures says nothing about any of them,
+// so none is remembered.
+func refusedPictureKeys(every []string, confirmed map[string]bool, refused error) []string {
+	if slices.Contains(agents.ImageInvalidReasons(refused), "count") {
+		return nil
+	}
+	var keys []string
+	for _, key := range every {
+		if confirmed[key] {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// rememberRefusedPictures stores the pictures a request was answered without,
+// so the session no longer sends them. A failed write is logged: the next
+// request that carries them is refused and stripped again.
+func (orchestrator *Orchestrator) rememberRefusedPictures(ctx context.Context, command ProcessTurn, keys []string) {
+	maximum := orchestrator.visionInvalidPolicy().MaximumExcluded
+	if orchestrator.service == nil || maximum <= 0 || len(keys) == 0 {
+		return
+	}
+	stored, err := orchestrator.service.ExcludeVisionPictures(
+		context.WithoutCancel(ctx), command.OwnerID, command.SessionID, keys, maximum)
+	if err != nil {
+		orchestrator.logger.Warn(
+			"记录会话中被上游拒绝的图片失败",
+			"session_id", command.SessionID,
+			"pictures", len(keys),
+			"error", err,
+		)
+		return
+	}
+	if !stored {
+		orchestrator.logger.Warn(
+			"会话没有保存被上游拒绝的图片记录（会话不存在或仓库不支持）",
+			"session_id", command.SessionID,
+			"pictures", len(keys),
+		)
+	}
 }
 
 // contentRejectedReasons is the Schema's reasons text for the reasons a
@@ -3795,6 +4014,16 @@ func (orchestrator *Orchestrator) contentRejectedReasons(ctx context.Context, er
 	messages := orchestrator.schema.Presentation.Messages
 	return moderation.Explain(messages.ContentRejectedReasons, agents.ContentRejectedReasons(err),
 		messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
+		func(text string) string { return orchestrator.text(ctx, text) })
+}
+
+// imageInvalidReasons is the Schema's reasons text for what a refusal in err
+// objected to about the request's picture, in the turn's locale (#497): the
+// tokens come from a closed vocabulary, never the upstream's own words.
+func (orchestrator *Orchestrator) imageInvalidReasons(ctx context.Context, err error) string {
+	messages := orchestrator.schema.Presentation.Messages
+	return moderation.Explain(messages.AgentImageInvalidReasons, agents.ImageInvalidReasons(err),
+		messages.AgentImageInvalidReasonLabels, messages.AgentImageInvalidReasonSeparator,
 		func(text string) string { return orchestrator.text(ctx, text) })
 }
 
@@ -3849,16 +4078,22 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253), an upstream content-safety refusal says the input tripped it (#35),
+// (#253), a picture the model read and refused says the picture does not meet
+// the model's limits and what it objected to (#497), an upstream
+// content-safety refusal says the input tripped it (#35),
 // a used-up upstream balance or key quota says so (#120), a picture the
 // model drew itself says it was not kept, a request field the upstream
 // refused names that field (#401: only the plain field name is shown, the
-// upstream's own wording stays in the log);
+// upstream's own wording stays in the log), a transient failure the retries
+// did not overcome says to send the message again (#509);
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if errors.Is(err, ErrTurnSubmissionUnconfirmed) && messages.SubmissionUnconfirmed != "" {
+		return orchestrator.text(ctx, messages.SubmissionUnconfirmed)
 	}
 	if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, err); exhausted {
 		return message
@@ -3869,13 +4104,30 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)
 	}
+	if errors.Is(err, agents.ErrImageInvalid) && messages.AgentImageInvalid != "" {
+		return orchestrator.text(ctx, messages.AgentImageInvalid) + orchestrator.imageInvalidReasons(ctx, err)
+	}
 	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
 	}
 	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
+	if message, broke := orchestrator.agentInterruptedMessage(ctx, err); broke {
+		return message
+	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentInterruptedMessage is the Schema's text for a chat model call that
+// failed transiently after the adapter layer's retries, or broke off after it
+// had started streaming (#509); false for any other error.
+func (orchestrator *Orchestrator) agentInterruptedMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentUpstreamInterrupted
+	if err == nil || text == "" || !errors.Is(err, agents.ErrTransient) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
 }
 
 // agentQuotaExhaustedMessage is the Schema text for an Agent request the

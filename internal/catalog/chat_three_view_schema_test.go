@@ -225,7 +225,7 @@ func TestDefaultThreeViewDeclaresTheDesignSheetUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	three := c.Application().Chat.ThreeView
-	if three.PurposeArgument == "" || three.DefaultPurpose != "model_input" || len(three.Purposes) != 2 {
+	if three.DefaultPurpose != "model_input" || len(three.Purposes) != 2 {
 		t.Fatalf("three_view purposes = %+v", three)
 	}
 	purposes := map[string]catalog.ChatThreeViewPurpose{}

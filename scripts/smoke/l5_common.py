@@ -55,13 +55,20 @@ def validate_base(base):
     return None
 
 
-def parse_arguments(argv, description=""):
+def parse_arguments(argv, description="", add_arguments=None):
+    """The shared arguments plus whatever `add_arguments(parser)` declares (a script's own options).
+
+    The extra options are added after the shared ones so a script can keep its defaults from the
+    environment without repeating --live, --report and the two timeouts.
+    """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--report", help="directory for the report and downloaded artifacts")
     parser.add_argument("--live", action="store_true",
                         help="confirm real, paid upstream requests (also needs ART_AI_LIVE_ACK=1)")
     parser.add_argument("--turn-timeout", type=int, default=1800, help="seconds to wait for one chat turn")
     parser.add_argument("--task-timeout", type=int, default=2400, help="seconds to wait for expected tasks")
+    if add_arguments is not None:
+        add_arguments(parser)
     arguments = parser.parse_args(argv)
     for name in ("turn_timeout", "task_timeout"):
         if getattr(arguments, name) < 30:
@@ -115,6 +122,49 @@ def tool_arguments(call):
         except ValueError:
             return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _refusal_code(call):
+    """The refusal code one tool call carries, when the wire exposes it (#407).
+
+    The server logs a refused call under "agent tool call refused" and answers the Agent with
+    the Schema's text; today's public wire keeps no tool result, so this reads the members a
+    later wire would carry instead of guessing from the arguments.
+    """
+    call = call if isinstance(call, dict) else {}
+    for name in ("refusal", "refusal_code", "refusalCode"):
+        value = call.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            code = value.get("code") or value.get("refusal_code")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    for name in ("error", "result", "toolResult"):
+        value = call.get(name)
+        if not isinstance(value, dict):
+            continue
+        refused = value.get("refused") is True or value.get("ok") is False or value.get("status") in ("refused", "error")
+        code = value.get("code") or value.get("refusal_code")
+        if refused and isinstance(code, str) and code.strip():
+            return code.strip()
+    return None
+
+
+def visible_refusal_counts(messages):
+    """Refusals the public tool calls show, by code; empty on the wire that carries no tool result.
+
+    The server-side count comes from the "agent tool call refused" log line, keyed by the same
+    codes (model_choice_conflict, multiview_views, ...); a runner that has that log adds it
+    separately. This function only reads what the API itself shows.
+    """
+    counts = {}
+    for message in messages or []:
+        for call in parse_tool_calls(message):
+            code = _refusal_code(call)
+            if code:
+                counts[code] = counts.get(code, 0) + 1
+    return counts
 
 
 def is_multiview_task(task, model_id):
@@ -1367,7 +1417,7 @@ def common_dimensions(data):
     return image_dimensions(data)
 
 
-def execute(name, body, description=""):
+def execute(name, body, description="", add_arguments=None):
     """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary."""
     _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
     if refusal:
@@ -1382,7 +1432,7 @@ def execute(name, body, description=""):
     if problem:
         print(problem, file=sys.stderr)
         return 2
-    arguments = parse_arguments(sys.argv[1:], description)
+    arguments = parse_arguments(sys.argv[1:], description, add_arguments)
     report = Report(name, arguments.report)
     live = Live(Client(os.environ["BASE"]), report, arguments)
     try:

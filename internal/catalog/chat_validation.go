@@ -392,6 +392,14 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return fmt.Errorf("presentation.content_rejected_reason_labels[%q] 须为小写、以 _ 分隔的原因并带文案（#35）", reason)
 		}
 	}
+	if reasons := schema.Presentation.Messages.AgentImageInvalidReasons; reasons != "" && !strings.Contains(reasons, "{reasons}") {
+		return errors.New("presentation.agent_image_invalid_reasons 须包含 {reasons}（#497）")
+	}
+	for reason, label := range schema.Presentation.Messages.AgentImageInvalidReasonLabels {
+		if reason == "" || reason != strings.ToLower(reason) || strings.ContainsAny(reason, "-/") || strings.TrimSpace(label) == "" {
+			return fmt.Errorf("presentation.agent_image_invalid_reason_labels[%q] 须为小写、以 _ 分隔的原因并带文案（#497）", reason)
+		}
+	}
 	for class, message := range schema.Presentation.Messages.GenerationFailedByClass {
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {
 			return fmt.Errorf("presentation.generation_failed_by_class[%q] 必须是已声明的失败分类并带文案", class)
@@ -521,6 +529,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		schema.Agent.ErrorBodyMaxBytes <= 0 {
 		return errors.New("agent 的 timeout 和响应限制必须为正数")
 	}
+	if err := validateChatAgentResilience(schema.Agent); err != nil {
+		return err
+	}
 	if schema.Agent.ConsentWaitTimeoutSeconds <= 0 {
 		return errors.New("agent 的 consent 等待时长必须为正数")
 	}
@@ -531,12 +542,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		return errors.New("agent 的 max_listed_models 必须为正数")
 	}
 	for name, value := range map[string]string{
-		"consent_approved_content":  schema.Agent.ConsentApprovedContent,
 		"consent_denied_content":    schema.Agent.ConsentDeniedContent,
 		"consent_waiting_content":   schema.Agent.ConsentWaitingContent,
 		"consent_duplicate_content": schema.Agent.ConsentDuplicateContent,
-		"consent_blocked_content":   schema.Agent.ConsentBlockedContent,
-		"consent_required_content":  schema.Agent.ConsentRequiredContent,
 		"consent_limit_content":     schema.Agent.ConsentLimitContent,
 		"consent_reconcile_content": schema.Agent.ConsentReconcileContent,
 	} {
@@ -3981,9 +3989,6 @@ func validateModelInspectProduction(
 	usage ChatModel3DUsageSchema,
 	capabilityPresentations []CapabilityPresentation,
 ) error {
-	if production.PivotBottomCenterRatio <= 0 || production.PivotBottomCenterRatio > 1 {
-		return errors.New("chat.model_review.inspect.production.pivot_bottom_center_ratio 必须在 (0, 1] 内")
-	}
 	if production.YUpFlatRatio <= 0 || production.YUpFlatRatio >= 1 {
 		return errors.New("chat.model_review.inspect.production.y_up_flat_ratio 必须在 (0, 1) 内")
 	}
@@ -4234,6 +4239,9 @@ func validateChatVision(schema ChatSchema) error {
 	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
 		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
 	}
+	if err := validateVisionInvalidPicture(vision.InvalidPicture); err != nil {
+		return err
+	}
 	if err := validateVisionContactSheet(vision.ContactSheet); err != nil {
 		return err
 	}
@@ -4258,6 +4266,18 @@ func validateChatVision(schema ChatSchema) error {
 		if profile.MaximumTokens < 0 || profile.MaximumTokens > vision.MaximumTokens {
 			return fmt.Errorf("context.vision.model_profiles[%d].maximum_tokens 必须在 0 与 maximum_tokens 之间", index)
 		}
+	}
+	return nil
+}
+
+// validateVisionInvalidPicture checks context.vision.invalid_picture (#522).
+// The zero value is valid: it keeps every picture and remembers no refusal.
+func validateVisionInvalidPicture(policy ChatVisionInvalidPictureSchema) error {
+	if policy.MinimumEdgePixels < 0 || policy.MaximumAspectRatio < 0 || policy.MaximumExcluded < 0 {
+		return errors.New("context.vision.invalid_picture 的数值不能为负")
+	}
+	if policy.MaximumExcluded > 0 && !strings.Contains(policy.SkippedTemplate, "{handles}") {
+		return errors.New("context.vision.invalid_picture.skipped_template 必须包含 {handles}")
 	}
 	return nil
 }
@@ -4340,4 +4360,36 @@ func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
 		}
 	}
 	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
+}
+
+// validateChatAgentResilience checks the first-byte timeout, the round bound
+// and the retry of model calls (#509). Each is optional; a declared one must
+// fit the request timeout: the first byte comes within a request, and a round
+// holds at least one whole request.
+func validateChatAgentResilience(agent ChatAgentSchema) error {
+	if agent.FirstByteTimeoutSeconds < 0 || agent.FirstByteTimeoutSeconds > agent.RequestTimeoutSeconds {
+		return errors.New("agent.first_byte_timeout_seconds 不能为负数，也不能超过 request_timeout_seconds")
+	}
+	if agent.RoundTimeoutSeconds < 0 ||
+		(agent.RoundTimeoutSeconds > 0 && agent.RoundTimeoutSeconds < agent.RequestTimeoutSeconds) {
+		return errors.New("agent.round_timeout_seconds 不能为负数，声明时不能小于 request_timeout_seconds")
+	}
+	retry := agent.Retry
+	if retry == nil {
+		return nil
+	}
+	if retry.MaxAttempts < 1 || retry.MaxAttempts > 10 {
+		return errors.New("agent.retry.max_attempts 必须在 1 到 10 之间")
+	}
+	if retry.InitialBackoffMillis <= 0 || retry.MaxBackoffMillis < retry.InitialBackoffMillis {
+		return errors.New("agent.retry 的 initial_backoff_millis 必须为正数，max_backoff_millis 不能小于它")
+	}
+	if retry.MaxRetryAfterSeconds <= 0 {
+		return errors.New("agent.retry.max_retry_after_seconds 必须为正数")
+	}
+	if agent.RoundTimeoutSeconds > 0 && (retry.MaxRetryAfterSeconds >= agent.RoundTimeoutSeconds ||
+		retry.MaxBackoffMillis >= agent.RoundTimeoutSeconds*1000) {
+		return errors.New("agent.retry 的等待上限必须小于 round_timeout_seconds")
+	}
+	return nil
 }

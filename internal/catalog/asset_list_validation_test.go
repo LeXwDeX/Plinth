@@ -87,7 +87,7 @@ func TestDefaultAssetListSchemaLoadsAndProjectsSafeMembers(t *testing.T) {
 	for _, block := range list.ItemBlocks {
 		blocks = append(blocks, block.Value)
 	}
-	if !slices.Equal(blocks, []string{"awaiting_approval", "paused", "step_cap"}) {
+	if !slices.Equal(blocks, []string{"awaiting_approval", "step_cap"}) {
 		t.Fatalf("item_blocks = %v", blocks)
 	}
 
@@ -719,6 +719,44 @@ func TestAssetListExecutionCopyIsLocalized(t *testing.T) {
 		}
 		if strings.TrimSpace(english.Messages[key]) == "" {
 			t.Errorf("content.messages %s missing from the English bundle", key)
+		}
+	}
+}
+
+// #508 asset-list-new-01 / asset-list-08: the copy an item turn reads (the
+// continuation of every round and the rework turn after a return) tells the
+// Agent to report through the completion tool the Catalog actually declares.
+// An older rework copy named a report_list_item tool that never existed, and
+// the continuation never asked for a report, so a made item ran out of rounds.
+func TestAssetListItemTurnCopyNamesTheDeclaredCompletionTool508(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	const completionTool = "submit_asset_list_item"
+	declared := false
+	for _, tool := range application.Chat.AgentTools {
+		if tool.Name == completionTool {
+			declared = true
+		}
+	}
+	if !declared {
+		t.Fatalf("the Catalog declares no %s tool", completionTool)
+	}
+	list := application.AssetList
+	if list == nil || list.Execution == nil || list.Review == nil {
+		t.Fatal("the default Catalog misses asset_list execution or review")
+	}
+	english := application.Localization.Bundles["en"].Fields
+	for name, text := range map[string]string{
+		"execution.continuation.message":    list.Execution.Continuation.Message,
+		"en execution.continuation.message": english["asset_list.execution.continuation.message"],
+		"review.messages.rework_message":    list.Review.Messages.ReworkMessage,
+		"en review.messages.rework_message": english["asset_list.review.messages.rework_message"],
+	} {
+		if !strings.Contains(text, completionTool) {
+			t.Errorf("%s does not name %s: %q", name, completionTool, text)
+		}
+		if strings.Contains(text, "report_list_item") {
+			t.Errorf("%s names the undeclared report_list_item tool", name)
 		}
 	}
 }

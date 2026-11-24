@@ -27,6 +27,45 @@ func TestFailureMessageMeteredNoAutoRetryText(t *testing.T) {
 	}
 }
 
+// #517: the one attribution of a failed Task. A credit-metered Offering whose
+// class the Schema declares a no-auto-retry text for, and a failure that may
+// already have been charged, send the caller to the person and never offer a
+// retry; any other failure keeps the platform's classification.
+func TestTaskFailureReportAsksThePersonForAMeteredOrAmbiguousFailure(t *testing.T) {
+	var chat catalog.ChatSchema
+	chat.Presentation.Messages.GenerationFailedMeteredByClass = map[string]string{string(generation.FailureIntegrity): "metered"}
+	chat.Presentation.Messages.GenerationFailedAmbiguous = "maybe charged"
+	failed := func(metered bool, failure generation.Failure) generation.Task {
+		return generation.Task{ID: "task_1", State: generation.TaskFailed,
+			Offering: generation.Offering{CreditsMetered: metered}, Failure: &failure}
+	}
+	for name, test := range map[string]struct {
+		task      generation.Task
+		action    generation.FailureAction
+		retryable bool
+		decide    bool
+		reason    string
+	}{
+		"metered integrity": {failed(true, generation.Failure{Class: generation.FailureIntegrity, Retryable: true}),
+			generation.ActionAskUser, false, true, "metered"},
+		"unmetered integrity": {failed(false, generation.Failure{Class: generation.FailureIntegrity, Retryable: true}),
+			generation.ActionContactAdmin, true, false, ""},
+		"metered, undeclared class": {failed(true, generation.Failure{Class: generation.FailureRateLimited, Retryable: true}),
+			generation.ActionRetryLater, true, false, ""},
+		"ambiguous": {failed(false, generation.Failure{Class: generation.FailureTransport, Retryable: true, Ambiguous: true}),
+			generation.ActionAskUser, false, true, "maybe charged"},
+	} {
+		report, reason := TaskFailureReport(chat, test.task)
+		if report.Action != test.action || report.Retryable != test.retryable ||
+			report.UserDecisionRequired != test.decide || reason != test.reason {
+			t.Errorf("%s: report = %+v reason = %q", name, report, reason)
+		}
+	}
+	if report, reason := TaskFailureReport(chat, generation.Task{State: generation.TaskSucceeded}); report != (generation.FailureReport{}) || reason != "" {
+		t.Errorf("a Task without a failure = %+v %q", report, reason)
+	}
+}
+
 func TestDefaultCatalogDeclaresMeteredIntegrityFailureText(t *testing.T) {
 	cat, err := catalog.LoadDefault()
 	if err != nil {

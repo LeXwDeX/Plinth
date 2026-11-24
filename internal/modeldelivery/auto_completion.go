@@ -2,6 +2,7 @@ package modeldelivery
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -46,6 +47,10 @@ const (
 	autoReasonNothingMissing = "nothing_missing"
 	autoReasonNoRoute        = "no_route"
 	autoReasonWaiting        = "waiting"
+	// autoReasonSlotWait: the round found the platform's plan slots full. It
+	// is looked at again after the slot-wait interval, and the wait does not
+	// count toward the deadline (#510).
+	autoReasonSlotWait       = "slot_wait"
 	autoReasonPaidSpent      = "paid_spent"
 	autoReasonPriceUnbounded = "price_unbounded"
 	autoReasonPlanStarted    = "plan_started"
@@ -89,7 +94,9 @@ type AutoCompletionRecord struct {
 	UpdatedAt   time.Time
 	// FirstRunAt is when this Task was first looked at. The Schema's deadline
 	// runs from it; NextRunAt moves with every round and cannot be the base
-	// (#478).
+	// (#478). A round that follows a wait for a platform slot moves it later by
+	// that wait (at most two slot-wait intervals), so the queue's length is
+	// never the reason a Task is given up (#510).
 	FirstRunAt time.Time
 }
 
@@ -142,6 +149,24 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 		limit = defaultAutoCompletionBatch
 	}
 	acted := 0
+	// A record whose round fails is put off and the scan goes on: returning at
+	// the first failure left that record at the head of every later scan and
+	// the records behind it unlooked at (#510). The first failure is still
+	// returned for the App's log.
+	var failed error
+	round := func(record AutoCompletionRecord) {
+		decided, err := s.reconcileAutoCompletion(ctx, record)
+		if err != nil {
+			if failed == nil {
+				failed = err
+			}
+			_ = s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
+			return
+		}
+		if decided {
+			acted++
+		}
+	}
 	due, err := s.autoCompletions.AutoCompletionDue(ctx, s.now(), limit)
 	if err != nil {
 		return 0, wrap("read due auto completions", err)
@@ -150,18 +175,12 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 		if ctx.Err() != nil {
 			return acted, ctx.Err()
 		}
-		decided, err := s.reconcileAutoCompletion(ctx, record)
-		if err != nil {
-			return acted, err
-		}
-		if decided {
-			acted++
-		}
+		round(record)
 	}
 	candidates, err := s.autoCompletions.AutoCompletionCandidates(
 		ctx, s.schema.AutoCompletion.SourceCapabilities, limit-acted)
 	if err != nil {
-		return acted, wrap("read auto completion candidates", err)
+		return acted, errors.Join(failed, wrap("read auto completion candidates", err))
 	}
 	// The scan position has already moved past these Tasks, so each one's
 	// record is written before any of them is looked at: a candidate whose
@@ -172,7 +191,7 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 	for _, candidate := range candidates {
 		record, exists, err := s.autoCompletions.AutoCompletionRecord(ctx, candidate.TaskID)
 		if err != nil {
-			return acted, wrap("read auto completion record", err)
+			return acted, errors.Join(failed, wrap("read auto completion record", err))
 		}
 		if exists {
 			continue
@@ -182,7 +201,7 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 			State: AutoStatePending, FirstRunAt: now, NextRunAt: now,
 		}
 		if err := s.saveAutoCompletion(record, AutoStatePending, autoReasonWaiting); err != nil {
-			return acted, err
+			return acted, errors.Join(failed, err)
 		}
 		pending = append(pending, record)
 	}
@@ -190,15 +209,9 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 		if ctx.Err() != nil {
 			return acted, ctx.Err()
 		}
-		decided, err := s.reconcileAutoCompletion(ctx, record)
-		if err != nil {
-			return acted, err
-		}
-		if decided {
-			acted++
-		}
+		round(record)
 	}
-	return acted, nil
+	return acted, failed
 }
 
 // reconcileAutoCompletion looks at one Task once and saves what it decided. The
@@ -221,6 +234,20 @@ func (s *Service) reconcileAutoCompletion(ctx context.Context, record AutoComple
 		return true, s.saveAutoCompletion(record, AutoStateDone, autoReasonNotCandidate)
 	}
 	record.Attempts++
+	s.creditSlotWait(&record)
+	if record.Reason == autoReasonSlotWait {
+		// The last round found every slot taken. While that is still so, the
+		// record is put back without reading the Task's formats again: a queue
+		// of waiting records then costs one count and one write per record
+		// per slot-wait interval.
+		inflight, err := s.autoInflightPlans(ctx)
+		if err != nil {
+			return false, err
+		}
+		if inflight >= auto.MaxInflightPlans {
+			return false, s.scheduleSlotWait(record)
+		}
+	}
 	state := s.analyze(ctx, task)
 	if state.err != nil {
 		// A read that failed may hide a running conversion: decide nothing and
@@ -252,7 +279,7 @@ func (s *Service) reconcileAutoCompletion(ctx context.Context, record AutoComple
 		return false, err
 	}
 	if inflight >= auto.MaxInflightPlans {
-		return false, s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
+		return false, s.scheduleSlotWait(record)
 	}
 	return s.startAutoCompletion(ctx, record, task, state, missing, paidBlocked, auto.MaxInflightPlans-inflight)
 }
@@ -282,7 +309,7 @@ func (s *Service) startAutoCompletion(
 		}
 		if active >= s.schema.AutoCompletion.MaxInflightPlans {
 			if lastPlan == "" {
-				return false, s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
+				return false, s.scheduleSlotWait(record)
 			}
 			break
 		}
@@ -619,6 +646,42 @@ func (s *Service) scheduleAutoCompletion(record AutoCompletionRecord, state, rea
 	}
 	record.NextRunAt = s.now().Add(interval)
 	return s.saveAutoCompletion(record, state, reason)
+}
+
+// scheduleSlotWait records a round that found every platform slot taken. It is
+// looked at again after the Schema's slot-wait interval, not a whole scan
+// interval, so a freed slot is taken within seconds (#510).
+func (s *Service) scheduleSlotWait(record AutoCompletionRecord) error {
+	record.NextRunAt = s.now().Add(s.slotWaitInterval())
+	return s.saveAutoCompletion(record, AutoStatePending, autoReasonSlotWait)
+}
+
+// slotWaitInterval is the Schema's slot-wait interval; the scan interval stands
+// in for a Schema that does not declare one (the loader rejects that).
+func (s *Service) slotWaitInterval() time.Duration {
+	interval := time.Duration(s.schema.AutoCompletion.SlotWaitIntervalMilliseconds) * time.Millisecond
+	if interval <= 0 {
+		interval = time.Duration(s.schema.AutoCompletion.ScanIntervalMilliseconds) * time.Millisecond
+	}
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return interval
+}
+
+// creditSlotWait moves the deadline's base later by the time the record has
+// just spent waiting for a platform slot: the queue is the platform's, and its
+// length must not be why a Task is given up (#510). The credit is at most two
+// slot-wait intervals, so a reconciler that did not run at all (a stopped
+// process) still lets the deadline arrive.
+func (s *Service) creditSlotWait(record *AutoCompletionRecord) {
+	if record.Reason != autoReasonSlotWait || record.FirstRunAt.IsZero() || record.UpdatedAt.IsZero() {
+		return
+	}
+	waited := min(s.now().Sub(record.UpdatedAt), 2*s.slotWaitInterval())
+	if waited > 0 {
+		record.FirstRunAt = record.FirstRunAt.Add(waited)
+	}
 }
 
 func (s *Service) saveAutoCompletion(record AutoCompletionRecord, state, reason string) error {

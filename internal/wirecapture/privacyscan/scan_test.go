@@ -17,6 +17,26 @@ import (
 // what the package adds for the application's recorder (#233): single values
 // and a whole record directory.
 
+// TestTwoPartLegacyAddressesStayFlagged pins the inet_aton shorthand with two
+// parts: a resolver or URL parser reads 0x7f.1, 0177.1 and 127.01 as
+// 127.0.0.1, and 10.01 or 10.00 as an address in 10/8. The same spelling is an
+// ordinary decimal, so a recorded amount such as credits_consumed 10.00 is
+// flagged too; the sample is rewritten (10.00 as 10) rather than the rule
+// narrowed to three or more parts, which would let these addresses through.
+// diagbundle's scrubber makes the same decision (TestLegacyAddressDecisionMatchesTheScan).
+func TestTwoPartLegacyAddressesStayFlagged(t *testing.T) {
+	for _, text := range []string{"0x7f.1", "0177.1", "127.01", "10.01", "10.00", `"credits_consumed": 10.00`} {
+		if findings := privacyscan.ScanText("f", "$", "", text); !privacyscan.HasRule(findings, "private-ip") {
+			t.Errorf("%q: rules %v, want private-ip", text, findings)
+		}
+	}
+	for _, clean := range []string{"10", `"credits_consumed": 10`, "1.5", "3.05", "2026.11"} {
+		if findings := privacyscan.ScanText("f", "$", "", clean); len(findings) != 0 {
+			t.Errorf("clean text %q flagged: %v", clean, findings)
+		}
+	}
+}
+
 func TestScanTextReportsTheRuleAndThePathNeverTheValue(t *testing.T) {
 	for _, tc := range []struct{ key, text, rule string }{
 		{"message", "mail alice@corp-mail.com", "email"},

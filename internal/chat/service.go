@@ -1569,6 +1569,26 @@ func (service *Service) ListSelfChecks(ctx context.Context, ownerID, sessionID s
 	return service.selfChecks.List(ctx, ownerID, sessionID)
 }
 
+// SessionSelfChecks returns, for each listed task of the owner's session, the
+// record that states its delivery state: the session's own concluded record,
+// else the owner's newest concluded record of the task in another session (a
+// branch's ancestor, #512), else the session's own record. A missing or foreign
+// session is ErrSessionNotFound.
+func (service *Service) SessionSelfChecks(ctx context.Context, ownerID, sessionID string,
+	taskIDs []string) (map[string]SelfCheckRecord, error) {
+	if service.selfChecks == nil {
+		return map[string]SelfCheckRecord{}, nil
+	}
+	owned, err := service.repository.OwnsSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, ErrSessionNotFound
+	}
+	return service.selfChecks.SessionRecords(ctx, ownerID, sessionID, taskIDs)
+}
+
 // SelfCheck returns one record of the owner's session, if any.
 func (service *Service) SelfCheck(ctx context.Context, ownerID, sessionID, taskID string) (SelfCheckRecord, bool, error) {
 	if service.selfChecks == nil {
@@ -1647,6 +1667,12 @@ func (service *Service) RecoverTurns(ctx context.Context) ([]Turn, error) {
 		ctx,
 		[]string{service.turnQueued, service.turnRunning},
 	)
+}
+
+// RunningTurns lists the turns whose state is running. The live reclaim of
+// turns no worker holds reads them (#516).
+func (service *Service) RunningTurns(ctx context.Context) ([]Turn, error) {
+	return service.repository.ListTurns(ctx, []string{service.turnRunning})
 }
 
 func (service *Service) GetTurn(ctx context.Context, ownerID, sessionID, assistantID string) (Turn, error) {

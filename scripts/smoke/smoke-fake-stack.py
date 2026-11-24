@@ -434,6 +434,10 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
         # reconciler's own round and the App's ticker.
         if auto_completion_scan_milliseconds is not None:
             delivery["auto_completion"]["scan_interval_milliseconds"] = auto_completion_scan_milliseconds
+            # The loader refuses a slot wait longer than the scan (#510).
+            delivery["auto_completion"]["slot_wait_interval_milliseconds"] = min(
+                delivery["auto_completion"]["slot_wait_interval_milliseconds"],
+                auto_completion_scan_milliseconds)
         if auto_completion_poll_milliseconds is not None:
             delivery["auto_completion"]["poll_interval_milliseconds"] = auto_completion_poll_milliseconds
     else:

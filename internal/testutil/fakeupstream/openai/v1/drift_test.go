@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,11 +15,51 @@ import (
 
 func loadSamples(t *testing.T) *fakeupstream.Samples {
 	t.Helper()
-	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFile)
+	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFiles...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return samples
+}
+
+// hasToolCalls reports whether a sample's answer carries a tool call.
+func hasToolCalls(exchange wirefixture.Exchange) bool {
+	return strings.Contains(string(exchange.Response.Body.JSON), `"tool_calls"`) ||
+		strings.Contains(exchange.Response.Body.SSE, `"tool_calls"`)
+}
+
+// newestSamples keeps the newest committed sample of every route and answer
+// kind (models, a 400 error, a text or tool-call completion, streamed or not).
+// The fake templates from the newest capture, so an older sample of the same
+// kind is evidence of what the gateway answered then, not of what the fake
+// answers now (#96, #497).
+func newestSamples(samples *fakeupstream.Samples) []wirefixture.Exchange {
+	kind := func(exchange wirefixture.Exchange) string {
+		switch {
+		case exchange.Request.Path == "/v1/models":
+			return "GET /v1/models"
+		case exchange.Response.Status != http.StatusOK:
+			return exchange.Request.Method + " " + exchange.Request.Path + " " + strconv.Itoa(exchange.Response.Status)
+		case exchange.Response.Body.Encoding == wirefixture.PayloadSSE:
+			return "POST /v1/chat/completions sse tool=" + strconv.FormatBool(hasToolCalls(exchange))
+		default:
+			return "POST /v1/chat/completions json tool=" + strconv.FormatBool(hasToolCalls(exchange))
+		}
+	}
+	sorted := append([]wirefixture.Exchange(nil), samples.Exchanges...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Metadata.CapturedAt.Before(sorted[j].Metadata.CapturedAt)
+	})
+	held := map[string]bool{}
+	var newest []wirefixture.Exchange
+	for i := len(sorted) - 1; i >= 0; i-- {
+		if held[kind(sorted[i])] {
+			continue
+		}
+		held[kind(sorted[i])] = true
+		newest = append(newest, sorted[i])
+	}
+	return newest
 }
 
 func shapeOf(t *testing.T, raw []byte) fakeupstream.Shape {
@@ -96,22 +137,28 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 	}
 
-	for _, exchange := range samples.Find("GET /v1/models", "") {
-		if exchange.Response.Status != http.StatusOK {
+	checked := map[string]bool{}
+	for _, exchange := range newestSamples(samples) {
+		if exchange.Request.Path == "/v1/models" {
+			if exchange.Response.Status != http.StatusOK {
+				continue
+			}
+			_, raw := f.send("GET", "/models", "k", nil)
+			compareJSON("models", exchange, raw)
 			continue
 		}
-		_, raw := f.send("GET", "/models", "k", nil)
-		compareJSON("models", exchange, raw)
-	}
-	checked := map[string]bool{}
-	for _, exchange := range samples.Find("POST /v1/chat/completions", "") {
 		if exchange.Response.Status == http.StatusBadRequest {
 			_, raw := f.send("POST", "/chat/completions", "k", map[string]any{})
 			compareJSON("error", exchange, raw)
 			checked["error"] = true
 			continue
 		}
-		hasTool := strings.Contains(string(exchange.Response.Body.JSON), `"tool_calls"`) || strings.Contains(exchange.Response.Body.SSE, `"tool_calls"`)
+		if exchange.Response.Status != http.StatusOK {
+			// The 429 daily-quota refusal: evidence for the quota scenario (see
+			// newest_capture_test.go), not an answer this route always gives.
+			continue
+		}
+		hasTool := hasToolCalls(exchange)
 		text := "hello"
 		if hasTool {
 			text = marker

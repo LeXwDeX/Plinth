@@ -43,7 +43,7 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
 |---|---|---|
 | `invalid_input` | 我方请求/用户输入 | 400（参数非法）、网宿 403（请求体错误）、Tripo 1003/1004/2002-2004/2009/2013/2015-2017、Meshy `task_error.type=invalid_input`、Ark `InvalidParameter.*`、Gemini 内容拦截码（`safety`、`prohibited_content`、`image_safety` 等 11 个，官方页面未列 HTTP 状态，所以按码声明、不依赖状态；#139） |
 | `authentication` | 我方配置 | 401、Tripo 1002/1005、Meshy 401 |
-| `rate_limited` | 第三方限流 | 429、Tripo 1007/2000 |
+| `rate_limited` | 第三方限流 | 429、Tripo 1007/2000、Meshy 429（每秒请求数超限带 Retry-After，并发任务数超限 `NoMorePendingTasks` 不带；精细化私有子作业按未派发重发，#504） |
 | `timed_out` | 第三方 | 408/504、Meshy `task_error.type=timeout` |
 | `upstream_unavailable` | 第三方 | 5xx（非提交）、Meshy `service_unavailable`/`server_error`、Tripo 1000/1001 |
 | `insufficient_balance` | 第三方账户（余额不足、欠费） | OpenAI 兼容 `error.code=insufficient_quota`（OpenAI 与 Gemini 图片连接都声明）、Gemini `payment_required` 与 402（Gemini、OpenAI 图片连接）、方舟/即梦 `AccountOverdueError`、Meshy 402、Tripo 2010、Rodin `API_INSUFFICIENT_FUNDS`，以及图片连接上消息含 insufficient balance / account in arrears 的错误；不可重试 |

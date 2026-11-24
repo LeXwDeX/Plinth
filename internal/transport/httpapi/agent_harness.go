@@ -24,7 +24,8 @@ type AgentOperationReader interface {
 
 // AGENTS 模式 harness/绑定/同意 端点。参数 store 为 harness（用户）与
 // agent（set_params 工具）共写的权威请求参数；绑定把 agent 会话关联到任务
-// （按任务隔离）；同意记录待批准项供前端 consent UI 读取/批准。
+// （按任务隔离）；同意端点只读写执行授权的待批准项（Agent 步骤、SkillRun、
+// 已脱离回合的待批准），不再有会话级同意状态（#491 已退役）。
 // 所有 store 键以 ScopeKey(owner, scope) 组合，保证按用户对象级隔离：
 // 任何 principal 只能读写自己 owner 下的 scope。
 // 错误 detail 一律为 error.* 词汇键（前端经 Product Schema 映射文案），
@@ -36,9 +37,8 @@ var (
 	agentSessionRequired = "error.agent_session_required"
 	// agentScopeForbidden：scope 必须是当前用户自己的会话；任意
 	// scope 字符串的写入会让同意/参数状态无界增长并污染 store。
-	agentScopeForbidden     = "error.agent_scope_forbidden"
-	agentConsentUnavailable = "error.consent_unavailable"
-	agentConsentNotPending  = "error.consent_not_pending"
+	agentScopeForbidden    = "error.agent_scope_forbidden"
+	agentConsentNotPending = "error.consent_not_pending"
 )
 
 // ownsAgentScope 校验 scope 是当前 owner 名下的会话； harness 的
@@ -121,30 +121,6 @@ func (s *Server) agentParamsPut(writer http.ResponseWriter, request *http.Reques
 		s.agentParams.SetUser(key, body.Params)
 	}
 	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id")))
-}
-
-func (s *Server) agentBindPut(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
-	var body struct {
-		Session string `json:"session"`
-		Task    string `json:"task"`
-	}
-	bodyReader := boundedBodyReader(writer, request, s.application.Runtime.HTTP.JSONBodyMaxBytes)
-	if err := json.NewDecoder(bodyReader).Decode(&body); err != nil || body.Session == "" {
-		writeProblem(writer, http.StatusBadRequest, "invalid_body", agentSessionRequired)
-		return
-	}
-	if !s.ownsAgentScope(request, owner, body.Session) {
-		writeProblem(writer, http.StatusForbidden, "invalid_scope", agentScopeForbidden)
-		return
-	}
-	key := agentparams.ScopeKey(string(owner), body.Session)
-	taskJSON, _ := json.Marshal(body.Task)
-	s.agentState.Set(key, map[string]json.RawMessage{
-		"task_id": taskJSON,
-	})
-	// One session is one creative task. A new generation task ID represents a
-	// version in that session, so the user's harness overrides remain in scope.
-	writeAgentJSON(writer, map[string]any{"session": body.Session, "task": body.Task})
 }
 
 func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
@@ -350,14 +326,9 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 		}})
 		return
 	}
-	if s.agentOperations != nil && s.executionGrants != nil {
-		writeAgentJSON(writer, map[string]any{"consent": map[string]any{}})
-		return
-	}
-	key := agentparams.ScopeKey(string(owner), scope)
-	state := s.agentState.Get(key)
-	delete(state, agentparams.ConsentClaimKey)
-	writeAgentJSON(writer, map[string]any{"consent": state})
+	// Nothing is waiting: the conversational consent state of earlier versions
+	// is retired (#491), so there is no stored decision to read back.
+	writeAgentJSON(writer, map[string]any{"consent": map[string]any{}})
 }
 
 func (s *Server) agentConsentPut(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
@@ -498,24 +469,8 @@ func (s *Server) agentConsentPut(writer http.ResponseWriter, request *http.Reque
 		writeAgentJSON(writer, map[string]any{"scope": scope, "approved": *body.Approved})
 		return
 	}
-	if s.agentOperations != nil && s.executionGrants != nil {
-		writeProblem(writer, http.StatusConflict, "consent_not_pending", agentConsentNotPending)
-		return
-	}
-	key := agentparams.ScopeKey(string(owner), scope)
-	decided, err := s.agentState.DecideConsent(key, body.RequestID, *body.Approved)
-	if err != nil {
-		writeProblem(writer, http.StatusServiceUnavailable, "consent_unavailable", agentConsentUnavailable, err)
-		return
-	}
-	if !decided {
-		writeProblem(writer, http.StatusConflict, "consent_not_pending", agentConsentNotPending)
-		return
-	}
-	// AGT-12：决定写入即唤醒因等待同意而挂起的轮次（重新入队续跑，
-	// 不占 worker 等待）。
-	s.chatScheduler.ResumeConsentWait(string(owner), scope)
-	writeAgentJSON(writer, map[string]any{"scope": scope, "approved": *body.Approved})
+	// No pending approval of this session: a decision has nothing to apply to.
+	writeProblem(writer, http.StatusConflict, "consent_not_pending", agentConsentNotPending)
 }
 
 func (s *Server) currentSkillExecutionGrant(request *http.Request, owner generation.OwnerID,

@@ -84,6 +84,9 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 		if scale := profile.ScaleRangeM; scale != nil && (scale.Min <= 0 || scale.Max <= scale.Min) {
 			return fmt.Errorf("model3d_usage.profiles[%d].scale_range_m 必须满足 0 < min < max", index)
 		}
+		if ratio := profile.PivotBottomCenterRatio; ratio != nil && (*ratio <= 0 || *ratio > 1) {
+			return fmt.Errorf("model3d_usage.profiles[%d].pivot_bottom_center_ratio 必须在 (0, 1] 内", index)
+		}
 		for stepIndex, step := range profile.Pipeline {
 			if !capabilities[step.Capability] {
 				return fmt.Errorf("model3d_usage.profiles[%d].pipeline[%d].capability %q 未声明", index, stepIndex, step.Capability)

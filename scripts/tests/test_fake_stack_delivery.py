@@ -87,6 +87,7 @@ class AutoCompletionCatalog(unittest.TestCase):
         self.assertEqual(auto["source_capabilities"], ["text-to-3d", "image-to-3d"])
         self.assertEqual(auto["route_order"], ["local/generated-glb/to-gltf", "meshy/processing/convert"])
         self.assertEqual(auto["scan_interval_milliseconds"], 500)
+        self.assertLessEqual(auto["slot_wait_interval_milliseconds"], 500)
         self.assertEqual(auto["poll_interval_milliseconds"], 500)
 
     def test_the_scenario_is_selectable_and_part_of_the_full_run(self):

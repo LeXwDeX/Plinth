@@ -248,7 +248,6 @@ func TestStoppedTurnReconcilesLaterCallsAfterEarlierLookupFailure(t *testing.T) 
 	var firstFailure atomic.Bool
 	firstFailure.Store(true)
 	var canceled atomic.Int32
-	var settled atomic.Int32
 	tools := &unexpectedStopExecutor{}
 	o, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service, Schema: schema, Model: "model", Agent: &scriptedStreamFuncs{}, Tools: tools,
@@ -277,15 +276,6 @@ func TestStoppedTurnReconcilesLaterCallsAfterEarlierLookupFailure(t *testing.T) 
 			canceled.Add(1)
 			return nil
 		},
-		StopConsent: func(ownerID, sessionID, callID, key, taskID string) error {
-			if ownerID != "owner-a" || sessionID != session.ID {
-				t.Errorf("wrong consent scope %s %s", ownerID, sessionID)
-			}
-			if callID == "second" && key == "key-second" && taskID == "task-second" {
-				settled.Add(1)
-			}
-			return nil
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,8 +284,8 @@ func TestStoppedTurnReconcilesLaterCallsAfterEarlierLookupFailure(t *testing.T) 
 	if err := o.Process(ctx, command); err == nil {
 		t.Fatal("first lookup failure must keep stop recoverable")
 	}
-	if canceled.Load() < 1 || settled.Load() < 1 || tools.calls.Load() != 0 {
-		t.Fatalf("later call not reconciled: canceled=%d settled=%d executed=%d", canceled.Load(), settled.Load(), tools.calls.Load())
+	if canceled.Load() < 1 || tools.calls.Load() != 0 {
+		t.Fatalf("later call not reconciled: canceled=%d executed=%d", canceled.Load(), tools.calls.Load())
 	}
 	firstFailure.Store(false)
 	if err := o.Process(ctx, command); err != nil {

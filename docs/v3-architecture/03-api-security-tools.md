@@ -83,7 +83,7 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 
 ## 6. D05：ToolRegistry、Skill、MCP 信任边界
 
-**现状。** Chat Agent 现有 `list_offerings`、`set_params`、`get_task`/`observe_task`、`request_consent` 和生成工具；执行器按工具名分派（`internal/chat/agenttools/executor.go:136-152`），付费任务最终仍经 Generation。Skill 有独立 Catalog/loader；当前源码证据不足以宣称开放 MCP connector 已存在。LLM 指令与用户内容不能授予权限。
+**现状。** Chat Agent 现有 `list_offerings`、`set_params`、`get_task` 和生成工具（`observe_task` 与 `request_consent` 已由 #491 从 Schema 删除，执行器里也没有它们的分支）；执行器按工具名分派（`internal/chat/agenttools/executor.go`），付费任务最终仍经 Generation。Skill 有独立 Catalog/loader；当前源码证据不足以宣称开放 MCP connector 已存在。LLM 指令与用户内容不能授予权限。
 
 **工作分支实现。** Catalog 的工具执行声明编译为服务端 ToolRegistry，执行器按 domain/effect/capability 与可用 Offering 校验；`create_three_view` 使用版本化 recipe、持久 SkillRun 和独立的人类 ExecutionGrant，仅自动发起首步。待批准的 SkillRun 步骤由同一 Agent consent API 投影，批准/拒绝都需真实 Cookie 人类身份与当前 request ID。AgentPending Grant 持久绑定 turn，Task 创建事务与 Stop 状态原子校验。后两步由 SkillRun review/advance API 推进，工作区交互及真实输出仍待验收。开放 MCP connector 未实现，不能把 ToolRegistry 存在当作任意外部工具可用。
 

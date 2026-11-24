@@ -130,11 +130,11 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
   });
 
   it('refuses a duplicate plan or step decision while the first one is in flight', () => {
-    expect(agentDialog).toMatch(/const decidePlan = useCallback\([\s\S]{0,200}deciding\.current\.begin\(budgetId\)/);
-    const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
-    expect(decidePlan).toContain('deciding.current.end(budgetId);');
-    expect(agentDialog).toMatch(/const decideDetached = useCallback\([\s\S]{0,400}deciding\.current\.begin\(card\.requestId\)/);
-    expect(agentDialog).toMatch(/deciding\.current\.end\(requestId\);/);
+    // #503: the claim and its release both come from `InFlightGuard.run`, never by hand.
+    expect(agentDialog).toMatch(/const decidePlan = useCallback\([\s\S]{0,200}deciding\.current\.run\(budgetId, /);
+    expect(agentDialog).toMatch(/const decideDetached = useCallback\([\s\S]{0,400}deciding\.current\.run\(requestId, /);
+    expect(agentDialog).toMatch(/const continuePlan = useCallback\([\s\S]{0,200}continuePlanOnce\(deciding\.current, /);
+    expect(agentDialog).not.toMatch(/deciding\.current\.(?:begin|end)\(/);
   });
 
   it('waits for the explicit 3D lock before the turn starts and sends nothing when it fails', () => {

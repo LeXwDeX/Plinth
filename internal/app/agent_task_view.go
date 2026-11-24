@@ -272,25 +272,13 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			Retryable: task.Failure.Retryable,
 			Ambiguous: task.Failure.Ambiguous,
 		}
-		reason := generationtool.MeteredFailureMessage(chatSchema, task.Offering.CreditsMetered, task.Failure)
-		if reason == "" {
-			// The upstream may already have run and charged (#136).
-			reason = generationtool.AmbiguousFailureMessage(chatSchema, task.Failure)
-		}
-		if reason != "" {
-			view.Failure.Retryable = false
-			view.Failure.UserDecisionRequired = true
-			view.Failure.Reason = reason
-		}
 		// #251: one actionable category and next action, without the internal
-		// failure detail. A metered or ambiguous failure always asks the person.
-		report := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
-		if view.Failure.UserDecisionRequired {
-			report.Retryable, report.UserDecisionRequired = false, true
-			report.Action = generation.ActionAskUser
-		}
+		// failure detail. A metered or ambiguous failure always asks the person
+		// and carries the Schema's reason (#136, #517).
+		report, reason := generationtool.TaskFailureReport(chatSchema, task)
+		view.Failure.Reason = reason
 		view.Failure.Category, view.Failure.NextAction = string(report.Category), string(report.Action)
-		view.Failure.Retryable = report.Retryable
+		view.Failure.Retryable, view.Failure.UserDecisionRequired = report.Retryable, report.UserDecisionRequired
 		view.Failure.Advice = chatSchema.Processing.Failures.Advice[string(report.Category)]
 		if view.Failure.Advice == "" {
 			view.Failure.Advice = string(report.Action)

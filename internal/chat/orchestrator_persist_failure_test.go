@@ -197,12 +197,41 @@ func streamStatus(t *testing.T, service *chat.Service, schema catalog.ChatSchema
 	return subscription.Status, closed
 }
 
+// endingFlakyRepository fails the write of a background ending's reply (the
+// reply carrying the Schema note) a set number of times, as a locked or briefly
+// unavailable message store would (#429). Every other write goes through.
+type endingFlakyRepository struct {
+	*memoryChatRepository
+	mu       sync.Mutex
+	failures int
+	note     string
+}
+
+func (r *endingFlakyRepository) failEnding(times int, note string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failures, r.note = times, note
+}
+
+func (r *endingFlakyRepository) UpdateMessage(ctx context.Context, ownerID string, message chat.Message,
+	updatedAt time.Time) (bool, error) {
+	r.mu.Lock()
+	if r.failures > 0 && r.note != "" && strings.Contains(message.Content, r.note) {
+		r.failures--
+		r.mu.Unlock()
+		return false, errors.New("message store unavailable")
+	}
+	r.mu.Unlock()
+	return r.memoryChatRepository.UpdateMessage(ctx, ownerID, message, updatedAt)
+}
+
 // A background ending that fails once is retried: every step is idempotent,
-// so the second attempt settles the consent claim, writes the note and closes
+// so the second attempt writes the note and closes
 // the stream as done. The Task keeps running and is not submitted again.
 func TestBackgroundEndingRetriesATransientFailure(t *testing.T) {
 	ctx := context.Background()
-	service := newChatService(t, newMemoryChatRepository())
+	repository := &endingFlakyRepository{memoryChatRepository: newMemoryChatRepository()}
+	service := newChatService(t, repository)
 	executor := newWaitingExecutor()
 	facts := newBackgroundFacts()
 	logs := &hungTurnLogs{}
@@ -216,9 +245,7 @@ func TestBackgroundEndingRetriesATransientFailure(t *testing.T) {
 	if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	facts.mu.Lock()
-	facts.consentFailures = 1
-	facts.mu.Unlock()
+	repository.failEnding(1, schema.Agent.BackgroundWait.TurnContent)
 	if err := o.Process(ctx, command); err != nil {
 		t.Fatalf("Process = %v", err)
 	}
@@ -230,9 +257,6 @@ func TestBackgroundEndingRetriesATransientFailure(t *testing.T) {
 	assistant := assistantOf(t, service, command)
 	if !strings.Contains(assistant.Content, schema.Agent.BackgroundWait.TurnContent) {
 		t.Fatalf("content = %q", assistant.Content)
-	}
-	if settled := facts.settlements(); len(settled) != 1 || !strings.HasSuffix(settled[0], "|"+taskID) {
-		t.Fatalf("consent settlements = %v", settled)
 	}
 	if canceled := facts.cancellations(); len(canceled) != 0 {
 		t.Fatalf("background ending cancelled %v", canceled)
@@ -249,7 +273,7 @@ func TestBackgroundEndingRetriesATransientFailure(t *testing.T) {
 	if status, closed := streamStatus(t, service, schema, command); status != "configured-done" || !closed {
 		t.Fatalf("stream status = %q, terminal event = %v", status, closed)
 	}
-	if !strings.Contains(logs.String(), "准备重试") || !strings.Contains(logs.String(), "consent store unavailable") {
+	if !strings.Contains(logs.String(), "准备重试") || !strings.Contains(logs.String(), "message store unavailable") {
 		t.Fatalf("the failed attempt was not logged: %s", logs.String())
 	}
 }
@@ -260,7 +284,8 @@ func TestBackgroundEndingRetriesATransientFailure(t *testing.T) {
 // are neither cancelled nor submitted again.
 func TestBackgroundEndingFailureEndsTheTurnAsFailed(t *testing.T) {
 	ctx := context.Background()
-	service := newChatService(t, newMemoryChatRepository())
+	repository := &endingFlakyRepository{memoryChatRepository: newMemoryChatRepository()}
+	service := newChatService(t, repository)
 	executor := newWaitingExecutor()
 	facts := newBackgroundFacts()
 	logs := &hungTurnLogs{}
@@ -274,9 +299,7 @@ func TestBackgroundEndingFailureEndsTheTurnAsFailed(t *testing.T) {
 	if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	facts.mu.Lock()
-	facts.consentFailures = 10
-	facts.mu.Unlock()
+	repository.failEnding(10, schema.Agent.BackgroundWait.TurnContent)
 	if err := o.Process(ctx, command); err != nil {
 		t.Fatalf("Process = %v; the failure is handled, not left for the worker", err)
 	}
@@ -324,7 +347,7 @@ func TestBackgroundEndingFailureEndsTheTurnAsFailed(t *testing.T) {
 		t.Fatalf("the failed turn stayed recoverable: %+v %v", pending, err)
 	}
 	for _, want := range []string{"level=ERROR", "session_id=" + command.SessionID,
-		"assistant_message_id=" + command.AssistantMessageID, "consent store unavailable"} {
+		"assistant_message_id=" + command.AssistantMessageID, "message store unavailable"} {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("log lacks %q: %s", want, logs.String())
 		}

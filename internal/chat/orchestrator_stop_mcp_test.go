@@ -268,13 +268,16 @@ func TestStoppedTurnWithAnMCPReadCallFinalizesAfterRestart(t *testing.T) {
 	}
 }
 
-// A call the turn's registry does not know either still takes the protective
-// branch: the stop stays recoverable rather than finalizing a turn that may
-// have committed a paid Task.
-func TestStoppedTurnWithAnUnknownCallStaysRecoverable(t *testing.T) {
+// #501: a call to a tool the turn does not offer (a name the model made up, or
+// a tool the frozen configuration leaves out) is answered with the
+// tool-unavailable text and never runs (#378), so it cannot have committed a
+// paid Task. A stop after it ends the turn as stopped instead of keeping it
+// running with stop_requested forever.
+func TestStoppedTurnWithAnUnknownCallFinalizes(t *testing.T) {
 	ctx := context.Background()
 	service := newChatService(t, newMemoryChatRepository())
 	schema := configuredChatSchema(t)
+	schema.Presentation.Messages.TurnStopped = "configured stopped"
 	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
 	if err != nil {
 		t.Fatal(err)
@@ -303,12 +306,114 @@ func TestStoppedTurnWithAnUnknownCallStaysRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = orchestrator.Process(ctx, command)
+	if err := orchestrator.Process(ctx, command); err != nil {
+		t.Fatalf("stop reconciliation of an unknown call: %v", err)
+	}
+	turn, err := service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if err != nil || turn.State != "configured-turn-done" || turn.EndReason != configuredEndReasons.Stopped {
+		t.Fatalf("stopped turn: state=%q reason=%q err=%v", turn.State, turn.EndReason, err)
+	}
+	if turns, err := service.RecoverTurns(ctx); err != nil || len(turns) != 0 {
+		t.Fatalf("stopped turn remained active: %#v err=%v", turns, err)
+	}
+	message := lastAssistant(t, service, command.OwnerID, command.SessionID)
+	if !strings.Contains(message.Content, "configured stopped") {
+		t.Fatalf("the stop text is missing: %q", message.Content)
+	}
+	for _, name := range executor.executed() {
+		if name == "no-such-tool" {
+			t.Fatalf("the unknown call ran: %#v", executor.executed())
+		}
+	}
+}
+
+// legacyStoppedTurn stores a turn the way an earlier version left it before a
+// stop: the reply holds one call with no Task and no frozen idempotency key,
+// the checkpoint holds the given calls as unexecuted, and the durable stop
+// intent is set. Process then finalizes the stop before the tool loop.
+func legacyStoppedTurn(t *testing.T, call chat.ToolCall, unexecuted []string) (*chat.Service, *chat.Orchestrator, chat.ProcessTurn) {
+	t.Helper()
+	ctx := context.Background()
+	service := newChatService(t, newMemoryChatRepository())
+	schema := configuredChatSchema(t)
+	schema.Presentation.Messages.TurnStopped = "configured stopped"
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistantID := startTurnFor(t, service, "owner-a", session.ID, "make a cube")
+	command := chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistantID}
+	message := lastAssistant(t, service, command.OwnerID, command.SessionID)
+	message.ToolCalls = []chat.ToolCall{call}
+	if err := service.UpdateMessage(ctx, command.OwnerID, message); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := turn.Checkpoint
+	checkpoint.UnexecutedCalls = unexecuted
+	if _, err := service.SaveTurnCheckpoint(ctx, turn, turn.State, checkpoint, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, active, err := service.RequestTurnStop(ctx, command.OwnerID, command.SessionID); err != nil || !active {
+		t.Fatalf("request the durable stop: active=%v err=%v", active, err)
+	}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model",
+		Agent: &scriptedAgent{}, Tools: &stopProbeExecutor{generated: "create_model_3d"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, orchestrator, command
+}
+
+// An unknown call the checkpoint records as answered without running ends a
+// stopped turn like any task-free call.
+func TestStoppedTurnFinalizesAnUnexecutedUnknownCall(t *testing.T) {
+	ctx := context.Background()
+	service, orchestrator, command := legacyStoppedTurn(t,
+		chat.ToolCall{ID: "call-unknown", Name: "no-such-tool", Arguments: []byte(`{}`)}, []string{"call-unknown"})
+	if err := orchestrator.Process(ctx, command); err != nil {
+		t.Fatalf("stop reconciliation of an unexecuted call: %v", err)
+	}
+	turn, err := service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if err != nil || turn.State != "configured-turn-done" || turn.EndReason != configuredEndReasons.Stopped {
+		t.Fatalf("stopped turn: state=%q reason=%q err=%v", turn.State, turn.EndReason, err)
+	}
+}
+
+// A checkpoint of an earlier version does not say which calls never ran. An
+// unknown call without a task identity there may have committed a paid Task
+// under a tool since removed, so the stop keeps the protective branch.
+func TestStoppedTurnWithALegacyUnknownCallStaysRecoverable(t *testing.T) {
+	ctx := context.Background()
+	service, orchestrator, command := legacyStoppedTurn(t,
+		chat.ToolCall{ID: "call-unknown", Name: "no-such-tool", Arguments: []byte(`{}`)}, nil)
+	err := orchestrator.Process(ctx, command)
 	if err == nil || !strings.Contains(err.Error(), "no recoverable task identity") {
-		t.Fatalf("unknown call reconciliation error = %v", err)
+		t.Fatalf("legacy unknown call reconciliation error = %v", err)
 	}
 	turns, err := service.RecoverTurns(ctx)
 	if err != nil || len(turns) != 1 || !turns[0].StopRequested {
-		t.Fatalf("unknown call must keep the stop recoverable: %#v err=%v", turns, err)
+		t.Fatalf("a legacy unknown call must keep the stop recoverable: %#v err=%v", turns, err)
+	}
+}
+
+// A known paid generation call with no Task and no frozen key (a pre-upgrade
+// call) keeps the protective branch too: nothing says it never submitted.
+func TestStoppedTurnWithAPaidCallWithoutIdentityStaysRecoverable(t *testing.T) {
+	ctx := context.Background()
+	service, orchestrator, command := legacyStoppedTurn(t,
+		chat.ToolCall{ID: "call-paid", Name: "create_model_3d", Arguments: []byte(`{"prompt":"a plain cube"}`)}, nil)
+	err := orchestrator.Process(ctx, command)
+	if err == nil || !strings.Contains(err.Error(), "no recoverable task identity") {
+		t.Fatalf("paid call reconciliation error = %v", err)
+	}
+	turns, err := service.RecoverTurns(ctx)
+	if err != nil || len(turns) != 1 || !turns[0].StopRequested {
+		t.Fatalf("a paid call without identity must keep the stop recoverable: %#v err=%v", turns, err)
 	}
 }
