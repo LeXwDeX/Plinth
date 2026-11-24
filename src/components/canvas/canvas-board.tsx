@@ -87,7 +87,7 @@ import { onHeldKeysLost } from '@/lib/canvas/held-keys';
 import { panelShortcutTabs } from '@/lib/workspace/panel-tabs';
 import { ownsNavigationKeys } from '@/lib/workspace/stage-keys';
 import { artboardRatioLabel } from '@/lib/canvas/artboard';
-import { snapRect, type SnapGuide } from '@/lib/canvas/snapping';
+import { isResizeAnchor, snapBypassed, snapRect, snapResize, type SnapGuide } from '@/lib/canvas/snapping';
 import { dragUpdates, movedUnion, snapTargetsFor, startDragSession, type DragSession } from '@/lib/canvas/multi-drag';
 import { canvasMenuItems, layerShortcut, nodeMenuItems, selectableNodeIds, type CanvasMenuItemId } from '@/lib/canvas/context-menu';
 import {
@@ -364,6 +364,8 @@ export function CanvasBoard({
   const snapSchema = canvasSchema.frontend.snap;
   const snapEnabled = useCanvasStore((state) => state.snapEnabledOverride ?? snapSchema.default_enabled);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  // Keys held during a resize, read from the handle's pointer event (#546): the bypass key, and Alt (Konva's centred resize).
+  const resizeKeys = useRef({ bypass: false, centred: false });
   const textSchema = canvasSchema.frontend.text;
   const labelSchema = canvasSchema.frontend.artboard.label;
   const artboardLabelColor = useMemo(
@@ -1661,7 +1663,7 @@ export function CanvasBoard({
                 const target = event.target;
                 if (!session || session.draggedId !== node.id) return;
                 let position = { x: target.x(), y: target.y() };
-                if (snapEnabled && session.snappable) {
+                if (snapEnabled && session.snappable && !snapBypassed(event.evt, snapSchema.bypass_modifier)) {
                   const targets = snapTargetsFor(nodes, session, { groupMemberTargets: snapSchema.group_member_targets });
                   if (artboard) targets.primary.unshift({ ...artboard, rotation: 0 });
                   const union = movedUnion(session, position);
@@ -2158,6 +2160,11 @@ export function CanvasBoard({
         <Layer name="selection-handles">
           <Transformer
             ref={transformerRef}
+            anchorDragBoundFunc={(_oldPosition, nextPosition, event) => {
+              const keys = (event as { evt?: MouseEvent } | undefined)?.evt ?? (event as MouseEvent | undefined);
+              resizeKeys.current = { bypass: snapBypassed(keys, snapSchema.bypass_modifier), centred: Boolean(keys?.altKey) };
+              return nextPosition;
+            }}
             boundBoxFunc={(oldBox, newBox) => {
               if (
                 newBox.width < canvasSchema.frontend.minimum_node_size ||
@@ -2165,8 +2172,31 @@ export function CanvasBoard({
               ) {
                 return oldBox;
               }
-              return newBox;
+              // #546: a corner handle snaps like a move does (same targets, threshold and guides). Off with the toolbar
+              // toggle, while the Schema's bypass key is held, and for a centred (Alt) resize, which moves both edges.
+              const transformer = transformerRef.current;
+              const anchor = transformer?.getActiveAnchor();
+              const selected = store.getState().selectedNodeIds;
+              const session = selected.length > 0 ? startDragSession(nodes, selected, selected[0]) : null;
+              if (!transformer || !snapEnabled || !isResizeAnchor(anchor) || resizeKeys.current.bypass || resizeKeys.current.centred || !session?.snappable) {
+                setSnapGuides((current) => (current.length > 0 ? [] : current));
+                return newBox;
+              }
+              const targets = snapTargetsFor(nodes, session, { groupMemberTargets: snapSchema.group_member_targets });
+              if (artboard) targets.primary.unshift({ ...artboard, rotation: 0 });
+              // The Transformer works in absolute (screen) units; snapping in board units, as for a move.
+              const { zoom, panX, panY } = viewport;
+              const snapped = snapResize(
+                { x: (newBox.x - panX) / zoom, y: (newBox.y - panY) / zoom, width: newBox.width / zoom, height: newBox.height / zoom, rotation: newBox.rotation },
+                anchor,
+                targets.primary,
+                { threshold: snapSchema.threshold_pixels / zoom, keepRatio: transformer.keepRatio(), secondary: targets.secondary },
+              );
+              setSnapGuides(snapped.guides);
+              const box = { ...newBox, x: snapped.box.x * zoom + panX, y: snapped.box.y * zoom + panY, width: snapped.box.width * zoom, height: snapped.box.height * zoom };
+              return box.width < canvasSchema.frontend.minimum_node_size || box.height < canvasSchema.frontend.minimum_node_size ? newBox : box;
             }}
+            onTransformEnd={() => setSnapGuides([])}
             rotateEnabled
             enabledAnchors={[
               'top-left',
