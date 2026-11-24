@@ -215,3 +215,20 @@ func TestReasoningTokenComesFromTheDoneEventElseFromTheOutput(t *testing.T) {
 		}
 	}
 }
+
+// #579: the model's refusal (the fake's RefusalMarker: a refusal content part
+// streamed as response.refusal.delta and response.refusal.done) reaches the
+// person as the answer text, streamed and whole.
+func TestARefusalIsTheAnswerText(t *testing.T) {
+	s := newStack(t)
+	adapter := s.adapter(nil)
+	request := agents.Request{Model: "gpt-astra", Messages: []agents.Message{userMessage("go " + openaiv1.RefusalMarker)}}
+	text, deltas, err := collect(adapter, request)
+	if err != nil || text.Content != openaiv1.FixedRefusal || texts(deltas) != openaiv1.FixedRefusal {
+		t.Fatalf("stream: %#v %q %v", text, texts(deltas), err)
+	}
+	whole, err := adapter.Complete(ctx, request)
+	if err != nil || whole.Content != openaiv1.FixedRefusal {
+		t.Fatalf("complete: %#v %v", whole, err)
+	}
+}

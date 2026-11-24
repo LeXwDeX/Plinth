@@ -265,8 +265,10 @@ func (r chatRequest) effortIsNone() bool {
 // request, every assistant message must carry it, a plain text round included:
 // the reading of the vendor's guide (checked 2026-11-24) that "all subsequent
 // requests" of a tool-calling conversation pass the reasoning back "even for
-// turns where the model did not perform a tool call". Which reading the real
-// API enforces is not proven (#536, I28); the default stays the narrower one.
+// turns where the model did not perform a tool call". The guide's wording
+// supports this strict reading (rechecked 2026-11-25); that the real API
+// enforces it is not observed (#536, I28), so the default stays the narrower
+// one.
 func (r chatRequest) toolCallWithoutReasoning() int {
 	strict := len(r.Tools) > 0 && r.anyText(StrictReasoningMarker)
 	for index, message := range r.Messages {

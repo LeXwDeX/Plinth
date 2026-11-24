@@ -166,9 +166,27 @@ func chatImageRefusalBody(kind, message string) any {
 // responsesImageRefusalBody is the Responses body of a picture refusal in the
 // envelope the gateway answers /v1/responses 400s with (message, type, param,
 // code, observed 2026-11-20); the wordings are the Chat ones. Constructed: the
-// probes of that day had no refused picture.
-func responsesImageRefusalBody(message string) any {
-	return map[string]any{"error": orderedError{{"message", message}, {"type", "invalid_request_error"}, {"param", "input"}, {"code", "invalid_value"}}}
+// probes of that day had no refused picture. The code of a picture that is too
+// small, too large or in an unreadable format is the official Responses
+// ResponseError.code name (responsesImageRefusalCodes); the other kinds keep
+// invalid_value.
+func responsesImageRefusalBody(kind, message string) any {
+	code, named := responsesImageRefusalCodes[kind]
+	if !named {
+		code = "invalid_value"
+	}
+	return map[string]any{"error": orderedError{{"message", message}, {"type", "invalid_request_error"}, {"param", "input"}, {"code", code}}}
+}
+
+// responsesImageRefusalCodes are the codes of the official Responses
+// ResponseError enum (openai-python types/responses/response_error.py, checked
+// 2026-11-25) for the refusal kinds that have one: dimensions is a picture too
+// small for the model, size a file over the size limit, format a format the
+// model cannot read. Constructed: no sample of the Responses wire has them.
+var responsesImageRefusalCodes = map[string]string{
+	"dimensions": "image_too_small",
+	"size":       "image_file_too_large",
+	"format":     "invalid_image_format",
 }
 
 // orderedError is an error object whose members keep the order they are listed

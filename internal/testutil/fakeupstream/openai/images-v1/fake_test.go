@@ -135,8 +135,8 @@ func TestFaultScenarios(t *testing.T) {
 		status int
 		code   string
 	}{
-		"insufficient-balance": {http.StatusPaymentRequired, "insufficient_quota"},
-		"key-quota":            {http.StatusPaymentRequired, "insufficient_quota"},
+		"insufficient-balance": {http.StatusTooManyRequests, "credit_balance_exhausted"},
+		"key-quota":            {http.StatusTooManyRequests, "project_spend_limit_exceeded"},
 		"quota-exceeded":       {http.StatusTooManyRequests, "quota_exceeded"},
 		"forbidden":            {http.StatusForbidden, "eca_access_denied"},
 		"service-unavailable":  {http.StatusServiceUnavailable, "server_is_overloaded"},
@@ -156,6 +156,21 @@ func TestFaultScenarios(t *testing.T) {
 			}
 		})
 	}
+	// #579: the error-code guide (checked 2026-11-25) has no 402; a used-up
+	// balance or spend limit is 429 with type insufficient_quota and the cause
+	// in error.code, and these constructed answers have a null param.
+	t.Run("billing answers are the guide's 429 with a null param", func(t *testing.T) {
+		for _, scenario := range []string{"insufficient-balance", "key-quota", "rate-limit", "server-error", "task-failed"} {
+			status, body := generate(newFixture(t, short), request, "X-Fake-Scenario", scenario)
+			object, _ := body["error"].(map[string]any)
+			if param, present := object["param"]; !present || param != nil {
+				t.Fatalf("%s: param = %#v (present %t), want null: %v", scenario, param, present, body)
+			}
+			if status == http.StatusTooManyRequests && scenario != "rate-limit" && object["type"] != "insufficient_quota" {
+				t.Fatalf("%s: type = %v", scenario, object["type"])
+			}
+		}
+	})
 	t.Run("quota exceeded carries the gateway quota object", func(t *testing.T) {
 		_, body := generate(newFixture(t, short), request, "X-Fake-Scenario", "quota-exceeded")
 		if testkit.Field(t, body, "error", "type") != "quota_exceeded" || testkit.Field(t, body, "error", "quota", "dimension") != "weekly" {

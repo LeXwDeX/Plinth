@@ -100,9 +100,11 @@ func TestImageConnectionsReadTheFakeFaultsAlike(t *testing.T) {
 		retryable bool
 	}
 	// scenario -> connection -> expected failure. The fake builds the quota
-	// answers from the vendors' documented vocabularies: OpenAI and the Gemini
-	// gateway answer 402 insufficient_quota, Ark answers 403 AccountOverdueError
-	// for arrears and 429 QuotaExceeded for an exhausted quota.
+	// answers from the vendors' documented vocabularies: OpenAI answers 429
+	// credit_balance_exhausted / project_spend_limit_exceeded (type
+	// insufficient_quota; its error-code guide has no 402), the Gemini gateway
+	// answers 402 insufficient_quota, Ark answers 403 AccountOverdueError for
+	// arrears and 429 QuotaExceeded for an exhausted quota.
 	table := []struct {
 		scenario fakeupstream.Scenario
 		want     map[string]want

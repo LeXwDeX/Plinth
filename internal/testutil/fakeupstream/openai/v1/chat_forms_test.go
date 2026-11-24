@@ -375,7 +375,7 @@ func TestQuotaMarkerAnswersEveryDeclaredCodeAndTheRateLimit(t *testing.T) {
 				dig(t, body, "error", "type") != kind {
 				t.Fatalf("%s %s: %d %s", path, code, response.StatusCode, raw)
 			}
-			if (code == "rate_limit_exceeded") != (response.Header.Get("Retry-After") != "") {
+			if RateLimitCode(code) != (response.Header.Get("Retry-After") != "") {
 				t.Fatalf("%s %s: Retry-After %q", path, code, response.Header.Get("Retry-After"))
 			}
 		}
@@ -442,5 +442,62 @@ func TestStrictReasoningMarkerSwitchesToTheBroadReading(t *testing.T) {
 	// No tools in the request: nothing to pass back, strict or not.
 	if status, _ := f.chat(map[string]any{"model": "deepseek", "messages": history(StrictReasoningMarker, nil)}); status != http.StatusOK {
 		t.Fatalf("strict reading without tools: %d", status)
+	}
+}
+
+// #579: the error-code guide (checked 2026-11-25) names the rate limit
+// rate_limit_error / slow_down. The marker answers it like rate_limit_exceeded
+// (429 with Retry-After) in the official envelope, and the chat connection
+// does not map it as a used-up balance, so Plinth reads it by its 429 as a wait.
+func TestQuotaMarkerAnswersTheDocumentedSlowDown(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	response, raw := f.send("POST", "/chat/completions", "k", map[string]any{"model": "deepseek", "messages": user("hi " + QuotaMarkerPrefix + "slow_down]]")})
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	object, _ := body["error"].(map[string]any)
+	if response.StatusCode != http.StatusTooManyRequests || response.Header.Get("Retry-After") == "" ||
+		object["code"] != "slow_down" || object["type"] != "rate_limit_error" {
+		t.Fatalf("%d %s", response.StatusCode, raw)
+	}
+	if param, present := object["param"]; !present || param != nil {
+		t.Fatalf("param = %#v: %s", param, raw)
+	}
+	if !RateLimitCode("slow_down") || !RateLimitCode("rate_limit_exceeded") || RateLimitCode("credit_balance_exhausted") {
+		t.Fatal("RateLimitCode")
+	}
+	if strings.Contains(string(catalog.DefaultDocument()), `"slow_down"`) {
+		t.Fatal("the Catalog now maps slow_down: check that it stays a wait")
+	}
+}
+
+// #579: on the Responses wire a picture that is too small, too large or in an
+// unreadable format is refused with the official ResponseError.code name; the
+// Chat Completions bodies keep the gateway's invalid_parameter_error.
+func TestResponsesImageRefusalsUseTheResponseErrorCodes(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	uri := pngDataURI(t, 64, 64)
+	for kind, want := range map[string]string{
+		"dimensions": "image_too_small", "size": "image_file_too_large", "format": "invalid_image_format",
+		"count": "invalid_value",
+	} {
+		_, raw := f.send("POST", "/responses", "k", map[string]any{
+			"model": "fake-vision-model",
+			"input": []any{map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "input_text", "text": "look " + ImageRefusalMarkerPrefix + kind + "]]"},
+				map[string]any{"type": "input_image", "image_url": uri},
+			}}},
+		})
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		if dig(t, body, "error", "code") != want || dig(t, body, "error", "param") != "input" {
+			t.Fatalf("responses %s: %s", kind, raw)
+		}
+		_, raw = f.send("POST", "/chat/completions", "k", map[string]any{
+			"model": "fake-vision-model", "messages": withPicture(t, "look "+ImageRefusalMarkerPrefix+kind+"]]", uri),
+		})
+		_ = json.Unmarshal(raw, &body)
+		if dig(t, body, "error", "code") != "invalid_parameter_error" {
+			t.Fatalf("chat %s: %s", kind, raw)
+		}
 	}
 }

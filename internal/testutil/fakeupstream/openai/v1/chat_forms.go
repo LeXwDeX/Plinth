@@ -36,8 +36,11 @@ const (
 	StrictReasoningMarker = "[[fake:strict-reasoning]]"
 	// QuotaMarkerPrefix, [[fake:quota:CODE]] in the last user message, answers
 	// HTTP 429 with the error code CODE: one of the codes the chat connection's
-	// Schema error_mapping declares as a used-up balance or key quota, or
-	// rate_limit_exceeded, which is only a wait. The envelope is the official
+	// Schema error_mapping declares as a used-up balance or key quota, or one of
+	// the two rate limits, which are only a wait: slow_down (the error-code
+	// guide's rate_limit_error code, checked 2026-11-25) and
+	// rate_limit_exceeded (kept for the gateways that answer it; the guide does
+	// not list it as a code). The envelope is the official
 	// ErrorResponse (OpenAPI components.schemas.Error, error-code guide), so
 	// the quota class and the rate-limit class can be told apart by code alone.
 	QuotaMarkerPrefix = "[[fake:quota:"
@@ -54,8 +57,9 @@ const (
 
 // QuotaCodes are the codes QuotaMarkerPrefix accepts, with the error type the
 // official ErrorResponse gives them: the 429 of an exhausted balance is
-// insufficient_quota (error-code guide), a rate limit is "requests" or
-// "tokens" (the type names the limit that was hit).
+// insufficient_quota (error-code guide), slow_down is rate_limit_error (the
+// guide's row), and rate_limit_exceeded is "requests" or "tokens" (the type
+// names the limit that was hit; not in the guide).
 var QuotaCodes = map[string]string{
 	"insufficient_quota":                "insufficient_quota",
 	"credit_balance_exhausted":          "insufficient_quota",
@@ -64,6 +68,13 @@ var QuotaCodes = map[string]string{
 	"organization_usage_limit_exceeded": "insufficient_quota",
 	"quota_exceeded":                    "quota_exceeded",
 	"rate_limit_exceeded":               "requests",
+	"slow_down":                         "rate_limit_error",
+}
+
+// RateLimitCode reports whether a QuotaCodes code is a rate limit (a wait,
+// answered with Retry-After) rather than a used-up balance or quota.
+func RateLimitCode(code string) bool {
+	return code == "rate_limit_exceeded" || code == "slow_down"
 }
 
 var quotaMarker = regexp.MustCompile(`\[\[fake:quota:([a-z_]+)\]\]`)
@@ -87,8 +98,14 @@ func (h *handler) writeQuotaFault(w http.ResponseWriter, code string) {
 		return
 	}
 	message := "You exceeded your current quota, please check your plan and billing details."
-	if code == "rate_limit_exceeded" {
+	switch code {
+	case "rate_limit_exceeded":
 		message = "Rate limit reached for requests per min (RPM): Limit 3, Used 3, Requested 1. Please try again in 20s."
+	case "slow_down":
+		// The guide gives the cause, not the wording: the message is the fake's.
+		message = "Your request rate increased too quickly. Please reduce your request rate and increase it gradually."
+	}
+	if RateLimitCode(code) {
 		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
 	}
 	writeJSON(w, http.StatusTooManyRequests, officialErrorBody(message, QuotaCodes[code], nil, code))

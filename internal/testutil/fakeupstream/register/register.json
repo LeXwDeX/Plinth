@@ -1401,7 +1401,7 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "invalid-key 场景答 OpenAI ErrorResponse 形态的 401。",
+      "behavior": "invalid-key 场景答 OpenAI ErrorResponse 形态的 401（code invalid_api_key）。2026-11-25 复核：error-codes 指南只写 401 的原因，不给 code 名，invalid_api_key 是否为官方 code 文档无法确认，行为不变。",
       "basis": [
         {
           "source": "https://github.com/openai/openai-openapi/blob/master/openapi.yaml",
@@ -1412,7 +1412,7 @@
           "section": "Error codes"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "网关对错误 Key 的应答只录到 text/plain 形态"
     },
     {
@@ -1471,7 +1471,7 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "403（text/plain JSON 文本）、404 model-not-found、503 带 Retry-After、429 带 error.quota、messages 为空的 400。",
+      "behavior": "403（text/plain JSON 文本）、404 model-not-found、503 带 Retry-After、429 带 error.quota、messages 为空的 400。 rate-limit 场景答 429 rate_limit_exceeded：官方 error-codes 指南未列出这个 code（指南的限流 code 是 slow_down，见 openai-v1/chat-quota-and-reasoning），保留，2026-11-25 复核。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/chat/create",
@@ -1482,7 +1482,7 @@
           "section": "Error codes"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -1494,14 +1494,14 @@
       ],
       "category": "state-machine",
       "status": "constructed",
-      "behavior": "[[fake:stream-error]] 以错误帧结束已开始的流，[[fake:stream-cut]] 在 finish_reason 与 [DONE] 前干净断开，[[fake:stream-plain]] 对流式请求答非流式对象（#509）。",
+      "behavior": "[[fake:stream-error]] 以错误帧结束已开始的流，[[fake:stream-cut]] 在 finish_reason 与 [DONE] 前干净断开，[[fake:stream-plain]] 对流式请求答非流式对象（#509）。 2026-11-25 复核：Chat 流内 error 帧的形态，官方文档无法确认，行为不变。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/chat/create",
           "section": "Chat create（stream）"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -1531,6 +1531,22 @@
       "why_not_real": "拒绝只在网关日志里看到，没有入库样本；reasoning_effort none 按文档构造"
     },
     {
+      "id": "openai-v1/chat-reasoning-minimal",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "request-validation",
+      "status": "gap",
+      "behavior": "gpt-astra / gpt-6.2-astra 在 Chat Completions 上放行 reasoning_effort=minimal（constraints.go noEffortMinimal 只用于 /v1/responses）。latest-model 文档暗示不支持 minimal（use low instead），未验证；行为不变（2026-11-25）。",
+      "checked_at": "2026-11-25",
+      "plan": "真实一轮对 Chat Completions 发一次 minimal，按结果决定拒绝或保留放行。",
+      "issues": [
+        579
+      ]
+    },
+    {
       "id": "openai-v1/chat-vendor-forms",
       "provider": "openai",
       "api": "v1",
@@ -1539,7 +1555,7 @@
       ],
       "category": "response-shape",
       "status": "constructed",
-      "behavior": "#536 的厂商形态：qwen 系列在 finish_reason 之后用空 choices 的末块报 usage，[[fake:dsml]] 把工具调用写成 DSML 文本，[[fake:inline-image]] 在 delta.images / message.images 里画图。",
+      "behavior": "#536 的厂商形态：qwen 系列在 finish_reason 之后用空 choices 的末块报 usage（这也是官方 stream_options.include_usage 的形态；默认的 deepseek 形态把 usage 放在 finish_reason 块上，是已观测的网关形态，与官方不同，2026-11-25 注明），[[fake:dsml]] 把工具调用写成 DSML 文本，[[fake:inline-image]] 在 delta.images / message.images 里画图。",
       "basis": [
         {
           "source": "Model Studio OpenAI 兼容文档",
@@ -1554,11 +1570,12 @@
       "provider": "openai",
       "api": "v1",
       "endpoints": [
-        "POST /chat/completions"
+        "POST /chat/completions",
+        "POST /responses"
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "图片输入按模型规则拒绝：qwen 宽或高不大于 32、fake-text-only 不收图、[[fake:image-refusal:KIND]] 的尺寸/大小/格式/张数/不支持。",
+      "behavior": "图片输入按模型规则拒绝：qwen 宽或高不大于 32、fake-text-only 不收图、[[fake:image-refusal:KIND]] 的尺寸/大小/格式/张数/不支持。Responses 线上（构造，无样本）尺寸过小、文件过大、格式不支持分别用官方 ResponseError.code 枚举名 image_too_small、image_file_too_large、invalid_image_format（2026-11-25），张数与不支持仍为 invalid_value；Chat 线上沿用网关观测信封 invalid_parameter_error 不变。",
       "basis": [
         {
           "source": "2026-11-23 观测到的 qwen 拒绝体",
@@ -1566,9 +1583,13 @@
         },
         {
           "source": "#253 的不收图文案"
+        },
+        {
+          "source": "https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error.py",
+          "section": "ResponseError.code"
         }
       ],
-      "checked_at": "2026-11-23",
+      "checked_at": "2026-11-25",
       "why_not_real": "qwen 的拒绝体只在观测中出现，未入库；大小、格式、张数按厂商风格构造"
     },
     {
@@ -1580,7 +1601,7 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "[[fake:quota:CODE]] 按连接 error_mapping 声明的配额码答 429；deepseek 拒绝 low/high/max 之外的 reasoning_effort，[[fake:strict-reasoning]] 切换 reasoning_content 的严格读法（未证实）。",
+      "behavior": "[[fake:quota:CODE]] 按连接 error_mapping 声明的配额码答 429；限流有两个 code，都带 Retry-After：slow_down（type rate_limit_error，官方 error-codes 指南的限流 code，2026-11-25 新增）与 rate_limit_exceeded（指南未列出，保留）。deepseek 拒绝 low/high/max 之外的 reasoning_effort；[[fake:strict-reasoning]] 切换 reasoning_content 的严格读法：文档字面支持严格读法（工具调用对话的“后续所有请求”都要回传，包括没有调用工具的轮次），真实 API 是否执行未观测，默认仍为窄读法。",
       "basis": [
         {
           "source": "https://api-docs.deepseek.com/guides/thinking_mode",
@@ -1588,10 +1609,10 @@
         },
         {
           "source": "https://developers.openai.com/api/docs/guides/error-codes",
-          "section": "Error codes"
+          "section": "Error codes（2026-11-25 复核）"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -1603,7 +1624,7 @@
       ],
       "category": "response-shape",
       "status": "constructed",
-      "behavior": "Responses API（#401）：流式工具调用、文本、并行调用、xhigh 推理项、input_image、非流式响应、strict false 的工具 schema、重放推理项，以及按字节对齐的 400。",
+      "behavior": "Responses API（#401）：流式工具调用、文本、并行调用、xhigh 推理项、input_image、非流式响应、strict false 的工具 schema、重放推理项，以及按字节对齐的 400。 缺 input 答 400 missing_required_parameter、非流式 failed 响应答 HTTP 200：2026-11-25 复核，官方文档无法确认，行为不变。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/responses/create",
@@ -1614,7 +1635,7 @@
           "section": "internal/testutil/fakeupstream/openai/v1/testdata/responses-2026-11-20.sample.json"
         }
       ],
-      "checked_at": "2026-11-20",
+      "checked_at": "2026-11-25",
       "why_not_real": "探测结果不是 wirefixture candidate（手工脱敏，部分由非流式响应补全），不能按 real 计"
     },
     {
@@ -1626,14 +1647,22 @@
       ],
       "category": "state-machine",
       "status": "constructed",
-      "behavior": "response.incomplete、response.failed、流内 error 事件、response.refusal.delta、推理摘要事件、超长流行与推理项后无后继项的 400。",
+      "behavior": "response.incomplete、response.failed、流内 error 事件、response.refusal.delta 与 response.refusal.done（[[fake:refusal]]：message 项的内容块为 {type: refusal, refusal}，delta/done 事件字段为 content_index、delta 或 refusal、item_id、output_index、sequence_number，按官方事件类型构造，2026-11-25 补上；此前登记表声称有而代码没有）、推理摘要事件与推理项后无后继项的 400。不再声称“超长流行”：行长界限是 Plinth Adapter 自己的 ScannerMaxBytes 设置，不是上游契约，fake 不产生超长行，Adapter 测试用脚本化 handler 构造（2026-11-25 更正）。incomplete 流在截断项后不发 .done 事件：官方文档无法确认，行为不变。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/responses/create",
           "section": "Responses streaming events"
+        },
+        {
+          "source": "https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_delta_event.py",
+          "section": "ResponseRefusalDeltaEvent"
+        },
+        {
+          "source": "https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_done_event.py",
+          "section": "ResponseRefusalDoneEvent"
         }
       ],
-      "checked_at": "2026-11-20",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -3657,14 +3686,14 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "size（16 的倍数、最长边 3840、比例 3:1、65.5 万至 829.4 万像素）、quality、output_format、background、moderation、n（1–10，不截断）、output_compression、prompt 至多 32000 字符，非法值答沿用真实信封的 400（#543）。",
+      "behavior": "size（16 的倍数、最长边 3840、比例 3:1、65.5 万至 829.4 万像素）、quality、output_format、background、moderation、n（1–10，不截断）、output_compression（0–100 对所有格式检查）、prompt 至多 32000 字符，非法值答沿用真实信封的 400（#543）。output_compression 与 png 或未写 output_format 同时出现时忽略、不再答 400：文档只写它用于 jpeg/webp，未写 png 会拒绝，也没有真实样本（2026-11-25 改）。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/images/",
           "section": "Images create"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "这些拒绝没有真实请求过"
     },
     {
@@ -3677,14 +3706,18 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "403、429、503 故障与内容审核拒绝。",
+      "behavior": "403、429、503 故障与内容审核拒绝。余额耗尽与 key 配额答 429（官方 error-codes 指南没有 402）：insufficient-balance 为 credit_balance_exhausted，key-quota 为 project_spend_limit_exceeded（OpenAI 没有按 key 的消费上限，取最接近的项目上限），type 均为 insufficient_quota，文案转述指南的原因（2026-11-25 由 402 改）。这些构造应答与内容审核拒绝的 param 为 null（官方 Error 的 param 可为 null；已提交样本里没有空串 param，2026-11-25 由空串改）。403 eca_access_denied 是网关形态，不是官方 code。",
       "basis": [
         {
           "source": "https://developers.openai.com/api/docs/guides/error-codes",
-          "section": "Error codes"
+          "section": "Error codes（2026-11-25 复核）"
+        },
+        {
+          "source": "https://github.com/openai/openai-openapi/blob/master/openapi.yaml",
+          "section": "Error schema（param nullable）"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -3697,11 +3730,12 @@
       ],
       "category": "request-validation",
       "status": "gap",
-      "behavior": "quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。",
+      "behavior": "quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。 2026-11-25 复核：官方两页说法仍冲突，行为不变。",
       "plan": "在 2D 真实一轮里对账一次，按结果决定接受或拒绝。",
       "issues": [
         540
-      ]
+      ],
+      "checked_at": "2026-11-25"
     },
     {
       "id": "openai-images-v1/edits-shape",
@@ -3732,15 +3766,19 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。",
+      "behavior": "至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；每张图与 mask 都须小于 50MB，否则 400 image_file_too_large；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。非 multipart 的编辑请求答 400 Invalid Content-Type（code、param 为 null），不再答缺 model（2026-11-25）。guide 的“mask 与图同格式”规则未强制：Catalog 只限 mask 为 PNG，Plinth 可能配 JPEG/WebP 参考图发出，强制会拒绝 Plinth 的实际请求，待真实一轮确认网关是否执行。当前 Create image edit 参考另列 application/json 请求体（images[] 的 image_url/file_id），fake 未建模。",
       "basis": [
         {
           "source": "https://platform.openai.com/docs/api-reference/images/",
           "section": "Create image edit"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/guides/image-generation",
+          "section": "Edit images（mask 要求：同格式同尺寸、小于 50MB、带 alpha 通道）"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "官方编辑参考没有 mask 规则，网关的措辞未记录"
+      "checked_at": "2026-11-25",
+      "why_not_real": "mask 规则与 50MB 限制出自 image-generation guide（编辑参考本身没有），网关对这些拒绝的措辞未记录"
     },
     {
       "id": "gemini-images-v1/chat-image-shape",

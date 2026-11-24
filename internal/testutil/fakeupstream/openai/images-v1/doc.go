@@ -6,9 +6,12 @@
 // fault answers the samples do not cover are constructed from the recorded
 // gateway refusals and the official documents, and are named in the endpoint
 // table: quota-exceeded 429 (error.code/type quota_exceeded with error.quota),
-// forbidden 403 (eca_access_denied) and service-unavailable 503
+// forbidden 403 (eca_access_denied, a gateway form) and service-unavailable 503
 // (service_unavailable_error/server_is_overloaded; error-code guide checked
-// 2026-11-08). model is optional on POST /images/edits, as the official Create
+// 2026-11-08). The billing scenarios answer the guide's 429 codes
+// (credit_balance_exhausted, project_spend_limit_exceeded; the guide has no
+// 402, checked 2026-11-25), and a constructed answer about no one parameter
+// has a null param. model is optional on POST /images/edits, as the official Create
 // image edit reference says (it defaults to gpt-image-2.6-sunburst), and
 // required on POST /images/generations.
 //
