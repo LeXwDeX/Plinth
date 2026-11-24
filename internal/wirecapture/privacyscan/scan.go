@@ -189,14 +189,6 @@ func cpLegacyIP(text string) bool {
 	}
 	for _, raw := range cpDottedIPRE.FindAllString(text, -1) {
 		parts := strings.Split(raw, ".")
-		// A two-part dotted number is an ordinary decimal (a JSON float such as
-		// a credit amount), not the legacy IP shorthand: "10.00" would parse as
-		// 10.0.0.0 and be reported as a leaked address. The octal and
-		// hexadecimal forms this rule exists for are written with three or four
-		// parts; the plain four-part form is cpIPv4RE's job above.
-		if len(parts) < 3 {
-			continue
-		}
 		legacy := false
 		for _, p := range parts {
 			legacy = legacy || (len(p) > 1 && p[0] == '0')
