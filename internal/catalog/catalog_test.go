@@ -332,6 +332,7 @@ const minimalApplication = `"application":{
 			"spinner_frame_milliseconds":80,
 			"percentage_multiplier":100,
 			"percentage_suffix":"%",
+			"task_list_page_size":10,
 			"advanced_model_form_feature":"advanced-model-form",
 			"advanced_model_default_mode":"regular",
 			"task_progress":{
@@ -890,7 +891,7 @@ const minimalApplication = `"application":{
 			"brush":{"minimum_size":1,"maximum_size":200,"default_size":12},
 			"selection":{"ants_dash":[5,5],"ants_tick_milliseconds":120,"tint_color":"#6366f1","tint_opacity":0.3,"preview_max_edge":512},
 			"mask":{"tint_color_token":"--info","tint_opacity":0.75},
-			"snap":{"default_enabled":true,"threshold_pixels":6,"guide_stroke_width":1,"guide_color_token":"--reminder","group_member_targets":false},
+			"snap":{"default_enabled":true,"threshold_pixels":6,"guide_stroke_width":1,"guide_color_token":"--reminder","group_member_targets":false,"bypass_modifier":"mod"},
 			"export_filename_fallback":"canvas","export_extension":".png",
 			"export":{
 				"padding_pixels":20,

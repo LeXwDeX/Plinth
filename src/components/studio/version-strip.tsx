@@ -535,14 +535,15 @@ export function VersionStrip() {
   const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);
 
   return (
-    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-32 shrink-0 items-stretch border-t border-border bg-panel">
+    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-36 shrink-0 items-stretch border-t border-border bg-panel">
       <div ref={scrollRef} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {columns.length === 0 && versions.isLoading ? (
           <VersionStripSkeleton label={schemaText(schema, 'ui.studio.strip.loading')} />
         ) : columns.length === 0 ? (
           <p className="flex h-full items-center px-4 text-sm text-muted-foreground" data-testid="version-strip-empty">{schemaText(schema, 'ui.studio.strip.empty')}</p>
         ) : (
-          <ol className="flex h-full w-max items-start px-3 py-1">
+          // #546: 12px above and below the cards, so the 2px ring of the selected card clears the strip's top edge.
+          <ol className="flex h-full w-max items-start px-3 py-3">
             {columns.map((column, index) => (
               <ColumnView
                 key={column.tiles[0].key}

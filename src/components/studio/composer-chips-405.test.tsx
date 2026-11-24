@@ -209,28 +209,33 @@ describe('the strips above the box', () => {
     expect(order[3]).toContain(messages['ui.studio.composer.attachment.pinned']);
   });
 
-  it('says 当前：画布 once on the canvas chip and keeps the kind badge', () => {
+  it('shows the picture and the kind badge only: the name 当前：画布 is the hint and the screen-reader text (#546)', () => {
     render(<Composer {...props} chip={{ kind: 'image', thumbnail: '/t.png', label: messages['ui.studio.composer.chip.canvas'], handle: '' }} />);
     const chip = screen.getByTestId('composer-object-chip');
-    expect(chip.textContent?.match(new RegExp(messages['ui.studio.composer.chip.canvas'], 'g'))).toHaveLength(1);
     expect(within(chip).getByTestId('kind-badge').getAttribute('data-kind')).toBe('image');
-    expect(chip.textContent).toContain('当前：画布');
+    // The name is there once, for screen readers only; no second line repeats it.
+    const name = within(chip).getByTestId('composer-object-name');
+    expect(name.textContent).toBe('当前：画布');
+    expect(name.className).toMatch(/\bsr-only\b/);
+    expect(chip.textContent?.match(new RegExp(messages['ui.studio.composer.chip.canvas'], 'g'))).toHaveLength(1);
+    // Hovering the chip names it.
+    expect(chip.parentElement?.getAttribute('data-name')).toBe('当前：画布');
+    expect(within(chip).getByRole('button', { name: messages['ui.studio.composer.chip.skip'] })).toBeTruthy();
   });
 
-  it('lets the kind badge give up its icon, not its "2D", while the column is narrow, so the name fits in half a row', () => {
+  it('keeps the whole kind badge, its icon included, now that no name shares the chip', () => {
     render(<Composer {...props} chip={{ kind: 'image', thumbnail: '/t.png', label: messages['ui.studio.composer.chip.canvas'], handle: '' }} />);
     const badge = within(screen.getByTestId('composer-object-chip')).getByTestId('kind-badge');
-    // Under 24rem of composer width the icon is hidden (a container query on the composer); the text stays.
-    expect(badge.className).toContain('@max-[24rem]:[&_svg]:hidden');
+    expect(badge.className).not.toContain('[&_svg]:hidden');
     expect(badge.textContent).toContain(messages['ui.studio.kind.badge_2d']);
-    expect(screen.getByTestId('studio-composer').className).toMatch(/(^|\s)@container(\s|$)/);
   });
 
-  it('keeps the two lines of a version chip, whose second line is its version label', () => {
+  it('puts the handle of a version chip in its hint and data, not on a line', () => {
     render(<Composer {...props} chip={{ kind: 'image', thumbnail: '/t.png', label: '2D v3', handle: '@img5' }} />);
     const chip = screen.getByTestId('composer-object-chip');
-    expect(chip.textContent).toContain('当前：@img5');
-    expect(chip.textContent).toContain('2D v3');
+    expect(chip.getAttribute('data-handle')).toBe('@img5');
+    expect(within(chip).getByTestId('composer-object-name').textContent).toBe('当前：@img5');
+    expect(chip.textContent).not.toContain('2D v3');
   });
 
   it('keeps the purpose controls under the chips, with the notices after them', () => {

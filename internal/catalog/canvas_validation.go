@@ -294,6 +294,11 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		!strings.HasPrefix(snap.GuideColorToken, "--") {
 		return errors.New("frontend.snap 阈值、线宽必须为正，颜色必须是 CSS 令牌")
 	}
+	switch snap.BypassModifier {
+	case "mod", "alt", "shift":
+	default:
+		return errors.New("frontend.snap.bypass_modifier 必须是 mod、alt 或 shift")
+	}
 	if frontend.FocusDelayMilliseconds <= 0 ||
 		frontend.AutoSaveDelayMilliseconds <= 0 ||
 		frontend.SavedIndicatorMilliseconds <= 0 ||

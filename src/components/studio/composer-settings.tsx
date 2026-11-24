@@ -15,8 +15,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import {
   COMPOSER_SETTINGS_TABS,
+  SETTINGS_CHANGED_NOTE_TEXT,
   SETTINGS_TAB_TEXT,
   changedSettings,
+  lockedModelDomains,
   modelsLocked,
   parametersPinned,
   visibleSettingsTab,
@@ -46,6 +48,9 @@ export interface ComposerSettingsProps {
  * The gear shows a dot when a Skill is selected, a generation model is picked, a parameter was set by hand, or the
  * chat model or its level is off the administrator's default; its name and tooltip say which (and what each holds).
  * A warning dot says a selected Skill cannot be used or the chat model could not be read.
+ *
+ * #546: every tab's own "changed" dot explains itself (the tab's hover hint and the dot's accessible name), and the
+ * models tab opens with a line naming the pinned models and a button that gives the choice back to the Agent.
  */
 export function ComposerSettings({ skill, params, locked }: ComposerSettingsProps) {
   const { schema } = useProductSchema();
@@ -79,6 +84,11 @@ export function ComposerSettings({ skill, params, locked }: ComposerSettingsProp
     .map((change) => (change.value ? formatSchemaText(text('ui.studio.composer.settings.item_value'), { name: tabLabel(change.tab), value: change.value }) : tabLabel(change.tab)))
     .join(separator);
   const changed = changes.length > 0;
+  // #546: the models tab says which pins hold and gives the choice back to the Agent (the pins outlive the session by design).
+  const lockedDomains = lockedModelDomains(modelByDomain);
+  const picks = { image, 'model-3d': model3d } as const;
+  const lockedNames = lockedDomains.map((domain) => picks[domain].short).join(separator);
+  const restoreAuto = () => { for (const domain of lockedDomains) picks[domain].clear(); };
 
   // A selected Skill that cannot be used, or a chat model that could not be read: the short reasons, as every hint says it (#94).
   const skillProblem = skill.selectedId && !skill.loading && (skill.failed || skill.unavailable)
@@ -149,21 +159,39 @@ export function ComposerSettings({ skill, params, locked }: ComposerSettingsProp
               aria-label={text('ui.studio.composer.settings.tabs')}
               className="group-data-horizontal/tabs:h-auto w-full max-w-full shrink-0 justify-start overflow-x-auto border-b border-border px-4 pb-0"
             >
-              {offered.map((id) => (
-                <TabsTrigger
-                  key={id}
-                  value={id}
-                  data-testid={`composer-settings-tab-${id}`}
-                  data-changed={changedTabs.has(id) ? 'true' : undefined}
-                  className="h-9 flex-none px-3 group-data-horizontal/tabs:after:bottom-0 focus-visible:ring-inset"
-                >
-                  {tabLabel(id)}
-                  {changedTabs.has(id) ? <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" /> : null}
-                </TabsTrigger>
-              ))}
+              {offered.map((id) => {
+                const trigger = (
+                  <TabsTrigger
+                    key={id}
+                    value={id}
+                    data-testid={`composer-settings-tab-${id}`}
+                    data-changed={changedTabs.has(id) ? 'true' : undefined}
+                    className="h-9 flex-none px-3 group-data-horizontal/tabs:after:bottom-0 focus-visible:ring-inset"
+                  >
+                    {tabLabel(id)}
+                    {changedTabs.has(id) ? (
+                      // #546: the dot says what it means, to the pointer (the tab's hint) and to a screen reader (its name).
+                      <span role="img" aria-label={text(SETTINGS_CHANGED_NOTE_TEXT[id])} data-testid={`composer-settings-tab-dot-${id}`} className="size-1.5 rounded-full bg-primary" />
+                    ) : null}
+                  </TabsTrigger>
+                );
+                return changedTabs.has(id)
+                  ? <HintTooltip key={id} name={tabLabel(id)} hint={text(SETTINGS_CHANGED_NOTE_TEXT[id])} passive className="flex-none">{trigger}</HintTooltip>
+                  : trigger;
+              })}
             </TabsList>
             <div data-testid="composer-settings-body" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 [scrollbar-gutter:stable]">
-              <TabsContent value="models"><ModelPicker image={image} model={model3d} /></TabsContent>
+              <TabsContent value="models" className="flex flex-col gap-3">
+                {lockedDomains.length > 0 ? (
+                  <div role="status" data-testid="composer-settings-models-locked" className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-xs">
+                    <span className="min-w-0 flex-1">{formatSchemaText(text('ui.studio.composer.settings.models_locked'), { models: lockedNames })}</span>
+                    <Action type="button" variant="outline" size="xs" onClick={restoreAuto} data-testid="composer-settings-models-reset">
+                      {text('ui.studio.composer.settings.models_reset')}
+                    </Action>
+                  </div>
+                ) : null}
+                <ModelPicker image={image} model={model3d} />
+              </TabsContent>
               <TabsContent value="skills"><SkillPicker {...skill} /></TabsContent>
               <TabsContent value="params"><ParamsPanel {...params} disabled={locked} /></TabsContent>
               {chat.offered ? <TabsContent value="chat"><ChatModelPicker settings={chat} /></TabsContent> : null}

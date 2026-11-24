@@ -205,7 +205,7 @@ describe('session list, batch export and balance wiring', () => {
 
   it('counts running tasks only in the top bar, not a turn waiting on a person', () => {
     expect(tasks).toContain('liveCount: activeTasks.length,');
-    expect(tasks).not.toContain('activeTasks.length + (agentPending');
+    expect(tasks).not.toContain('agentPending');
   });
 });
 

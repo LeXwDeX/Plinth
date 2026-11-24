@@ -707,6 +707,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		frontend.ChatMessagePageSize <= 0 ||
 		frontend.SpinnerFrameMilliseconds <= 0 ||
 		frontend.PercentageMultiplier <= 0 ||
+		frontend.TaskListPageSize <= 0 ||
 		frontend.TaskProgress.SecondsPerMinute <= 0 ||
 		frontend.TaskProgress.MillisecondsPerSecond <= 0 ||
 		frontend.TaskProgress.MinutesPerHour <= 0 ||

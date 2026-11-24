@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -14,7 +14,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { PaidStepNotes } from '@/components/chat/paid-step-notes';
 import { GaussianSplatResultCard, ImageResultCard, ModelResultCard, SentImages } from '@/components/chat/result-card';
-import { paidStepFailed, stepCreditsText, stepFailedText } from '@/lib/chat/approval-modes';
+import { paidStepFailed, roundCreditsText, stepCreditsText, stepFailedText } from '@/lib/chat/approval-modes';
 import { unavailableLabel } from '@/lib/unavailable';
 import { fetchSourceRetries, regenerateBlockedBy, sourceExpiredSteps, sourceRetryText } from '@/lib/chat/source-retry';
 import { messageTaskIds, modelCardsOf, modelTaskIdsOf, splitMessagePictures, type MessagePictures, type ModelCardModel } from '@/lib/chat/message-pictures';
@@ -33,6 +33,8 @@ import { MarkdownText, MessageText } from '@/components/chat/markdown-text';
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  /** #546: the turn's task progress, drawn after the reply text and above its credit line (the newest reply only). */
+  taskProgress?: ReactNode;
   sessionId?: string | null;
   onDelete?: (msgId: string) => void;
   /** 更早的用户消息：把文字和图片放回输入框，不直接发送。 */
@@ -193,7 +195,7 @@ function ChatModelCards({ cards, sessionId, selfChecks }: {
  * chunk, and only the streaming message (and a message whose own tasks changed) receives new props.
  */
 export const ChatMessage = memo(function ChatMessage({
-  message, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, rejectedAssets, onReject, handleReferences,
+  message, taskProgress, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, rejectedAssets, onReject, handleReferences,
 }: ChatMessageProps) {
   const { schema } = useProductSchema();
   const isUser = message.role === 'user';
@@ -357,12 +359,16 @@ export const ChatMessage = memo(function ChatMessage({
       {!isUser && messageSelfChecks.length > 0 && <SelfCheckRecordCard records={messageSelfChecks} renders={renders} />}
       {splatResults.map((target) => <GaussianSplatResultCard key={target.taskId} target={target} />)}
 
+      {/* #546：本轮任务进度在正文之后、积分说明之上，随消息滚动 */}
+      {!isUser && taskProgress ? <div className="mt-1.5" data-testid="chat-message-task-progress">{taskProgress}</div> : null}
+
       {/* 已提交的付费步骤：估算积分与批准来源 */}
       {!isUser && message.paidSteps && message.paidSteps.length > 0 && (
         <PaidStepNotes
           steps={message.paidSteps}
           creditsText={(credits) => stepCreditsText(schema, credits)}
           failedText={(credits) => stepFailedText(schema, credits)}
+          roundCreditsText={(credits, steps) => roundCreditsText(schema, credits, steps)}
           failed={(taskId) => paidStepFailed(schema, trackedTasks.find((task) => task.taskId === taskId))}
           note={(taskId) => sourceRetryText(schema, sourceRetries?.[taskId] ?? '')}
           noteUnavailableLabel={(taskId) => regenerateBlockedBy({ [taskId]: sourceRetries?.[taskId] ?? '' }) ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.source_retry')) : ''}

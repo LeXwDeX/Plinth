@@ -86,7 +86,6 @@ import { boardMentionCandidate, buildMentionCandidates, mentionsBoard, mentionsF
 import { useComposerDraft } from '@/hooks/use-composer-draft';
 import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
-import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
@@ -136,6 +135,7 @@ import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
+import { isRunning, statusBubbleShown } from '@/lib/workspace/task-progress';
 import { useSessionContextStore } from '@/store/session-context-store';
 import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
@@ -899,9 +899,13 @@ export function ChatColumn() {
   // ended reads "not run" instead of waiting for ever.
   const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming);
   const lastDisplayed = displayMessages[displayMessages.length - 1];
-  const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
+  // #546: the running tasks are drawn under the newest assistant reply (after its text, above its credit line).
+  const runningTaskCount = useWorkspaceStore((state) => state.trackedTasks.filter((task) => task.sessionId === activeSessionId && isRunning(task)).length);
+  // One element for every render, so the memoized messages keep their props (#291).
+  const runningTaskBlock = useMemo(() => <TaskStatusCards part="running" />, []);
+  const progressMessageId = runningTaskCount > 0 ? [...displayMessages].reverse().find((message) => message.role === 'assistant')?.id ?? null : null;
   const {
-    containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, keepPinned, onScroll: onMessagesScroll,
+    containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, onScroll: onMessagesScroll,
   } = useChatScrollFollow({
     // The newest message, not the count: earlier pages put in front must not move the reader.
     // #177: streamed text and pictures grow the last message without changing its id; a reader at the
@@ -909,6 +913,8 @@ export function ChatColumn() {
     changeKey: [
       lastDisplayed?.id ?? '', threeViews.length, pendingCount, collapsed, queuedTurns.length,
       streamBuf?.textContent.length ?? 0, streamBuf?.images.length ?? 0,
+      // #546: the task block sits in the list now, and a task starting or ending changes its height.
+      runningTaskCount,
     ].join('|'),
     // #177: the status line appears and goes away without animation; only real content is followed smoothly.
     pinKey: statusText,
@@ -916,14 +922,6 @@ export function ChatColumn() {
     resetKey: activeSessionId,
     settleMilliseconds: SCROLL_SETTLE_MILLISECONDS,
   });
-  // #177: the floating task cards are absolutely positioned; the list pads by their measured height.
-  // Re-pin in the same layout pass so that padding change never shows as a jump.
-  const lastFloatingHeight = useRef(floatingHeight);
-  useLayoutEffect(() => {
-    if (lastFloatingHeight.current === floatingHeight) return;
-    lastFloatingHeight.current = floatingHeight;
-    keepPinned();
-  }, [floatingHeight, keepPinned]);
 
   // Earlier messages are read only when asked for; the view stays on the message the reader was looking at.
   const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'failed'>('idle');
@@ -2284,7 +2282,7 @@ export function ChatColumn() {
               event.clipboardData.setData('text/html', payload.html);
             }}
             className="min-h-0 flex-1 overflow-y-auto px-2 pt-3"
-            style={{ paddingBottom: `calc(0.75rem + ${floatingHeight}px)` }}
+            style={{ paddingBottom: '0.75rem' }}
             data-testid="chat-messages"
           >
             {historyLoading && displayMessages.length === 0 ? (
@@ -2318,6 +2316,7 @@ export function ChatColumn() {
                   <Fragment key={item.message.id}>
                   <ChatMessage
                     message={item.message}
+                    taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}
                     sessionId={activeSessionId}
                     onImageClick={openImageDetail}
                     handleReferences={sessionHandleReferences}
@@ -2360,7 +2359,9 @@ export function ChatColumn() {
                   ))}
                   </Fragment>
                 ))}
-                {isStreaming && statusText ? (
+                {/* #546: one expression of progress at a time; the turn's task block replaces the "generating" bubble. */}
+                {!progressMessageId && runningTaskCount > 0 ? <TaskStatusCards part="running" /> : null}
+                {statusBubbleShown(isStreaming, statusText, runningTaskCount) ? (
                   <ChatStatusBubble text={statusText} progress={progress} thinking={streamBuf?.genState?.thinking === true} />
                 ) : null}
               </>
@@ -2449,7 +2450,7 @@ export function ChatColumn() {
             />
             <div ref={messagesEndRef} />
           </div>
-          {/* #244：进行中的任务悬浮在消息区底部、输入区上方，不撑开消息滚动；消息区按其实测高度留出底部空间。 */}
+          {/* 「回到最新」按钮悬浮在消息区底部；#546 起进行中的任务改在对话内容里显示，不再悬浮。 */}
           <div className="pointer-events-none absolute inset-x-2 bottom-2 flex max-h-[45%] flex-col items-stretch gap-2">
             {showLatest ? (
               <Action
@@ -2460,9 +2461,6 @@ export function ChatColumn() {
                 {schemaText(schema, 'ui.chat.scroll.latest')}
               </Action>
             ) : null}
-            <div ref={floatingRef} className="pointer-events-auto flex min-h-0 flex-col" data-testid="chat-task-float">
-              <TaskStatusCards part="running" />
-            </div>
           </div>
           </div>
 

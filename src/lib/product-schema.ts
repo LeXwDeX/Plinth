@@ -524,6 +524,8 @@ export interface ProductSchema {
       spinner_frame_milliseconds: number;
       percentage_multiplier: number;
       percentage_suffix: string;
+      /** #546: rows the task drawer shows at first and adds with each "show more". */
+      task_list_page_size: number;
       advanced_model_form_feature: string;
       advanced_model_default_mode: 'regular' | 'parts';
       task_progress: {
@@ -1444,6 +1446,8 @@ export interface CanvasProductSchema {
       guide_color_token: string;
       /** A group snaps as one box; true also keeps each member's own edges as secondary targets. */
       group_member_targets: boolean;
+      /** Held to turn snapping off for one move or resize: 'mod' (Ctrl or ⌘), 'alt' or 'shift'. */
+      bypass_modifier: 'mod' | 'alt' | 'shift';
     };
     upload_task_id: string;
     export_filename_fallback: string;

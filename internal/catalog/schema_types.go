@@ -2069,9 +2069,10 @@ type CanvasArtboardLabelSchema struct {
 	BackgroundOpacity float64 `json:"background_opacity"`
 }
 
-// CanvasSnapSchema declares drag snapping: the default of the toolbar toggle,
-// the screen-pixel capture distance, the guide line style, and whether group
-// members are snap targets of their own.
+// CanvasSnapSchema declares drag and resize snapping: the default of the
+// toolbar toggle, the screen-pixel capture distance, the guide line style,
+// whether group members are snap targets of their own, and the key held to
+// turn it off for one gesture.
 type CanvasSnapSchema struct {
 	DefaultEnabled   bool    `json:"default_enabled"`
 	ThresholdPixels  float64 `json:"threshold_pixels"`
@@ -2082,6 +2083,9 @@ type CanvasSnapSchema struct {
 	// visible members); true also keeps each member's own edges as secondary
 	// targets, used only on an axis no unit is within reach of (#273).
 	GroupMemberTargets bool `json:"group_member_targets"`
+	// BypassModifier is held to turn snapping off for the current move or
+	// resize: "mod" (Ctrl, or Command on macOS), "alt" or "shift".
+	BypassModifier string `json:"bypass_modifier"`
 }
 
 type CanvasExportSchema struct {
@@ -7455,19 +7459,21 @@ type FrontendRuntimeSchema struct {
 	// delays the search request after typing.
 	// The title refresh pair controls how long the page re-reads a session
 	// whose automatic title is still pending after a turn completes.
-	SessionMenuPageSize                     int                       `json:"session_menu_page_size"`
-	SessionMenuSearchDebounceMilliseconds   int                       `json:"session_menu_search_debounce_milliseconds"`
-	SessionTitleRefreshAttempts             int                       `json:"session_title_refresh_attempts"`
-	SessionTitleRefreshIntervalMilliseconds int                       `json:"session_title_refresh_interval_milliseconds"`
-	DisplayLocale                           string                    `json:"display_locale"`
-	TaskAPIPrefix                           string                    `json:"task_api_prefix"`
-	SpinnerFrameMilliseconds                int                       `json:"spinner_frame_milliseconds"`
-	PercentageMultiplier                    float64                   `json:"percentage_multiplier"`
-	PercentageSuffix                        string                    `json:"percentage_suffix"`
-	AdvancedModelFormFeature                string                    `json:"advanced_model_form_feature"`
-	AdvancedModelDefaultMode                string                    `json:"advanced_model_default_mode"`
-	TaskProgress                            TaskProgressRuntimeSchema `json:"task_progress"`
-	Toaster                                 ToasterRuntimeSchema      `json:"toaster"`
+	SessionMenuPageSize                     int     `json:"session_menu_page_size"`
+	SessionMenuSearchDebounceMilliseconds   int     `json:"session_menu_search_debounce_milliseconds"`
+	SessionTitleRefreshAttempts             int     `json:"session_title_refresh_attempts"`
+	SessionTitleRefreshIntervalMilliseconds int     `json:"session_title_refresh_interval_milliseconds"`
+	DisplayLocale                           string  `json:"display_locale"`
+	TaskAPIPrefix                           string  `json:"task_api_prefix"`
+	SpinnerFrameMilliseconds                int     `json:"spinner_frame_milliseconds"`
+	PercentageMultiplier                    float64 `json:"percentage_multiplier"`
+	PercentageSuffix                        string  `json:"percentage_suffix"`
+	// TaskListPageSize is how many tasks the task drawer shows at first and adds with each "show more" (#546).
+	TaskListPageSize         int                       `json:"task_list_page_size"`
+	AdvancedModelFormFeature string                    `json:"advanced_model_form_feature"`
+	AdvancedModelDefaultMode string                    `json:"advanced_model_default_mode"`
+	TaskProgress             TaskProgressRuntimeSchema `json:"task_progress"`
+	Toaster                  ToasterRuntimeSchema      `json:"toaster"`
 	// ChatMessagePageSize is how many messages the chat column reads when it
 	// opens a conversation and each time the person asks for earlier ones.
 	ChatMessagePageSize int `json:"chat_message_page_size"`

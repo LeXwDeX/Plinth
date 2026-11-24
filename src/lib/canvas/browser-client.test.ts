@@ -70,7 +70,7 @@ const canvasSchema: CanvasProductSchema = {
     brush: { minimum_size: 1, maximum_size: 200, default_size: 12 },
     selection: { ants_dash: [5, 5], ants_tick_milliseconds: 120, tint_color: '#6366f1', tint_opacity: 0.3, preview_max_edge: 512 },
     mask: { tint_color_token: '--info', tint_opacity: 0.75 },
-    snap: { default_enabled: true, threshold_pixels: 6, guide_stroke_width: 1, guide_color_token: '--reminder', group_member_targets: false },
+    snap: { default_enabled: true, threshold_pixels: 6, guide_stroke_width: 1, guide_color_token: '--reminder', group_member_targets: false, bypass_modifier: 'mod' },
     maximum_node_edge: 512,
     upload_task_id: 'upload',
     export_filename_fallback: 'canvas',

@@ -39,6 +39,8 @@ export interface ContextChipProps {
   data?: Record<string, string | number | boolean | undefined>;
   /** Makes the picture and name a button (the attachment preview). */
   open?: { label: string; onClick: () => void; testId?: string };
+  /** One line only, even with no description (the current-object chip: a picture and its kind badge, #546). */
+  oneLine?: boolean;
   /** Briefly highlighted: the person tried to add what this chip already is. */
   flash?: boolean;
   /** Makes the chip a drag source (an attachment dragged onto the canvas). */
@@ -122,7 +124,7 @@ export function ChipRemove({ label, onClick, icon, pressed, testId }: NonNullabl
   );
 }
 
-export function ContextChip({ square, title, label, subtitle, accent = false, muted = false, remove, testId, hint, data, flash = false, open, onDragStart }: ContextChipProps) {
+export function ContextChip({ square, title, label, subtitle, accent = false, muted = false, remove, testId, hint, data, flash = false, open, oneLine = false, onDragStart }: ContextChipProps) {
   const dataAttributes = Object.fromEntries(Object.entries(data ?? {}).filter(([, value]) => value !== undefined).map(([name, value]) => [`data-${name}`, String(value)]));
   const frameRef = useRef<HTMLSpanElement>(null);
   // Whether some of the text is cut off, read when the pointer or the keyboard arrives (only then can it have changed).
@@ -131,7 +133,7 @@ export function ContextChip({ square, title, label, subtitle, accent = false, mu
   const titleText = typeof title === 'string' ? title : label ?? '';
   const lines = chipLines(titleText, typeof subtitle === 'string' ? subtitle : undefined);
   // A description that only repeats the name is left out; a chip given none keeps its (blank) second line as before.
-  const single = typeof subtitle === 'string' && subtitle.trim() !== '' && lines.subtitle === null;
+  const single = oneLine || (typeof subtitle === 'string' && subtitle.trim() !== '' && lines.subtitle === null);
   const reach = { onPointerEnter: measure, onFocus: measure };
   const chip = (
     <span

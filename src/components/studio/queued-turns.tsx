@@ -5,6 +5,7 @@ import { Clock, X } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { ClampHint } from '@/components/studio/clamp-hint';
 import type { QueuedTurn } from '@/lib/chat/send-queue';
 
 /**
@@ -24,7 +25,9 @@ export function QueuedTurns({ turns, onCancel }: { turns: readonly QueuedTurn[];
         >
           <Clock aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <p className="line-clamp-3 text-[13px] [overflow-wrap:anywhere]">{turn.text}</p>
+            <ClampHint name={turn.text}>
+              <p data-clamp className="line-clamp-3 text-[13px] [overflow-wrap:anywhere]">{turn.text}</p>
+            </ClampHint>
             <p className="mt-0.5 text-muted-foreground">
               <span className="font-medium text-foreground" data-testid="chat-queued-label">{text('ui.studio.chat.queued')}</span>
               <span className="ml-1.5">{text('ui.studio.chat.queued_note')}</span>

@@ -215,6 +215,7 @@ export function Composer({
     ...(pinnedImage ? [{ url: pinnedImage, index: -1, pinned: true, number: images.length + base }] : []),
   ];
   const overriding = chip && !chipSkipped ? overridingHandle(value, chip.handle) : '';
+  const currentName = chip ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label }) : '';
   const skillName = skill.selectedId ? skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId : '';
   const purposeLabelId = useId();
   const stopLabel = schemaText(schema, 'ui.workspace.agent.stop');
@@ -548,7 +549,7 @@ export function Composer({
             <ContextChip
               testId="composer-object-chip"
               // A handle typed in the box wins this turn: the chip says so and turns grey.
-              data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined }}
+              data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined, handle: chip.handle || undefined }}
               accent
               muted={overriding !== ''}
               square={(
@@ -556,15 +557,18 @@ export function Composer({
                   {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
                 </ChipSquare>
               )}
-              label={formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}
+              // #546: the picture and its kind badge only; the name ("当前：画布", "当前：@img5") is the hover hint and the
+              // screen-reader text, not a line of its own. An override still says which handle wins this turn.
+              label={currentName}
+              hint={{ name: currentName }}
+              oneLine={overriding === ''}
               title={(
                 <span className="flex min-w-0 items-center gap-1">
-                  {/* In a narrow column the chip is only half a row wide: the badge keeps its "2D" and gives up its icon so the name fits. */}
-                  <KindBadge kind={chip.kind} className="@max-[24rem]:[&_svg]:hidden" />
-                  <span className="truncate">{formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}</span>
+                  <KindBadge kind={chip.kind} />
+                  <span className="sr-only" data-testid="composer-object-name">{currentName}</span>
                 </span>
               )}
-              subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : chip.label}
+              subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : undefined}
               remove={{ label: chipLabel, onClick: onToggleChip }}
             />
           )
