@@ -171,14 +171,19 @@ func (calls *CallLogger) Log(call Call) {
 		// has its status, its request id and the head of the upstream's
 		// answer, so a gateway's 502 can be traced without the request.
 		attributes = append(attributes, "status", call.Status)
-		if excerpt := ResponseExcerpt(call.ResponseBody, call.Echoes...); excerpt != "" {
+		excerpt := ResponseExcerpt(call.ResponseBody, call.Echoes...)
+		if excerpt != "" {
 			attributes = append(attributes, "response_excerpt", excerpt)
 		}
-		// The refusal's error carries the raw body; the line keeps only the
-		// sanitized excerpt above.
+		// The refusal's error carries the same sanitized excerpt (#563), or
+		// the raw body from an Adapter that does not build it through
+		// Refusal; the line names it once, in response_excerpt above.
 		message := call.Err.Error()
 		if body := strings.TrimSpace(string(call.ResponseBody)); body != "" {
 			message = strings.ReplaceAll(message, body, "[response_excerpt]")
+		}
+		if excerpt != "" {
+			message = strings.ReplaceAll(message, excerpt, "[response_excerpt]")
 		}
 		attributes = append(attributes, "error", message)
 	}
