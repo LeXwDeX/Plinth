@@ -229,6 +229,8 @@ python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-fak
 3. #299 单张 2048×2048 `gpu_oom`：Task FAILED，`failure.class` 为 `upstream_unavailable`、`retryable` 为 `false`、`detail` 等于 `failure.upstream_unavailable`（各 Provider 共用的一句），无交付、无 `notices`，服务的原话（显存、`BIREFNET_PROCESS_RES`、`SDMATTE_PROCESS_RES`、图片尺寸）不出现在公开投影里（#299：失败文案按分类取，服务原话没有公开通道）。
 4. 对照：不带标记的两张图 SUCCEEDED，交付 2 张，没有 `notices`。
 
+本地处理（#538）不接任何上游：`python3 scripts/smoke/smoke-fake-stack.py --only model-convert,model-parts` 用脚本自己生成的 GLB 夹具，经公开 API 跑 `local/static-glb/to-gltf` → `local/static-gltf/to-glb`（往返后三角面、节点名、网格数不变）、`local/model-parts/split`（按节点与按连通块，每个部件各一个 GLB，清单点名每个部件；拆分与合并只读同会话的 Task 输出，夹具先经转换变成 Task 输出）与 `local/model-parts/merge`（三角面为来源之和），并断言非 GLB 与单模型合并在建任务前被拒；两个场景在门禁子集里，登记一致性由 `scripts/tests/test_fake_stack_local_processing.py` 守。真实一轮要补的抠图脚本（`smoke-l5-matting.py` 与只读探针 `matting-probe.py`，含一次 `GET /openapi.json` 取得 `internal/testutil/fakeupstream/matting/api-v1/testdata/openapi.snapshot.json`）尚未编写；快照不存在时对应 Go 测试 skip 并写明 PENDING CAPTURE。
+
 同样的检查是本机整栈冒烟的 `matting-faults` 场景：`python3 scripts/smoke/smoke-fake-stack.py --only matting-faults`（不带 `--only` 的全量运行包含它，单跑含构建缓存命中时本机约十秒；不在 `verify-local.py` 的门禁子集里，fake 与 Adapter 的契约由 `go test` 守）。脚本和场景共用 `fake_faults.py`；复制脚本到别处运行时，`fake_faults.py` 与 `upstream_shape.py` 须与脚本同目录。离线单测：`python3 -m unittest scripts/tests/test_fake_faults.py`（图片、Schema 句子、每条断言的反例、`run()` 的提交顺序与批准、脚本对非 fake 目标的拒绝，以及与 Go 源码里标记和故障词的一致性）。
 
 **手工复现。** `python3 scripts/smoke/fake_faults.py picture failed.png --fault failed` 写一张带标记的 PNG（`--size 2048x2048 --fault gpu_oom` 是 #299 的那张图；`--fault` 可重复），在 fake 形态 dev-test 的背景去除里和普通图片一起上传即可。浏览器只对 Schema 声明的格式（BMP→PNG）重新编码，PNG 与 JPEG 原样上传，标记因此保留；图片若被别的工具重新编码，标记会丢，那一张就按普通图片处理。
