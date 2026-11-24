@@ -24010,7 +24010,7 @@
           "max_bytes": 20000000,
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216
+            "max_pixels": 20000000
           },
           "semantic": "reference-image",
           "extensions": [
@@ -24218,7 +24218,7 @@
           "max_bytes": 20000000,
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216
+            "max_pixels": 20000000
           },
           "semantic": "reference-image",
           "extensions": [
@@ -25044,7 +25044,7 @@
           "max_bytes": 52428800,
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216,
+            "max_pixels": 20000000,
             "keep_when": [
               {
                 "parameter": "background",
@@ -25439,7 +25439,7 @@
           "max_bytes": 52428800,
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216,
+            "max_pixels": 20000000,
             "keep_when": [
               {
                 "parameter": "background",
@@ -26050,7 +26050,7 @@
           "max_total_encoded_bytes": 19500000,
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216
+            "max_pixels": 20000000
           },
           "semantic": "reference-image",
           "wire_name": "messages.0.content.[]",
@@ -26617,7 +26617,7 @@
           },
           "alpha_flatten": {
             "background_color": "#ffffff",
-            "max_pixels": 16777216
+            "max_pixels": 20000000
           },
           "semantic": "reference-image",
           "wire_name": "image"

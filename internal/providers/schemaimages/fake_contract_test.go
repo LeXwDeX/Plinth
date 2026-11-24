@@ -473,3 +473,48 @@ func TestJimengConnectionReadsTheBurstAndModelAccessCodes(t *testing.T) {
 		t.Fatalf("RequestBurstTooFast = %+v, want a declared retryable rate limit", rule)
 	}
 }
+
+// A Gemini image-to-image answer is a PNG, and at 4K every non-square ratio of
+// the constructed size table is over 16,777,216 pixels (the 1:1 square is the
+// only one that fits). The board feeds a task's picture back as the next
+// reference, so each image-to-image Offering must take such a PNG through its
+// alpha_flatten bound instead of refusing it as "pixels over the flatten
+// limit" (#543, F1). The table is constructed: if the real 4K sizes differ the
+// bound is re-checked in the real round.
+func TestOfferingsTakeAGemini4KPNGBackAsAReference(t *testing.T) {
+	stack := newFakeStack(t)
+	gemini := imageConnections[1]
+	ratios := []string{"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}
+	back := []struct {
+		c        imageConnection
+		offering generation.OfferingID
+		input    string
+	}{
+		{imageConnections[0], "openai/gpt-image-2/image-to-image", `{"prompt":"edit","reference_assets":["ref"],"size":"1024x1024"}`},
+		{gemini, "gemini/gemini-3-pro-image/image-to-image", `{"prompt":"edit","reference_assets":["ref"],"aspect_ratio":"3:4","image_size":"4K"}`},
+		{imageConnections[2], "jimeng/seedream-4-5/image-to-image", `{"prompt":"edit","reference_assets":["ref"],"size":"4704x3520"}`},
+	}
+	for _, ratio := range ratios {
+		t.Run(ratio, func(t *testing.T) {
+			first, err := stack.startOffering(t, gemini, "gemini/gemini-3-pro-image/image-to-image",
+				fmt.Sprintf(`{"prompt":"edit","reference_assets":["seed"],"aspect_ratio":%q,"image_size":"4K"}`, ratio),
+				officialAssetStore{"seed": solidPNG(32, 32)},
+				map[string][]generation.InputAsset{"reference_assets": references("seed", 1)})
+			if err != nil {
+				t.Fatalf("the 4K image-to-image answer: %v", err)
+			}
+			config, format, _ := pictureOf(t, first.Artifacts[0])
+			if format != "png" {
+				t.Fatalf("a Gemini image-to-image answer is a PNG, got %s", format)
+			}
+			store := officialAssetStore{"ref": first.Artifacts[0].Inline}
+			for _, next := range back {
+				if _, err := stack.startOffering(t, next.c, next.offering, next.input, store,
+					map[string][]generation.InputAsset{"reference_assets": references("ref", 1)}); err != nil {
+					t.Errorf("%s refused its own 4K %s answer (%dx%d = %d pixels) as a reference: %v",
+						next.offering, ratio, config.Width, config.Height, config.Width*config.Height, err)
+				}
+			}
+		})
+	}
+}
