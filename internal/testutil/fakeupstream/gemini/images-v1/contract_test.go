@@ -103,9 +103,9 @@ func TestEveryPictureSizeStaysWithinThePictureBound(t *testing.T) {
 	}
 }
 
-// I18 (constructed): a ratio or size outside the documented sets, or more than
-// 14 references, is a 400. The real gateway may ignore these instead; the real
-// round settles it.
+// I18 (constructed): a ratio or size outside the documented sets is a 400
+// invalid_request, more than 14 references a 416 out_of_range. The real gateway
+// may ignore these instead; the real round settles it.
 func TestOutOfContractImageConfigIsRefused(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	for name, config := range map[string]map[string]any{
@@ -125,15 +125,19 @@ func TestOutOfContractImageConfigIsRefused(t *testing.T) {
 		"aspect with whitespace": {"aspect_ratio": " 1:1", "image_size": "1K"},
 	} {
 		status, body := complete(f, withConfig(textRequest(), config))
-		if status != http.StatusBadRequest || testkit.Field(t, body, "error", "code") != "invalid_argument" {
+		// #579: the official code for an invalid parameter is invalid_request
+		// (the errors page has no invalid_argument).
+		if status != http.StatusBadRequest || testkit.Field(t, body, "error", "code") != "invalid_request" {
 			t.Fatalf("%s: %d %v", name, status, body)
 		}
 	}
 	if status, body := complete(f, references(14)); status != http.StatusOK {
 		t.Fatalf("14 references: %d %v", status, body)
 	}
+	// #579: a count beyond its limit is the official 416 out_of_range.
 	status, body := complete(f, references(15))
-	if status != http.StatusBadRequest || !strings.Contains(fmt.Sprint(testkit.Field(t, body, "error", "message")), "14") {
+	if status != http.StatusRequestedRangeNotSatisfiable || testkit.Field(t, body, "error", "code") != "out_of_range" ||
+		!strings.Contains(fmt.Sprint(testkit.Field(t, body, "error", "message")), "14") {
 		t.Fatalf("15 references: %d %v", status, body)
 	}
 	// Every Catalog option of both parameters is in the documented sets.

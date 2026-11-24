@@ -235,6 +235,35 @@ func TestGeminiConnectionReadsTheDocumentedErrorCodes(t *testing.T) {
 	runStubbedAnswers(t, gemini, func(url string) string { return url + "/v1" }, answers)
 }
 
+// #579: the Gemini fake answers the official codes of the errors page
+// (permission_denied for 403, prohibited_content for a blocked request,
+// invalid_request and out_of_range for refused parameters) instead of
+// forbidden, content_policy_violation and invalid_argument. The Adapter reads
+// each of them, served by the fake itself, into the class it had before.
+func TestGeminiConnectionReadsTheFakeOfficialCodes(t *testing.T) {
+	fake, err := fakeupstream.New(fakeupstream.Config{}, geminiimagesv1.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	gemini := imageConnections[1]
+	for key, want := range map[string]generation.FailureClass{
+		fakeupstream.KeyPrefix + string(fakeupstream.ScenarioForbidden):        generation.FailureUpstreamDenied,
+		fakeupstream.KeyPrefix + string(fakeupstream.ScenarioPermissionDenied): generation.FailureUpstreamDenied,
+		fakeupstream.KeyPrefix + string(fakeupstream.ScenarioTaskFailed):       generation.FailureContentRejected,
+		fakeupstream.KeyPrefix + "error-invalid_request":                       generation.FailureInvalidInput,
+		fakeupstream.KeyPrefix + "error-416-out_of_range":                      generation.FailureInvalidInput,
+	} {
+		t.Run(key, func(t *testing.T) {
+			failure := startImage(t, gemini, server.URL+gemini.prefix, key)
+			if failure == nil || failure.Class != want || failure.Retryable {
+				t.Fatalf("failure = %+v, want class %s, not retryable", failure, want)
+			}
+		})
+	}
+}
+
 // Ark's error codes (https://docs.volcengine.com/docs/82379/1299023, checked
 // 2026-10-29). QuotaExceeded (429) and SetLimitExceeded (429) are exhausted
 // quotas and usage caps, not rate limits: waiting a minute does not help, so the
@@ -351,7 +380,11 @@ func TestJimengConnectionReadsTheDocumentedCodeVariants(t *testing.T) {
 		// succeed once it is back.
 		{"ContentSecurityDetectionError 400", 400, body("ContentSecurityDetectionError"), generation.FailureUpstreamUnavailable, true},
 		{"InvalidEndpointOrModel.NotFound 404", 404, body("InvalidEndpointOrModel.NotFound"), generation.FailureUpstreamDenied, false},
-		{"ModelIDAccessDisabled 404", 404, body("ModelIDAccessDisabled"), generation.FailureUpstreamDenied, false},
+		// #579: the official table names it with its InvalidEndpointOrModel prefix.
+		{"InvalidEndpointOrModel.ModelIDAccessDisabled 404", 404, body("InvalidEndpointOrModel.ModelIDAccessDisabled"), generation.FailureUpstreamDenied, false},
+		// #579: an overdue balance under the OperationDenied family is an empty
+		// balance, not the 403 upstream refusal the status range would read.
+		{"OperationDenied.ServiceOverdue 403", 403, body("OperationDenied.ServiceOverdue"), generation.FailureInsufficientBalance, false},
 		{"ModelNotOpen 404", 404, body("ModelNotOpen"), generation.FailureUpstreamDenied, false},
 	}
 	runStubbedAnswers(t, jimeng, func(url string) string { return url }, answers)
