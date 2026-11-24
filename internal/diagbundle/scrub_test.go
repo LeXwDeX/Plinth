@@ -242,7 +242,7 @@ func TestLegacyAddressDecisionMatchesTheScan(t *testing.T) {
 		text string
 		want bool
 	}{
-		{"010.0.0.1", true}, {"10.01", true}, {"127.01", true}, {"0x7f.1", true}, {"0177.1", true},
+		{"010.0.0.1", true}, {"10.01", true}, {"10.00", true}, {"127.01", true}, {"0x7f.1", true}, {"0177.1", true},
 		{"00.123", false}, {"0.05", false}, {"1.2.3", false}, {"1.5", false}, {"3.05", false}, {"2026.11", false},
 	} {
 		if got := legacyAddress(tc.text); got != tc.want {
