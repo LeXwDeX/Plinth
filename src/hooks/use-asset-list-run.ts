@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { useIdleInterval } from '@/hooks/use-polling';
 import {
   assetListClient,
   type AssetListClient,
@@ -14,9 +15,6 @@ import {
   type AssetListSummary,
 } from '@/lib/asset-lists/client';
 
-/** The brief's 3–5s window: the runner ticks every 2s, so 4s keeps the card current. */
-const DEFAULT_INTERVAL_MS = 4000;
-
 export interface UseAssetListRunOptions {
   /** The open session's project; nothing is read while empty. */
   projectId: string | null;
@@ -24,7 +22,7 @@ export interface UseAssetListRunOptions {
   listId?: string | null;
   /** Test seam; the real hook builds its client from the Schema. */
   client?: AssetListClient;
-  /** Overrides the 4s polling interval. */
+  /** Overrides the Schema's `runtime.frontend.task_polling_interval_milliseconds`. */
   intervalMs?: number;
   /** False on a Catalog without the run route: no request is sent. */
   enabled?: boolean;
@@ -43,39 +41,42 @@ export function latestConfirmedList(
     (right.decided_at ?? right.updated_at).localeCompare(left.decided_at ?? left.updated_at))[0];
 }
 
-function documentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
-}
-
 /**
  * #328: the run summary of one project list. The hook reads the project's list
- * summaries, picks the tracked (or newest confirmed) list and polls it every few
- * seconds while the tab is visible; controls resolve and then re-read at once so
- * the card never shows the state it just left.
+ * summaries, picks the tracked (or newest confirmed) list and polls it; controls
+ * resolve and then re-read at once so the card never shows the state it just
+ * left.
+ *
+ * #511: the poll follows the page's rules (#385): the interval is the Schema's
+ * task polling interval, the page's SWR gate stops it in a hidden tab and after
+ * the login ended, and while the followed list is not running and its summary
+ * stays the same the wait grows up to the Schema's `idle_polling` ceiling.
  */
 export function useAssetListRun(options: UseAssetListRunOptions) {
   const { schema } = useProductSchema();
-  const { projectId, listId = null, intervalMs = DEFAULT_INTERVAL_MS, enabled = true } = options;
+  const {
+    projectId,
+    listId = null,
+    intervalMs = schema.runtime.frontend.task_polling_interval_milliseconds,
+    enabled = true,
+  } = options;
   const fallbackClient = useMemo(() => assetListClient(schema), [schema]);
   const client = options.client ?? fallbackClient;
-  const [visible, setVisible] = useState(documentVisible);
-
-  // Poll only while the workspace can be seen; a hidden tab revalidates when it
-  // becomes visible again (SWR's focus revalidation covers the switch too).
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const sync = () => setVisible(documentVisible());
-    sync();
-    document.addEventListener('visibilitychange', sync);
-    return () => document.removeEventListener('visibilitychange', sync);
-  }, []);
+  // A running list moves on its own: its reads keep the interval. Known from the previous read, because the interval
+  // is handed to the read that produces the next one.
+  const [running, setRunning] = useState(false);
+  const refreshInterval = useIdleInterval<AssetListSummary[]>(
+    intervalMs,
+    schema.runtime.frontend.idle_polling,
+    { busy: running },
+  );
 
   const active = Boolean(projectId) && enabled;
   const { data, error, isLoading, mutate } = useSWR<AssetListSummary[]>(
     active ? ['asset-list-run', projectId, listId ?? ''] : null,
     ([, id]: readonly [string, string, string]) => client.listProjectLists(id),
     {
-      refreshInterval: visible ? intervalMs : 0,
+      refreshInterval,
       revalidateOnFocus: true,
       keepPreviousData: false,
     },
@@ -84,6 +85,8 @@ export function useAssetListRun(options: UseAssetListRunOptions) {
   const lists = active ? data ?? [] : [];
   const list = active ? latestConfirmedList(lists, listId) : null;
   const run: AssetListRun | null = list?.run ?? null;
+  const runStatus = run?.status ?? '';
+  useEffect(() => { setRunning(runStatus === 'running'); }, [runStatus]);
 
   const refresh = useCallback(async () => { await mutate(); }, [mutate]);
 

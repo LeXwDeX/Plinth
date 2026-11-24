@@ -332,6 +332,18 @@ export function boardPollingActive(board: AssetListBoard | null): boolean {
 }
 
 /**
+ * #511: whether something on the board is being made right now: the run is
+ * running or an item is working. While it is, the board's poll keeps its
+ * interval; a board whose items only wait for review is read more slowly while
+ * it stays the same.
+ */
+export function boardProducing(board: AssetListBoard | null): boolean {
+  if (!board) return false;
+  if (board.list.run?.status === 'running') return true;
+  return board.items.some((item) => item.state === 'working');
+}
+
+/**
  * #329d: the item ids a batch download takes. An explicit selection of
  * accepted items wins; otherwise the accepted items the current filter shows.
  * The archive route narrows to exactly these ids.

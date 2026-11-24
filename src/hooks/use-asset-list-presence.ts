@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 import { assetListPresenceURL, type AssetListClient } from '@/lib/asset-lists/client';
+import { signedInGate, startPoller } from '@/lib/polling';
 import type { ProductSchema } from '@/lib/product-schema';
 
 /**
@@ -11,6 +12,11 @@ import type { ProductSchema } from '@/lib/product-schema';
  * heartbeat within its grace period. Background tabs keep heartbeating on
  * purpose: the browser may throttle them and the server's grace covers the
  * gap, so a throttled tab still counts as present.
+ *
+ * #511: the heartbeat runs on the page's poller (#385) with the signed-in gate:
+ * it goes on in a hidden tab, stops once the login has ended (every request
+ * would be a 401) and beats again at once after signing in. It never backs off:
+ * its interval is what keeps the tab within the server's grace.
  */
 export const PRESENCE_TAB_STORAGE_KEY = 'plinth.asset-list.tab';
 const DEFAULT_HEARTBEAT_SECONDS = 15;
@@ -70,16 +76,18 @@ export function useAssetListPresence(options: UseAssetListPresenceOptions): void
     let stopped = false;
 
     // Presence is background bookkeeping: a failed request is retried by the
-    // next tick, and nothing is logged.
-    const call = (state: 'present' | 'leave') => {
+    // next beat, and nothing is logged.
+    const call = (state: 'present' | 'leave'): Promise<void> => {
       try {
-        void Promise.resolve(client.presence(projectId, tabID, state)).catch(() => {});
+        return Promise.resolve(client.presence(projectId, tabID, state)).catch(() => {});
       } catch {
         // A client that refuses to build the URL must not break the shell.
+        return Promise.resolve();
       }
     };
     const leave = () => {
-      if (left) return;
+      // An ended login has nobody to leave for: the request would only be a 401.
+      if (left || signedInGate.halted()) return;
       left = true;
       if (beaconURL && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
         try {
@@ -89,25 +97,24 @@ export function useAssetListPresence(options: UseAssetListPresenceOptions): void
           // Beacon refused the request; the keepalive fetch below still runs.
         }
       }
-      call('leave');
+      void call('leave');
     };
-    const tick = () => {
+    const beat = async () => {
       if (stopped) return;
       // A page restored from the back/forward cache heartbeats again, so its
       // later unmount must leave again too.
       left = false;
-      call('present');
+      await call('present');
     };
 
-    tick();
-    const timer = window.setInterval(tick, intervalMs);
+    const poller = startPoller({ read: beat, intervalMilliseconds: intervalMs, gate: signedInGate });
     leaveRef.current = leave;
 
     // A project change or unmount leaves the old project before React starts
     // the next heartbeat effect for the new one.
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      poller.stop();
       leave();
       if (leaveRef.current === leave) leaveRef.current = null;
     };
