@@ -595,6 +595,10 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	if source.Chat.Presentation.Messages.GenerationFailedByClass != nil {
 		result.Chat.Presentation.Messages.GenerationFailedByClass = cloneStringMap(source.Chat.Presentation.Messages.GenerationFailedByClass)
 	}
+	if source.Chat.Presentation.Messages.UpstreamHTTPError.Reasons != nil {
+		result.Chat.Presentation.Messages.UpstreamHTTPError.Reasons = cloneStringMap(source.Chat.Presentation.Messages.UpstreamHTTPError.Reasons)
+	}
+	result.Chat.Presentation.Messages.UpstreamHTTPError.FailureClasses = slices.Clone(source.Chat.Presentation.Messages.UpstreamHTTPError.FailureClasses)
 	if source.Chat.Presentation.Messages.GenerationFailedMeteredByClass != nil {
 		result.Chat.Presentation.Messages.GenerationFailedMeteredByClass = cloneStringMap(source.Chat.Presentation.Messages.GenerationFailedMeteredByClass)
 	}

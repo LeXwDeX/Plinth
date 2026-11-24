@@ -405,6 +405,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return fmt.Errorf("presentation.generation_failed_by_class[%q] 必须是已声明的失败分类并带文案", class)
 		}
 	}
+	if err := schema.Presentation.Messages.UpstreamHTTPError.validate(); err != nil {
+		return err
+	}
 	for class, message := range schema.Presentation.Messages.GenerationFailedMeteredByClass {
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {
 			return fmt.Errorf("presentation.generation_failed_metered_by_class[%q] 必须是已声明的失败分类并带文案", class)
