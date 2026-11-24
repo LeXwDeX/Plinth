@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"encoding/json"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -105,4 +106,26 @@ func TestAgentConfigurationRejectsDefaultEnabledDuplicateMCPReads(t *testing.T) 
 	if err := catalog.ValidateApplicationSchema(unknown); err == nil || !strings.Contains(err.Error(), "duplicates unknown built-in tool") {
 		t.Fatalf("unknown duplicate target accepted: %v", err)
 	}
+}
+
+// #517: the workspace-read preset's mcp_get_task_assets needs a task, as its
+// runtime does; the Schema says so, so the model is not left to guess.
+func TestWorkspaceReadPresetRequiresTheTaskOfGetTaskAssets(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range c.Application().AgentConfiguration.MCPPresets[0].Tools {
+		if tool.Name != "mcp_get_task_assets" {
+			continue
+		}
+		var parameters struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil || !slices.Contains(parameters.Required, "task_id") {
+			t.Fatalf("mcp_get_task_assets parameters = %s (%v)", tool.Parameters, err)
+		}
+		return
+	}
+	t.Fatal("the workspace-read preset has no mcp_get_task_assets")
 }

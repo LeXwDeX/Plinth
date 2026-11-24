@@ -1367,16 +1367,22 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 		want     string
 		category string
 		action   string
+		metered  bool
 	}{
 		"balance": {generation.Failure{Class: generation.FailureInsufficientBalance, SafeDetail: "upstream said: insufficient balance acct-123"}, balance,
-			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser)},
+			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser), false},
 		"rejected": {generation.Failure{Class: generation.FailureRejected, SafeDetail: "upstream said no"}, generic,
-			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser)},
+			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser), false},
 		// #326 N2: a source whose original task the provider no longer keeps
 		// is named as such, with the way forward, never the upstream 404.
 		"source expired": {generation.Failure{Class: generation.FailureSourceExpired, SafeDetail: "upstream said: Task not found acct-123"},
 			application.Chat.Presentation.Messages.GenerationFailedByClass[string(generation.FailureSourceExpired)],
-			string(generation.CategoryInputInvalid), string(generation.ActionFixInput)},
+			string(generation.CategoryInputInvalid), string(generation.ActionFixInput), false},
+		// #517: a credit-metered integrity failure may already be charged; the
+		// primary result sends the Agent to the person, as the task view does.
+		"metered integrity": {generation.Failure{Class: generation.FailureIntegrity, Retryable: true, SafeDetail: "upstream said: stored acct-123"},
+			application.Chat.Presentation.Messages.GenerationFailedMeteredByClass[string(generation.FailureIntegrity)],
+			string(generation.CategoryInternal), string(generation.ActionAskUser), true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			failure := tc.failure
@@ -1388,6 +1394,7 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 				tasks: []generation.Task{{
 					ID: "configured-task", OwnerID: "owner-a", SessionID: "session-a",
 					State: generation.TaskFailed, Failure: &failure,
+					Offering: generation.Offering{CreditsMetered: tc.metered},
 				}},
 			}
 			executor, err := generationtool.New(generationtool.Config{
@@ -1419,6 +1426,12 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 			}
 			if content["failure_advice"] == "" || content["failure_advice"] == nil {
 				t.Fatalf("failure result has no advice: %s", result.AgentContent)
+			}
+			// The same attribution as the task view and the external MCP.
+			report, _ := generationtool.TaskFailureReport(application.Chat, gateway.tasks[0])
+			if content["retryable"] != report.Retryable || content["user_decision_required"] != report.UserDecisionRequired ||
+				content["next_action"] != string(report.Action) {
+				t.Fatalf("primary result %s differs from the attribution %+v", result.AgentContent, report)
 			}
 		})
 	}

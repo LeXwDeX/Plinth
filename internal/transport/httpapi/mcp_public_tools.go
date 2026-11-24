@@ -11,6 +11,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
 	"github.com/LeXwDeX/Plinth/internal/routing"
@@ -392,6 +393,13 @@ func (s *Server) mcpInvalidArguments(locale, detail string) mcpOutcome {
 	return mcpOutcome{problem: &mcpProblem{Code: "invalid_arguments", Message: message}}
 }
 
+// mcpInvalidDetail is the {detail} of invalid_arguments: the JSON path the
+// refusal names, then the Schema's reason in the request's language (#517).
+// replacements fill the reason's placeholders, as strings.NewReplacer pairs.
+func (s *Server) mcpInvalidDetail(locale, path, text string, replacements ...string) string {
+	return path + ": " + strings.NewReplacer(replacements...).Replace(s.mcpText(locale, text))
+}
+
 func (s *Server) mcpTaskNotFound(locale string) mcpOutcome {
 	return mcpOutcome{problem: &mcpProblem{Code: "task_not_found", Message: s.mcpText(locale, s.application.MCPPublic.Messages.TaskNotFound)}}
 }
@@ -439,7 +447,7 @@ type mcpTaskView struct {
 
 // mcpTaskView projects a Task the way the web API does: the public state and
 // its label come from the Schema's task states, the failure is the platform's
-// own attribution (generation.ClassifyFailure) with the Schema's advice, and no
+// own attribution (generationtool.TaskFailureReport) with the Schema's advice, and no
 // internal detail, upstream text or storage key is shown.
 func (s *Server) mcpTaskView(locale string, task generation.Task) (mcpTaskView, *mcppublic.Failure) {
 	presentation := catalog.TaskStatePresentation{
@@ -481,7 +489,8 @@ func (s *Server) mcpTaskView(locale string, task generation.Task) (mcpTaskView, 
 	}
 	var attribution *mcppublic.Failure
 	if task.Failure != nil {
-		report := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+		// #517: the platform's one attribution, metered override included.
+		report, _ := generationtool.TaskFailureReport(s.application.Chat, task)
 		advice := s.application.Chat.Processing.Failures.Advice[string(report.Category)]
 		if advice == "" {
 			advice = s.application.Chat.Processing.Failures.Actions[string(report.Action)]
@@ -596,7 +605,7 @@ func (s *Server) mcpListTasks(call *mcpCall) (mcpOutcome, error) {
 	}
 	page, err := s.generation.List(call.ctx, generation.OwnTasks(call.owner), query)
 	if mcpChainHasCode(err, generation.ErrInvalidInput) {
-		return s.mcpInvalidArguments(call.locale, "$.cursor: is not a cursor of this list"), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.cursor", s.application.MCPPublic.Messages.InvalidDetails.NotACursor)), nil
 	}
 	if err != nil {
 		return mcpOutcome{}, err
@@ -850,7 +859,7 @@ func (s *Server) mcpListServices(call *mcpCall) (mcpOutcome, error) {
 			}
 		}
 		if !served {
-			return s.mcpInvalidArguments(call.locale, "$.capability: is not served through MCP"), nil
+			return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.capability", s.application.MCPPublic.Messages.InvalidDetails.CapabilityNotServed)), nil
 		}
 	}
 	groups := make([]mcpGroupView, 0, len(service.ServiceGroups))

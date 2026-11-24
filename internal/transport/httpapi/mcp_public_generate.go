@@ -120,6 +120,7 @@ func (s *Server) mcpStartArguments(call *mcpCall) (mcpStartRequest, *mcpOutcome)
 		outcome := s.mcpInvalidArguments(call.locale, detail)
 		return mcpStartRequest{}, &outcome
 	}
+	details := s.application.MCPPublic.Messages.InvalidDetails
 	switch call.tool.declared.Name {
 	case catalog.MCPToolGenerateImage:
 		request.capability = generation.TextToImage
@@ -135,7 +136,7 @@ func (s *Server) mcpStartArguments(call *mcpCall) (mcpStartRequest, *mcpOutcome)
 		case request.prompt != nil:
 			request.capability = generation.TextTo3D
 		default:
-			return invalid("$: give a prompt (text-to-3D) or images (image-to-3D)")
+			return invalid(s.mcpInvalidDetail(call.locale, "$", details.PromptOrImages))
 		}
 	case catalog.MCPToolProcessModel:
 		request.capability = generation.Capability(mcpStringArgument(call, "operation"))
@@ -143,23 +144,24 @@ func (s *Server) mcpStartArguments(call *mcpCall) (mcpStartRequest, *mcpOutcome)
 		return mcpStartRequest{}, nil
 	}
 	if !slices.Contains(call.tool.declared.Capabilities, request.capability) {
-		return invalid("$: this tool does not offer " + string(request.capability))
+		return invalid(s.mcpInvalidDetail(call.locale, "$", details.ToolNotOffering, "{capability}", string(request.capability)))
 	}
-	if name, value := mcpReasonProblem(request.reasons); name != "" {
-		return invalid("$.parameter_reasons." + name + ": " + value)
+	if name := mcpReasonProblem(request.reasons); name != "" {
+		return invalid(s.mcpInvalidDetail(call.locale, "$.parameter_reasons."+name, details.ReasonText))
 	}
 	return request, nil
 }
 
-// mcpReasonProblem finds a parameter_reasons entry that is not a non-empty text.
-func mcpReasonProblem(reasons map[string]any) (name, problem string) {
+// mcpReasonProblem names a parameter_reasons entry that is not a non-empty
+// text of at most 4096 bytes; "" when every entry is one.
+func mcpReasonProblem(reasons map[string]any) string {
 	for key, value := range reasons {
 		text, ok := value.(string)
 		if !ok || strings.TrimSpace(text) == "" || len(text) > 4096 {
-			return key, "must be a text of 1 to 4096 bytes"
+			return key
 		}
 	}
-	return "", ""
+	return ""
 }
 
 // mcpOperationID is the operation identity of a call: the key and what the call
@@ -671,23 +673,12 @@ func (s *Server) mcpOffering(call *mcpCall, request mcpStartRequest) (generation
 		return s.mcpNamedOffering(call, request)
 	}
 	if request.capability == generation.ImageTo3D && len(request.images) > 1 {
-		var fallback *generation.Offering
-		for _, candidate := range s.generation.Offerings(request.capability) {
-			if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) || !generationtool.TakesSeveralViews(candidate) {
-				continue
-			}
-			if candidate.Default {
-				return candidate, nil
-			}
-			if fallback == nil {
-				found := candidate
-				fallback = &found
-			}
+		chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+			mcppublic.OfferingNeed{SeveralViews: true})
+		if outcome := s.mcpSelectionProblem(call, chosen.Code, mcppublic.Subject{}); outcome != nil {
+			return generation.Offering{}, outcome
 		}
-		if fallback != nil {
-			return *fallback, nil
-		}
-		return generation.Offering{}, s.mcpMessageProblem(call, "no_service", service.Messages.NoService, mcppublic.Subject{})
+		return chosen.Offering, nil
 	}
 	id, err := s.generation.DefaultOfferingID(request.capability)
 	if err != nil {
@@ -732,26 +723,26 @@ func (s *Server) mcpMaskOffering(call *mcpCall, request mcpStartRequest) (genera
 		}
 		return offering, nil
 	}
-	var chosen *generation.Offering
-	for _, candidate := range s.generation.Offerings(request.capability) {
-		if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) {
-			continue
-		}
-		if _, declared := mcpSemanticParameter(candidate, generation.SemanticMask); !declared {
-			continue
-		}
-		if candidate.Default {
-			return candidate, nil
-		}
-		if chosen == nil {
-			found := candidate
-			chosen = &found
-		}
+	chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+		mcppublic.OfferingNeed{Mask: true})
+	if outcome := s.mcpSelectionProblem(call, chosen.Code, mcppublic.Subject{}); outcome != nil {
+		return generation.Offering{}, outcome
 	}
-	if chosen == nil {
-		return generation.Offering{}, s.mcpMessageProblem(call, "no_service", service.Messages.NoService, mcppublic.Subject{})
+	return chosen.Offering, nil
+}
+
+// mcpSelectionProblem words why no service was chosen (#517): the selection's
+// code is the problem code, its message the Schema's. nil when one was chosen.
+func (s *Server) mcpSelectionProblem(call *mcpCall, code mcppublic.SelectionCode, subject mcppublic.Subject) *mcpOutcome {
+	messages := s.application.MCPPublic.Messages
+	switch code {
+	case mcppublic.SelectionChosen:
+		return nil
+	case mcppublic.SelectionSourceIncompatible:
+		return s.mcpMessageProblem(call, string(code), messages.SourceIncompatible, subject)
+	default:
+		return s.mcpMessageProblem(call, string(mcppublic.SelectionNoService), messages.NoService, subject)
 	}
-	return *chosen, nil
 }
 
 // mcpSemanticParameter finds the parameter an Offering declares for a semantic
@@ -834,28 +825,12 @@ func (s *Server) mcpProcessingOffering(call *mcpCall, request mcpStartRequest, s
 		}
 		return generation.Offering{}, nil, s.mcpMessageProblem(call, "source_incompatible", service.Messages.SourceIncompatible, subject)
 	}
-	var chosen *generation.Offering
-	var chosenBinding *generation.ModelSourceBinding
-	for _, candidate := range s.generation.Offerings(request.capability) {
-		if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) {
-			continue
-		}
-		binding := bind(candidate)
-		if binding == nil {
-			continue
-		}
-		if candidate.Default {
-			return candidate, binding, nil
-		}
-		if chosen == nil {
-			found := candidate
-			chosen, chosenBinding = &found, binding
-		}
+	chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+		mcppublic.OfferingNeed{Source: &source, SourceAsset: generation.AssetID(request.sourceAsset), Prefer: prefer})
+	if outcome := s.mcpSelectionProblem(call, chosen.Code, subject); outcome != nil {
+		return generation.Offering{}, nil, outcome
 	}
-	if chosen == nil {
-		return generation.Offering{}, nil, s.mcpMessageProblem(call, "source_incompatible", service.Messages.SourceIncompatible, subject)
-	}
-	return *chosen, chosenBinding, nil
+	return chosen.Offering, chosen.Binding, nil
 }
 
 // mcpBuildInput lays the call's arguments over the service's declared
@@ -869,6 +844,7 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 		outcome := s.mcpInvalidArguments(call.locale, detail)
 		return nil, &outcome
 	}
+	details := s.application.MCPPublic.Messages.InvalidDetails
 	declared := make(map[string]generation.Parameter, len(offering.Parameters))
 	var promptName, referenceName string
 	for _, parameter := range offering.Parameters {
@@ -890,35 +866,35 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 		parameter, known := declared[name]
 		switch {
 		case !known || !offering.AgentParameterAllowed(parameter):
-			return invalid("$.parameters." + name + ": is not a parameter this service lets a caller set (see list_services)")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.parameters."+name, details.ParameterNotSettable))
 		case name == promptName:
-			return invalid("$.parameters." + name + ": give the prompt in the prompt argument")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.parameters."+name, details.PromptInParameters))
 		}
 		input[name] = request.parameters[name]
 		if parameter.AdjustmentPolicy == "advised" && !sameParameterDefault(request.parameters[name], parameter.Default) {
 			if reason, _ := request.reasons[name].(string); strings.TrimSpace(reason) == "" {
-				return invalid("$.parameter_reasons." + name + ": this parameter is advised against changing; say why in parameter_reasons")
+				return invalid(s.mcpInvalidDetail(call.locale, "$.parameter_reasons."+name, details.ReasonRequired))
 			}
 		}
 	}
 	for name := range request.reasons {
 		if parameter, known := declared[name]; !known || parameter.AdjustmentPolicy != "advised" {
-			return invalid("$.parameter_reasons." + name + ": this parameter takes no reason (only an advised parameter does)")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.parameter_reasons."+name, details.ReasonNotTaken))
 		}
 	}
 	if request.prompt != nil {
 		if promptName == "" {
-			return invalid("$.prompt: this service takes no prompt")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.prompt", details.PromptNotTaken))
 		}
 		input[promptName] = *request.prompt
 	}
 	if len(request.images) > 0 {
 		if referenceName == "" {
-			return invalid("$.images: this service takes no pictures")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.images", details.ImagesNotTaken))
 		}
 		if declared[referenceName].Type == "asset" {
 			if len(request.images) != 1 {
-				return invalid("$.images: this service takes exactly one picture")
+				return invalid(s.mcpInvalidDetail(call.locale, "$.images", details.ImagesExactlyOne))
 			}
 			input[referenceName] = request.images[0]
 		} else {
@@ -928,10 +904,10 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 	if request.mask != "" {
 		parameter, declaredMask := mcpSemanticParameter(offering, generation.SemanticMask)
 		if !declaredMask {
-			return invalid("$.mask: this service declares no mask parameter (see list_services)")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.mask", details.MaskNotDeclared))
 		}
 		if len(request.images) == 0 {
-			return invalid("$.mask: a mask must name the picture it edits in images")
+			return invalid(s.mcpInvalidDetail(call.locale, "$.mask", details.MaskWithoutImage))
 		}
 		input[parameter.Name] = request.mask
 		if outcome := s.mcpMaskProblem(call, request, parameter); outcome != nil {
@@ -943,7 +919,7 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
-		return invalid("$.parameters: cannot be encoded")
+		return invalid(s.mcpInvalidDetail(call.locale, "$.parameters", details.ParametersNotEncodable))
 	}
 	// An Offering that bills extra credits for some inputs needs the consent
 	// flag. The server sets it, as for the Agent: the caller cannot name it, the
@@ -951,7 +927,7 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 	// policy decides that exact input.
 	consented, err := generationtool.ConsentInput(offering, encoded)
 	if err != nil {
-		return invalid("$.parameters: cannot be encoded")
+		return invalid(s.mcpInvalidDetail(call.locale, "$.parameters", details.ParametersNotEncodable))
 	}
 	return consented, nil
 }
