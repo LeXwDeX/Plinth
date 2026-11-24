@@ -5415,6 +5415,16 @@ type ChatAgentSchema struct {
 	// more with it, so the Agent learns why it cannot see the picture and
 	// adjusts by itself. Empty turns the retry off.
 	ModeratedImageNote string `json:"moderated_image_note,omitempty"`
+	// InvalidImageNote replaces each picture of an Agent request that the
+	// upstream read and refused as a bad picture (#522, after #497); the
+	// request is sent once more with it, followed by what the upstream
+	// objected to, so the Agent says which picture was skipped and carries on.
+	// Empty turns that retry off.
+	InvalidImageNote string `json:"invalid_image_note,omitempty"`
+	// ImagesUnsupportedNote replaces every picture of an Agent request that
+	// the model refused because it takes no picture input (#522, after #253);
+	// the request is sent once more with it. Empty turns that retry off.
+	ImagesUnsupportedNote string `json:"images_unsupported_note,omitempty"`
 	// TitleTimeoutSeconds bounds the background title summary call.
 	TitleTimeoutSeconds int    `json:"title_timeout_seconds"`
 	WorkerCount         int    `json:"worker_count"`
@@ -7904,6 +7914,32 @@ type ChatVisionSchema struct {
 	// ModelProfiles narrow the budget or turn vision off for a model family,
 	// matched case-insensitively by prefix; the first match wins.
 	ModelProfiles []ChatVisionModelProfileSchema `json:"model_profiles,omitempty"`
+	// InvalidPicture is the policy for a picture the upstream cannot read
+	// (#522): the smallest picture worth sending and what a session remembers
+	// of the pictures it refused. The zero value keeps the pictures as they are.
+	InvalidPicture ChatVisionInvalidPictureSchema `json:"invalid_picture"`
+}
+
+// ChatVisionInvalidPictureSchema declares which pictures never reach the model
+// and how a refused one is remembered (#522). Every bound is a Product Schema
+// value: the code only compares.
+type ChatVisionInvalidPictureSchema struct {
+	// MinimumEdgePixels is the shortest edge of a picture that is sent; a
+	// picture with a shorter edge is skipped before the request (an upstream
+	// answers a one-pixel strip with a 400 that blocks every later round). 0
+	// turns the check off.
+	MinimumEdgePixels int `json:"minimum_edge_pixels"`
+	// MaximumAspectRatio is the longest side divided by the shortest that is
+	// sent; a longer strip is skipped. 0 turns the check off.
+	MaximumAspectRatio int `json:"maximum_aspect_ratio"`
+	// MaximumExcluded bounds the pictures one session remembers as refused;
+	// the oldest are forgotten first. A refusal can only be remembered when
+	// this is positive.
+	MaximumExcluded int `json:"maximum_excluded"`
+	// SkippedTemplate ({handles}, space separated) tells the Agent which
+	// pictures of the session were skipped because the upstream refuses them,
+	// so it can say so instead of describing a picture it cannot see.
+	SkippedTemplate string `json:"skipped_template,omitempty"`
 }
 
 // Vision role sources. A picture belongs to exactly one source: the artboard

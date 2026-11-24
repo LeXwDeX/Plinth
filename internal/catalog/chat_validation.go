@@ -4242,6 +4242,9 @@ func validateChatVision(schema ChatSchema) error {
 	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
 		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
 	}
+	if err := validateVisionInvalidPicture(vision.InvalidPicture); err != nil {
+		return err
+	}
 	if err := validateVisionContactSheet(vision.ContactSheet); err != nil {
 		return err
 	}
@@ -4266,6 +4269,18 @@ func validateChatVision(schema ChatSchema) error {
 		if profile.MaximumTokens < 0 || profile.MaximumTokens > vision.MaximumTokens {
 			return fmt.Errorf("context.vision.model_profiles[%d].maximum_tokens 必须在 0 与 maximum_tokens 之间", index)
 		}
+	}
+	return nil
+}
+
+// validateVisionInvalidPicture checks context.vision.invalid_picture (#522).
+// The zero value is valid: it keeps every picture and remembers no refusal.
+func validateVisionInvalidPicture(policy ChatVisionInvalidPictureSchema) error {
+	if policy.MinimumEdgePixels < 0 || policy.MaximumAspectRatio < 0 || policy.MaximumExcluded < 0 {
+		return errors.New("context.vision.invalid_picture 的数值不能为负")
+	}
+	if policy.MaximumExcluded > 0 && !strings.Contains(policy.SkippedTemplate, "{handles}") {
+		return errors.New("context.vision.invalid_picture.skipped_template 必须包含 {handles}")
 	}
 	return nil
 }

@@ -105,6 +105,14 @@ func TestVisionBudgetRejectsBrokenDeclarations(t *testing.T) {
 			`"style_anchor_dropped_template": "风格锁参考图 #{index}"`, `"style_anchor_dropped_template": "风格锁参考图"`,
 			"style_anchor_dropped_template",
 		},
+		"broken skipped template": {
+			`没有附上：{handles}。它们`, `没有附上：。它们`,
+			"skipped_template",
+		},
+		"negative minimum edge": {
+			`"minimum_edge_pixels": 33`, `"minimum_edge_pixels": -1`,
+			"invalid_picture",
+		},
 		"empty unnamed picture label": {
 			`"unnamed_picture_label": "图片"`, `"unnamed_picture_label": ""`,
 			"unnamed_picture_label",
@@ -148,5 +156,36 @@ func TestCatalogWithoutVisionBudgetStaysValid(t *testing.T) {
 	}
 	if product.Application().Chat.Context.ImageDetail == "" {
 		t.Fatal("legacy image_detail must stay declared")
+	}
+}
+
+// #522: the bounds of a picture worth sending and the notes about a refused one
+// are Schema values, and the default Catalog declares them in both languages.
+func TestDefaultCatalogDeclaresInvalidPicturePolicy(t *testing.T) {
+	loaded, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := loaded.Application()
+	policy := application.Chat.Context.Vision.InvalidPicture
+	// 33: an upstream's refusal reads "must be larger than 32" for an edge of 1.
+	if policy.MinimumEdgePixels != 33 || policy.MaximumAspectRatio <= 1 || policy.MaximumExcluded <= 0 ||
+		!strings.Contains(policy.SkippedTemplate, "{handles}") {
+		t.Fatalf("invalid_picture = %+v", policy)
+	}
+	texts, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, note := range map[string]string{
+		"invalid_image_note":      application.Chat.Agent.InvalidImageNote,
+		"images_unsupported_note": application.Chat.Agent.ImagesUnsupportedNote,
+	} {
+		if note == "" {
+			t.Fatalf("agent.%s is not declared", name)
+		}
+		if english := texts.Text("en", note); english == note || strings.ContainsAny(english, "，。「」") {
+			t.Fatalf("agent.%s has no English text: %q", name, english)
+		}
 	}
 }
