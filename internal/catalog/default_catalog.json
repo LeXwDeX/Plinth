@@ -13440,7 +13440,8 @@
         "key_headers": [
           "x-webhook-key",
           "x-webhook-secret",
-          "x-meshy-webhook-key"
+          "x-meshy-webhook-key",
+          "x-meshy-api-webhook-secret-key"
         ],
         "payload_job_id_fields": [
           "id",

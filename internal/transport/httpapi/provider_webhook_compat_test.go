@@ -290,6 +290,37 @@ func TestProviderWebhookHTTPContractIsSchemaDriven(t *testing.T) {
 		}
 	})
 
+	t.Run("POST accepts the official Meshy secret header", func(t *testing.T) {
+		body := `{"task_id":"remote-official-header","status":"SUCCEEDED"}`
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/path-secret/wbh",
+			strings.NewReader(body),
+		)
+		// Meshy delivers the shared secret in this exact header
+		// (https://docs.meshy.ai/en/api/webhooks); the platform must read it.
+		request.Header.Set("X-MESHY-API-WEBHOOK-SECRET-KEY", "key-secret")
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, request)
+		if response.Code != webhook.API.Statuses.OK {
+			t.Fatalf(
+				"official Meshy header = status %d, body %s",
+				response.Code,
+				response.Body.String(),
+			)
+		}
+		if len(recorder.commands) != 3 {
+			t.Fatalf("commands = %#v", recorder.commands)
+		}
+		command := recorder.commands[2]
+		if command.ProviderID != webhook.ProviderID ||
+			command.RemoteID != "remote-official-header" ||
+			command.EventType != webhook.EventType ||
+			string(command.Payload) != body {
+			t.Fatalf("command = %#v", command)
+		}
+	})
+
 	t.Run("POST maps normalized decode failures to retry policy", func(t *testing.T) {
 		testCases := []struct {
 			name       string

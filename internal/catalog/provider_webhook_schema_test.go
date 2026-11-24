@@ -26,7 +26,7 @@ func TestDefaultCatalogOwnsCompleteProviderWebhookContract(t *testing.T) {
 		t.Fatalf("provider webhook = %#v", webhook)
 	}
 	if strings.Join(webhook.KeyHeaders, ",") !=
-		"x-webhook-key,x-webhook-secret,x-meshy-webhook-key" {
+		"x-webhook-key,x-webhook-secret,x-meshy-webhook-key,x-meshy-api-webhook-secret-key" {
 		t.Fatalf("key headers = %#v", webhook.KeyHeaders)
 	}
 	if strings.Join(webhook.PayloadJobIDFields, ",") != "id,task_id" {
