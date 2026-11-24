@@ -256,6 +256,39 @@ type TurnCheckpoint struct {
 	// it without cancelling them, also after a restart, and a stop that comes
 	// later no longer cancels them.
 	Background bool `json:"background,omitempty"`
+	// Unconfirmed lists the paid calls whose submission could be neither
+	// confirmed nor ruled out, each with the time the turn first suspended on
+	// it (#516). Replays look for the Task again; once the Agent request
+	// timeout has passed since that time, the turn ends failed instead of
+	// suspending once more. A Task that was accepted stays with the kernel.
+	Unconfirmed []UnconfirmedCall `json:"unconfirmed,omitempty"`
+}
+
+// UnconfirmedCall is one entry of TurnCheckpoint.Unconfirmed.
+type UnconfirmedCall struct {
+	CallID string    `json:"call_id"`
+	Since  time.Time `json:"since"`
+}
+
+// unconfirmedSince is when the turn first suspended on the call's unknown
+// submission, if it did.
+func (checkpoint TurnCheckpoint) unconfirmedSince(callID string) (time.Time, bool) {
+	for _, entry := range checkpoint.Unconfirmed {
+		if entry.CallID == callID {
+			return entry.Since, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// clearUnconfirmed drops the call's entry once its outcome is known.
+func (checkpoint *TurnCheckpoint) clearUnconfirmed(callID string) {
+	checkpoint.Unconfirmed = slices.DeleteFunc(checkpoint.Unconfirmed, func(entry UnconfirmedCall) bool {
+		return entry.CallID == callID
+	})
+	if len(checkpoint.Unconfirmed) == 0 {
+		checkpoint.Unconfirmed = nil
+	}
 }
 
 // WithoutRequests is what a turn keeps once it has ended (#382): the request

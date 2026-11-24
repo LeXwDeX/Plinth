@@ -1029,6 +1029,11 @@ func KnownNotSubmitted(err error) bool {
 		// does not exist.
 		return true
 	}
+	if errors.Is(err, generation.ErrNotSubmitted) {
+		// SubmitPrepared confirmed no Task holds the key and then refused the
+		// frozen input for good (#516): a replay meets the same refusal.
+		return true
+	}
 	for _, code := range []generation.ErrorCode{
 		generation.ErrInvalidCapability, generation.ErrInvalidInput,
 		generation.ErrUnknownOffering, generation.ErrNoOffering,

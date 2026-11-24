@@ -1649,6 +1649,12 @@ func (service *Service) RecoverTurns(ctx context.Context) ([]Turn, error) {
 	)
 }
 
+// RunningTurns lists the turns whose state is running. The live reclaim of
+// turns no worker holds reads them (#516).
+func (service *Service) RunningTurns(ctx context.Context) ([]Turn, error) {
+	return service.repository.ListTurns(ctx, []string{service.turnRunning})
+}
+
 func (service *Service) GetTurn(ctx context.Context, ownerID, sessionID, assistantID string) (Turn, error) {
 	return service.repository.GetTurn(ctx, ownerID, sessionID, assistantID)
 }
