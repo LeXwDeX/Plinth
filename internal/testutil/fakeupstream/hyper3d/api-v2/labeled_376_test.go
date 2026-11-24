@@ -42,7 +42,8 @@ func profileSteps(t *testing.T, names ...string) []align.Step {
 }
 
 // The profile's paid steps are listed here, so a new one is added knowingly: the
-// labeled request is one of them, and only its submission is.
+// labeled request is one of them, and only its submission is. The last five are
+// the real round's (#539).
 func TestPaidStepsOfTheProfile(t *testing.T) {
 	var paid []string
 	for _, step := range Profile().Steps {
@@ -50,7 +51,8 @@ func TestPaidStepsOfTheProfile(t *testing.T) {
 			paid = append(paid, step.Name)
 		}
 	}
-	want := []string{"rodin-text", "rodin-image", "bang", "texture", "texture-failed", "rodin-labeled", "rodin-label-overflow"}
+	want := []string{"rodin-text", "rodin-image", "bang", "texture", "texture-failed", "rodin-labeled", "rodin-label-overflow",
+		"reject-seed-probe", "rodin-text-quadpose", "rodin-image-label-short", "bang-upload", "texture-images"}
 	if !reflect.DeepEqual(paid, want) {
 		t.Fatalf("paid steps = %v, want %v", paid, want)
 	}
