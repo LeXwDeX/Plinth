@@ -25,7 +25,7 @@ import { useProjectStore } from '@/store/project-store';
 
 /**
  * 「对话 + 舞台」工作台：顶栏 48px；左边是对话列；中间是舞台和右侧栏，
- * 舞台和右侧栏下面是 128px 的版本条；任务中心从右侧滑出，不遮挡对话。
+ * 舞台和右侧栏下面是 144px 的版本条（#546 从 128px 加高，选中框上方留白）；任务中心从右侧滑出，不遮挡对话。
  */
 export function StudioShell() {
   return (

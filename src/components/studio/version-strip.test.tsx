@@ -129,10 +129,12 @@ describe('output strip navigation and details', () => {
     const html = renderToStaticMarkup(<VersionStrip />);
     // A regular card: 2+2 padding, 56 thumbnail, 2 gap, 18 label, 12 caption, 16 detail row = 108px; the list adds 4+4.
     for (const part of ['p-0.5', 'size-14', 'gap-0.5', 'h-[18px]', 'h-3', 'h-4']) expect(html).toContain(part);
-    expect(html).toMatch(/data-testid="version-strip" class="[^"]*\bh-32\b/);
-    expect(html).toMatch(/<ol class="[^"]*\bpy-1\b/);
-    // 128px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 116px: the card plus its 8px padding.
-    expect(128 - 1 - 11).toBeGreaterThanOrEqual(108 + 8);
+    expect(html).toMatch(/data-testid="version-strip" class="[^"]*\bh-36\b/);
+    expect(html).toMatch(/<ol class="[^"]*\bpy-3\b/);
+    // #546: 144px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 132px: the card plus 12px above and below.
+    expect(144 - 1 - 11).toBeGreaterThanOrEqual(108 + 24);
+    // The selected card's 2px ring sits 12px below the strip's top edge, with 10px of room left above it.
+    expect(12 - 2).toBeGreaterThanOrEqual(8);
   });
   it('does not turn a drag into pointer navigation and still permits keyboard activation', () => {
     renderToStaticMarkup(<VersionStrip />); primary().props.onDragStart({}); primary().props.onClick(click);
