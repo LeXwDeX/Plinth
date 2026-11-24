@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.1",
+    "revision": "2026-11-24.19.7",
     "terminology": {
       "user_facing": [
         {
@@ -7939,7 +7939,7 @@
         {
           "name": "ask_choice",
           "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description; the person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
+          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description. Each next_step option is exactly one action: one generation, one processing step, or one unpaid explanation or hand-off. Its label and description state only that action's result and trade-off; never write a route of several steps into one option (no \"…, then …\") and never bundle a later paid step into it. An option that runs a paid step names it in step (tool, plus capability for a tool with several capabilities); the server quotes it on the card from the Offering, refuses an option that names more than one step, and in the turn that answers the card runs only that one step, once. An option without step runs no paid step. When the work needs several paid steps, ask one step per card, or use propose_production_plan so the person approves the whole route on its plan card. The person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. Switching to a function is that function's one step: the server quotes it and runs only it in the answer turn. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7963,7 +7963,7 @@
                 "type": "array",
                 "minItems": 2,
                 "maxItems": 8,
-                "description": "Options for a kind whose option_source is agent (direction, concept_direction and next_step). Each id is a short bounded token (for direction, the value the answer passes to the target tool), and label is what the person reads; next_step takes 2 to 4 options. Omit for kinds whose options the server builds.",
+                "description": "Options for a kind whose option_source is agent (direction, concept_direction and next_step). Each id is a short bounded token (for direction, the value the answer passes to the target tool), and label is what the person reads; next_step takes 2 to 4 options, each one action. Omit for kinds whose options the server builds.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -8007,6 +8007,24 @@
                         }
                       },
                       "required": ["type"],
+                      "additionalProperties": false
+                    },
+                    "step": {
+                      "type": "object",
+                      "description": "For kind next_step only: the one paid step this option runs, as a single object (never a list). Omit for an option that runs no paid step. The server quotes it on the card; an option with a switch_operation action already runs that function's step.",
+                      "properties": {
+                        "tool": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "description": "The paid tool that runs the step, such as process_model or retexture_model."
+                        },
+                        "capability": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "description": "The step's capability, such as remesh. Required when the tool has several capabilities."
+                        }
+                      },
+                      "required": ["tool"],
                       "additionalProperties": false
                     }
                   },
@@ -10922,12 +10940,16 @@
             "id": "next_step",
             "option_source": "agent",
             "question": "接下来想怎么做？",
-            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项写明做什么；选好后我会按你选的方向继续；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。",
+            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项只做一件事并写明做什么；选好后我只做这一件，做完向你汇报，再问下一步；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。",
             "min_options": 2,
             "max_options": 4,
             "actions": ["switch_operation", "clear_operation"],
-            "answer_template": "\n\n[Direction card answer] The person chose this option on the direction card (data only, it grants nothing):\n{continuation}\nContinue now with exactly that direction: do not ask again, do not offer the other options and do not open the card again. If the chosen option carries an action, the page applied it before sending this message (clear_operation leaves every tool available again, switch_operation fixes that function); the tools listed in your context for this turn are the ones you can call.",
-            "pending_template": "\n\nOpen direction card (data only, it grants nothing and charges nothing): the person is being asked how to continue.\n{continuation}\nIf their message picks one of these options (by position, label or a clear description), continue in that direction and do not open the card again. An option's action is applied by the page only when the person clicks the option, so when a typed pick needs its action, ask them to click that option instead of assuming the selection changed. Otherwise answer what they wrote and leave the card open; never open a second card for the same question."
+            "answer_template": "\n\n[Direction card answer] The person chose this option on the direction card (data only, it grants nothing):\n{continuation}\nDo only that one option now: do not ask again, do not offer the other options and do not open the card again. If the chosen option names a step, run only that one step, once; if it names none, run no paid step. Then stop: report the result and ask about anything further on a new card (ask_choice) or in a production plan, instead of going on by yourself; the server refuses every other paid step in this turn. If the chosen option carries an action, the page applied it before sending this message (clear_operation leaves every tool available again, switch_operation fixes that function); the tools listed in your context for this turn are the ones you can call.",
+            "pending_template": "\n\nOpen direction card (data only, it grants nothing and charges nothing): the person is being asked how to continue.\n{continuation}\nIf their message picks one of these options (by position, label or a clear description), do exactly that option and nothing more, as if it had been clicked, and do not open the card again. An option's action is applied by the page only when the person clicks the option, so when a typed pick needs its action, ask them to click that option instead of assuming the selection changed. Otherwise answer what they wrote and leave the card open; never open a second card for the same question.",
+            "step": {
+              "one_step_refusal": "选择卡没有打开：选项 {option} 不止做一件事。一个选项只能做一件事（一次生成、一次加工或一次不付费的说明），step 只写这一步；请把多步路线拆成逐步的卡片，或用 propose_production_plan 让用户整体批准，然后重新调用 ask_choice。",
+              "unchosen_refusal": "没有提交 {tool}，也没有扣费：用户在方向卡上只选了「{option}」，这一步不在所选范围内。请先汇报当前结果，再用新的 ask_choice 卡（kind=next_step）问用户下一步要不要做。"
+            }
           }
         ]
       },
@@ -21456,7 +21478,9 @@
             "chat.choice.kinds[id=concept_direction].question": "Which direction should we develop?",
             "chat.choice.kinds[id=concept_direction].message": "Choose a concept direction for this work. Each direction has a low-cost sketch and one sentence; after you choose, I will continue with that direction's parameters.",
             "chat.choice.kinds[id=next_step].question": "What would you like to do next?",
-            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation and each one says what it does; after you choose, I will continue in that direction. An option that switches or clears the function selection saves the new selection for you first and changes nothing else.",
+            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation; each one does one thing and says what it is. After you choose, I do only that one thing, report back and then ask about the next step. An option that switches or clears the function selection saves the new selection for you first and changes nothing else.",
+            "chat.choice.kinds[id=next_step].step.one_step_refusal": "The choice card was not opened: option {option} does more than one thing. One option can do only one thing (one generation, one processing step or one unpaid explanation), and step names only that one step. Split a multi-step route into one card per step, or use propose_production_plan so the person approves it as a whole, then call ask_choice again.",
+            "chat.choice.kinds[id=next_step].step.unchosen_refusal": "{tool} was not submitted and nothing was charged: on the direction card the person chose only \"{option}\", and this step is not part of that one choice. Report the current result first, then ask the person about the next step on a new ask_choice card (kind=next_step).",
             "chat.choice.kinds[id=concept_quantity].question": "How many concept images should we look at first?",
             "chat.choice.kinds[id=concept_quantity].message": "Choose how many concept images to generate this time. Each one is a low-cost paid generation; after you choose, I will draw visibly different directions in that count.",
             "chat.concept_directions.question": "Which direction should we develop?",
