@@ -164,6 +164,70 @@ func TestSelfCheckPromptDropsThePendingBackgroundNoteAfterAConclusion(t *testing
 	}
 }
 
+// TestSelfCheckPromptReadsAnInheritedResultAcrossSessions is the #512
+// regression: a branch lists the models its ancestor produced, and the
+// conclusion the ancestor wrote for one of them is read by owner and task, so
+// the branch neither calls it unchecked nor puts it before the result it really
+// has not checked. Another owner's record of the same task never counts.
+func TestSelfCheckPromptReadsAnInheritedResultAcrossSessions(t *testing.T) {
+	schema := testCatalogChatSchema(t)
+	orchestrator, store := selfCheckPromptFixture(t, schema)
+	now := time.Now().UTC()
+	store.records["owner-a\x00session-parent\x00task-inherited"] = SelfCheckRecord{
+		TaskID: "task-inherited", UpdatedAt: now.Add(-time.Hour),
+		Checks: []SelfCheckCheck{
+			{Kind: SelfCheckKindInspect, Tool: "inspect_model", OK: true},
+			{Kind: SelfCheckKindRender, Tool: "render_model_views", OK: true},
+		},
+		Conclusion: &SelfCheckConclusion{Status: "passed", Summary: "checked in the parent", At: now.Add(-time.Hour)},
+	}
+	store.records["owner-b\x00session-other\x00task-foreign"] = SelfCheckRecord{
+		TaskID: "task-foreign", UpdatedAt: now,
+		Conclusion: &SelfCheckConclusion{Status: "passed", Summary: "someone else's", At: now},
+	}
+	orchestrator.selfCheckTasks = func(context.Context, string, string) ([]SelfCheckTask, error) {
+		return []SelfCheckTask{
+			{TaskID: "task-inherited", Model: "meshy-6", ResultAt: now.Add(-2 * time.Hour)},
+			{TaskID: "task-new", Model: "tripo-3", ResultAt: now},
+			{TaskID: "task-foreign", Model: "tripo-3", ResultAt: now},
+		}, nil
+	}
+	prompt := orchestrator.selfCheckPrompt(context.Background(), "owner-a", "session-branch", nil)
+	passed, _ := SelfCheckStatusByRole(schema.SelfCheck, SelfCheckRolePassed)
+	unchecked, _ := SelfCheckStatusByRole(schema.SelfCheck, SelfCheckRoleUnchecked)
+	var lines []string
+	for _, line := range strings.Split(prompt, "\n") {
+		// The first line follows the block's heading on the same line.
+		if at := strings.Index(line, "- task-"); at >= 0 {
+			lines = append(lines, line[at:])
+		}
+	}
+	if len(lines) != 3 {
+		t.Fatalf("result lines = %q, want three:\n%s", lines, prompt)
+	}
+	lineOf := func(taskID string) (int, string) {
+		for index, line := range lines {
+			if strings.HasPrefix(line, "- "+taskID+"｜") {
+				return index, line
+			}
+		}
+		return -1, ""
+	}
+	index, line := lineOf("task-inherited")
+	if !strings.Contains(line, passed.Label) || !strings.Contains(line, "checked in the parent") {
+		t.Fatalf("inherited result line = %q, want the ancestor's passed conclusion", line)
+	}
+	if index != len(lines)-1 {
+		t.Fatalf("inherited checked result sorted at %d of %q, want after the unchecked ones", index, lines)
+	}
+	if _, line := lineOf("task-foreign"); !strings.Contains(line, unchecked.Label) || strings.Contains(line, "someone else's") {
+		t.Fatalf("another owner's record leaked into the prompt: %q", line)
+	}
+	if _, line := lineOf("task-new"); !strings.Contains(line, unchecked.Label) {
+		t.Fatalf("an unchecked result line = %q", line)
+	}
+}
+
 func TestSelfCheckPromptKeepsUncheckedResultsWithinTheLimits(t *testing.T) {
 	schema := testCatalogChatSchema(t)
 	schema.SelfCheck.Context.MaxResults = 1

@@ -920,7 +920,8 @@ func reviewUsageItem(t *testing.T, payload map[string]any, check string) map[str
 // inspect_model end to end: the shipped Catalog's default purpose judges the
 // saved GLB, only enabled Offerings the runtime can reach are named in a fix
 // hint, and a frozen brief purpose with a triangle_budget overrides the
-// default.
+// default. The display purpose declares no origin, so its pivot is not judged;
+// a game purpose declares one and judges it (#512).
 func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T) {
 	glb := reviewModelGLB(t, 1, 1)
 	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
@@ -966,7 +967,7 @@ func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T
 		"watertight":          "unknown",
 		"skin":                "unknown",
 		"texture_size":        "pass",
-		"pivot_bottom_center": "fail",
+		"pivot_bottom_center": "unknown",
 		"y_up":                "unknown",
 		"plausible_scale":     "unknown",
 		"debris":              "pass",
@@ -976,7 +977,35 @@ func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T
 			t.Errorf("%s status = %v, want %s", check, got, want)
 		}
 	}
+	if pivot := reviewUsageItem(t, payload, "pivot_bottom_center"); pivot["fix_hint"] != nil {
+		t.Fatalf("display pivot = %v, want no fix hint for a purpose that declares no origin", pivot)
+	}
+
+	// A game prop declares where its origin belongs, so the off-centre origin of
+	// the fixture fails against the purpose's own tolerance (#512).
+	propCommand := func() chat.ToolCommand {
+		command := reviewCommand("inspect_model", `{"model":"task-a"}`)
+		command.Options.ProductionBrief = chat.ProductionBrief{"purpose": []byte(`"game_prop"`)}
+		return command
+	}
+	propTolerance := 0.0
+	for _, profile := range schema.Model3DUsage.Profiles {
+		if profile.ID == "game_prop" && profile.PivotBottomCenterRatio != nil {
+			propTolerance = *profile.PivotBottomCenterRatio
+		}
+	}
+	if propTolerance <= 0 {
+		t.Fatal("the shipped game_prop purpose declares no origin tolerance")
+	}
+	result, err = executor.InspectModel(context.Background(), propCommand())
+	if err != nil || result.Error != "" {
+		t.Fatalf("prop inspect = %+v err=%v", result, err)
+	}
+	payload = reviewPayload(t, result)
 	pivot := reviewUsageItem(t, payload, "pivot_bottom_center")
+	if pivot["status"] != "fail" {
+		t.Fatalf("prop pivot = %v, want a failure for an off-centre origin", pivot)
+	}
 	hint, _ := pivot["fix_hint"].(string)
 	if !strings.Contains(hint, "resize(origin_at=bottom)") {
 		t.Fatalf("pivot fix hint = %q, want the enabled resize capability", hint)
@@ -984,16 +1013,16 @@ func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T
 	if strings.Contains(hint, "format-conversion") {
 		t.Fatalf("pivot fix hint = %q names an unavailable Offering", hint)
 	}
-	if got := reviewNumber(t, pivot, "budget", "maximum_ratio"); got != schema.ModelReview.Inspect.Production.PivotBottomCenterRatio {
-		t.Fatalf("pivot maximum_ratio = %v", got)
+	if got := reviewNumber(t, pivot, "budget", "maximum_ratio"); got != propTolerance {
+		t.Fatalf("pivot maximum_ratio = %v, want the purpose's own %v", got, propTolerance)
 	}
-	if got := reviewNumber(t, pivot, "actual"); got <= schema.ModelReview.Inspect.Production.PivotBottomCenterRatio {
+	if got := reviewNumber(t, pivot, "actual"); got <= propTolerance {
 		t.Fatalf("pivot actual ratio = %v, want above the tolerance", got)
 	}
 
 	// An unavailable Offering and a disabled one both disappear from the hint.
 	gateway.unavailable = map[generation.OfferingID]bool{"test/resize": true, "test/format-conversion": true}
-	result, err = executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	result, err = executor.InspectModel(context.Background(), propCommand())
 	if err != nil || result.Error != "" {
 		t.Fatalf("inspect = %+v err=%v", result, err)
 	}
@@ -1003,7 +1032,7 @@ func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T
 	}
 	gateway.unavailable = map[generation.OfferingID]bool{"test/format-conversion": true}
 	gateway.offerings["resize"][0].Enabled = false
-	result, err = executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	result, err = executor.InspectModel(context.Background(), propCommand())
 	if err != nil || result.Error != "" {
 		t.Fatalf("inspect = %+v err=%v", result, err)
 	}

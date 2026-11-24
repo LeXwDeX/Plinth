@@ -3986,9 +3986,6 @@ func validateModelInspectProduction(
 	usage ChatModel3DUsageSchema,
 	capabilityPresentations []CapabilityPresentation,
 ) error {
-	if production.PivotBottomCenterRatio <= 0 || production.PivotBottomCenterRatio > 1 {
-		return errors.New("chat.model_review.inspect.production.pivot_bottom_center_ratio 必须在 (0, 1] 内")
-	}
 	if production.YUpFlatRatio <= 0 || production.YUpFlatRatio >= 1 {
 		return errors.New("chat.model_review.inspect.production.y_up_flat_ratio 必须在 (0, 1) 内")
 	}

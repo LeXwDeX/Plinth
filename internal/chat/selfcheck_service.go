@@ -116,6 +116,38 @@ func (service *SelfCheckService) SelfCheckByTask(ctx context.Context, owner, tas
 	return records[0], true, nil
 }
 
+// SessionRecords returns the record that states each listed task's delivery
+// state in this session (#512). The session's own record is used when it has a
+// conclusion; otherwise the owner's newest concluded record of the same task in
+// any session (SelfCheckByTask) is, so a branch reads the conclusion its
+// ancestor wrote for an inherited model instead of calling it unchecked. A task
+// without a concluded record keeps the session's own record, if any. Writes stay
+// per session: the counters a branch's own checks are limited by are its own.
+func (service *SelfCheckService) SessionRecords(ctx context.Context, owner, session string,
+	taskIDs []string) (map[string]SelfCheckRecord, error) {
+	records, err := service.List(ctx, owner, session)
+	if err != nil {
+		return nil, err
+	}
+	byTask := make(map[string]SelfCheckRecord, len(taskIDs))
+	for _, record := range records {
+		byTask[record.TaskID] = record
+	}
+	for _, taskID := range taskIDs {
+		if own, found := byTask[taskID]; found && own.Conclusion != nil {
+			continue
+		}
+		inherited, found, err := service.SelfCheckByTask(ctx, owner, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if found && inherited.Conclusion != nil {
+			byTask[taskID] = inherited
+		}
+	}
+	return byTask, nil
+}
+
 // Counts derives the persisted counters of a record.
 func (service *SelfCheckService) Counts(record SelfCheckRecord) SelfCheckCounters {
 	return SelfCheckCounts(service.schema, record)
@@ -153,8 +185,11 @@ func (service *SelfCheckService) CheckpointIDs() []string {
 
 // AppendCheck records one real tool call. A successful inspect opens a new
 // round (its number is the count of inspect checks); render, compare and
-// reference evidence belongs to the current round. New evidence invalidates a
-// written conclusion, so the delivery state returns to unchecked.
+// reference evidence belongs to the current round. A read-only check changes
+// nothing about the model, so a written conclusion stays (#512): a second look
+// at the same result, or compare_models naming it as the other side, never sends
+// it back to unchecked. Only the Agent's next conclusion replaces it, and only a
+// paid correction (IncrementCorrectionsOnce) clears it.
 func (service *SelfCheckService) AppendCheck(ctx context.Context, owner, session, taskID, modelAssetID string,
 	check SelfCheckCheck) (SelfCheckRecord, error) {
 	if !service.available() {
@@ -177,10 +212,6 @@ func (service *SelfCheckService) AppendCheck(ctx context.Context, owner, session
 			check.At = service.now().UTC()
 		}
 		record.Checks = append(record.Checks, check)
-		// New evidence makes an older conclusion stale: the state goes back to
-		// unchecked rather than claiming a result the evidence no longer
-		// supports.
-		record.Conclusion = nil
 		return nil
 	})
 	return record, err

@@ -34,15 +34,17 @@ func (orchestrator *Orchestrator) selfCheckPrompt(ctx context.Context, ownerID, 
 	if err != nil || len(tasks) == 0 {
 		return ""
 	}
-	records, err := orchestrator.service.ListSelfChecks(ctx, ownerID, sessionID)
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.TaskID)
+	}
+	// Records are read by owner and task across sessions (#512): a branch lists
+	// its ancestors' models, and their conclusions were written there.
+	byTask, err := orchestrator.service.SessionSelfChecks(ctx, ownerID, sessionID, taskIDs)
 	if err != nil {
 		orchestrator.logger.Warn("self-check records not readable for the prompt",
 			"owner_id", ownerID, "session_id", sessionID, "error", err)
 		return ""
-	}
-	byTask := make(map[string]SelfCheckRecord, len(records))
-	for _, record := range records {
-		byTask[record.TaskID] = record
 	}
 	background := backgroundResultTasks(history)
 	entries := make([]selfCheckPromptEntry, 0, len(tasks))

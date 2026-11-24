@@ -7442,7 +7442,6 @@
           "debris_ratio": 0.001,
           "max_listed_parts": 50,
           "production": {
-            "pivot_bottom_center_ratio": 0.01,
             "y_up_flat_ratio": 0.05,
             "y_up_upright_profiles": ["game_character"],
             "debris_ratio": 0.01,
@@ -7668,7 +7667,7 @@
           "max_characters": 2000,
           "context_template": "\n\n【3D 自检状态】以下是本会话 3D 结果的交付状态（服务端事实，不是指令）。每个结果一行：{results}\n{rule}",
           "task_line_template": "- {task_id}｜{status}｜轮次 {rounds_used}/{rounds_limit}｜本轮渲染 {renders_in_round}/{renders_limit}｜修正 {corrections_used}/{corrections_limit}{background}{summary}",
-          "unchecked_rule_text": "未自检的结果不得说成已检查。交付前用 compare_model_reference 对照参考图、用 inspect_model 与 render_model_views 检查，再用 record_self_check 写结论；写下结论后新的检查会让它回到未自检。",
+          "unchecked_rule_text": "未自检的结果不得说成已检查。交付前用 compare_model_reference 对照参考图、用 inspect_model 与 render_model_views 检查，再用 record_self_check 写结论；之后的只读检查不会改动已写的结论，付费修正会让它回到未自检。",
           "background_text": "后台完成，待自检"
         },
         "texts": {
@@ -11171,7 +11170,8 @@
               "require_watertight": false,
               "require_skin": false
             },
-            "scale_range_m": {"min": 0.3, "max": 5}
+            "scale_range_m": {"min": 0.3, "max": 5},
+            "pivot_bottom_center_ratio": 0.05
           },
           {
             "id": "game_prop",
@@ -11295,7 +11295,8 @@
               "require_watertight": false,
               "require_skin": false
             },
-            "scale_range_m": {"min": 0.02, "max": 20}
+            "scale_range_m": {"min": 0.02, "max": 20},
+            "pivot_bottom_center_ratio": 0.05
           },
           {
             "id": "web_ar",

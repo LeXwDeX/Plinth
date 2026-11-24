@@ -121,7 +121,7 @@ func TestShippedModelReviewBoundsAreConsistent(t *testing.T) {
 		t.Fatalf("inspect defaults = %+v", review.Inspect)
 	}
 	production := review.Inspect.Production
-	if production.PivotBottomCenterRatio != 0.01 || production.YUpFlatRatio != 0.05 ||
+	if production.YUpFlatRatio != 0.05 ||
 		production.DebrisRatio != 0.01 || production.DegenerateRatio != 0.001 {
 		t.Fatalf("production thresholds = %+v", production)
 	}
@@ -153,12 +153,6 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"no triangle limit", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.Limits.MaxTriangles = -1 }, "inspect"},
 		{"no weld ratio", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.WeldEpsilonRatio = 0 }, "inspect"},
 		{"no parts bound", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.MaxListedParts = 0 }, "inspect"},
-		{"no pivot tolerance", func(a *catalog.ApplicationSchema) {
-			a.Chat.ModelReview.Inspect.Production.PivotBottomCenterRatio = 0
-		}, "pivot_bottom_center_ratio"},
-		{"pivot tolerance above one", func(a *catalog.ApplicationSchema) {
-			a.Chat.ModelReview.Inspect.Production.PivotBottomCenterRatio = 1.1
-		}, "pivot_bottom_center_ratio"},
 		{"flat ratio one", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Inspect.Production.YUpFlatRatio = 1
 		}, "y_up_flat_ratio"},
