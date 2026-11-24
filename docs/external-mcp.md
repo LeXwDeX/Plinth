@@ -561,7 +561,7 @@ Key 的持有人必须是平台里真实存在且可用的用户；只存在于�
 | `needs_person` | 需要真人在网页界面处理（同一资产里更早的同类生成已被上游完成并可能扣费、结果没能保存）；Message 带那次的任务 ID |
 | `service_unavailable` / `service_mismatch` / `no_service` | 服务不可用 / 不匹配 / 没有可用服务；不会换模型 |
 | `input_refused` | 服务拒绝了这组输入，按 `list_services` 修改后再试 |
-| `invalid_arguments` | 参数名、提示词、图片、`parameter_reasons` 等问题，写明 `$.路径` |
+| `invalid_arguments` | 参数名、提示词、图片、`parameter_reasons` 等问题，写明 `$.路径`；路径后的原因取 Schema `mcp_public.messages.invalid_details`，随请求语言（#517） |
 | `image_not_found` | 图片 ID 不是本人的 |
 | `source_not_found` / `source_not_ready` / `source_incompatible` | 来源任务不存在 / 未成功或无模型文件 / 服务不接受这个来源 |
 | `asset_name_invalid` / `asset_project_mismatch` / `project_not_found` | 资产名、项目归属问题 |

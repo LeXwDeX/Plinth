@@ -393,6 +393,13 @@ func (s *Server) mcpInvalidArguments(locale, detail string) mcpOutcome {
 	return mcpOutcome{problem: &mcpProblem{Code: "invalid_arguments", Message: message}}
 }
 
+// mcpInvalidDetail is the {detail} of invalid_arguments: the JSON path the
+// refusal names, then the Schema's reason in the request's language (#517).
+// replacements fill the reason's placeholders, as strings.NewReplacer pairs.
+func (s *Server) mcpInvalidDetail(locale, path, text string, replacements ...string) string {
+	return path + ": " + strings.NewReplacer(replacements...).Replace(s.mcpText(locale, text))
+}
+
 func (s *Server) mcpTaskNotFound(locale string) mcpOutcome {
 	return mcpOutcome{problem: &mcpProblem{Code: "task_not_found", Message: s.mcpText(locale, s.application.MCPPublic.Messages.TaskNotFound)}}
 }
@@ -598,7 +605,7 @@ func (s *Server) mcpListTasks(call *mcpCall) (mcpOutcome, error) {
 	}
 	page, err := s.generation.List(call.ctx, generation.OwnTasks(call.owner), query)
 	if mcpChainHasCode(err, generation.ErrInvalidInput) {
-		return s.mcpInvalidArguments(call.locale, "$.cursor: is not a cursor of this list"), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.cursor", s.application.MCPPublic.Messages.InvalidDetails.NotACursor)), nil
 	}
 	if err != nil {
 		return mcpOutcome{}, err
@@ -852,7 +859,7 @@ func (s *Server) mcpListServices(call *mcpCall) (mcpOutcome, error) {
 			}
 		}
 		if !served {
-			return s.mcpInvalidArguments(call.locale, "$.capability: is not served through MCP"), nil
+			return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.capability", s.application.MCPPublic.Messages.InvalidDetails.CapabilityNotServed)), nil
 		}
 	}
 	groups := make([]mcpGroupView, 0, len(service.ServiceGroups))

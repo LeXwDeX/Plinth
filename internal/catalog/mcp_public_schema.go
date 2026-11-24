@@ -344,6 +344,34 @@ type MCPPublicMessages struct {
 	// TaskTerminal answers tasks/cancel for a Task that already reached a
 	// terminal status; carries {state}. It is required when tasks is enabled.
 	TaskTerminal string `json:"task_terminal"`
+	// InvalidDetails are the {detail} texts of invalid_arguments (#517). The
+	// server prefixes each with the JSON path it names, such as "$.images: ";
+	// ToolNotOffering carries {capability}, PurposeUnknown {purposes}.
+	InvalidDetails MCPPublicInvalidDetails `json:"invalid_details"`
+}
+
+// MCPPublicInvalidDetails words why an argument of a tool call was refused.
+type MCPPublicInvalidDetails struct {
+	PromptOrImages            string `json:"prompt_or_images"`
+	ToolNotOffering           string `json:"tool_not_offering"`
+	ReasonText                string `json:"reason_text"`
+	ReasonRequired            string `json:"reason_required"`
+	ReasonNotTaken            string `json:"reason_not_taken"`
+	ParameterNotSettable      string `json:"parameter_not_settable"`
+	PromptInParameters        string `json:"prompt_in_parameters"`
+	ParametersNotEncodable    string `json:"parameters_not_encodable"`
+	PromptNotTaken            string `json:"prompt_not_taken"`
+	ImagesNotTaken            string `json:"images_not_taken"`
+	ImagesExactlyOne          string `json:"images_exactly_one"`
+	MaskNotDeclared           string `json:"mask_not_declared"`
+	MaskWithoutImage          string `json:"mask_without_image"`
+	NotACursor                string `json:"not_a_cursor"`
+	CapabilityNotServed       string `json:"capability_not_served"`
+	PurposeUnknown            string `json:"purpose_unknown"`
+	ImageOrTaskID             string `json:"image_or_task_id"`
+	ImageOrTaskIDMissing      string `json:"image_or_task_id_missing"`
+	AssetIDNeedsTaskID        string `json:"asset_id_needs_task_id"`
+	PurposeWithInputChecklist string `json:"purpose_with_input_checklist"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result
