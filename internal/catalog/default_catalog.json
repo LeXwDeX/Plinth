@@ -29142,7 +29142,14 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "target_formats",
