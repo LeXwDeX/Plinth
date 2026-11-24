@@ -1093,6 +1093,10 @@
               },
               "UnsupportedModel": {
                 "class": "upstream_denied"
+              },
+              "RequestBurstTooFast": {
+                "class": "rate_limited",
+                "retryable": true
               }
             },
             "message_matchers": [
