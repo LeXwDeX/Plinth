@@ -683,6 +683,7 @@ func buildChatAgentWithTransport(
 					RequestTimeout: time.Duration(
 						schema.Chat.Agent.RequestTimeoutSeconds,
 					) * time.Second,
+					FirstByteTimeout:  time.Duration(schema.Chat.Agent.FirstByteTimeoutSeconds) * time.Second,
 					Client:            client,
 					ScannerMaxBytes:   schema.Chat.Agent.ScannerMaxBytes,
 					ErrorBodyMaxBytes: schema.Chat.Agent.ErrorBodyMaxBytes,
@@ -720,6 +721,7 @@ func buildChatAgentWithTransport(
 					RequestTimeout: time.Duration(
 						schema.Chat.Agent.RequestTimeoutSeconds,
 					) * time.Second,
+					FirstByteTimeout:  time.Duration(schema.Chat.Agent.FirstByteTimeoutSeconds) * time.Second,
 					Client:            client,
 					ScannerMaxBytes:   schema.Chat.Agent.ScannerMaxBytes,
 					ErrorBodyMaxBytes: schema.Chat.Agent.ErrorBodyMaxBytes,
@@ -739,7 +741,9 @@ func buildChatAgentWithTransport(
 					wireFor:         schema.Chat.Agent.Thinking.WireFor,
 				}
 			}
-			adapters[chatConnection.ID] = served
+			// A transient failure of a model call is retried, and a round is
+			// bounded, as chat.agent declares (#509).
+			adapters[chatConnection.ID] = agents.NewRetrying(served, chatRetryPolicy(schema.Chat.Agent, logger))
 			configured = true
 		}
 		if !configured {
@@ -843,4 +847,21 @@ func settingEnvironmentName(schema catalog.ApplicationSchema, name string) strin
 		return environment[0].Name
 	}
 	return name
+}
+
+// chatRetryPolicy is the retry of model calls chat.agent declares (#509): its
+// retry and round_timeout_seconds. A Schema without retry sends each call once.
+func chatRetryPolicy(agent catalog.ChatAgentSchema, logger *slog.Logger) agents.RetryPolicy {
+	policy := agents.RetryPolicy{
+		MaxAttempts:  1,
+		RoundTimeout: time.Duration(agent.RoundTimeoutSeconds) * time.Second,
+		Logger:       logger,
+	}
+	if retry := agent.Retry; retry != nil {
+		policy.MaxAttempts = retry.MaxAttempts
+		policy.InitialBackoff = time.Duration(retry.InitialBackoffMillis) * time.Millisecond
+		policy.MaxBackoff = time.Duration(retry.MaxBackoffMillis) * time.Millisecond
+		policy.MaxRetryAfter = time.Duration(retry.MaxRetryAfterSeconds) * time.Second
+	}
+	return policy
 }

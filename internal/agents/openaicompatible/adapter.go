@@ -78,6 +78,11 @@ type Config struct {
 	AuthorizationType string
 	RequestTimeout    time.Duration
 	ScannerMaxBytes   int
+	// FirstByteTimeout bounds how long a streamed call waits for its first
+	// frame, the response headers included (chat.agent.
+	// first_byte_timeout_seconds, #509); a call that gets none in time fails
+	// as transient. 0: only RequestTimeout bounds it.
+	FirstByteTimeout  time.Duration
 	ErrorBodyMaxBytes int64
 	Client            *http.Client
 	// Thinking applies to every model; ThinkingFor, when set, wins and picks
@@ -109,6 +114,7 @@ type Adapter struct {
 	authorizationType string
 	scannerMaxBytes   int
 	errorBodyMaxBytes int64
+	firstByteTimeout  time.Duration
 	client            *http.Client
 	thinking          *ThinkingOptions
 	thinkingFor       func(model string) *ThinkingOptions
@@ -148,6 +154,7 @@ func New(config Config) (*Adapter, error) {
 		authorizationType: config.AuthorizationType,
 		scannerMaxBytes:   config.ScannerMaxBytes,
 		errorBodyMaxBytes: config.ErrorBodyMaxBytes,
+		firstByteTimeout:  config.FirstByteTimeout,
 		client:            config.Client,
 		thinking:          thinking,
 		thinkingFor:       config.ThinkingFor,
@@ -212,9 +219,13 @@ func (adapter *Adapter) Stream(
 	defer func() {
 		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
 	}()
-	response, bodyBytes, err = adapter.send(ctx, request, true)
+	// An upstream that sends nothing ends at the first-byte timeout, not at the
+	// request timeout (#509).
+	guard := upstreamhttp.GuardFirstByte(ctx, adapter.firstByteTimeout)
+	defer guard.Release()
+	response, bodyBytes, err = adapter.send(guard.Context(), request, true)
 	if err != nil {
-		return agents.Completion{}, err
+		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
 	if err = adapter.requireSuccess(response, request); err != nil {
@@ -223,6 +234,12 @@ func (adapter *Adapter) Stream(
 	// first is when the upstream answered: the first stream frame is what a
 	// person waits through, so a slow model shows up as its own number.
 	lines := upstreamhttp.NewLines(response.Body, adapter.scannerMaxBytes)
+	// The stream is whole only with its end (#509): [DONE], or a choice that
+	// carries its finish_reason (the usage chunk and [DONE] may still be cut
+	// after it, the reply is not). plain is the first line that is no SSE
+	// frame, for a 200 answer that is not a stream at all.
+	ended, framed := false, false
+	plain := ""
 	options := adapter.optionsFor(request)
 	var content, reasoning strings.Builder
 	// thinking is true from the first reasoning fragment until visible
@@ -243,8 +260,10 @@ func (adapter *Adapter) Stream(
 	for lines.Scan() {
 		if first == 0 {
 			first = time.Since(started)
+			guard.Arrived()
 		}
 		if lines.Oversized() {
+			framed = true
 			if !oversizedImage(lines.Head()) {
 				return agents.Completion{}, fmt.Errorf("read agent stream: line exceeds %d bytes", adapter.scannerMaxBytes)
 			}
@@ -256,11 +275,21 @@ func (adapter *Adapter) Stream(
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
+			if plain == "" && !strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, "id:") &&
+				!strings.HasPrefix(line, "retry:") {
+				plain = line
+			}
 			continue
 		}
+		framed = true
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
+			ended = true
 			break
+		}
+		if upstreamhttp.HasError([]byte(payload)) {
+			// An error frame ends the stream: the upstream broke off (#509).
+			return agents.Completion{}, upstreamhttp.StreamError([]byte(payload), adapter.exhaustedQuota)
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -275,6 +304,9 @@ func (adapter *Adapter) Stream(
 			usage = chunk.Usage.agentUsage()
 		}
 		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				ended = true
+			}
 			if len(choice.Delta.Images) > 0 {
 				inlineImage = true
 			}
@@ -327,7 +359,15 @@ func (adapter *Adapter) Stream(
 		}
 	}
 	if err := lines.Err(); err != nil {
-		return agents.Completion{}, fmt.Errorf("read agent stream: %w", err)
+		return agents.Completion{}, guard.Err(fmt.Errorf("read agent stream: %w", err))
+	}
+	if !ended {
+		if !framed && plain != "" {
+			return agents.Completion{}, upstreamhttp.NotAStream(response.Header.Get("Content-Type"), plain, adapter.exhaustedQuota)
+		}
+		// A stream that stops before its end is a cut one: the text or the
+		// call arguments so far may be half of what the model wrote.
+		return agents.Completion{}, agents.Transient(errors.New("agent stream ended before its last chunk"), 0)
 	}
 	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
 		return agents.Completion{}, agents.ErrInlineImageOutput
@@ -355,9 +395,12 @@ func (adapter *Adapter) Complete(
 		// A call that failed before the response has no first byte to report.
 		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
 	}()
+	// A non-streamed answer arrives whole, so only the request timeout bounds
+	// it; the guard only classifies a broken connection as transient (#509).
+	guard := upstreamhttp.GuardFirstByte(ctx, 0)
 	response, bodyBytes, err = adapter.send(ctx, request, false)
 	if err != nil {
-		return agents.Completion{}, err
+		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
 	if err = adapter.requireSuccess(response, request); err != nil {
@@ -368,10 +411,10 @@ func (adapter *Adapter) Complete(
 		io.LimitReader(response.Body, adapter.errorBodyMaxBytes+1),
 	)
 	if err != nil {
-		return agents.Completion{}, fmt.Errorf(
+		return agents.Completion{}, guard.Err(fmt.Errorf(
 			"read agent completion: %w",
 			err,
-		)
+		))
 	}
 	if int64(len(data)) > adapter.errorBodyMaxBytes {
 		return agents.Completion{}, fmt.Errorf(
@@ -487,6 +530,7 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		Body:           body,
 		HasImages:      upstreamhttp.RequestHasImages(request),
 		ExhaustedQuota: adapter.exhaustedQuota,
+		RetryAfter:     upstreamhttp.RetryAfter(response.Header, time.Now()),
 	}.Err()
 }
 
@@ -692,7 +736,9 @@ func marshalRequest(
 type streamChunk struct {
 	Usage   *wireUsage `json:"usage"`
 	Choices []struct {
-		Delta struct {
+		// FinishReason is set on the last chunk of a choice (#509).
+		FinishReason *string `json:"finish_reason"`
+		Delta        struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			// Images are pictures the model drew itself (OpenRouter-style

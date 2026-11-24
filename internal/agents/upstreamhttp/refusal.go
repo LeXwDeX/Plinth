@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/moderation"
@@ -26,6 +27,9 @@ type Refusal struct {
 	// application derives it from the chat connection's Schema error_mapping
 	// (#120); nil: no refusal is read as one.
 	ExhaustedQuota func(status int, body []byte) (class string, exhausted bool)
+	// RetryAfter is the wait the response's Retry-After header asked for
+	// (RetryAfter); a transient refusal carries it (#509).
+	RetryAfter time.Duration
 }
 
 // Err is the error an Adapter returns for the refusal. The status travels as
@@ -44,10 +48,12 @@ type Refusal struct {
 //     neither picture class reads a refusal that names a field outside the
 //     conversation or objects to a tool declaration (a tool named refine_image);
 //   - a request field the upstream refuses (#401): an invalid_request_error
-//     that names the field it refuses, with the field's name.
+//     that names the field it refuses, with the field's name;
+//   - a status that may not meet the same request again (TransientStatus:
+//     408, 429, 500, 502, 503, 504), with its Retry-After (#509).
 //
-// Any other refusal (context too long, an unknown model, a server error) stays
-// the plain status error.
+// Any other refusal (context too long, an unknown model) stays the plain
+// status error.
 func (refusal Refusal) Err() error {
 	err := fmt.Errorf(
 		"%w: %s",
@@ -78,6 +84,9 @@ func (refusal Refusal) Err() error {
 	}
 	if param != "" {
 		return errors.Join(&agents.RequestRejection{Param: param}, err)
+	}
+	if TransientStatus(refusal.Status) {
+		return agents.Transient(err, refusal.RetryAfter)
 	}
 	return err
 }

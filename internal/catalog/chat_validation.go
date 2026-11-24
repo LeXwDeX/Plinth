@@ -529,6 +529,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		schema.Agent.ErrorBodyMaxBytes <= 0 {
 		return errors.New("agent 的 timeout 和响应限制必须为正数")
 	}
+	if err := validateChatAgentResilience(schema.Agent); err != nil {
+		return err
+	}
 	if schema.Agent.ConsentWaitTimeoutSeconds <= 0 {
 		return errors.New("agent 的 consent 等待时长必须为正数")
 	}
@@ -4357,4 +4360,36 @@ func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
 		}
 	}
 	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
+}
+
+// validateChatAgentResilience checks the first-byte timeout, the round bound
+// and the retry of model calls (#509). Each is optional; a declared one must
+// fit the request timeout: the first byte comes within a request, and a round
+// holds at least one whole request.
+func validateChatAgentResilience(agent ChatAgentSchema) error {
+	if agent.FirstByteTimeoutSeconds < 0 || agent.FirstByteTimeoutSeconds > agent.RequestTimeoutSeconds {
+		return errors.New("agent.first_byte_timeout_seconds 不能为负数，也不能超过 request_timeout_seconds")
+	}
+	if agent.RoundTimeoutSeconds < 0 ||
+		(agent.RoundTimeoutSeconds > 0 && agent.RoundTimeoutSeconds < agent.RequestTimeoutSeconds) {
+		return errors.New("agent.round_timeout_seconds 不能为负数，声明时不能小于 request_timeout_seconds")
+	}
+	retry := agent.Retry
+	if retry == nil {
+		return nil
+	}
+	if retry.MaxAttempts < 1 || retry.MaxAttempts > 10 {
+		return errors.New("agent.retry.max_attempts 必须在 1 到 10 之间")
+	}
+	if retry.InitialBackoffMillis <= 0 || retry.MaxBackoffMillis < retry.InitialBackoffMillis {
+		return errors.New("agent.retry 的 initial_backoff_millis 必须为正数，max_backoff_millis 不能小于它")
+	}
+	if retry.MaxRetryAfterSeconds <= 0 {
+		return errors.New("agent.retry.max_retry_after_seconds 必须为正数")
+	}
+	if agent.RoundTimeoutSeconds > 0 && (retry.MaxRetryAfterSeconds >= agent.RoundTimeoutSeconds ||
+		retry.MaxBackoffMillis >= agent.RoundTimeoutSeconds*1000) {
+		return errors.New("agent.retry 的等待上限必须小于 round_timeout_seconds")
+	}
+	return nil
 }

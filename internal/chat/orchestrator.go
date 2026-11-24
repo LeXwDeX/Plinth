@@ -2170,10 +2170,16 @@ func (orchestrator *Orchestrator) Process(
 		// instead of asking for a retry that cannot succeed.
 		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
 			assistant.Content = message
+		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
+			assistant.Content = message
 		}
 		if failed {
 			assistant.Content = orchestrator.withErrorReference(ctx, assistant.Content, assistant.ID)
 		}
+	} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
+		// #509: the follow-up broke off after its retries; the reply so far
+		// stays and says it was cut, so the person knows to send it again.
+		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
 	if err := orchestrator.service.UpdateMessage(
@@ -4078,7 +4084,8 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // a used-up upstream balance or key quota says so (#120), a picture the
 // model drew itself says it was not kept, a request field the upstream
 // refused names that field (#401: only the plain field name is shown, the
-// upstream's own wording stays in the log);
+// upstream's own wording stays in the log), a transient failure the retries
+// did not overcome says to send the message again (#509);
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -4106,7 +4113,21 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
+	if message, broke := orchestrator.agentInterruptedMessage(ctx, err); broke {
+		return message
+	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentInterruptedMessage is the Schema's text for a chat model call that
+// failed transiently after the adapter layer's retries, or broke off after it
+// had started streaming (#509); false for any other error.
+func (orchestrator *Orchestrator) agentInterruptedMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentUpstreamInterrupted
+	if err == nil || text == "" || !errors.Is(err, agents.ErrTransient) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
 }
 
 // agentQuotaExhaustedMessage is the Schema text for an Agent request the
