@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"io/fs"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
@@ -56,10 +58,10 @@ const unauthorizedBody = "unauthorized\n"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/images/generations", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/generations",
 		DocURL: docsRoot + "create", CheckedAt: captured,
-		Note: "JSON request with inline base64 pictures; 400 missing_required_parameter and 401 text/plain are real samples. n is documented by the official Create image reference (1–10) and returns that many distinct inline candidates; the committed samples ask for n=1, so n>1 is constructed-from-docs. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (" + docsErrors + ", checked " + docsCheckedAt + ")"},
+		Note: "JSON request with inline base64 pictures; 400 empty_string (missing prompt) and 401 text/plain are real samples. The picture is drawn at the requested size (an auto or omitted size is 1024x1024) in the requested output_format, and the response reports the drawn size, output_format and background (background=transparent answers an alpha PNG); the committed samples only ask for 1024x1024 png, so the size, the format and the transparent behaviors are constructed-from-docs. The documented parameter contract is enforced with constructed 400s that reuse the real envelope and OpenAI's error vocabulary: size (gpt-image-2: both edges divisible by 16, longest edge at most 3840, ratio at most 3:1, 655360 to 8294400 pixels), quality, output_format, background, moderation, n (1 to 10, integer_above_max_value / integer_below_min_value, never clamped), output_compression (0 to 100, only jpeg and webp), a transparent background with jpeg, and a prompt over 32000 characters; the real gateway's wording for these refusals is not recorded (free negative probes are planned). quality max is accepted although the official page limits xhigh and max to the 2.5 snapshots: the gateway answered 200 for both on 2.6 (2026-11-09), and only a paid real answer can settle it (matrix B2), so the fake does not refuse it. gif and svg output_format are documented but not modelled (Plinth never sends them), and WebP answers the fixed 1x1 fixture whatever the size. n is documented by the official Create image reference (1-10) and returns that many distinct inline candidates. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (" + docsErrors + ", checked " + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/images/edits", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/edits",
 		DocURL: docsRoot + "createEdit", CheckedAt: captured,
-		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both). model is optional on this route, per the official Create image edit reference (default gpt-image-2.5-sunburst, checked " + docsCheckedAt + "); the same constructed-from-docs 403/429/503 faults as generations apply"},
+		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both). model is optional on this route, per the official Create image edit reference (default gpt-image-2.6-sunburst, checked 2026-11-24); the same constructed-from-docs 403/429/503 faults and the same parameter contract as generations apply (the text fields are multipart strings, so n is parsed as an integer). An edit takes at most 16 pictures (array_above_max_length on image). A mask is a PNG with an alpha channel and the size of the first picture, otherwise 400 invalid_image on mask (constructed: the official edit reference gives no mask rules and the gateway's wording is not recorded). With a mask only the transparent pixels change and the answer keeps the picture's size, for every one of the n candidates and in the requested output_format (PNG keeps the other pixels exactly, JPEG is lossy). A missing prompt on this route answers the documented missing_required_parameter: the empty_string answer is recorded for generations only"},
 }
 
 // Version is the OpenAI-compatible images /v1 fake.
@@ -189,33 +191,34 @@ func (h *handler) render(endpoint string) fakeupstream.ErrorRenderer {
 type request struct {
 	prompt string
 	model  string
-	form   map[string]string
-	hasImg bool
+	// form holds every text value as a string (the multipart fields, and the
+	// JSON strings); raw holds the typed JSON values, so a number sent as a
+	// string (or the other way round) is told apart by validate.
+	form map[string]string
+	raw  map[string]any
+	// multipart is true for an edit: its text fields are always strings.
+	multipart bool
+	hasImg    bool
+	// imageCount counts the reference pictures (image and image[] parts).
+	imageCount int
 	// imageData and maskData keep the first reference picture and the mask of
 	// an edit request (#244), so the fake can compose only the masked region
 	// and leave every other pixel of the picture byte for byte equal.
 	imageData []byte
 	maskData  []byte
-	// count is the requested candidate count (n): 1..10. The recorded samples
-	// only ever ask for one, so n>1 is a constructed-from-docs behavior.
-	count int
 }
 
 func readRequest(r *http.Request, endpoint string) (request, bool) {
-	out := request{form: map[string]string{}}
+	out := request{form: map[string]string{}, raw: map[string]any{}}
 	if endpoint == "/images/generations" {
 		var body map[string]any
 		if json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&body) != nil {
 			return out, false
 		}
 		for key, value := range body {
-			switch typed := value.(type) {
-			case string:
+			out.raw[key] = value
+			if typed, ok := value.(string); ok {
 				out.form[key] = typed
-			case float64:
-				if key == "n" {
-					out.count = int(typed)
-				}
 			}
 		}
 	} else {
@@ -223,6 +226,7 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 		if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
 			return out, false
 		}
+		out.multipart = true
 		reader := multipart.NewReader(io.LimitReader(r.Body, 64<<20), params["boundary"])
 		for {
 			part, err := reader.NextPart()
@@ -234,6 +238,7 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 			case name == "image" || name == "image[]":
 				if len(data) > 0 {
 					out.hasImg = true
+					out.imageCount++
 					if out.imageData == nil {
 						out.imageData = data
 					}
@@ -242,16 +247,215 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 				out.maskData = data
 			case part.FileName() == "":
 				out.form[name] = string(data)
+				out.raw[name] = string(data)
 			}
-		}
-	}
-	if out.count == 0 {
-		if parsed, err := strconv.Atoi(strings.TrimSpace(out.form["n"])); err == nil {
-			out.count = parsed
 		}
 	}
 	out.prompt, out.model = strings.TrimSpace(out.form["prompt"]), strings.TrimSpace(out.form["model"])
 	return out, true
+}
+
+// refusal is a constructed official-shaped 400 for a parameter value the
+// documented contract rejects. The real gateway's wording for these is not
+// recorded (the free negative probes are planned, see the endpoint table), so
+// the codes follow OpenAI's own vocabulary and every message is the fake's.
+type refusal struct{ code, message, param string }
+
+const (
+	// The limits below are the official gpt-image-2 contract (Create image
+	// reference, checked 2026-11-24): a custom size has both edges divisible by
+	// 16, a longest edge of at most 3840, a long:short ratio of at most 3:1 and
+	// a total of 655,360 to 8,294,400 pixels; n is 1 to 10; an edit takes up to
+	// 16 pictures. The Catalog declares the same numbers; the schemaimages
+	// contract test keeps the two in step.
+	sizeMultiple    = 16
+	sizeMaxEdge     = 3840
+	sizeMaxRatio    = 3
+	sizeMinPixels   = 655_360
+	sizeMaxPixels   = 8_294_400
+	maxCandidates   = 10
+	maxReferences   = 16
+	maxPromptLength = 32_000
+	// autoSize is the picture an omitted or auto size answers.
+	autoSize = "1024x1024"
+)
+
+// The enums are the official ones. quality also lists xhigh and max for every
+// model: the official page limits them to the 2.5 snapshots, but the gateway
+// answered 200 for both on gpt-image-2.6-sunburst (2026-11-09 live probe, see
+// docs/image-api-parameters.md), and the Catalog sends max by default. That
+// conflict (matrix B2) is settled only by a paid real answer, so the fake does
+// not reject max until then.
+var (
+	qualityValues      = []string{"auto", "low", "medium", "high", "xhigh", "max"}
+	outputFormatValues = []string{"png", "jpeg", "webp"}
+	backgroundValues   = []string{"auto", "opaque", "transparent"}
+	moderationValues   = []string{"auto", "low"}
+)
+
+func quoted(values []string) string {
+	parts := make([]string, len(values))
+	for index, value := range values {
+		parts[index] = "'" + value + "'"
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func kindOf(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64:
+		if typed != float64(int64(typed)) {
+			return "decimal number"
+		}
+		return "integer"
+	case nil:
+		return "null"
+	default:
+		return "object"
+	}
+}
+
+// enumParam reads an enum parameter. ok is false when the parameter is absent.
+func (r request) enumParam(name string, allowed []string) (value string, present bool, bad *refusal) {
+	raw, exists := r.raw[name]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	text, isString := raw.(string)
+	if !isString {
+		return "", true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected a string, but got %s instead.", name, kindOf(raw)), name}
+	}
+	if !contains(allowed, text) {
+		return "", true, &refusal{"invalid_value", fmt.Sprintf("Invalid value: '%s'. Supported values are: %s.", text, quoted(allowed)), name}
+	}
+	return text, true, nil
+}
+
+// intParam reads an integer parameter bounded to min..max. A JSON number must
+// be integral; a multipart text value must parse as an integer.
+func (r request) intParam(name string, minimum, maximum int) (value int, present bool, bad *refusal) {
+	raw, exists := r.raw[name]
+	if !exists || raw == nil {
+		return 0, false, nil
+	}
+	switch typed := raw.(type) {
+	case float64:
+		if typed != float64(int64(typed)) {
+			return 0, true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected an integer, but got a decimal number instead.", name), name}
+		}
+		value = int(typed)
+	case string:
+		if !r.multipart {
+			return 0, true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected an integer, but got a string instead.", name), name}
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err != nil {
+			return 0, true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected an integer, but got a string instead.", name), name}
+		}
+		value = parsed
+	default:
+		return 0, true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected an integer, but got %s instead.", name, kindOf(raw)), name}
+	}
+	if value > maximum {
+		return 0, true, &refusal{"integer_above_max_value", fmt.Sprintf("Invalid '%s': integer above maximum value. Expected a value <= %d, but got %d instead.", name, maximum, value), name}
+	}
+	if value < minimum {
+		return 0, true, &refusal{"integer_below_min_value", fmt.Sprintf("Invalid '%s': integer below minimum value. Expected a value >= %d, but got %d instead.", name, minimum, value), name}
+	}
+	return value, true, nil
+}
+
+// sizeRefusal checks a custom WIDTHxHEIGHT against the gpt-image-2 rules.
+func sizeRefusal(value string) *refusal {
+	width, height, ok := fakeupstream.ParseSize(value)
+	if !ok {
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid value: '%s'. Expected 'auto' or a size in the form WIDTHxHEIGHT.", value), "size"}
+	}
+	switch {
+	case width%sizeMultiple != 0 || height%sizeMultiple != 0:
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid size '%s': width and height must both be divisible by %d.", value, sizeMultiple), "size"}
+	case width > sizeMaxEdge || height > sizeMaxEdge:
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid size '%s': the maximum edge is %d pixels.", value, sizeMaxEdge), "size"}
+	case width > sizeMaxRatio*height || height > sizeMaxRatio*width:
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid size '%s': the aspect ratio must be between 1:%d and %d:1.", value, sizeMaxRatio, sizeMaxRatio), "size"}
+	case width*height < sizeMinPixels || width*height > sizeMaxPixels:
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid size '%s': the total pixels must be between %d and %d.", value, sizeMinPixels, sizeMaxPixels), "size"}
+	}
+	return nil
+}
+
+// validate applies the documented parameter contract. It returns the first
+// violated rule, in the order the official reference lists the parameters.
+func (r request) validate() *refusal {
+	size, present, bad := r.freeText("size")
+	if bad != nil {
+		return bad
+	}
+	// The custom-size rules are gpt-image-2's; an edit may omit the model, and
+	// then the default model (the same family) applies.
+	if present && size != "auto" && (r.model == "" || strings.HasPrefix(r.model, "gpt-image-2")) {
+		if bad := sizeRefusal(size); bad != nil {
+			return bad
+		}
+	}
+	if _, _, bad := r.enumParam("quality", qualityValues); bad != nil {
+		return bad
+	}
+	if _, _, bad := r.intParam("n", 1, maxCandidates); bad != nil {
+		return bad
+	}
+	format, _, bad := r.enumParam("output_format", outputFormatValues)
+	if bad != nil {
+		return bad
+	}
+	if compression, present, bad := r.intParam("output_compression", 0, 100); bad != nil {
+		return bad
+	} else if present && (format == "" || format == "png") {
+		return &refusal{"invalid_value", fmt.Sprintf("Invalid 'output_compression' (%d): output_compression is only supported with the jpeg and webp output formats.", compression), "output_compression"}
+	}
+	background, _, bad := r.enumParam("background", backgroundValues)
+	if bad != nil {
+		return bad
+	}
+	if background == "transparent" && format == "jpeg" {
+		return &refusal{"invalid_value", "Invalid 'background': a transparent background requires the png or webp output format.", "background"}
+	}
+	if _, _, bad := r.enumParam("moderation", moderationValues); bad != nil {
+		return bad
+	}
+	if r.multipart && r.imageCount > maxReferences {
+		return &refusal{"array_above_max_length", fmt.Sprintf("Invalid 'image': array too long. Expected an array with maximum length %d, but got an array with length %d instead.", maxReferences, r.imageCount), "image"}
+	}
+	if utf8.RuneCountInString(r.prompt) > maxPromptLength {
+		return &refusal{"string_above_max_length", fmt.Sprintf("Invalid 'prompt': string too long. Expected a string with maximum length %d, but got a string with length %d instead.", maxPromptLength, utf8.RuneCountInString(r.prompt)), "prompt"}
+	}
+	return nil
+}
+
+// freeText reads a free-text parameter (size) that is not an enum.
+func (r request) freeText(name string) (value string, present bool, bad *refusal) {
+	raw, exists := r.raw[name]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	text, isString := raw.(string)
+	if !isString {
+		return "", true, &refusal{"invalid_type", fmt.Sprintf("Invalid type for '%s': expected a string, but got %s instead.", name, kindOf(raw)), name}
+	}
+	return strings.TrimSpace(text), true, nil
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string) {
@@ -277,8 +481,31 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		writeJSON(w, http.StatusBadRequest, h.invalid[endpoint])
 		return
 	case req.prompt == "":
-		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "missing_required_parameter", "Missing required parameter: 'prompt'.", "prompt"))
+		// The real gateway answers a request without a prompt with empty_string
+		// (recorded sample, 2026-11-09): the field is read as an empty string, not
+		// as a missing parameter. The edit route's answer is not recorded, so it
+		// keeps OpenAI's documented missing_required_parameter.
+		if endpoint == "/images/generations" {
+			writeJSON(w, http.StatusBadRequest, h.invalid[endpoint])
+		} else {
+			writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "missing_required_parameter", "Missing required parameter: 'prompt'.", "prompt"))
+		}
 		return
+	}
+	if bad := req.validate(); bad != nil {
+		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", bad.code, bad.message, bad.param))
+		return
+	}
+	var editor *maskedEditor
+	if endpoint == "/images/edits" && len(req.maskData) > 0 {
+		// #244: an edit with a mask changes only the mask's transparent pixels
+		// and copies every other pixel of the reference picture byte for byte.
+		built, bad := newMaskedEditor(req.imageData, req.maskData)
+		if bad != nil {
+			writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", bad.code, bad.message, bad.param))
+			return
+		}
+		editor = built
 	}
 	scenario := fakeupstream.ScenarioOf(r)
 	switch scenario {
@@ -290,50 +517,36 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			"Your request was rejected by the safety system. If you believe this is an error, contact us.", ""))
 		return
 	}
-	var data []byte
-	if endpoint == "/images/edits" && len(req.maskData) > 0 {
-		// #244: an edit with a mask changes only the mask's transparent pixels
-		// and copies every other pixel of the reference picture byte for byte.
-		composed, err := composeMaskedEdit(req.imageData, req.maskData)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "invalid_image",
-				"The reference image or the mask could not be decoded.", "mask"))
-			return
-		}
-		data = composed
-	} else {
-		file, err := fakeupstream.ImageFile("png")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		data = file.Data
+	format := req.form["output_format"]
+	if format == "" {
+		format = "png"
 	}
-	if scenario == fakeupstream.ScenarioArtifactCorrupt {
-		data = fakeupstream.Corrupt(data)
+	transparent := req.form["background"] == "transparent"
+	width, height := outputSize(req.form["size"])
+	if editor != nil {
+		// A masked edit keeps the reference picture's pixels, so it keeps its size.
+		width, height = editor.width, editor.height
 	}
 	body := fakeupstream.Clone(h.ok[endpoint])
 	if list, ok := body["data"].([]any); ok && len(list) > 0 {
 		if template, ok := list[0].(map[string]any); ok {
-			// n is documented by the official Create image reference. The
-			// committed samples only ask for one picture, so returning n
-			// distinct pictures is constructed-from-docs.
-			const maximumFakeImages = 10
-			count := req.count
-			if count < 1 {
-				count = 1
-			}
-			if count > maximumFakeImages {
-				count = maximumFakeImages
+			// n is documented by the official Create image reference (1-10) and
+			// validate has already refused anything else. The committed samples
+			// only ask for one picture, so returning n distinct pictures is
+			// constructed-from-docs.
+			count := 1
+			if n, present, _ := req.intParam("n", 1, maxCandidates); present {
+				count = n
 			}
 			// The capacity is a constant so the allocation never depends on the
 			// request's n; count only decides how many entries are appended.
-			items := make([]any, 0, maximumFakeImages)
+			items := make([]any, 0, maxCandidates)
 			for index := 0; index < count; index++ {
 				item := fakeupstream.Clone(template)
-				candidate := data
-				if count > 1 {
-					candidate = candidatePNG(index)
+				candidate, err := h.candidate(editor, format, width, height, transparent, index)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
 				}
 				if scenario == fakeupstream.ScenarioArtifactCorrupt {
 					candidate = fakeupstream.Corrupt(candidate)
@@ -347,68 +560,140 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			body["data"] = items
 		}
 	}
-	for _, field := range []string{"size", "quality", "output_format", "background"} {
-		if value := req.form[field]; value != "" && value != "auto" {
-			body[field] = value
-		}
+	// The answer reports what was made, not what was asked: an auto size is the
+	// size actually drawn, an auto background is opaque (the recorded sample).
+	body["size"] = fmt.Sprintf("%dx%d", width, height)
+	body["output_format"] = format
+	if transparent {
+		body["background"] = "transparent"
+	} else {
+		body["background"] = "opaque"
+	}
+	if quality := req.form["quality"]; quality != "" && quality != "auto" {
+		body["quality"] = quality
 	}
 	writeJSON(w, http.StatusOK, body)
 }
 
-// composeMaskedEdit copies the reference picture and repaints only the pixels
-// whose mask alpha is below 128 (the editable region, #244). The repaint is a
-// deterministic diagonal gradient, so a test can compare every pixel outside
-// the mask with the source and see that the inside changed. The output keeps
-// the reference picture's dimensions.
-func composeMaskedEdit(reference, mask []byte) ([]byte, error) {
-	source, _, err := image.Decode(bytes.NewReader(reference))
+// outputSize is the size of the picture drawn for a request's size value:
+// the requested WxH, or 1024x1024 for auto or an omitted size.
+func outputSize(value string) (width, height int) {
+	if width, height, ok := fakeupstream.ParseSize(value); ok {
+		return width, height
+	}
+	width, height, _ = fakeupstream.ParseSize(autoSize)
+	return width, height
+}
+
+// candidate draws picture number index: the masked composition of the
+// reference when an edit carries a mask, else the fake subject picture at the
+// requested size and format (an alpha PNG for background=transparent). Every
+// index shades the picture differently, so n>1 answers distinct bytes.
+func (h *handler) candidate(editor *maskedEditor, format string, width, height int, transparent bool, index int) ([]byte, error) {
+	if editor != nil {
+		return editor.encode(format, index)
+	}
+	file, err := fakeupstream.Picture(fakeupstream.PictureSpec{
+		Format: format, Width: width, Height: height, Transparent: transparent && format == "png", Variant: index,
+	})
 	if err != nil {
 		return nil, err
+	}
+	return file.Data, nil
+}
+
+// maskedEditor composes the edit of a reference picture and its mask.
+type maskedEditor struct {
+	source        image.Image
+	mask          image.Image
+	width, height int
+}
+
+// newMaskedEditor decodes the first reference picture and the mask and applies
+// the official mask rules: the mask is a PNG with an alpha channel and the same
+// size as the picture. A reference the fake cannot decode is refused too, as
+// the real service would; the edit without a mask never decodes it.
+func newMaskedEditor(reference, mask []byte) (*maskedEditor, *refusal) {
+	source, _, err := image.Decode(bytes.NewReader(reference))
+	if err != nil {
+		return nil, &refusal{"invalid_image", "The reference image or the mask could not be decoded.", "image"}
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(mask))
+	if err != nil {
+		return nil, &refusal{"invalid_image", "The reference image or the mask could not be decoded.", "mask"}
+	}
+	if format != "png" {
+		return nil, &refusal{"invalid_image", "Invalid mask image format: the mask must be a PNG file with an alpha channel.", "mask"}
+	}
+	switch config.ColorModel {
+	case color.RGBAModel, color.GrayModel, color.Gray16Model, color.RGBA64Model:
+		return nil, &refusal{"invalid_image", "Invalid mask image format: the mask must contain an alpha channel.", "mask"}
 	}
 	decodedMask, _, err := image.Decode(bytes.NewReader(mask))
 	if err != nil {
-		return nil, err
+		return nil, &refusal{"invalid_image", "The reference image or the mask could not be decoded.", "mask"}
 	}
 	bounds := source.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
-	if width <= 0 || height <= 0 {
-		return nil, errors.New("reference has no pixels")
+	if config.Width != bounds.Dx() || config.Height != bounds.Dy() {
+		return nil, &refusal{"invalid_image", fmt.Sprintf("Invalid mask image: the mask size %dx%d does not match the image size %dx%d.", config.Width, config.Height, bounds.Dx(), bounds.Dy()), "mask"}
 	}
-	out := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.Draw(out, out.Bounds(), source, bounds.Min, draw.Src)
-	maskBounds := decodedMask.Bounds()
-	for y := 0; y < height; y++ {
-		maskY := maskBounds.Min.Y + y*maskBounds.Dy()/height
-		for x := 0; x < width; x++ {
-			maskX := maskBounds.Min.X + x*maskBounds.Dx()/width
-			_, _, _, alpha := decodedMask.At(maskX, maskY).RGBA()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return nil, &refusal{"invalid_image", "The reference image has no pixels.", "image"}
+	}
+	return &maskedEditor{source: source, mask: decodedMask, width: bounds.Dx(), height: bounds.Dy()}, nil
+}
+
+// compose copies the reference picture and repaints only the pixels whose mask
+// alpha is below 128 (the editable region, #244). The repaint is a
+// deterministic diagonal gradient (shifted per variant, so n>1 candidates
+// differ), so a test can compare every pixel outside the mask with the source
+// and see that the inside changed. The output keeps the reference picture's
+// dimensions.
+func (e *maskedEditor) compose(variant int) *image.RGBA {
+	bounds := e.source.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, e.width, e.height))
+	draw.Draw(out, out.Bounds(), e.source, bounds.Min, draw.Src)
+	maskBounds := e.mask.Bounds()
+	for y := 0; y < e.height; y++ {
+		maskY := maskBounds.Min.Y + y*maskBounds.Dy()/e.height
+		for x := 0; x < e.width; x++ {
+			maskX := maskBounds.Min.X + x*maskBounds.Dx()/e.width
+			_, _, _, alpha := e.mask.At(maskX, maskY).RGBA()
 			if alpha>>8 >= 128 {
 				continue
 			}
 			out.SetRGBA(x, y, color.RGBA{
-				R: uint8((x * 7) % 256),
-				G: uint8((y * 11) % 256),
-				B: uint8((x + y) % 256),
+				R: uint8((x*7 + variant*41) % 256),
+				G: uint8((y*11 + variant*23) % 256),
+				B: uint8((x + y + variant*59) % 256),
 				A: 255,
 			})
 		}
 	}
-	var encoded bytes.Buffer
-	if err := png.Encode(&encoded, out); err != nil {
-		return nil, err
-	}
-	return encoded.Bytes(), nil
+	return out
 }
 
-// candidatePNG returns a deterministic solid-colour picture whose bytes differ
-// per candidate. It is fake fixture data, not a Provider response.
-func candidatePNG(index int) []byte {
-	picture := image.NewRGBA(image.Rect(0, 0, 256, 256))
-	shade := uint8(40 + index*18)
-	draw.Draw(picture, picture.Bounds(), &image.Uniform{
-		C: color.RGBA{R: shade, G: uint8(180 - index*12), B: uint8(90 + index*8), A: 255},
-	}, image.Point{}, draw.Src)
+// encode writes the composition in the requested output format. PNG keeps
+// every pixel outside the mask exactly; JPEG is lossy like the real one;
+// WebP answers the fixed fixture (see fakeupstream.PictureSpec).
+func (e *maskedEditor) encode(format string, variant int) ([]byte, error) {
+	composed := e.compose(variant)
 	var encoded bytes.Buffer
-	_ = png.Encode(&encoded, picture)
-	return encoded.Bytes()
+	switch format {
+	case "jpeg":
+		if err := jpeg.Encode(&encoded, composed, &jpeg.Options{Quality: 90}); err != nil {
+			return nil, err
+		}
+	case "webp":
+		file, err := fakeupstream.ImageFile("webp")
+		if err != nil {
+			return nil, err
+		}
+		return file.Data, nil
+	default:
+		if err := png.Encode(&encoded, composed); err != nil {
+			return nil, err
+		}
+	}
+	return encoded.Bytes(), nil
 }

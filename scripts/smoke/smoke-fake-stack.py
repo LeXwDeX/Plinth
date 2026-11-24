@@ -2952,9 +2952,13 @@ def scenario_image_purpose(api, offerings, work):
                f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
                f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
 
-    # (c2) #282: the fake picture is 64x64, far below the 1536 short edge of the
-    # illustration purpose, so the delivery checklist fails short_edge, keeps the
-    # failed check for the ledger and names a model that can reach it.
+    # (c2) #282: the delivery checklist judges the picture against the purpose.
+    # The 2D fakes draw the picture at the size the request names (I17), so this
+    # Gemini 3:4 4K picture is 3584x4800, far above the 1536 short edge of the
+    # illustration purpose: short_edge must pass and no failed check may name a
+    # stronger model. (Before I17 the fake picture was 64x64 and this step
+    # asserted the failure; the failing path is now covered by the unit tests of
+    # internal/chat/imagereview, which use their own small pictures.)
     handles = image_handles(api, session)
     if not handles:
         record("#282 delivery checklist judges the purpose", False, "no generated image handle")
@@ -2970,8 +2974,8 @@ def scenario_image_purpose(api, offerings, work):
             contents = _checkpoint_completed_contents(work, "main", session)
             named = any('"check":"short_edge"' in content and "Gemini 3 Pro" in content
                         and '"purpose":"illustration"' in content for content in contents)
-            record("#282 delivery checklist judges the purpose", "short_edge" in failed and named,
-                   f"handle={handle} failed={failed} model_named={named} summary={summary}")
+            record("#282 delivery checklist judges the purpose", "short_edge" not in failed and not named,
+                   f"handle={handle} failed={failed} short_edge_failure_named={named} summary={summary}")
 
     # (d) the explicit 2D lock wins: a different named model is refused before
     # submission, and a later call without a model runs the locked one.

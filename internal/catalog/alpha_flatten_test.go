@@ -16,7 +16,7 @@ func TestAlphaFlattenDeclaredOnlyWhereTransparencyIsUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	white := schema.AlphaFlatten{BackgroundColor: "#ffffff", MaxPixels: 16777216}
+	white := schema.AlphaFlatten{BackgroundColor: "#ffffff", MaxPixels: 20000000}
 	keepTransparent := white
 	keepTransparent.KeepWhen = []schema.ParameterCondition{{Parameter: "background", Operator: "equals", Value: json.RawMessage(`"transparent"`)}}
 	flattened := map[string]schema.AlphaFlatten{
