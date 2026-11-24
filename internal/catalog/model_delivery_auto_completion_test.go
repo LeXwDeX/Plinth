@@ -123,6 +123,21 @@ func TestAutoCompletionRoutesMustBeBounded(t *testing.T) {
 			},
 			"必须为正数",
 		},
+		// #510: a record waiting for a platform slot is looked at again after
+		// the declared slot wait, which must exist and not exceed the scan.
+		"no slot wait": {
+			func(s *ApplicationSchema) {
+				s.ModelDelivery.AutoCompletion.SlotWaitIntervalMilliseconds = 0
+			},
+			"slot_wait_interval_milliseconds",
+		},
+		"a slot wait longer than the scan": {
+			func(s *ApplicationSchema) {
+				auto := &s.ModelDelivery.AutoCompletion
+				auto.SlotWaitIntervalMilliseconds = auto.ScanIntervalMilliseconds + 1
+			},
+			"slot_wait_interval_milliseconds",
+		},
 		"a ceiling of zero": {
 			func(s *ApplicationSchema) {
 				s.ModelDelivery.AutoCompletion.MaxCreditsPerTask = 0
