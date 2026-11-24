@@ -476,7 +476,7 @@ func TestSSEStrictJSONAndDONE(t *testing.T) {
 	}
 
 	evented := &wirefixture.Recorder{Policy: policy, Default: testMetadata()}
-	_, _ = capture(t, evented, request, jsonResponse(200, "text/event-stream", "event: message\ndata: {\"choices\":[]}\n\n"))
+	_, _ = capture(t, evented, request, jsonResponse(200, "text/event-stream", "id: 7\ndata: {\"choices\":[]}\n\n"))
 	if err := wirefixture.Validate(evented.Exchanges(), policy); !errors.Is(err, wirefixture.ErrUnsupportedBody) {
 		t.Fatalf("evented SSE error = %v", err)
 	}

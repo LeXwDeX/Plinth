@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -15,6 +16,16 @@ import (
 // chunks are aggregated by choice and tool-call index; split fields are joined,
 // validated and sanitized as one value, then written once in the last original
 // fragment. Other chunk fields and the chunk order remain unchanged.
+//
+// A stream whose blocks carry an event: line (the OpenAI Responses wire, #536)
+// is a named stream. It is written as "event: NAME\ndata: JSON\n\n" per block,
+// in the original order, and gets no [DONE] unless the original had one. It is
+// complete when its last block is a terminal event (sseTerminalEvents) or a
+// [DONE] closes it. Its "*.delta" fragments are joined per event name, item and
+// content index the way a Chat choice's content is, so a split text or a split
+// function-call argument is approved as one value. Any other SSE field (id:,
+// retry:, comments), an event: line without data, and a stream that mixes named
+// and bare blocks stay unsupported.
 
 // SSEFramed reports whether raw reached a complete SSE boundary.
 func SSEFramed(raw []byte) bool {
@@ -28,10 +39,14 @@ func SSEFramed(raw []byte) bool {
 }
 
 func sanitizeSSE(raw []byte, policy Policy) (string, error) {
-	chunks, err := parseSSE(raw)
+	stream, err := parseSSEStream(raw)
 	if err != nil {
 		return "", err
 	}
+	if stream.named {
+		return sanitizeNamedSSE(stream, policy)
+	}
+	chunks := stream.chunks()
 	if err := normalizeSSE(chunks, policy); err != nil {
 		return "", err
 	}
@@ -51,65 +66,215 @@ func sanitizeSSE(raw []byte, policy Policy) (string, error) {
 	return out.String(), nil
 }
 
+// sseTerminalEvents are the events that end a named stream: the Responses
+// stream's three final response states and its in-stream error.
+var sseTerminalEvents = map[string]bool{
+	"response.completed": true, "response.incomplete": true, "response.failed": true, "error": true,
+}
+
+// sseEventNameRE bounds an event name to a protocol token; it is public text,
+// never a value of the person's.
+var sseEventNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
+
+type sseEvent struct {
+	// name is the event: line; "" for a block that carries only data.
+	name string
+	data map[string]any
+}
+
+type sseStream struct {
+	events []sseEvent
+	// named is whether the blocks carry event: lines; done whether [DONE] closed
+	// the stream.
+	named, done bool
+}
+
+// chunks are the data objects of the stream's events, in order.
+func (s sseStream) chunks() []map[string]any {
+	chunks := make([]map[string]any, 0, len(s.events))
+	for _, event := range s.events {
+		chunks = append(chunks, event.data)
+	}
+	return chunks
+}
+
 func parseSSE(raw []byte) ([]map[string]any, error) {
+	stream, err := parseSSEStream(raw)
+	if err != nil {
+		return nil, err
+	}
+	return stream.chunks(), nil
+}
+
+func parseSSEStream(raw []byte) (sseStream, error) {
 	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	scanner.Buffer(make([]byte, 4096), len(raw)+1)
-	var chunks []map[string]any
+	var stream sseStream
 	var data []string
-	done := false
+	var name string
+	var named, bare bool
+	terminal := false
 	dispatch := func() error {
 		if len(data) == 0 {
+			if name != "" {
+				return fmt.Errorf("%w: SSE event without data", ErrUnsupportedBody)
+			}
 			return nil
 		}
 		payload := strings.Join(data, "\n")
 		data = nil
+		eventName := name
+		name = ""
 		if payload == "[DONE]" {
-			if done {
+			if eventName != "" {
+				return fmt.Errorf("%w: SSE event with DONE", ErrUnsupportedBody)
+			}
+			if stream.done {
 				return fmt.Errorf("%w: duplicate DONE", ErrInvalidExchange)
 			}
-			done = true
+			stream.done = true
 			return nil
 		}
-		if done {
+		if stream.done || terminal {
 			return ErrPartialSSE
 		}
 		chunk, err := decodeSSEChunk(payload)
 		if err != nil {
 			return err
 		}
-		chunks = append(chunks, chunk)
+		if eventName == "" {
+			bare = true
+		} else {
+			named = true
+			terminal = sseTerminalEvents[eventName]
+		}
+		if named && bare {
+			return fmt.Errorf("%w: SSE named and bare events", ErrUnsupportedBody)
+		}
+		stream.events = append(stream.events, sseEvent{name: eventName, data: chunk})
 		return nil
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			if err := dispatch(); err != nil {
-				return nil, err
+				return sseStream{}, err
 			}
 			continue
 		}
+		if value, ok := strings.CutPrefix(line, "event:"); ok {
+			value = strings.TrimPrefix(value, " ")
+			if name != "" || len(data) > 0 {
+				return sseStream{}, fmt.Errorf("%w: SSE event field", ErrUnsupportedBody)
+			}
+			if !sseEventNameRE.MatchString(value) || checkText(value, false) != nil {
+				return sseStream{}, fmt.Errorf("%w: SSE event name", ErrUnsafePublicValue)
+			}
+			name = value
+			continue
+		}
 		if !strings.HasPrefix(line, "data:") {
-			return nil, fmt.Errorf("%w: SSE field", ErrUnsupportedBody)
+			return sseStream{}, fmt.Errorf("%w: SSE field", ErrUnsupportedBody)
 		}
 		data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("%w: SSE read", ErrUnsafePublicValue)
+		return sseStream{}, fmt.Errorf("%w: SSE read", ErrUnsafePublicValue)
 	}
-	if len(data) > 0 {
-		if done || !strings.HasSuffix(text, "\n") || len(data) != 1 || data[0] != "[DONE]" {
-			return nil, ErrPartialSSE
+	if len(data) > 0 || name != "" {
+		if stream.done || name != "" || !strings.HasSuffix(text, "\n") || len(data) != 1 || data[0] != "[DONE]" {
+			return sseStream{}, ErrPartialSSE
 		}
 		if err := dispatch(); err != nil {
-			return nil, err
+			return sseStream{}, err
 		}
 	}
-	if !done || len(chunks) == 0 {
-		return nil, ErrPartialSSE
+	stream.named = named
+	if len(stream.events) == 0 || !(stream.done || terminal) {
+		return sseStream{}, ErrPartialSSE
 	}
-	return chunks, nil
+	return stream, nil
+}
+
+// sanitizeNamedSSE writes a named stream in its canonical form.
+func sanitizeNamedSSE(stream sseStream, policy Policy) (string, error) {
+	if err := normalizeNamedSSE(stream.events, policy); err != nil {
+		return "", err
+	}
+	var out bytes.Buffer
+	for _, event := range stream.events {
+		clean, err := sanitizeValue(event.data, policy, 0)
+		if err != nil {
+			return "", err
+		}
+		data, err := marshalJSON(clean)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&out, "event: %s\ndata: %s\n\n", event.name, data)
+	}
+	if stream.done {
+		out.WriteString("data: [DONE]\n\n")
+	}
+	return out.String(), nil
+}
+
+// sseDeltaKey groups the fragments that belong to one value of a named stream:
+// the event name, the item and the output, content and summary positions.
+func sseDeltaKey(event sseEvent) string {
+	var key strings.Builder
+	key.WriteString(event.name)
+	for _, field := range []string{"item_id", "output_index", "content_index", "summary_index"} {
+		fmt.Fprintf(&key, "|%v", event.data[field])
+	}
+	return key.String()
+}
+
+// normalizeNamedSSE joins the "*.delta" fragments of each value, sanitizes the
+// joined text (or, for function-call arguments, JSON) once and writes it in the
+// last fragment, like normalizeSSE does for a Chat choice.
+func normalizeNamedSSE(events []sseEvent, policy Policy) error {
+	type group struct {
+		field     sseField
+		arguments bool
+	}
+	groups := map[string]*group{}
+	var order []string
+	for _, event := range events {
+		if !strings.HasSuffix(event.name, ".delta") {
+			continue
+		}
+		raw, found := event.data["delta"]
+		if !found {
+			continue
+		}
+		text, ok := sseString(raw)
+		if !ok {
+			return fmt.Errorf("%w: SSE delta", ErrUnsafePublicValue)
+		}
+		key := sseDeltaKey(event)
+		state := groups[key]
+		if state == nil {
+			state = &group{arguments: strings.HasSuffix(event.name, "arguments.delta")}
+			groups[key] = state
+			order = append(order, key)
+		}
+		state.field.add(event.data, "delta", text)
+	}
+	for _, key := range order {
+		state := groups[key]
+		if err := state.field.normalize(func(value string) (string, error) {
+			if state.arguments {
+				return sanitizeSSEArguments(value, policy)
+			}
+			return sanitizeSSEText(value, policy)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func decodeSSEChunk(payload string) (map[string]any, error) {

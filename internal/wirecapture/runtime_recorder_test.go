@@ -771,3 +771,50 @@ func TestRuntimeRecorderStatusDescribesTheRecorder(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 }
+
+// #536 (I26): a Responses stream (event: lines, no [DONE]) is recorded through
+// the whole runtime pipeline (draft policy, sanitizer, privacy scan) as
+// complete once its terminal event arrived, and a stream cut before that event
+// is skipped like any other partial stream.
+func TestRuntimeRecorderRecordsAResponsesStreamWithEventLines(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		block := func(name, data string) {
+			_, _ = io.WriteString(w, "event: "+name+"\ndata: "+data+"\n\n")
+			flusher.Flush()
+		}
+		block("response.created", `{"type":"response.created","sequence_number":0,"response":{"id":"resp_0193a5c27c1e7f00b2d28f1e3a","object":"response","model":"gpt-astra","status":"in_progress"}}`)
+		block("response.output_text.delta", `{"type":"response.output_text.delta","sequence_number":1,"item_id":"msg_0193a5c27c1e7f00b2d28f1e3a","output_index":0,"content_index":0,"delta":"the assistant "}`)
+		block("response.output_text.delta", `{"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_0193a5c27c1e7f00b2d28f1e3a","output_index":0,"content_index":0,"delta":"reply text"}`)
+		if r.URL.Path == "/v1/responses-cut" {
+			return // the connection ends before the terminal event
+		}
+		block("response.completed", `{"type":"response.completed","sequence_number":3,"response":{"id":"resp_0193a5c27c1e7f00b2d28f1e3a","object":"response","model":"gpt-astra","status":"completed"}}`)
+	}))
+	t.Cleanup(server.Close)
+	dir, recorder := newRuntimeRecorder(t, nil)
+	client := &http.Client{Transport: recorder.Wrap("LLM", http.DefaultTransport.(*http.Transport).Clone())}
+	if got := send(t, client, http.MethodPost, server.URL+"/v1/responses", "application/json", []byte(`{"model":"gpt-astra","stream":true}`)); !strings.Contains(string(got), "reply text") {
+		t.Fatalf("stream changed: %q", got)
+	}
+	send(t, client, http.MethodPost, server.URL+"/v1/responses-cut", "application/json", []byte(`{"model":"gpt-astra","stream":true}`))
+	status := recorder.Status()
+	if status.Written != 1 || status.Skipped != 1 {
+		t.Fatalf("status = %+v (%v)", status, recorder.WriteError())
+	}
+	exchanges, _, err := wirecapture.LoadUpstreamRecords(dir)
+	if err != nil || len(exchanges) != 1 {
+		t.Fatalf("load: %d %v", len(exchanges), err)
+	}
+	body := exchanges[0].Response.Body
+	if body.Encoding != wirecapture.PayloadSSE || !strings.HasPrefix(body.SSE, "event: response.created\ndata: {") ||
+		strings.Contains(body.SSE, "[DONE]") || strings.Contains(body.SSE, "reply text") ||
+		strings.Contains(body.SSE, "0193a5c27c1e7f00b2d28f1e3a") {
+		t.Fatalf("named stream recorded wrongly: %s", body.SSE)
+	}
+	if findings, covered, err := privacyscan.ScanRecordDir(dir); err != nil || covered != 1 || len(findings) != 0 {
+		t.Fatalf("scan: %d %v %v", covered, findings, err)
+	}
+}
