@@ -589,6 +589,9 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	if source.Chat.Presentation.Messages.ContentRejectedReasonLabels != nil {
 		result.Chat.Presentation.Messages.ContentRejectedReasonLabels = cloneStringMap(source.Chat.Presentation.Messages.ContentRejectedReasonLabels)
 	}
+	if source.Chat.Presentation.Messages.AgentImageInvalidReasonLabels != nil {
+		result.Chat.Presentation.Messages.AgentImageInvalidReasonLabels = cloneStringMap(source.Chat.Presentation.Messages.AgentImageInvalidReasonLabels)
+	}
 	if source.Chat.Presentation.Messages.GenerationFailedByClass != nil {
 		result.Chat.Presentation.Messages.GenerationFailedByClass = cloneStringMap(source.Chat.Presentation.Messages.GenerationFailedByClass)
 	}

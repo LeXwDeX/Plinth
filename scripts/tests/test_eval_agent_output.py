@@ -5,11 +5,15 @@ No network and no server: the runner is loaded as a module and driven with
 fake clients, so the 3MF-before-GLB delivery order and the 409 turn-active
 retry are checked without a paid request.
 """
+import contextlib
 import importlib.util
+import io
+import os
 import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock as mock
 
 sys.dont_write_bytecode = True
 SMOKE = pathlib.Path(__file__).resolve().parents[1] / "smoke"
@@ -242,6 +246,120 @@ class SendMessageTest(unittest.TestCase):
         self.assertFalse(run.session_busy(409, CHOICE_CLOSED))
         self.assertFalse(run.session_busy(202, BUSY))
         self.assertFalse(run.session_busy(500, {"error": "boom"}))
+
+
+class StubClient:
+    """A chat client whose turn ends at once: no stream is held open."""
+
+    def call(self, method, path, body=None):
+        return 202, {}
+
+    def read_chat_stream(self, session, timeout):
+        return "done"
+
+
+class StubLive:
+    """Just enough of Live for run_case: one turn, no cards, no tasks."""
+
+    def __init__(self):
+        self.client = StubClient()
+        self._last_send = {}
+
+    def new_session(self, approval="auto"):
+        return "s1"
+
+    def lock_model_3d(self, session, model):
+        return {}
+
+    def pending_choices(self, session):
+        return []
+
+    def pending_approvals(self, session):
+        return []
+
+    def messages(self, session):
+        return [{"role": "assistant", "content": "Fake upstream reply."}]
+
+    def tasks(self, session):
+        return []
+
+    def wait_tasks(self, session, counts, timeout=None):
+        return [], True
+
+
+class RunnerReportingTest(unittest.TestCase):
+    """#498: what the live runner can and cannot report."""
+
+    def case(self, request):
+        args = run.parse_arguments(["--report", tempfile.gettempdir()])
+        return run.quality.evaluate_case(request, run.run_case(StubLive(), request, {}, {}, args))
+
+    def test_the_live_run_declares_that_it_never_sends_feedback(self):
+        data, _path, _digest = run.quality.load_requests()
+        request = next(item for item in data["requests"] if item["id"] == "2d-preference-multiturn")
+        case = self.case(request)
+        checks = {check["id"]: check["status"] for check in case["checks"]}
+        for name in ("preference:captured", "preference:injected", "preference:after_compaction",
+                     "preference:edited", "preference:deleted"):
+            self.assertEqual(checks[name], run.quality.CHECK_SKIP)
+        self.assertNotIn("preference:captured",
+                         {check["id"] for check in run.quality.case_hard_failures(case)})
+
+    def test_an_unknown_request_id_is_refused_instead_of_running_a_subset(self):
+        environ = {"BASE": "http://127.0.0.1:1", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
+                   "ART_AI_UPSTREAM_SHAPE": "live", "ART_AI_LIVE_ACK": "1", "PATH": os.environ["PATH"]}
+        with mock.patch.dict(os.environ, environ, clear=True):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                code = run.main(["--live", "--report", tempfile.gettempdir(), "--only", "no-such-case"])
+        self.assertEqual(code, 2)
+        self.assertIn("unknown request id", err.getvalue())
+
+    def test_an_interrupt_says_so_and_exits_nonzero(self):
+        with mock.patch.object(run, "run", side_effect=KeyboardInterrupt):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                code = run.main(["--live", "--report", tempfile.gettempdir()])
+        self.assertEqual(code, 130)
+        self.assertIn("interrupted", err.getvalue())
+
+    def test_a_crash_says_what_happened_and_exits_nonzero(self):
+        with mock.patch.object(run, "run", side_effect=RuntimeError("boom")):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                code = run.main(["--live", "--report", tempfile.gettempdir()])
+        self.assertEqual(code, 1)
+        self.assertIn("boom", err.getvalue())
+
+
+class CrashingLive:
+    """A Live that cannot even open a session, to prove a half-run crash reports."""
+
+    def __init__(self, client, report, arguments):
+        self.arguments = arguments
+
+    def login(self):
+        return True
+
+    def public_schema(self):
+        return {}
+
+    def offerings(self, capability):
+        return []
+
+    def new_session(self, approval="auto"):
+        raise RuntimeError("boom")
+
+
+class CrashReportingTest(unittest.TestCase):
+    def test_a_crash_mid_run_still_writes_a_report_and_exits_nonzero(self):
+        environ = {"BASE": "http://127.0.0.1:1", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
+                   "ART_AI_UPSTREAM_SHAPE": "live", "ART_AI_LIVE_ACK": "1", "PATH": os.environ["PATH"]}
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(os.environ, environ, clear=True):
+                with mock.patch.object(run.common, "Live", CrashingLive):
+                    code = run.main(["--live", "--report", directory, "--only", "2d-icon-set"])
+            report = pathlib.Path(directory) / "agent-quality-output-run.json"
+            self.assertEqual(code, 1)
+            self.assertTrue(report.exists(), "a crash must leave a report behind")
+            self.assertIn("script error", report.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -372,10 +372,10 @@ func TestThirdAlignmentReportIsCommittedAndClean(t *testing.T) {
 	testkit.AssertAlignmentReport(t, "testdata/alignment-report-386.json", OfficialBase, true)
 }
 
-// The 2026-11-20 live window re-captured image-to-multiview through the
-// production path (an uploaded PNG, then the task). The fake keeps that
-// capture's structure even though it templates from the older sample of the
-// kind (#446).
+// The live windows re-captured image-to-multiview through the production path
+// (an uploaded PNG, then the task): 2026-11-20, and again on 2026-11-23 with
+// the edited views the same way. The fake keeps the newest capture's structure
+// even though it templates from the older sample of the kind (#446, #497).
 func TestTheFakeMatchesTheNewestMultiviewCapture(t *testing.T) {
 	samples := loadSamples(t)
 	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})

@@ -84,6 +84,15 @@ type Kind struct {
 	Fidelity string
 	// Real marks kinds with a captured sample of their own.
 	Real bool
+	// EchoResolution marks kinds whose task object repeats the geometry options
+	// the request was sent with, geometry_resolution and its deprecated alias
+	// ultra_mode, in every poll. The 2026-11-23 capture of Multi Image to 3D
+	// shows both in the queued, running and finished objects of a task created
+	// with geometry_resolution "2k". A kind whose committed sample was taken
+	// without the two keys (Multi Image to 3D, 2026-10-29, sent "standard",
+	// which the object does not repeat) needs this to echo them; a kind whose
+	// sample carries them is already shaped by the template.
+	EchoResolution bool
 	// Patch, when set, edits a poll body before it is sent (keys the sample
 	// sanitizer cannot hold).
 	Patch func(body map[string]any)
@@ -809,14 +818,16 @@ func (e *engine) anyTemplate(typ string) map[string]any {
 // deprecated aliases the Catalog dated 2026-09-18/2026-11-20 names, where
 // ultra_mode=true means 2k geometry or more and hd_texture=true means a 4k
 // texture. A body that carries none of the keys (every other kind) is left
-// alone; the Adapter reads none of them.
+// alone, unless the kind is marked EchoResolution: the 2026-11-23 capture of
+// Multi Image to 3D repeats geometry_resolution and ultra_mode in every poll,
+// so that kind echoes them even though its own sample was taken without them.
+// The Adapter reads none of them.
 func (e *engine) shapeResolution(t *task, body map[string]any) {
-	if _, has := body["geometry_resolution"]; has {
-		resolution, _ := t.request["geometry_resolution"].(string)
-		if resolution != "" {
-			body["geometry_resolution"] = resolution
-		}
-		if _, has := body["ultra_mode"]; has && resolution != "" {
+	resolution, _ := t.request["geometry_resolution"].(string)
+	_, templated := body["geometry_resolution"]
+	if resolution != "" && (templated || t.kind.EchoResolution) {
+		body["geometry_resolution"] = resolution
+		if _, has := body["ultra_mode"]; has || t.kind.EchoResolution {
 			body["ultra_mode"] = resolution != "1k"
 		}
 	}

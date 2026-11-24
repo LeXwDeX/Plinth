@@ -334,7 +334,7 @@ class TrajectoryTest(unittest.TestCase):
         self.assertIn("order:ask_choice+update_production_brief<create_model_3d", failed)
         self.assertIn("no_failed_tasks", failed)
 
-    def test_budgets_are_enforced(self):
+    def test_budgets_are_recorded_without_deciding_the_verdict(self):
         request = base_request()
         request["expected"]["budgets"] = {"max_paid_calls": 0, "max_tool_calls": 1, "max_interruptions": 0}
         run = {
@@ -343,10 +343,44 @@ class TrajectoryTest(unittest.TestCase):
             "cards": [{"kind": "choice"}],
             "final_reply": {"content": "done"},
         }
-        failed = {check["id"] for check in quality.case_hard_failures(quality.evaluate_case(request, run))}
-        self.assertIn("budget:paid_calls", failed)
-        self.assertIn("budget:tool_calls", failed)
-        self.assertIn("budget:interruptions", failed)
+        case = quality.evaluate_case(request, run)
+        checks = {check["id"]: check for check in case["checks"]}
+        # #498: the thresholds come from the request set and a healthy live run
+        # is over them, so they are recorded (info), never failed.
+        for name in ("budget:paid_calls", "budget:tool_calls", "budget:interruptions"):
+            self.assertEqual(checks[name]["status"], quality.CHECK_INFO)
+        self.assertNotIn("budget:paid_calls", {check["id"] for check in quality.case_hard_failures(case)})
+        self.assertIn("1 task(s), 阈值 0", checks["budget:paid_calls"]["detail"])
+        self.assertIn("仅记录", quality.report_markdown(quality.summarize([case], "trajectory-fake", "a", False,
+                                                                        {"version": 1, "sha256": "x"})))
+
+    def test_a_runner_that_never_sends_feedback_skips_the_preference_checks(self):
+        request = base_request(
+            modality="2d", purpose="illustration",
+            expected={
+                "capabilities": ["text-to-image"],
+                "required_tool_groups": [{"id": "generate", "any": ["refine_image"]}],
+                "budgets": {"max_paid_calls": 4, "max_tool_calls": 6, "max_interruptions": 1},
+                "preferences": {"captured": True, "injected": True, "after_compaction": True,
+                                "edited": True, "deleted": True},
+            },
+        )
+        run = {
+            "messages": [message({"name": "refine_image", "taskId": "t1"})],
+            "tasks": [succeeded("text-to-image")],
+            "cards": [],
+            "final_reply": {"content": "完成。"},
+            # What the live output runner states about itself (#498).
+            "preference_supported": False,
+        }
+        case = quality.evaluate_case(request, run)
+        self.assertEqual(quality.case_hard_failures(case), [])
+        checks = {check["id"]: check["status"] for check in case["checks"]}
+        for name in ("preference:captured", "preference:injected", "preference:after_compaction",
+                     "preference:edited", "preference:deleted"):
+            self.assertEqual(checks[name], quality.CHECK_SKIP)
+        self.assertIn("已跳过", quality.report_markdown(quality.summarize([case], "trajectory-fake", "a", False,
+                                                                        {"version": 1, "sha256": "x"})))
 
 
     def test_evaluate_case_checks_the_preference_stages(self):
@@ -394,6 +428,69 @@ class TrajectoryTest(unittest.TestCase):
         run["preference_prompts"][2]["prompt"] = "PREF-0 PREF-1 PREF-EDIT washed out"
         failed = {check["id"] for check in quality.case_hard_failures(quality.evaluate_case(request, run))}
         self.assertIn("preference:edited", failed)
+
+class ComparabilityTest(unittest.TestCase):
+    """#498: the report has to say what it compared and what it could not."""
+
+    def case(self, case_id="case"):
+        return {
+            "id": case_id, "title": case_id,
+            "metrics": {"tool_call_count": 1, "paid_call_count": 1, "interruption_count": 0,
+                        "self_inspection": {"inspect_model": 0, "render_model_views": 0}, "elapsed_ms": 1},
+            "checks": [{"id": "final_reply", "status": "pass", "detail": ""}],
+            "tasks": [],
+        }
+
+    def report(self, shape):
+        return quality.summarize([self.case()], "output-live", "a", False,
+                                 {"version": 5, "sha256": "x"}, shape=shape)
+
+    def test_a_live_run_compares_chat_and_artifacts(self):
+        report = self.report("live")
+        self.assertEqual(report["comparable_metrics"], ["chat", "artifacts"])
+        self.assertEqual(report["incomparable_metrics"], [])
+        markdown = quality.report_markdown(report)
+        self.assertIn("上游形态: `live`", markdown)
+        self.assertIn("不可比指标: （无）", markdown)
+
+    def test_a_mixed_run_names_the_artifact_metrics_it_cannot_compare(self):
+        report = self.report("mixed")
+        self.assertEqual(report["comparable_metrics"], ["chat"])
+        self.assertEqual(report["incomparable_metrics"], ["artifacts"])
+        markdown = quality.report_markdown(report)
+        self.assertIn("上游形态: `mixed`", markdown)
+        self.assertIn("产物指标", markdown)
+        self.assertIn("占位", markdown)
+
+    def test_the_shipped_baselines_cannot_be_compared_with_a_live_run(self):
+        baseline = quality.find_baseline("output-live", 5)
+        self.assertFalse(baseline["available"])
+        self.assertIn("无法与基线对比", baseline["note"])
+        self.assertIn("trajectory-fake", baseline["note"])
+
+    def test_a_run_without_a_stored_baseline_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            baseline = quality.find_baseline("output-live", 5, directory=pathlib.Path(directory))
+            self.assertFalse(baseline["available"])
+            report = self.report("live")
+            report["baseline"] = baseline
+            self.assertIn("无法与基线对比", quality.report_markdown(report))
+
+    def test_a_stored_report_of_the_same_mode_is_used_as_the_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "agent-quality-output-a.json"
+            path.write_text(json.dumps({"kind": "agent-quality", "mode": "output-live", "revision": "a",
+                                        "generated_at": "2026-11-24T00:00:00Z",
+                                        "request_set": {"version": 5, "sha256": "x"}}), encoding="utf-8")
+            baseline = quality.find_baseline("output-live", 5, directory=pathlib.Path(directory))
+            self.assertTrue(baseline["available"])
+            self.assertEqual(baseline["path"], "agent-quality-output-a.json")
+            report = self.report("live")
+            report["baseline"] = baseline
+            markdown = quality.report_markdown(report)
+            self.assertIn("agent-quality-output-a.json", markdown)
+            self.assertNotIn("无法与基线对比", markdown)
+
 
 class OutputMetricsTest(unittest.TestCase):
     def test_an_rgb_png_reports_its_subject_coverage(self):
@@ -494,6 +591,24 @@ class ReportTest(unittest.TestCase):
     def test_compare_accepts_identical_reports(self):
         result = quality.compare_reports(self.report(), self.report())
         self.assertTrue(result["ok"])
+
+    def test_a_candidate_that_records_a_budget_check_does_not_regress(self):
+        baseline = self.report()
+        candidate = self.report(revision="b")
+        candidate["cases"][0]["checks"].append(
+            {"id": "budget:paid_calls", "status": quality.CHECK_INFO, "detail": "1 task(s), 阈值 1"})
+        result = quality.compare_reports(baseline, candidate)
+        self.assertTrue(result["ok"])
+        self.assertEqual([item["check"] for item in result["recorded"]], ["budget:paid_calls"])
+        self.assertIn("不可比检查", result["markdown"])
+
+    def test_a_shape_change_is_named_without_blocking(self):
+        candidate = self.report(revision="b")
+        candidate["upstream_shape"] = "mixed"
+        result = quality.compare_reports(self.report(), candidate)
+        self.assertTrue(result["ok"])
+        self.assertIn("上游形态", result["markdown"])
+        self.assertIn("形态不同", result["markdown"])
 
 
     def test_compare_refuses_different_request_sets(self):

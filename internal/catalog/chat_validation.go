@@ -392,6 +392,14 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return fmt.Errorf("presentation.content_rejected_reason_labels[%q] 须为小写、以 _ 分隔的原因并带文案（#35）", reason)
 		}
 	}
+	if reasons := schema.Presentation.Messages.AgentImageInvalidReasons; reasons != "" && !strings.Contains(reasons, "{reasons}") {
+		return errors.New("presentation.agent_image_invalid_reasons 须包含 {reasons}（#497）")
+	}
+	for reason, label := range schema.Presentation.Messages.AgentImageInvalidReasonLabels {
+		if reason == "" || reason != strings.ToLower(reason) || strings.ContainsAny(reason, "-/") || strings.TrimSpace(label) == "" {
+			return fmt.Errorf("presentation.agent_image_invalid_reason_labels[%q] 须为小写、以 _ 分隔的原因并带文案（#497）", reason)
+		}
+	}
 	for class, message := range schema.Presentation.Messages.GenerationFailedByClass {
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {
 			return fmt.Errorf("presentation.generation_failed_by_class[%q] 必须是已声明的失败分类并带文案", class)
