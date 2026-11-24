@@ -687,6 +687,9 @@ Skill 文案统一用动态 key：`schemaText(schema, \`ui.workspace.skills.${ke
 | 错误边界标题 | `ui.boundary.error.title` | 出错了 | app-error-boundary.tsx:57 |
 | 错误说明 | `ui.boundary.error.description` | 发生了意外错误，请重试或联系管理员。 | 60 |
 | 重试 | `ui.boundary.error.retry` | 重试 | 62-63 |
+| 页面代码已更新标题（#511） | `ui.boundary.reload.title` | 页面已更新 | app-error-boundary.tsx `PageReloadFallback` |
+| 页面代码已更新说明 | `ui.boundary.reload.description` | 这一页的程序没能加载，多半是刚发布了新版本。请刷新页面后继续。 | 同上 |
+| 刷新页面 | `ui.boundary.reload.action` | 刷新页面 | 同上 |
 | 404 标题 | `ui.boundary.not_found.title` | 页面未找到 | not-found.tsx:14 |
 | 404 说明 | `ui.boundary.not_found.description` | 抱歉，您访问的页面不存在或已被移除。 | 17 |
 | 返回首页 | `ui.boundary.not_found.home` | 返回首页 | 20 |
@@ -1125,6 +1128,9 @@ Surface 阴影：none、sm、lg、xl。
 | components/common/app-error-boundary.tsx:57 | `ui.boundary.error.title` | 出错了 |
 | components/common/app-error-boundary.tsx:60 | `ui.boundary.error.description` | 发生了意外错误，请重试或联系管理员。 |
 | components/common/app-error-boundary.tsx:63 | `ui.boundary.error.retry` | 重试 |
+| components/common/app-error-boundary.tsx `PageReloadFallback` | `ui.boundary.reload.title` | 页面已更新 |
+| components/common/app-error-boundary.tsx `PageReloadFallback` | `ui.boundary.reload.description` | 这一页的程序没能加载，多半是刚发布了新版本。请刷新页面后继续。 |
+| components/common/app-error-boundary.tsx `PageReloadFallback` | `ui.boundary.reload.action` | 刷新页面 |
 | components/common/thumbnail-cell.tsx:39 | `ui.common.preview` | 预览 |
 | components/form/image-upload.tsx:85 | `ui.form.image_upload.maximum` | 最多只能上传 {count} 张图片 |
 | components/form/image-upload.tsx:195 | `ui.form.image_upload.release` | 松开以上传 |

@@ -5,6 +5,7 @@ import {
 } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
+import { resetFailedPageCode } from '@/components/common/reloadable-lazy';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Button } from '@/components/ui/button';
 import { reportClientError } from '@/lib/client-error-report';
@@ -48,6 +49,8 @@ export class RegionErrorBoundary extends Component<
   }
 
   private reload = () => {
+    // #511: React.lazy keeps a refused code import; forget it so the remounted region loads the code anew.
+    resetFailedPageCode();
     this.setState((state) => ({ error: null, attempt: state.attempt + 1 }));
   };
 
