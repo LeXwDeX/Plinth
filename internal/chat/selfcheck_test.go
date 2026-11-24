@@ -182,7 +182,7 @@ func TestSelfCheckCountsDeriveRoundsRendersAndState(t *testing.T) {
 	}
 }
 
-func TestSelfCheckServiceAppendsEvidenceAndInvalidatesTheConclusion(t *testing.T) {
+func TestSelfCheckServiceAppendsEvidenceAndKeepsTheConclusion(t *testing.T) {
 	schema := testSelfCheckSchema(t)
 	store := newMemorySelfCheckStore()
 	service := chat.NewSelfCheckService(store, schema)
@@ -205,24 +205,32 @@ func TestSelfCheckServiceAppendsEvidenceAndInvalidatesTheConclusion(t *testing.T
 	if err != nil || conclusion.Conclusion == nil || conclusion.Conclusion.Status != "passed" {
 		t.Fatalf("conclusion = %+v err=%v", conclusion, err)
 	}
-	// New evidence invalidates the written conclusion, so the state returns to
-	// unchecked until the Agent records again.
-	cleared, err := service.AppendCheck(ctx, "owner-a", "session-a", "task-a", "asset-a", chat.SelfCheckCheck{
-		Kind: chat.SelfCheckKindRender, Tool: "render_model_views", Views: []string{"back"}, OK: true,
-	})
-	if err != nil || cleared.Conclusion != nil {
-		t.Fatalf("new evidence must clear the conclusion: %+v err=%v", cleared, err)
+	// #512: a later read-only check changes nothing about the model, so it is
+	// added as evidence and the written conclusion stays: neither a second look
+	// at the same result nor compare_models naming it as the other side sends it
+	// back to unchecked.
+	for _, check := range []chat.SelfCheckCheck{
+		{Kind: chat.SelfCheckKindRender, Tool: "render_model_views", Views: []string{"back"}, OK: true},
+		{Kind: chat.SelfCheckKindCompare, Tool: "compare_models", Views: []string{"front"}, OK: true},
+		{Kind: chat.SelfCheckKindInspect, Tool: "inspect_model", OK: true},
+	} {
+		kept, err := service.AppendCheck(ctx, "owner-a", "session-a", "task-a", "asset-a", check)
+		if err != nil || kept.Conclusion == nil || kept.Conclusion.Status != "passed" ||
+			kept.Conclusion.Summary != "looks right" {
+			t.Fatalf("a later %s check must keep the conclusion: %+v err=%v", check.Tool, kept.Conclusion, err)
+		}
 	}
 	passed, err := service.RecordConclusion(ctx, "owner-a", "session-a", "task-a", "asset-a",
 		chat.SelfCheckConclusion{Status: "passed", Summary: "checked"})
-	if err != nil || passed.Conclusion == nil || passed.Conclusion.Status != "passed" {
+	if err != nil || passed.Conclusion == nil || passed.Conclusion.Status != "passed" ||
+		passed.Conclusion.Summary != "checked" {
 		t.Fatalf("passed conclusion = %+v err=%v", passed, err)
 	}
-	if passed.Revision != 5 {
-		t.Fatalf("revision = %d, want 5", passed.Revision)
+	if passed.Revision != 7 {
+		t.Fatalf("revision = %d, want 7", passed.Revision)
 	}
 	counters := service.Counts(passed)
-	if counters.StatusRole != chat.SelfCheckRolePassed || counters.RoundsUsed != 1 || counters.RendersInRound != 2 {
+	if counters.StatusRole != chat.SelfCheckRolePassed || counters.RoundsUsed != 2 || counters.RendersInRound != 0 {
 		t.Fatalf("counters = %+v", counters)
 	}
 }

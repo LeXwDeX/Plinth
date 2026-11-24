@@ -12,6 +12,8 @@ import (
 
 func usageInt(value int) *int { return &value }
 
+func usageRatio(value float64) *float64 { return &value }
+
 func usageIdentityText(template string, replacements ...string) string {
 	for index := 0; index+1 < len(replacements); index += 2 {
 		template = strings.ReplaceAll(template, replacements[index], replacements[index+1])
@@ -20,7 +22,9 @@ func usageIdentityText(template string, replacements ...string) string {
 }
 
 // usageBaseUsage is a small purpose whose bounds are easy to cross in a test:
-// 10–20 triangles, UV, watertight, skin, 1024 px textures and 1–2 m.
+// 10–20 triangles, UV, watertight, skin, 1024 px textures, 1–2 m and an origin
+// within 5% of the diagonal from the bottom centre. The prop purpose declares
+// no origin, like a display purpose (#512).
 func usageBaseUsage() catalog.ChatModel3DUsageSchema {
 	return catalog.ChatModel3DUsageSchema{
 		DefaultProfile: "game",
@@ -32,7 +36,8 @@ func usageBaseUsage() catalog.ChatModel3DUsageSchema {
 					MaxTextureSize: usageInt(1024),
 					RequireUV:      true, RequireWatertight: true, RequireSkin: true,
 				},
-				ScaleRangeM: &catalog.ChatModel3DUsageScaleRange{Min: 1, Max: 2},
+				ScaleRangeM:            &catalog.ChatModel3DUsageScaleRange{Min: 1, Max: 2},
+				PivotBottomCenterRatio: usageRatio(0.05),
 			},
 			{
 				ID: "prop", Label: "道具", Description: "d", Reason: "r",
@@ -198,6 +203,26 @@ func TestModelReviewUsageChecksReportPassFailAndUnknown(t *testing.T) {
 			want: modelReviewUsageStatusFail,
 			mutate: func(report *modelinspect.Report, _ *catalog.ChatModel3DUsageSchema) {
 				report.BBox.BottomCenterOffset = [3]float64{0, -1, 0}
+			},
+		},
+		{
+			// #512: the tolerance is the purpose's own; 1% of the diagonal (the old
+			// global bound) would have failed this offset.
+			name: "pivot inside the purpose's tolerance", check: catalog.ModelReviewUsageCheckPivotBottomCenter,
+			want: modelReviewUsageStatusPass,
+			mutate: func(report *modelinspect.Report, _ *catalog.ChatModel3DUsageSchema) {
+				report.BBox.BottomCenterOffset = [3]float64{0.05, 0, 0}
+			},
+		},
+		{
+			// #512: a purpose that declares no origin (display, Web/AR, print) never
+			// fails on where the origin sits.
+			name:  "a purpose without an origin requirement does not judge the pivot",
+			check: catalog.ModelReviewUsageCheckPivotBottomCenter,
+			want:  modelReviewUsageStatusUnknown,
+			mutate: func(report *modelinspect.Report, usage *catalog.ChatModel3DUsageSchema) {
+				report.BBox.BottomCenterOffset = [3]float64{0, -1, 0}
+				usage.Profiles[0].PivotBottomCenterRatio = nil
 			},
 		},
 		{

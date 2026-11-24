@@ -3018,9 +3018,9 @@ func ModelReviewUsageCheckIDs() []string {
 // ChatModelInspectProductionSchema holds the thresholds, words and fix
 // suggestions of the purpose check. Ratio thresholds are fractions of one.
 type ChatModelInspectProductionSchema struct {
-	// PivotBottomCenterRatio bounds the distance from the bbox bottom centre
-	// to the origin, relative to the bbox diagonal.
-	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
+	// The origin tolerance is not here: each purpose declares its own
+	// (ChatModel3DUsageProfile.PivotBottomCenterRatio, #512).
+	//
 	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
 	// when its shortest edge is at most this fraction of its longest edge.
 	YUpFlatRatio float64 `json:"y_up_flat_ratio"`
@@ -3801,6 +3801,13 @@ type ChatModel3DUsageProfile struct {
 	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
 	// the purpose does not judge scale (render).
 	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+	// PivotBottomCenterRatio is the purpose's tolerance for the origin: the
+	// distance from the bbox bottom centre to the origin, relative to the bbox
+	// diagonal, in (0, 1]. Only a purpose whose model is placed by its feet or
+	// base (a game character or prop) declares it; nil means the purpose does not
+	// judge where the origin sits (display, Web/AR, print), so the check stays
+	// unknown and never fails (#512).
+	PivotBottomCenterRatio *float64 `json:"pivot_bottom_center_ratio,omitempty"`
 }
 
 // ChatModel3DUsagePlatform is one platform variant of a purpose (#275). IDs

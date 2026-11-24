@@ -321,11 +321,15 @@ func TestSelfCheckLimitsRefuseMoreRoundsAndRendersButAllowTheConclusion(t *testi
 		t.Fatal("a refused conclusion created a record")
 	}
 
-	inspect, err := executor.InspectModel(ctx, reviewCommand("inspect_model", `{"model":"task-a"}`))
+	// A game prop declares where its origin belongs (#512), so the fixture's
+	// off-centre origin fails its purpose check.
+	inspectCommand := reviewCommand("inspect_model", `{"model":"task-a"}`)
+	inspectCommand.Options.ProductionBrief = chat.ProductionBrief{"purpose": []byte(`"game_prop"`)}
+	inspect, err := executor.InspectModel(ctx, inspectCommand)
 	if err != nil || inspect.Error != "" {
 		t.Fatalf("inspect = %+v err=%v", inspect, err)
 	}
-	second, err := executor.InspectModel(ctx, reviewCommand("inspect_model", `{"model":"task-a"}`))
+	second, err := executor.InspectModel(ctx, inspectCommand)
 	if err != nil || second.Error == "" || !strings.Contains(second.Error, "limit") {
 		t.Fatalf("second round = %+v err=%v", second, err)
 	}

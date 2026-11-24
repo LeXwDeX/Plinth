@@ -339,7 +339,12 @@ func (policy *ProductionPlanPolicy) planCheck(check string, profile catalog.Chat
 	case modelcheck.CheckSkin:
 		return budget.PlanCheck{Check: check, Required: purposeBudget.RequireSkin}, true
 	case modelcheck.CheckPivotBottomCenter:
-		ratio := policy.Production.PivotBottomCenterRatio
+		// Only a purpose that declares where its origin belongs judges it (#512);
+		// any other purpose freezes the check without a bound, so it reads unknown.
+		if profile.PivotBottomCenterRatio == nil {
+			return budget.PlanCheck{Check: check}, true
+		}
+		ratio := *profile.PivotBottomCenterRatio
 		return budget.PlanCheck{Check: check, MaximumRatio: &ratio}, true
 	case modelcheck.CheckYUp:
 		ratio := policy.Production.YUpFlatRatio

@@ -313,13 +313,18 @@ func (executor *Executor) SessionModelTasks(ctx context.Context, ownerID, sessio
 	}
 	records := map[string]chat.SelfCheckRecord{}
 	if executor.selfChecks != nil {
-		if stored, listErr := executor.selfChecks.List(ctx, ownerID, sessionID); listErr != nil {
+		taskIDs := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			taskIDs = append(taskIDs, string(task.ID))
+		}
+		// A branch lists its ancestors' models; their conclusions are read by
+		// owner and task, so an inherited checked model is not queued first as
+		// unchecked (#512).
+		if stored, listErr := executor.selfChecks.SessionRecords(ctx, ownerID, sessionID, taskIDs); listErr != nil {
 			executor.logger.Warn("self-check records not readable for the prompt task list",
 				"owner_id", ownerID, "session_id", sessionID, "error", listErr)
 		} else {
-			for _, record := range stored {
-				records[record.TaskID] = record
-			}
+			records = stored
 		}
 	}
 	type selfCheckTaskEntry struct {
