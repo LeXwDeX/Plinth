@@ -17,6 +17,17 @@ export const SETTINGS_TAB_TEXT: Record<ComposerSettingsTab, string> = {
   chat: 'ui.studio.composer.settings.tab.chat',
 };
 
+/**
+ * #546: what the dot beside a changed tab means (its hover hint and its screen-reader name), one Schema message per
+ * tab, written out in full so the message-key guard can see them.
+ */
+export const SETTINGS_CHANGED_NOTE_TEXT: Record<ComposerSettingsTab, string> = {
+  models: 'ui.studio.composer.settings.changed_note.models',
+  skills: 'ui.studio.composer.settings.changed_note.skills',
+  params: 'ui.studio.composer.settings.changed_note.params',
+  chat: 'ui.studio.composer.settings.changed_note.chat',
+};
+
 export function isComposerSettingsTab(value: unknown): value is ComposerSettingsTab {
   return typeof value === 'string' && (COMPOSER_SETTINGS_TABS as readonly string[]).includes(value);
 }
@@ -32,6 +43,14 @@ export function visibleSettingsTab(wanted: ComposerSettingsTab, offered: readonl
 /** A generation model picked for either domain is the person's explicit lock; no pick leaves the choice to the Agent. */
 export function modelsLocked(modelByDomain: Readonly<Record<'image' | 'model-3d', string | null>>): boolean {
   return modelByDomain.image !== null || modelByDomain['model-3d'] !== null;
+}
+
+/**
+ * #546: the domains whose generation model the person pinned, in the order 2D, 3D. The pins are kept across sessions
+ * (#405/#406 store them with the workspace); the models tab names them and offers to give the choice back to the Agent.
+ */
+export function lockedModelDomains(modelByDomain: Readonly<Record<'image' | 'model-3d', string | null>>): Array<'image' | 'model-3d'> {
+  return (['image', 'model-3d'] as const).filter((domain) => modelByDomain[domain] !== null);
 }
 
 /** A parameter the person set (a pin), in any of the domains; defaults and the Agent's own values do not count. */

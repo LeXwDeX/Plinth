@@ -41,6 +41,11 @@ export interface DomainPick {
   /** 选中模型的简称和全名（供应商只在同名时才带上，#324）；未选时都是"选择模型"。 */
   short: string;
   full: string;
+  /**
+   * #546: drop the person's pick for this domain so the Agent chooses again: the picker shows no selection and the
+   * session's explicit lock is cleared through the same serialized write a pick uses (an empty model clears it).
+   */
+  clear: () => void;
 }
 
 /**
@@ -107,9 +112,34 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       fullWithProvider: schemaText(schema, 'ui.studio.picker.full_with_provider'),
     })
     : { short: schemaText(schema, 'ui.studio.picker.choose'), full: schemaText(schema, 'ui.studio.picker.choose') };
+  // #103/#239: a 2D or 3D pick is the person's explicit lock for this session; null clears it (#546). The restore and
+  // retired-successor paths above call setModel directly and do not mark it. A pick before the session exists waits
+  // for the first send; later picks are serialized per session and the newest wins.
+  const choose = (key: string | null) => {
+    setModel(domain, key);
+    const route = domain === 'image'
+      ? schema.runtime.http.routes.chat_session_model2d
+      : schema.runtime.http.routes.chat_session_model3d;
+    if (!route) return;
+    const write = domain === 'image'
+      ? (sessionId: string, model: string) => client.setExplicitModelImage(sessionId, model)
+      : (sessionId: string, model: string) => client.setExplicitModel3D(sessionId, model);
+    const pick = domain === 'image' ? pickExplicitModelImage : pickExplicitModel3D;
+    pick({
+      sessionId: activeSessionId,
+      model: key ?? '',
+      previous: selectedModel ?? null,
+      write,
+      onFailure: (previous) => {
+        setModel(domain, previous);
+        toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
+      },
+    });
+  };
   return {
     short: names.short,
     full: names.full,
+    clear: () => choose(null),
     section: {
       testId: `workspace-model-picker-${scope}`,
       title: text(`${scope}.title`),
@@ -125,33 +155,7 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       loadingText: schemaText(schema, 'ui.workspace.models.loading'),
       failedText: error ? schemaText(schema, 'ui.workspace.models.load_failed') : undefined,
       emptyText: schemaText(schema, 'ui.workspace.models.empty'),
-      onPick: (key) => {
-        setModel(domain, key);
-        // #103/#239: a 2D or 3D pick is the person's explicit lock for this
-        // session. The restore and retired-successor paths above call
-        // setModel directly and do not mark it. A pick before the session
-        // exists waits for the first send; later picks are serialized per
-        // session and the newest wins.
-        const route = domain === 'image'
-          ? schema.runtime.http.routes.chat_session_model2d
-          : schema.runtime.http.routes.chat_session_model3d;
-        if (route) {
-          const write = domain === 'image'
-            ? (sessionId: string, model: string) => client.setExplicitModelImage(sessionId, model)
-            : (sessionId: string, model: string) => client.setExplicitModel3D(sessionId, model);
-          const pick = domain === 'image' ? pickExplicitModelImage : pickExplicitModel3D;
-          pick({
-            sessionId: activeSessionId,
-            model: key,
-            previous: selectedModel ?? null,
-            write,
-            onFailure: (previous) => {
-              setModel(domain, previous);
-              toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
-            },
-          });
-        }
-      },
+      onPick: (key) => choose(key),
     },
   };
 }
