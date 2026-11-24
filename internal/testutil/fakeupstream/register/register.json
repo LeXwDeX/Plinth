@@ -1,0 +1,3716 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "tripo-v3/balance",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /account/balance"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "余额查询返回 {code:0, data:{balance, frozen}, status:success} 信封，值固定。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+          "captured_at": "2026-11-16",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/auth-401",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /account/balance"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺少 Key 返回 401，错误信封为 code 2、status error、message 与 suggestion。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/files-upload",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /files"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "multipart 上传图片或模型，返回 file_token 信封。",
+      "note": "上传的参考图在样本里替换为固定 recipe，响应为真实；2026-11-23 的样本 provenance 为 derived。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-model.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/files-refusals",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /files"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "空文件 400/code 2003，不支持的类型 400/code 2004，沿用真实 400 信封。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/files",
+          "section": "Files"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/error-handling",
+          "section": "Error handling"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "tripo-v3/task-poll-states",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /tasks/{task_id}"
+      ],
+      "category": "state-machine",
+      "status": "real",
+      "behavior": "任务轮询 queued → running → success / failed，各状态的轮询体结构与样本一致。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/task-cancelled-unknown",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /tasks/{task_id}"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "task-canceled 与 task-unknown 场景的 cancelled / unknown 终态，由真实 failed 轮询去掉 error_code 与 error_message 派生；banned、expired 不出现。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/task-lifecycle",
+          "section": "Task lifecycle"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/task-query",
+          "section": "Task query"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "tripo-v3/task-404",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /tasks/{task_id}"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "未知或不属于本账号的任务返回 404/code 2001 信封。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/artifacts-route",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /artifacts/{task_id}/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "产物 CDN 不属于 API；该路由提供任务输出 URL 指向的固定文件（content type 按观测为 binary/octet-stream）。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/task-query",
+          "section": "Task query：output 字段"
+        }
+      ],
+      "checked_at": "2026-09-30",
+      "why_not_real": "产物主机不是 API 的一部分，wire 样本只记 API 交换，媒体字节按 recipe 替换"
+    },
+    {
+      "id": "tripo-v3/artifact-expired",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "GET /artifacts/{task_id}/{name}"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "artifact-expired 场景：过期签名 URL 返回 CloudFront 的 403 text/xml AccessDenied 体。",
+      "basis": [
+        {
+          "source": "官方产物 CDN 上的观测：把签名 URL 的有效期改到过去后请求",
+          "section": "#295，2026-10-29"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；且不是自然过期，只是同一条服务端分支"
+    },
+    {
+      "id": "tripo-v3/text-to-model-h-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "H 系列（v3.1-20260211）文生模型的创建信封与任务对象结构；输出含 model_url、rendered_image_url 与 generated_image_url。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/create-400-1004",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺少或非法参数的创建请求返回 400/code 1004 信封；其余创建端点的参数拒绝复用这一信封。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/text-to-model-p-series",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "P 系列（P2-20260801、P1-20260311）文生模型的请求值、拒绝与报价按官方 P Series 页面构造（generation.go）。",
+      "wire_coverage_correction": {
+        "unit": "tripo.v3|text-to-3d|POST /v3/generation/text-to-model",
+        "offering": "tripo/tripo-p2/text-to-3d",
+        "reason": "该单元的 real 来自 v3.1-20260211 的文生样本；P2 与 H 系列共用端点，P2 的请求值、拒绝与价格没有真实样本。矩阵的 Offering 行已是 partial，但单元仍把 P2 列在 real 证据下。"
+      },
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard",
+          "section": "Text to model（P Series）"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "P 系列从未以文生任务真实请求过；已提交的文生样本只用 H 系列 v3.1-20260211"
+    },
+    {
+      "id": "tripo-v3/generation-request-contract",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "生成请求契约（#541）：各模型版本允许的参数、取值与来源任务按官方页校验，非法值答真实 400/code 1004 信封。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard",
+          "section": "Text to model"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard",
+          "section": "Image to model"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard",
+          "section": "Multiview to model"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/changelog",
+          "section": "Changelog"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "参数层面的拒绝没有真实请求过；样本只有一次合法请求与一次缺参 400"
+    },
+    {
+      "id": "tripo-v3/p-quad-fbx",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "P 系列 quad=true 时输出只有 FBX、没有 GLB（p2_quad.go）；multiview-to-model 上为推定。",
+      "basis": [
+        {
+          "source": "dev-test 真实运行观测（文生与图生）",
+          "section": "#294，2026-11-12"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；multiview-to-model 未观测，按同系列推定"
+    },
+    {
+      "id": "tripo-v3/image-to-model-h-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/image-to-model"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "H 系列 v3.1 图生模型：任务类型 image_to_model，输出 model_url 与 rendered_image_url（没有 generated_image_url）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/image-to-model-p-series",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/image-to-model"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "P 系列图生模型的请求值、拒绝与报价按官方 P Series 页面构造。",
+      "wire_coverage_correction": {
+        "unit": "tripo.v3|image-to-3d|POST /v3/generation/image-to-model",
+        "offering": "tripo/tripo-p2/image-to-3d",
+        "reason": "该单元的 real 来自 v3.1-20260211 的图生样本；P2 共用端点但没有真实样本。"
+      },
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/p",
+          "section": "Image to model（P Series）"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "P 系列从未在图生端点真实请求过"
+    },
+    {
+      "id": "tripo-v3/multiview-to-model-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "v3.1 多视图建模：创建信封、任务类型 multiview_to_model、queued → running → success，任务对象带 input、model_version 与四项 files，输出 model_url（GLB）与 rendered_image_url（WebP）。",
+      "note": "该样本是对照证据，不是 fake 的模板；端点表仍按文档标 constructed。真实运行中 running 轮询在 progress 99 就给出渲染图，fake 不复现；请求省略参数时真实回显什么未知。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-386-multiview-model.candidate.json",
+          "captured_at": "2026-11-19",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/multiview-to-model-request",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "inputs 为单键视图对象数组（front 必需，2–4 张），代替 input。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard",
+          "section": "Multiview to model"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "只有一次合法的三视图请求入库（evidence-386），缺视图或越界的拒绝没有真实请求过"
+    },
+    {
+      "id": "tripo-v3/multiview-to-model-p-series",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "P 系列多视图建模的请求值与报价按官方 P Series 页面构造。",
+      "wire_coverage_correction": {
+        "unit": "tripo.v3|image-to-3d|POST /v3/generation/multiview-to-model",
+        "offering": "tripo/tripo-p2-multiview/image-to-3d",
+        "reason": "该单元的 real 来自 v3.1-20260211 的多视图样本（evidence-386）；P2 多视图共用端点但没有真实样本。"
+      },
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard",
+          "section": "Multiview to model（P Series）"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "P 系列从未在多视图端点真实请求过；唯一的样本 evidence-386 用 v3.1-20260211"
+    },
+    {
+      "id": "tripo-v3/image-to-splat",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/image-to-splat"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "任务类型 image_to_splat，输出只有 model_url（.splat）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/image-to-multiview",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/image-to-multiview"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "任务类型 image_to_multiview，输出 generate_multiview_image 的四个视图 URL（JPEG）；running 轮询的 output 为 {}，任务回显 input.file.object。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/edit-multiview",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/edit-multiview"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "任务类型 edit_multiview，input.original_task_id 指向多视图任务，输出只含被编辑的视图。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/rig-check",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /animations/rig-check"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "rig-check 的创建与结果结构。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+          "captured_at": "2026-11-16",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/rig-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /animations/rig"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "rig（biped、spec tripo，v2.5 与 v3.0）的创建与结果；v3.0 运行中即显示 25 credits。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+          "captured_at": "2026-11-16",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/rig-request-values",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /animations/rig"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "rig_type、spec、out_format 的取值与 v3.0 专有值按官方页校验，非法值答 400/code 1004；轮询回显 spec、out_format 与骨架类型。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/animations-rig",
+          "section": "Rig"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/animations-rig-check",
+          "section": "Rig check"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "样本只有 biped + tripo 的请求，其余取值未真实请求过"
+    },
+    {
+      "id": "tripo-v3/retarget-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /animations/retarget"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "retarget（preset:walk，v3.0 biped 骨架）的创建与结果；v2 骨架的 retarget 以 failed、code 1004 结束。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/retarget-request-values",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /animations/retarget"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "animation 与 animations 二选一（至多 5 个）、11 个 v3.0 biped 预设、5 个生物预设与 v1.0 preset:biped: 名称；预设与骨架不符时以 failed/1004 结束（推定）。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/animations-retarget",
+          "section": "Retarget"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "只真实请求过 preset:walk"
+    },
+    {
+      "id": "tripo-v3/segment",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /mesh/segment"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "segment 的创建与结果结构。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/complete",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /mesh/complete"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "complete 的创建与结果结构。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/smartsegment",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /mesh/smartsegment"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "smartsegment_image 与 smartsegment_model：输出 seg_model_url、mask_url、prompt、seg_task_id、model_task_id；着色球体输入以 failed/1001 结束且不计费。",
+      "note": "两种 seg_type 各只观测到一次成功。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/decimate-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /mesh/decimate"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "任务类型 highpoly_to_lowpoly，输出 model_url 与 rendered_image_url。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/decimate-request",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /mesh/decimate"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "来源只能是文生、图生等生成任务，面数与四边面选项按官方页校验，回显默认值并按面数交付带贴图的 GLB 或四边面 FBX（decimate.go）。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/mesh-decimate",
+          "section": "Mesh decimate"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "样本只有一次合法的 v3.0 请求"
+    },
+    {
+      "id": "tripo-v3/texture",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /models/texture"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "任务类型 texture_model（standard、无 PBR），输出 model_url 与 rendered_image_url。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/convert-shape",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /models/convert"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "格式转换：任务在 input 下回显请求与 original_model_id；GLTF/FBX 结果带 normalize_scale 与 normalize_translation，3MF 结果只有 model_url。",
+      "note": "3MF 一轮的样本 evidence-386-convert-3mf 只含轮询，按任务 id 指定来源，见 convert-3mf-package。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+          "captured_at": "2026-11-16",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/convert-request",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /models/convert"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "format 限 GLTF、FBX、USDZ、OBJ、STL、3MF；texture_format、export_orientation、fbx_preset、texture_packaging 取值与类型按官方页校验，texture_packaging 只给 FBX。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/models-convert",
+          "section": "Models convert"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "取值层面的拒绝没有真实请求过"
+    },
+    {
+      "id": "tripo-v3/convert-3mf-package",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /models/convert"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "3MF 交付是带 Tripo 供应商命名空间（AIGC 标签）的 ZIP64 包结构（tripo3mf.go），不是通用 3MF 夹具。",
+      "basis": [
+        {
+          "source": "dev-test 真实运行观测（多视图模型转 3MF，35,952,441 字节）",
+          "section": "#386，2026-11-19"
+        }
+      ],
+      "checked_at": "2026-11-19",
+      "why_not_real": "API 交换已入库（evidence-386-convert-3mf），交付文件本身只有私有媒体证据，没有入库字节"
+    },
+    {
+      "id": "tripo-v3/convert-url-delay",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /models/convert"
+      ],
+      "category": "other",
+      "status": "constructed",
+      "behavior": "以 URL 为输入的转换创建延迟应答（真实 47–48 秒，fake 默认 10 ms，可配置）。",
+      "basis": [
+        {
+          "source": "dev-test 真实运行观测",
+          "section": "#305，2026-11-16"
+        }
+      ],
+      "checked_at": "2026-11-16",
+      "why_not_real": "wire 样本不记录应答耗时"
+    },
+    {
+      "id": "tripo-v3/pricing-observed",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/image-to-splat",
+        "POST /generation/image-to-multiview",
+        "POST /generation/edit-multiview",
+        "POST /models/texture",
+        "POST /mesh/decimate",
+        "POST /mesh/smartsegment",
+        "POST /models/convert",
+        "POST /animations/rig"
+      ],
+      "category": "pricing",
+      "status": "real",
+      "behavior": "已真实观测的扣费回显：H 系列图生（纯几何）20、splat 30、多视图 10、编辑多视图 5、texture 10、decimate 35、smartsegment 85/55、convert 10（GLTF/FBX）、rig（v3.0）25。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+          "captured_at": "2026-11-16",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "tripo-v3/pricing-table",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model",
+        "POST /generation/image-to-splat",
+        "POST /generation/image-to-multiview",
+        "POST /generation/edit-multiview",
+        "POST /models/texture",
+        "POST /mesh/decimate",
+        "POST /models/convert"
+      ],
+      "category": "pricing",
+      "status": "constructed",
+      "behavior": "未观测的参数组合（P 系列、PBR、纹理档位、quad 等）按官方价格表计价（billing.go）。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "只有样本里那几种参数组合被真实扣费过"
+    },
+    {
+      "id": "tripo-v3/rate-limit-concurrency",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model",
+        "POST /generation/image-to-splat",
+        "POST /generation/image-to-multiview",
+        "POST /generation/edit-multiview",
+        "POST /animations/rig-check",
+        "POST /animations/rig",
+        "POST /animations/retarget",
+        "POST /mesh/segment",
+        "POST /mesh/complete",
+        "POST /mesh/smartsegment",
+        "POST /mesh/decimate",
+        "POST /models/texture",
+        "POST /models/convert"
+      ],
+      "category": "rate-limit-concurrency",
+      "status": "constructed",
+      "behavior": "请求限流 429/code 1007 带 X-RateLimit-* 头；分类并发池（H 10 / P 5、图像 1、动画 10、模型处理 5、网格 10）满时创建答 429/code 2000 与 Retry-After（#468）。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/rate-limits",
+          "section": "Rate limits"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/error-handling",
+          "section": "Error handling"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "tripo-v3/fault-scenarios",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model",
+        "POST /generation/image-to-splat",
+        "POST /generation/image-to-multiview",
+        "POST /generation/edit-multiview",
+        "POST /animations/rig-check",
+        "POST /animations/rig",
+        "POST /animations/retarget",
+        "POST /mesh/segment",
+        "POST /mesh/complete",
+        "POST /mesh/smartsegment",
+        "POST /mesh/decimate",
+        "POST /models/texture",
+        "POST /models/convert"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "余额不足、Key 额度、5xx、超时、丢响应、受理后 502、畸形请求体 400/code 1003、未知来源任务 404/code 2001 等故障场景，复用真实错误信封。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/error-handling",
+          "section": "Error handling"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "tripo-v3/real-round-567",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model",
+        "POST /generation/image-to-splat",
+        "POST /generation/image-to-multiview",
+        "POST /generation/edit-multiview",
+        "POST /animations/rig-check",
+        "POST /animations/rig",
+        "POST /animations/retarget",
+        "POST /mesh/segment",
+        "POST /mesh/complete",
+        "POST /mesh/smartsegment",
+        "POST /mesh/decimate",
+        "POST /models/texture",
+        "POST /models/convert"
+      ],
+      "category": "other",
+      "status": "gap",
+      "behavior": "2026-11-24 的 Tripo 公开任务 API 全功能真实一轮正在回灌，本表仍按其之前的样本与构造登记。",
+      "plan": "回灌完成后按功能更新对应条目的状态、样本与日期（P 系列、请求契约、计价等 constructed 条目优先）。",
+      "issues": [
+        567
+      ]
+    },
+    {
+      "id": "openai-v1/models-list",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "GET /models"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "模型列表结构，以及网关对缺少 Key 的 text/plain 401。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-v1/models-invalid-key",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "GET /models",
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "invalid-key 场景答 OpenAI ErrorResponse 形态的 401。",
+      "basis": [
+        {
+          "source": "https://github.com/openai/openai-openapi/blob/master/openapi.yaml",
+          "section": "ErrorResponse schema"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/guides/error-codes",
+          "section": "Error codes"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "网关对错误 Key 的应答只录到 text/plain 形态"
+    },
+    {
+      "id": "openai-v1/chat-shape",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "非流式、SSE 流式、tool_calls 与 reasoning_content 的结构；2026-11-23 的五次补全是所有文本补全的模板（usage 带 prompt_tokens_details.text_tokens，没有 system_fingerprint）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-v1/chat-model-required",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺 model 的 400 model_required（网关信封没有官方的 param，带 path）与缺 Key 的 401。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-v1/chat-fault-scenarios",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "403（text/plain JSON 文本）、404 model-not-found、503 带 Retry-After、429 带 error.quota、messages 为空的 400。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/chat/create",
+          "section": "Chat create"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/guides/error-codes",
+          "section": "Error codes"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "openai-v1/chat-stream-faults",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "[[fake:stream-error]] 以错误帧结束已开始的流，[[fake:stream-cut]] 在 finish_reason 与 [DONE] 前干净断开，[[fake:stream-plain]] 对流式请求答非流式对象（#509）。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/chat/create",
+          "section": "Chat create（stream）"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "openai-v1/chat-model-constraints",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "gpt-astra / gpt-6.2-astra 按模型规则拒绝 tools、temperature 与 reasoning_effort none（400 invalid_request_error，#401）。",
+      "basis": [
+        {
+          "source": "网关 2026-11-20 的日志观测（tools、temperature 拒绝）"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/guides/latest-model.md",
+          "section": "Latest model guide"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/models/gpt-6.2-astra.md",
+          "section": "gpt-6.2-astra"
+        }
+      ],
+      "checked_at": "2026-11-20",
+      "why_not_real": "拒绝只在网关日志里看到，没有入库样本；reasoning_effort none 按文档构造"
+    },
+    {
+      "id": "openai-v1/chat-vendor-forms",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "#536 的厂商形态：qwen 系列在 finish_reason 之后用空 choices 的末块报 usage，[[fake:dsml]] 把工具调用写成 DSML 文本，[[fake:inline-image]] 在 delta.images / message.images 里画图。",
+      "basis": [
+        {
+          "source": "Model Studio OpenAI 兼容文档",
+          "section": "流式 usage"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "这些形态没有入库样本（deepseek 的 usage 在 finish_reason 块上是已观测形态），待真实一轮"
+    },
+    {
+      "id": "openai-v1/chat-image-refusals",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "图片输入按模型规则拒绝：qwen 宽或高不大于 32、fake-text-only 不收图、[[fake:image-refusal:KIND]] 的尺寸/大小/格式/张数/不支持。",
+      "basis": [
+        {
+          "source": "2026-11-23 观测到的 qwen 拒绝体",
+          "section": "宽高下限"
+        },
+        {
+          "source": "#253 的不收图文案"
+        }
+      ],
+      "checked_at": "2026-11-23",
+      "why_not_real": "qwen 的拒绝体只在观测中出现，未入库；大小、格式、张数按厂商风格构造"
+    },
+    {
+      "id": "openai-v1/chat-quota-and-reasoning",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "[[fake:quota:CODE]] 按连接 error_mapping 声明的配额码答 429；deepseek 拒绝 low/high/max 之外的 reasoning_effort，[[fake:strict-reasoning]] 切换 reasoning_content 的严格读法（未证实）。",
+      "basis": [
+        {
+          "source": "https://api-docs.deepseek.com/guides/thinking_mode",
+          "section": "Thinking mode"
+        },
+        {
+          "source": "https://developers.openai.com/api/docs/guides/error-codes",
+          "section": "Error codes"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "openai-v1/responses-shape",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /responses"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "Responses API（#401）：流式工具调用、文本、并行调用、xhigh 推理项、input_image、非流式响应、strict false 的工具 schema、重放推理项，以及按字节对齐的 400。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/responses/create",
+          "section": "Responses create"
+        },
+        {
+          "source": "2026-11-20 两次网关探测的手工脱敏摘录",
+          "section": "internal/testutil/fakeupstream/openai/v1/testdata/responses-2026-11-20.sample.json"
+        }
+      ],
+      "checked_at": "2026-11-20",
+      "why_not_real": "探测结果不是 wirefixture candidate（手工脱敏，部分由非流式响应补全），不能按 real 计"
+    },
+    {
+      "id": "openai-v1/responses-unsampled-events",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /responses"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "response.incomplete、response.failed、流内 error 事件、response.refusal.delta、推理摘要事件、超长流行与推理项后无后继项的 400。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/responses/create",
+          "section": "Responses streaming events"
+        }
+      ],
+      "checked_at": "2026-11-20",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "openai-v1/responses-quota-429",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /responses"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "网关日配额耗尽答 HTTP 429：error.code 与 error.type 为 quota_exceeded，另带嵌套 quota 对象；quota-exceeded 场景复用此信封。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/balance",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /balance"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "余额查询结构，值固定。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/errors-400-401-404",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /balance",
+        "GET /image-to-3d/{id}",
+        "POST /image-to-3d",
+        "POST /remesh"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "错误体为 {message}：缺 Key 401、非法 id 400、未知任务 404、非法创建请求 400。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/assets-route",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /assets/{task_id}/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "产物 CDN 不属于 API；该路由提供任务 URL 指向的固定文件，glb、png、fbx、stl、3mf、obj、mtl、usdz 的 content type 按 2026-11-20 窗口的观测（obj 为 model/obj，usdz 为 application/octet-stream）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/remesh",
+          "section": "Remesh：model_urls"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "产物主机不在 API 样本里，媒体字节按 recipe 替换；content type 来自观测"
+    },
+    {
+      "id": "meshy-openapi-v1/text-to-image-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-image",
+        "GET /text-to-image/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "text-to-image 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/image-to-image-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-image",
+        "GET /image-to-image/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "image-to-image 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-image-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/image-to-3d-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-3d",
+        "GET /image-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "image-to-3d 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "note": "2026-10-29 的样本用最便宜的贴图选项；2026-11-20 窗口按 Catalog 默认（贴图与 PBR 开）重采，PBR 贴图为真实。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/multi-image-to-3d-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /multi-image-to-3d",
+        "GET /multi-image-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "multi-image-to-3d 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "note": "2026-11-23 的样本带 PBR 贴图，轮询回显 geometry_resolution 与 ultra_mode。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/remesh-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /remesh",
+        "GET /remesh/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "remesh 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/convert-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /convert",
+        "GET /convert/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "convert 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/retexture-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /retexture",
+        "GET /retexture/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "retexture 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "note": "2026-11-20 窗口按 Catalog 默认重采，PBR 贴图为真实。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/rigging-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /rigging",
+        "GET /rigging/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "rigging 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "note": "成功的 rig 回 result.basic_animations 六个片段（2026-11-20）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/animations-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /animations",
+        "GET /animations/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "animations 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/uv-unwrap-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /uv-unwrap",
+        "GET /uv-unwrap/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "uv-unwrap 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/resize-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /resize",
+        "GET /resize/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "resize 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/print-analyze-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /print/analyze",
+        "GET /print/analyze/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "print/analyze 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "note": "报告的 printability._version 键不能进样本（策略键须以字母或数字开头），fake 补回。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/print-multi-color-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /print/multi-color",
+        "GET /print/multi-color/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "print/multi-color 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/text-to-motion-shape",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-motion",
+        "GET /text-to-motion/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "text-to-motion 的创建信封（202，{result}）与 IN_PROGRESS → SUCCEEDED 轮询体结构；引擎以最新样本为模板。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/delete",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "DELETE /text-to-image/{id}",
+        "DELETE /image-to-image/{id}",
+        "DELETE /image-to-3d/{id}",
+        "DELETE /multi-image-to-3d/{id}",
+        "DELETE /remesh/{id}",
+        "DELETE /convert/{id}",
+        "DELETE /retexture/{id}",
+        "DELETE /rigging/{id}",
+        "DELETE /animations/{id}",
+        "DELETE /uv-unwrap/{id}",
+        "DELETE /resize/{id}",
+        "DELETE /print/analyze/{id}",
+        "DELETE /print/multi-color/{id}",
+        "DELETE /text-to-motion/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "删除任务答 HTTP 200，没有 JSON 体；14 个任务族都有真实删除样本。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/delete-running-409",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "DELETE /text-to-image/{id}",
+        "DELETE /image-to-image/{id}",
+        "DELETE /image-to-3d/{id}",
+        "DELETE /multi-image-to-3d/{id}",
+        "DELETE /remesh/{id}",
+        "DELETE /convert/{id}",
+        "DELETE /retexture/{id}",
+        "DELETE /rigging/{id}",
+        "DELETE /animations/{id}",
+        "DELETE /uv-unwrap/{id}",
+        "DELETE /resize/{id}",
+        "DELETE /print/analyze/{id}",
+        "DELETE /print/multi-color/{id}",
+        "DELETE /text-to-motion/{id}"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "删除运行中任务的 409。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/errors",
+          "section": "Errors"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "meshy-openapi-v1/poll-pending-canceled",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image/{id}",
+        "GET /image-to-image/{id}",
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /remesh/{id}",
+        "GET /convert/{id}",
+        "GET /retexture/{id}",
+        "GET /rigging/{id}",
+        "GET /animations/{id}",
+        "GET /uv-unwrap/{id}",
+        "GET /resize/{id}",
+        "GET /print/analyze/{id}",
+        "GET /print/multi-color/{id}",
+        "GET /text-to-motion/{id}"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "PENDING（无 started/finished 时间戳，排队时带 preceding_tasks）与 task-canceled 场景的 CANCELED 轮询体。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/image-to-3d",
+          "section": "各端点的任务对象字段说明"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED（rigging 另有 FAILED）"
+    },
+    {
+      "id": "meshy-openapi-v1/rigging-failed-oversize",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /rigging",
+        "GET /rigging/{id}"
+      ],
+      "category": "state-machine",
+      "status": "real",
+      "behavior": "超过 32 万面的输入在提交时被受理（202，文档写 400），任务运行到约 10% 后以 FAILED、task_error.type=invalid_input 结束。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/poll-failed-other-kinds",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image/{id}",
+        "GET /image-to-image/{id}",
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /remesh/{id}",
+        "GET /convert/{id}",
+        "GET /retexture/{id}",
+        "GET /rigging/{id}",
+        "GET /animations/{id}",
+        "GET /uv-unwrap/{id}",
+        "GET /resize/{id}",
+        "GET /print/analyze/{id}",
+        "GET /print/multi-color/{id}",
+        "GET /text-to-motion/{id}"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "rigging 之外各族的 FAILED 轮询体（task-failed 场景），由进行中结构加终态时间戳与 task_error 构造。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/errors",
+          "section": "Errors"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "只有 rigging 观测到过 FAILED"
+    },
+    {
+      "id": "meshy-openapi-v1/image-models-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-image",
+        "POST /image-to-image"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "ai_model 必填且取十个之一，aspect_ratio 七值且 3:2、2:3 只给 GPT Image 模型，generate_multi_view 与 aspect_ratio 冲突；图生图接受 1–5 张 reference_image_urls 或成功任务的 input_task_id（任务优先）（#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-image",
+          "section": "Text to image"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/image-to-image",
+          "section": "Image to image"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "拒绝从未向真实 API 请求过，拒绝文案为构造"
+    },
+    {
+      "id": "meshy-openapi-v1/image-to-3d-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-3d",
+        "POST /multi-image-to-3d"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "geometry_resolution 2k/4k 与模型的组合、texture_model、4k/8k 贴图与 meshy-6-lite/meshy-n1（定价表 NS 格读作 400）、meshy-n1 不配 PBR；多图 1–4 张、不收 4k、texture_image_urls 的互斥（core.ImageTo3DRequestError，#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/image-to-3d",
+          "section": "Image to 3D"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/multi-image-to-3d",
+          "section": "Multi-image to 3D"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "组合拒绝没有真实请求过"
+    },
+    {
+      "id": "meshy-openapi-v1/image-to-3d-rich-success",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "带多视图、PBR 与 8K 贴图的成功体按文档的贴图字段构造。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/image-to-3d",
+          "section": "Image to 3D：texture_urls"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "这些组合的成功体还没有真实运行替换"
+    },
+    {
+      "id": "meshy-openapi-v1/retexture-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /retexture"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "text_style_prompt、image_style_url、multiview_image_urls 三选一，multiview 互斥且须显式 meshy-7 或 meshy-n1，风格文本不超过 800 字符；页面 ai_model 枚举外的值（如 meshy-7.1）答 400（core.RetextureRequestError，#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/retexture",
+          "section": "Retexture"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "页面没写枚举外取值的结果，待零费用探测定稿"
+    },
+    {
+      "id": "meshy-openapi-v1/rigging-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /rigging"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "skeleton_template（九种）、include_fingers（不与 texture_image_url 同用）、height_meters（非负）按官方页校验（riggingRequestError）；rig-non-humanoid 场景答文档的 422。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/rigging",
+          "section": "Rigging"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/rigging-and-animation",
+          "section": "Rigging and animation"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "取值未真实请求过"
+    },
+    {
+      "id": "meshy-openapi-v1/rigging-quad-fingers",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /rigging"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "四边面拓扑来源任务带 include_fingers 时答 HTTP 400，正文只有 message（riggingSourceError）。",
+      "basis": [
+        {
+          "source": "dev-test 真实调用观测",
+          "section": "#294，2026-11-12"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库"
+    },
+    {
+      "id": "meshy-openapi-v1/motion-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /animations",
+        "POST /text-to-motion"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "动画三种动作来源恰好一个（action_ids 至多 10 个、不重复）；text-to-motion 的 prompt 至多 400 字符、mode 为 prime 或 swift、duration 2–10 秒半秒步进（#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/animation",
+          "section": "Animation"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-motion",
+          "section": "Text to motion"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "拒绝从未向真实 API 请求过"
+    },
+    {
+      "id": "meshy-openapi-v1/resize-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /resize"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "resize_height、resize_longest_side、auto_size 恰好一个，否则答文档的 400（resizeRequestError）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/resize",
+          "section": "Resize"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "meshy-openapi-v1/pricing-observed",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image/{id}",
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /remesh/{id}",
+        "GET /convert/{id}",
+        "GET /retexture/{id}",
+        "GET /rigging/{id}",
+        "GET /animations/{id}",
+        "GET /resize/{id}"
+      ],
+      "category": "pricing",
+      "status": "real",
+      "behavior": "2026-11-20 至 23 的真实价格作为断言：nano-banana-pro 9、image-to-3d 4k 几何 2k 贴图 35、多图 2k 几何 2k 贴图 35、retexture 8k 15、remesh 5、rigging 5、动画 3、resize 与 convert 1；价格从第一次轮询起就带上。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/pricing-table",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image/{id}",
+        "GET /image-to-image/{id}",
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /remesh/{id}",
+        "GET /convert/{id}",
+        "GET /retexture/{id}",
+        "GET /rigging/{id}",
+        "GET /animations/{id}",
+        "GET /uv-unwrap/{id}",
+        "GET /resize/{id}",
+        "GET /print/analyze/{id}",
+        "GET /print/multi-color/{id}",
+        "GET /text-to-motion/{id}"
+      ],
+      "category": "pricing",
+      "status": "constructed",
+      "behavior": "其余参数组合的 consumed_credits 按官方 Pricing 页随请求计算（core.Credits），失败任务为 0（#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "只有上一条所列组合被真实扣费过"
+    },
+    {
+      "id": "meshy-openapi-v1/fault-scenarios",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-image",
+        "POST /image-to-image",
+        "POST /image-to-3d",
+        "POST /multi-image-to-3d",
+        "POST /remesh",
+        "POST /convert",
+        "POST /retexture",
+        "POST /rigging",
+        "POST /animations",
+        "POST /uv-unwrap",
+        "POST /resize",
+        "POST /print/analyze",
+        "POST /print/multi-color",
+        "POST /text-to-motion"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "403 forbidden（{message}）、余额不足（非 Key 额度）、429、5xx、超时与丢响应；402 API key credit limit reached 沿用 #73 的观测。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/errors",
+          "section": "Errors"
+        },
+        {
+          "source": "#73 的 402 Key 额度观测（未入库）"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "meshy-openapi-v1/rate-limit",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-image",
+        "POST /image-to-image",
+        "POST /image-to-3d",
+        "POST /multi-image-to-3d",
+        "POST /remesh",
+        "POST /convert",
+        "POST /retexture",
+        "POST /rigging",
+        "POST /animations",
+        "POST /uv-unwrap",
+        "POST /resize",
+        "POST /print/analyze",
+        "POST /print/multi-color",
+        "POST /text-to-motion"
+      ],
+      "category": "rate-limit-concurrency",
+      "status": "constructed",
+      "behavior": "rate-limit 场景答 429 与 Retry-After；非终态轮询带 Retry-After: 5。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/rate-limits",
+          "section": "Rate limits"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "429 没有在官方 API 上触发；Retry-After: 5 在轮询中已观测，但未单独断言为样本"
+    },
+    {
+      "id": "meshy-openapi-v1/partial-formats",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /retexture/{id}"
+      ],
+      "category": "other",
+      "status": "constructed",
+      "behavior": "partial-formats 场景：完成的 retexture 不给 STL 与 3MF（D 类补齐恢复的起点）。",
+      "basis": [
+        {
+          "source": "Catalog：retexture 的 STL、3MF 为可选产物"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 从未被观测到少给格式；这是构造的故障"
+    },
+    {
+      "id": "meshy-openapi-v1/webhook-sender",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /text-to-image",
+        "POST /image-to-image",
+        "POST /image-to-3d",
+        "POST /multi-image-to-3d",
+        "POST /remesh",
+        "POST /convert",
+        "POST /retexture",
+        "POST /rigging",
+        "POST /animations",
+        "POST /uv-unwrap",
+        "POST /resize",
+        "POST /print/analyze",
+        "POST /print/multi-color",
+        "POST /text-to-motion"
+      ],
+      "category": "other",
+      "status": "constructed",
+      "behavior": "按账号登记的 webhook 收到全部 API 任务的状态更新，投递体为该任务 GET 端点的任务对象（webhook.go，#542）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/webhooks",
+          "section": "Webhooks"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "真实投递需要公网 https 地址并会影响账号下其他应用，未做真实验证"
+    },
+    {
+      "id": "meshy-openapi-v1/t25-image-to-3d",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-3d",
+        "GET /image-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "gap",
+      "behavior": "meshy-t2.5 图生 3D 的创建与轮询体按 meshy-7.1 样本的结构给出。",
+      "wire_coverage_correction": {
+        "unit": "meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d",
+        "offering": "meshy/meshy-t2.5/image-to-3d",
+        "reason": "矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；在 #569 之前没有任何入库样本请求过 meshy-t2.5。"
+      },
+      "plan": "#569 合并后，用 2026-11-24 真实一轮的 meshy-openapi-v1-real-round-2026-11-24 样本把本条改为 real 并补样本路径与日期。",
+      "issues": [
+        568,
+        569
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/real-round-568",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /retexture/{id}",
+        "POST /retexture"
+      ],
+      "category": "response-shape",
+      "status": "gap",
+      "behavior": "2026-11-24 的 Meshy 15 功能真实一轮（#568）发现分辨率键的回显应按请求（2k 不回显、4k/8k 回显 texture_resolution 与 hd_texture），并确认了 15 个功能的价格；主线 fake 仍按模板回显。",
+      "plan": "#569 合并后把分辨率回显、t2.5 与多图、retexture 的样本和价格登记为 real，并引用新样本路径。",
+      "issues": [
+        568,
+        569
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/text-to-3d-shape",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "POST /text-to-3d",
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "preview 与 refine 共用一个路由，任务类型随 mode；IN_PROGRESS 与 SUCCEEDED 轮询体两种类型均为真实，2026-11-20 的对象另有 input、expires_at、分辨率回显与 output。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
+          "captured_at": "2026-11-22",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-11-22.456-460.1"
+        },
+        {
+          "file": "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+          "captured_at": "2026-10-26",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-10-26.issue363-validator-and-issue358-input-reasons.1"
+        },
+        {
+          "file": "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+          "captured_at": "2026-11-22",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-11-22.456-460.1"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/errors",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "POST /text-to-3d",
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺 Key 401、未知任务 404 与非法创建 400，错误体为 {message}。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/delete",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "DELETE /text-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "删除任务的应答。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/poll-pending-failed-canceled",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "PENDING（started_at/finished_at 为 0、排队时带 preceding_tasks）、FAILED（task_error 与 expires_at null）与 CANCELED 的轮询体。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-3d",
+          "section": "Text to 3D：任务对象"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED"
+    },
+    {
+      "id": "meshy-openapi-v2/text-to-3d-request",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "POST /text-to-3d"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "preview 需要不超过 800 字符的 prompt，refine 需要指向本账号已成功 preview 的 preview_task_id（否则 400），2k/4k 几何与模型的组合，模型、mode、格式枚举（#542）；refine 的任意已知模型名都接受。",
+      "note": "refine 带 meshy-7.1 被接受是 2026-11-20 的真实观测。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-3d",
+          "section": "Text to 3D"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "拒绝文案为构造，参数层面的拒绝没有真实请求过"
+    },
+    {
+      "id": "meshy-openapi-v2/pricing-observed",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "pricing",
+      "status": "real",
+      "behavior": "2026-11-20 与 22 的真实价格作为断言：7.1 preview 4k 几何 25、refine 2k 10、8k 15。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json",
+          "captured_at": "2026-11-20",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
+          "captured_at": "2026-11-22",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-11-22.456-460.1"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/pricing-table",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "pricing",
+      "status": "constructed",
+      "behavior": "其余组合按 Pricing 页计价：preview 20 或 5，2k/4k 几何加 5；refine 10，8k 为 15。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/pricing",
+          "section": "Pricing"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "只有上一条的组合被真实扣费过"
+    },
+    {
+      "id": "meshy-openapi-v2/assets-route",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "GET /assets/{task_id}/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "提供 model_urls 与 thumbnail_url 指向的固定文件；六种 Catalog 格式的 content type 沿用 v1 对齐的 CDN 观测。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-3d",
+          "section": "Text to 3D：model_urls"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "v2 对齐只请求了 glb；产物主机不在 API 样本里"
+    },
+    {
+      "id": "meshy-openapi-v2/t25-text-to-3d",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "POST /text-to-3d",
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "gap",
+      "behavior": "meshy-t2.5 文生 3D 的 preview 与 refine 按 meshy-7.1 样本的结构给出。",
+      "wire_coverage_correction": {
+        "unit": "meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d",
+        "offering": "meshy/meshy-t2.5/text-to-3d",
+        "reason": "该单元的 real 来自 meshy-7.1 的样本；meshy-t2.5 共用端点，在 #569 之前没有入库样本请求过它。"
+      },
+      "plan": "#569 合并后，用 meshy-openapi-v2-real-round-2026-11-24 样本把本条改为 real 并补样本路径与日期。",
+      "issues": [
+        568,
+        569
+      ]
+    },
+    {
+      "id": "meshy-openapi-v2/real-round-568",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "POST /text-to-3d",
+        "GET /text-to-3d/{id}"
+      ],
+      "category": "response-shape",
+      "status": "gap",
+      "behavior": "2026-11-24 真实一轮（#568）的 t2.5 preview/refine 结构、价格与分辨率回显规则尚未合入主线 fake。",
+      "plan": "#569 合并后登记为 real 并引用 meshy-openapi-v2-real-round-2026-11-24。",
+      "issues": [
+        568,
+        569
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/check-balance",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "GET /check_balance"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "余额查询结构与缺 Key 的 401 UNAUTHORIZED。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/check-balance-usage",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "GET /check_balance"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "usage_page（从 1 起，每页至多 20 条，新的在前）返回 usage 列表；非法页码答 400 信封（#537）。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/check-balance",
+          "section": "Check balance"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "带 usage_page 的真实请求待真实一轮"
+    },
+    {
+      "id": "hyper3d-api-v2/status-states",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /status"
+      ],
+      "category": "state-machine",
+      "status": "real",
+      "behavior": "子作业 Waiting → Generating → Done / Failed；400 校验信封；Waiting 的 queue_length 只出现在下一个排队的作业上（值 0）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+          "captured_at": "2026-10-26",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-10-26.issue363-validator-and-issue358-input-reasons.1"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/status-queue-countdown",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /status"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "排队期间第一个作业的 queue_length 逐次递减到 0。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/check-status",
+          "section": "Check status"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "真实排队中的取值未观测到"
+    },
+    {
+      "id": "hyper3d-api-v2/no-such-task",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /status",
+        "POST /download"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "未知 subscription_key 或 task_uuid 答 HTTP 201 {\"error\":\"NO_SUCH_TASK\"}。",
+      "basis": [
+        {
+          "source": "真实观测（charge_evidence_test.go）",
+          "section": "2026-10-21"
+        }
+      ],
+      "checked_at": "2026-10-21",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库"
+    },
+    {
+      "id": "hyper3d-api-v2/download",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /download"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "下载列表（name、url）；400 校验信封；作业未完成时为空列表。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+          "captured_at": "2026-10-28",
+          "provenance": "captured",
+          "app_revision": "b29265603b4fbb7efc25ba967a537b161153e023",
+          "catalog_revision": "2026-10-29.issue92-93-reference-key-quota.2"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/files-route",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "GET /files/{task_uuid}/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "文件主机不属于 API；提供下载列表指向的固定夹具（content type 按观测），Gen-2.5 的 PBR 包随请求（三角面数、贴图边长，#303）。",
+      "note": "真实文件的体量与形状不复现：200 万面的展示请求交付的是 121,032 三角面上限的夹具，贴图是平涂。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/download-results",
+          "section": "Download results"
+        },
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+          "section": "Gen-2.5"
+        }
+      ],
+      "checked_at": "2026-11-16",
+      "why_not_real": "文件主机不在 API 样本里；PBR 包的面数与贴图边长按页面表与少数观测构造"
+    },
+    {
+      "id": "hyper3d-api-v2/rodin-shape",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "multipart 提交，受理与拒绝都是 HTTP 201；文生、图生与 image_label 的回执结构。",
+      "note": "internal/providers/hyper3d 的两个样本里，图生的提交请求按 recipe 替换参考图（wire coverage 记为 derived）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
+          "captured_at": "2026-11-19",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+          "captured_at": "2026-10-26",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "2026-10-26.issue363-validator-and-issue358-input-reasons.1"
+        },
+        {
+          "file": "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+          "captured_at": "2026-10-28",
+          "provenance": "captured",
+          "app_revision": "b29265603b4fbb7efc25ba967a537b161153e023",
+          "catalog_revision": "2026-10-29.issue92-93-reference-key-quota.2"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/rodin-errors",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "201 加 error 的拒绝：INVALID_REQUEST、IMAGE_LABEL_LENGTH_TOO_LONG；缺 Key 401 UNAUTHORIZED。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
+          "captured_at": "2026-11-19",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/submit-error-codes",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin",
+        "POST /bang",
+        "POST /rodin_texture_only"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "API_NO_ACTIVE_SUBSCRIPTION（2026-11-12 观测到被拒，正文未保留）与文档列出的 API_PARALLELISM_LIMIT_REACHED、PERMISSION_DENIED、API_SUBSCRIPTION_PLAN_TOO_LOW、API_OBJECT_NOT_FOUND_ON_IMAGE、IMAGE_CONTENT_VIOLATION、API_UNKNOWN、NO_SUCH_TASK。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/errors",
+          "section": "Errors"
+        },
+        {
+          "source": "#294 的真实提交被拒观测",
+          "section": "2026-11-12"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "这些码没有入库样本；API_NO_ACTIVE_SUBSCRIPTION 的真实正文未保留"
+    },
+    {
+      "id": "hyper3d-api-v2/rodin-gen25-values",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "Gen-2.5 表单的取值规则（seed、mesh_mode、quality、texture_mode、quality_override 及 Quad 与档位上限、TAPose、quad_normal、image_label、参考图 1–5 张），越界答 INVALID_REQUEST。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+          "section": "Gen-2.5"
+        }
+      ],
+      "checked_at": "2026-11-16",
+      "why_not_real": "拒绝值没有真实请求过；真实服务也可能答 HTTP 400 校验信封"
+    },
+    {
+      "id": "hyper3d-api-v2/rodin-pricing",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin"
+      ],
+      "category": "pricing",
+      "status": "constructed",
+      "behavior": "回执的 consumed 按官方页价格表计（generationCharge）；Extreme-High 档多列额外网格。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+          "section": "Gen-2.5：价格表"
+        },
+        {
+          "source": "游戏角色真实付费运行（扣 1 credit）",
+          "section": "#294 后续，2026-11-13"
+        }
+      ],
+      "checked_at": "2026-11-16",
+      "why_not_real": "2026-11-13 的运行没有录原始请求与响应"
+    },
+    {
+      "id": "hyper3d-api-v2/bang-shape",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /bang"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "Bang 的提交回执与子作业流转（Generating > Waiting > Generating > Done）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/bang-input-modes",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /bang"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "asset_id 与 model 恰好一个；asset_id 带 model/image/prompt 答 HTTP 400；model 缺 image 且 material 不是 None 答 INVALID_REQUEST；asset_id 指向 Bang 或 Texture 结果答 ASSET_NOT_AVAILABLE（#537）。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/bang",
+          "section": "Bang"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "冲突与缺图的拒绝状态没有真实请求过；来源未完成的 ASSET_NOT_AVAILABLE 为已观测"
+    },
+    {
+      "id": "hyper3d-api-v2/texture-shape",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin_texture_only"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "Texture 的提交回执与完成后的下载列表。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/texture-failed-tiny-model",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin_texture_only"
+      ],
+      "category": "state-machine",
+      "status": "real",
+      "behavior": "模型是 400 字节单三角形 GLB 时官方受理（201），第一次轮询全部子作业 Failed，顶层 message 为 Invalid input.，下载为空列表。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "hyper3d-api-v2/texture-request",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin_texture_only"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "参考图字段 images 与 image 都收，合计 1–5 张；image_label 与超过 1024 字符的 prompt 按 Gen-2.5 规则拒绝（#537）。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/generate-texture",
+          "section": "Generate texture"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "单数 image 是否仍被容忍待真实一轮"
+    },
+    {
+      "id": "hyper3d-api-v2/texture-pricing",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin_texture_only"
+      ],
+      "category": "pricing",
+      "status": "constructed",
+      "behavior": "extreme-high 回执 consumed 为 2，其余模式为基础 0.5。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/generate-texture",
+          "section": "Generate texture"
+        },
+        {
+          "source": "#187 的真实扣费观测（Basic 与 High 分辨率各扣 2）"
+        }
+      ],
+      "checked_at": "2026-11-16",
+      "why_not_real": "扣费只在观测中出现，没有入库样本"
+    },
+    {
+      "id": "hyper3d-api-v2/rate-limit-faults",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin",
+        "POST /bang",
+        "POST /rodin_texture_only"
+      ],
+      "category": "rate-limit-concurrency",
+      "status": "constructed",
+      "behavior": "rate-limit、5xx、超时与丢响应场景；并行上限 API_PARALLELISM_LIMIT_REACHED。",
+      "basis": [
+        {
+          "source": "https://docs.hyper3d.ai/en/api-specification/errors",
+          "section": "Errors"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "hyper3d-api-v2/real-round-568",
+      "provider": "hyper3d",
+      "api": "api-v2",
+      "endpoints": [
+        "POST /rodin_texture_only",
+        "GET /files/{task_uuid}/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "gap",
+      "behavior": "2026-11-24 的 Rodin 真实一轮（#568）显示 Texture（extreme-high、High、hd_texture）交付 base_high_pbr.glb、贴图边长 12288；主线 fake 的 Texture 包仍是 Basic 命名的夹具。",
+      "plan": "#569 合并后按分辨率命名 Texture 包并按表单给贴图边长，引用 evidence-568-processing-high 样本；Bang 子作业数等未回灌项另记。",
+      "issues": [
+        568,
+        569
+      ]
+    },
+    {
+      "id": "openai-images-v1/generations-shape",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "JSON 请求，成功体为内嵌 base64 的 data[0].b64_json 加 usage（1024x1024 PNG）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
+          "captured_at": "2026-11-09",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-images-v1/generations-errors",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺 prompt 的 400 empty_string 与 text/plain 的 401。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
+          "captured_at": "2026-11-09",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-images-v1/size-format-background",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations",
+        "POST /images/edits"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "按 size（auto 为 1024x1024）与 output_format 出图并回显实际尺寸、格式与 background，transparent 给带 alpha 的 PNG（#543）。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/images/",
+          "section": "Images create"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "已提交样本只请求过 1024x1024 png"
+    },
+    {
+      "id": "openai-images-v1/parameter-contract",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations",
+        "POST /images/edits"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "size（16 的倍数、最长边 3840、比例 3:1、65.5 万至 829.4 万像素）、quality、output_format、background、moderation、n（1–10，不截断）、output_compression、prompt 至多 32000 字符，非法值答沿用真实信封的 400（#543）。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/images/",
+          "section": "Images create"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "这些拒绝没有真实请求过"
+    },
+    {
+      "id": "openai-images-v1/fault-scenarios",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations",
+        "POST /images/edits"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "403、429、503 故障与内容审核拒绝。",
+      "basis": [
+        {
+          "source": "https://developers.openai.com/api/docs/guides/error-codes",
+          "section": "Error codes"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "openai-images-v1/quality-max",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations",
+        "POST /images/edits"
+      ],
+      "category": "request-validation",
+      "status": "gap",
+      "behavior": "quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。",
+      "plan": "在 2D 真实一轮里对账一次，按结果决定接受或拒绝。",
+      "issues": [
+        540
+      ]
+    },
+    {
+      "id": "openai-images-v1/edits-shape",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/edits"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "multipart 编辑（参考图在 image 分片，Plinth 写 image[]，fake 两种都收），成功体与生成相同；缺参数 400 missing_required_parameter。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
+          "captured_at": "2026-11-09",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-images-v1/edits-mask-and-count",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/edits"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。",
+      "basis": [
+        {
+          "source": "https://platform.openai.com/docs/api-reference/images/",
+          "section": "Create image edit"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "官方编辑参考没有 mask 规则，网关的措辞未记录"
+    },
+    {
+      "id": "gemini-images-v1/chat-image-shape",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "modalities [text,image] 的补全，图片是 choices[0].message.content[].image_url.url 的 data URI；文生图 JPEG、图生图 PNG，图生图多出 service_tier 与图片 token。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "gemini-images-v1/errors",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "缺 Key 401 与 400 invalid_text_request。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "gemini-images-v1/size-table",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "按 eca_image_config 的十种 aspect_ratio 与 1K/2K/4K 出图（默认 1:1 的 1K），像素表为构造值（pictureSizes）。",
+      "basis": [
+        {
+          "source": "https://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1",
+          "section": "Chat completions（网关）"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "样本只请求过 1K 1:1"
+    },
+    {
+      "id": "gemini-images-v1/out-of-set-400",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "比例或尺寸不在集合内、小写 1k、超过 14 张参考图答 400 invalid_argument。",
+      "basis": [
+        {
+          "source": "https://ai.google.dev/gemini-api/docs/api-errors",
+          "section": "API errors"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "真实网关是拒绝还是静默忽略没有记录；免费探针待做"
+    },
+    {
+      "id": "gemini-images-v1/fault-scenarios",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "内容审核拒绝、内容过滤（沿用成功信封改 finish_reason）、402/403/404/429/5xx。",
+      "basis": [
+        {
+          "source": "https://ai.google.dev/gemini-api/docs/api-errors",
+          "section": "API errors"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "jimeng-api-v3/generations-shape",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "response_format b64_json 答内嵌图片、url 答签名 TOS URL；图生图（b64_json）结构相同。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-image-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "jimeng-api-v3/errors",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "error-code-and-text",
+      "status": "real",
+      "behavior": "401 AuthenticationError 与 400 MissingParameter。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-text-to-image.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "jimeng-api-v3/size-and-contract",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "size（WxH 总像素 3686400–16777216、比例至多 16，或 2K/4K）、response_format、sequential_image_generation、max_images 1–15、参考图至多 14 张与逐张尺寸，非法值答 400 InvalidParameter（param 指明字段）（#543）。",
+      "basis": [
+        {
+          "source": "https://www.volcengine.com/docs/82379/1541523",
+          "section": "Seedream 图片生成 API"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "样本只请求过 2048x2048；真实措辞未记录，免费探针待做"
+    },
+    {
+      "id": "jimeng-api-v3/documented-codes",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "POST /images/generations"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "内容安全、风险检测、ContentSecurityDetectionError、模型访问码与 RequestBurstTooFast；429 类带 Retry-After；欠费与限流。",
+      "basis": [
+        {
+          "source": "https://docs.volcengine.com/docs/82379/1299023",
+          "section": "错误码"
+        }
+      ],
+      "checked_at": "2026-11-24",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "jimeng-api-v3/files-route",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "GET /files/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "签名图片主机不属于 API；提供 response_format=url 指向的固定 JPEG。",
+      "basis": [
+        {
+          "source": "https://www.volcengine.com/docs/82379/1541523",
+          "section": "Seedream 图片生成 API"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "文件主机不在 API 样本里，媒体字节按 recipe 替换"
+    },
+    {
+      "id": "jimeng-api-v3/files-expired",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "GET /files/{name}"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "过期 URL 答 TOS 的 403 application/json（Code AccessDenied、Message Request has expired）。",
+      "basis": [
+        {
+          "source": "官方 TOS 主机观测：把 X-Tos-Date 改到过去后请求",
+          "section": "2026-10-29"
+        }
+      ],
+      "checked_at": "2026-10-29",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；不是自然过期"
+    },
+    {
+      "id": "matting-api-v1/jobs-shape",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "POST /jobs"
+      ],
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "multipart 提交（files + pipeline_params_json），READY 批次信封；401 {detail} 与 422 校验列表。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "matting-api-v1/jobs-multi-file",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "POST /jobs"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "每个 files 分片一个任务，REJECTED 任务与 PARTIAL_SUCCESS / 全部拒绝的批次。",
+      "basis": [
+        {
+          "source": "运营方抠图服务的 FastAPI /docs",
+          "section": "SubmitBatchResponse、TaskStatusItem、BatchStatus 枚举"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "样本每批只有一个被受理的文件"
+    },
+    {
+      "id": "matting-api-v1/jobs-process-res-422",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "POST /jobs"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "处理分辨率越界答 422（birefnet_process_res 512..4096、sdmatte_process_res 512..2048），正文为 pydantic 校验列表加 ctx。",
+      "basis": [
+        {
+          "source": "抠图服务源码 PipelineParams",
+          "section": "取值范围"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "越界值没有真实请求过，loc 前缀未观测"
+    },
+    {
+      "id": "matting-api-v1/batches-states",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "GET /batches/{batch_id}"
+      ],
+      "category": "state-machine",
+      "status": "real",
+      "behavior": "READY → RUNNING → SUCCESS 轮询体、downloadable 随批次翻转、download_path 为 /api/v1/tasks/<task>/download；未知批次 404 {detail}。",
+      "note": "matting-api-v1-batch-2026-11-20 的 meta 记 captured_at_utc 为 2026-11-21（窗口跨过 UTC 零点），按 meta 登记。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-20.candidate.json",
+          "captured_at": "2026-11-21",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "matting-api-v1/batches-failure-states",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "GET /batches/{batch_id}"
+      ],
+      "category": "state-machine",
+      "status": "constructed",
+      "behavior": "FAILED 批次（任务 FAILED 带 error_message）、PARTIAL_SUCCESS、全部 REJECTED/FAILED 无产物的完成批次与 CANCELED 批次。",
+      "basis": [
+        {
+          "source": "运营方抠图服务的 FastAPI /docs",
+          "section": "BatchStatus、TaskStatus 枚举"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "matting-api-v1/download",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "GET /tasks/{task_id}/download"
+      ],
+      "category": "artifact-shape",
+      "status": "real",
+      "behavior": "鉴权下载 PNG 结果（image/png），没有 Key 时 401 {detail}；服务没有签名 URL。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
+          "captured_at": "2026-10-29",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        },
+        {
+          "file": "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-23.candidate.json",
+          "captured_at": "2026-11-23",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "matting-api-v1/download-rgba-and-keys",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "GET /tasks/{task_id}/download"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "下载是源图像素尺寸（长边缩到 4096）的 RGBA PNG，背景透明、主体不透明；读不出头的文件给 64x64；服务不认识的 Key 答 401 Invalid authentication credentials 带 WWW-Authenticate: Bearer（#538）。",
+      "basis": [
+        {
+          "source": "运营方抠图服务的 FastAPI /docs"
+        }
+      ],
+      "checked_at": "2026-11-12",
+      "why_not_real": "像素与 Key 规则待真实一轮定稿"
+    },
+    {
+      "id": "matting-api-v1/download-404",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "GET /tasks/{task_id}/download"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "REJECTED 任务或文件级故障的任务没有产物，下载答 404。",
+      "basis": [
+        {
+          "source": "运营方抠图服务的 FastAPI /docs",
+          "section": "TaskStatus 枚举"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "matting-api-v1/fault-scenarios",
+      "provider": "matting",
+      "api": "api-v1",
+      "endpoints": [
+        "POST /jobs",
+        "GET /batches/{batch_id}",
+        "GET /tasks/{task_id}/download"
+      ],
+      "category": "rate-limit-concurrency",
+      "status": "constructed",
+      "behavior": "请求级 429、500 与超时故障在各路由上相同。",
+      "basis": [
+        {
+          "source": "运营方抠图服务的 FastAPI /docs"
+        }
+      ],
+      "checked_at": "2026-11-08",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    }
+  ]
+}
