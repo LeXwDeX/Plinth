@@ -131,13 +131,18 @@ func TestPicturesAreRefusedByTheRulesOfTheModel(t *testing.T) {
 		}
 	}
 	// Observed: a model without image input answers in its own envelope.
-	status, body = post("deepseek", big)
+	status, body = post(TextOnlyModelPrefix+"-1", big)
 	if status != http.StatusBadRequest || dig(t, body, "error", "code") != "invalid_request_error" ||
 		dig(t, body, "error", "message") != "this model does not support image input" {
-		t.Fatalf("deepseek picture: %d %v", status, body)
+		t.Fatalf("text-only picture: %d %v", status, body)
+	}
+	// The default stack model reads pictures here: whether the real one does is
+	// open, and refusing would make Plinth strip every picture of the fake stack.
+	if status, body := post("deepseek", big); status != http.StatusOK {
+		t.Fatalf("deepseek picture refused by default: %d %v", status, body)
 	}
 	// Text only is untouched.
-	if status, _ := f.chat(map[string]any{"model": "deepseek", "messages": user("hi")}); status != http.StatusOK {
+	if status, _ := f.chat(map[string]any{"model": TextOnlyModelPrefix, "messages": user("hi")}); status != http.StatusOK {
 		t.Fatalf("text refused: %d", status)
 	}
 }

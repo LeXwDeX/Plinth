@@ -107,7 +107,17 @@ var constrainedPrefixes = []struct {
 }{
 	{"deepseek", deepseekConstraint},
 	{"qwen", qwenConstraint},
+	{TextOnlyModelPrefix, textOnlyConstraint},
 }
+
+// TextOnlyModelPrefix names a model of the fake that takes no picture input.
+// The default stack model (deepseek) is not one: whether the real gateway's
+// deepseek reads pictures is for the real round to settle, and a refusal there
+// would make Plinth strip the pictures of every vision scenario of the fake
+// stack (#535), so only a model named so, or ImageRefusalMarkerPrefix, gets it.
+const TextOnlyModelPrefix = "fake-text-only"
+
+var textOnlyConstraint = modelConstraint{noImageInput: true}
 
 // constraintFor is the rule set of a model name; false for a model without one.
 func constraintFor(model string) (modelConstraint, bool) {
@@ -144,8 +154,7 @@ var astraConstraint = modelConstraint{
 // message that calls tools, and the API answers 400 to a request that drops it
 // (#377).
 //
-// Constructed from the same documents (checked 2026-11-24): the model is text
-// only (noImageInput), and reasoning_effort takes low, high and max, plus the
+// Constructed from the same documents (checked 2026-11-24): reasoning_effort takes low, high and max, plus the
 // values the vendor maps onto them (minimal and low to low, medium, high and
 // xhigh to high, max and ultra to max) and none, which turns thinking off; any
 // other value is an invalid value (#536). The usage of a stream rides on the
@@ -153,7 +162,6 @@ var astraConstraint = modelConstraint{
 var deepseekConstraint = modelConstraint{
 	reasoningContentRequired: true,
 	allowedEfforts:           []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"},
-	noImageInput:             true,
 }
 
 // qwenConstraint is the DashScope compatible mode behind the dev-test gateway:
