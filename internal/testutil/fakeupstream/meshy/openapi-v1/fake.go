@@ -42,17 +42,39 @@ const (
 	docsChecked = "2026-11-08"
 )
 
-// imageGenerationRequestError checks the remesh options and the official pixel
-// bounds of every inlined picture (#460 B24, #487 for the texture views).
-func imageGenerationRequestError(request map[string]any) string {
-	if message := core.GenerationRequestError(request); message != "" {
-		return message
+// imageGenerationRequestError checks the remesh options, the official pixel
+// bounds of every inlined picture (#460 B24, #487 for the texture views) and the
+// option combinations the Image to 3D and Multi Image to 3D pages refuse.
+func imageGenerationRequestError(multi bool) func(map[string]any) string {
+	return func(request map[string]any) string {
+		if message := core.GenerationRequestError(request); message != "" {
+			return message
+		}
+		if message := core.ImageRequestError(request); message != "" {
+			return message
+		}
+		if message := core.TextureImageListError(request); message != "" {
+			return message
+		}
+		return core.ImageTo3DRequestError(request, multi)
 	}
-	if message := core.ImageRequestError(request); message != "" {
-		return message
-	}
-	return core.TextureImageListError(request)
 }
+
+// pictureRequestError checks the pixel bounds of the inlined pictures before a
+// route's own rules.
+func pictureRequestError(rules func(map[string]any) string) func(map[string]any) string {
+	return func(request map[string]any) string {
+		if message := core.ImageRequestError(request); message != "" {
+			return message
+		}
+		return rules(request)
+	}
+}
+
+// imageSources are the task types an Image to Image or Multi Image to 3D
+// input_task_id may name (the pages: a succeeded Text to Image or Image to
+// Image task, multi-view included).
+var imageSources = map[string][]string{"input_task_id": {"text-to-image", "image-to-image"}}
 
 // texturedUnlessDisabled follows the should_texture default (true).
 func texturedUnlessDisabled(request map[string]any) bool {
@@ -63,26 +85,31 @@ func texturedUnlessDisabled(request map[string]any) bool {
 // kinds are the task routes of this version, in the order of the Catalog's
 // Offerings. Every one has a captured sample of its own.
 var kinds = []core.Kind{
-	{Path: "/text-to-image", Type: "text-to-image", Need: [][]string{{"prompt"}}, Real: true},
-	{Path: "/image-to-image", Type: "image-to-image", Need: [][]string{{"prompt"}, {"reference_image_urls"}}, Real: true},
+	{Path: "/text-to-image", Type: "text-to-image", Need: [][]string{{"prompt"}}, Real: true,
+		Validate: core.TextToImageRequestError},
+	{Path: "/image-to-image", Type: "image-to-image", Need: [][]string{{"prompt"}, {"reference_image_urls", "input_task_id"}}, Sources: []string{"input_task_id"},
+		SourceTypes: imageSources, Real: true, Validate: pictureRequestError(core.ImageToImageRequestError)},
 	{Path: "/image-to-3d", Type: "image-to-3d", Need: [][]string{{"image_url", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError},
-	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError, EchoResolution: true},
+		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(false)},
+	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"},
+		SourceTypes: imageSources, Real: true, Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(true), EchoResolution: true},
 	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/convert", Type: "convert", Need: [][]string{{"input_task_id", "model_url"}, {"target_formats"}}, Sources: []string{"input_task_id"}, Real: true},
-	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: func(map[string]any) bool { return true }},
+	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}, {"text_style_prompt", "image_style_url", "multiview_image_urls"}},
+		Sources: []string{"input_task_id"}, Real: true, Textured: func(map[string]any) bool { return true },
+		Validate: pictureRequestError(core.RetextureRequestError)},
 	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true,
 		Validate: riggingRequestError, ValidateSource: riggingSourceError},
-	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true},
+	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true,
+		Validate: core.AnimationRequestError},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Validate: resizeRequestError},
 	{Path: "/print/analyze", Type: "print-analyze", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Patch: patchPrintAnalyze},
 	{Path: "/print/multi-color", Type: "print-multi-color", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
-	{Path: "/text-to-motion", Type: "text-to-motion", Need: [][]string{{"prompt"}, {"duration"}}, Fidelity: "animation", Real: true},
+	{Path: "/text-to-motion", Type: "text-to-motion", Need: [][]string{{"prompt"}, {"duration"}}, Fidelity: "animation", Real: true,
+		Validate: core.TextToMotionRequestError},
 }
 
 // rigSkeletonTemplates are the skeleton_template values of the Rigging page
@@ -213,6 +240,18 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":
 			parts = append(parts, "the 2026-10-29 samples were captured with the cheapest texture options, so texture_urls and the PBR maps were constructed from the documented texture fields (docs checked "+docsChecked+"); the 2026-11-20 window re-captured image-to-3d and retexture with the Catalog defaults (textures and PBR on) and their PBR maps are real, as are multi-image-to-3d's since 2026-11-23 (meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json)")
 		}
+		switch kind.Path {
+		case "/text-to-image", "/image-to-image":
+			parts = append(parts, "the create is checked as the pages read on 2026-11-24 document it (#542): ai_model required and one of ten, aspect_ratio one of seven with 3:2 and 2:3 for the GPT Image models only, generate_multi_view and aspect_ratio conflict, and image-to-image takes 1 to 5 reference_image_urls or an input_task_id of a succeeded text-to-image or image-to-image task (which wins); none of the refusals was requested from the real API (constructed)")
+		case "/image-to-3d", "/multi-image-to-3d":
+			parts = append(parts, "the option combinations of the pages read on 2026-11-24 answer 400 (#542, core.ImageTo3DRequestError): geometry_resolution 2k needs meshy-7.1, latest or meshy-7 and 4k needs meshy-7.1 or latest (multi-image takes no 4k), texture_model, texture_resolution 4k/8k with meshy-6-lite or meshy-n1 (the pricing page's NS cells, read as 400), PBR with meshy-n1, and for multi-image 1 to 4 image_urls and texture_image_urls with their conflicts; the refusal texts are constructed. The success bodies with textures, several views, PBR and 8K stay constructed until a real run replaces them")
+		case "/retexture":
+			parts = append(parts, "the create is checked as the page read on 2026-11-24 documents it (#542, core.RetextureRequestError): one of text_style_prompt, image_style_url or multiview_image_urls is required, multiview excludes the other two and needs an explicit meshy-7 or meshy-n1, the prompt is at most 800 characters, and the meshy-6-lite and meshy-n1 conflicts; the page's ai_model enum has no meshy-7.1 and the fake answers 400 for it, which is constructed because the page does not say what an unlisted value does")
+		case "/animations", "/text-to-motion":
+			parts = append(parts, "the create is checked as the page read on 2026-11-24 documents it (#542): animations take exactly one of action_id, action_ids (at most ten, no repeats) or motion_task_id, text-to-motion a prompt of at most 400 characters, mode prime or swift and a duration of 2 to 10 seconds in half steps (constructed refusal texts)")
+		}
+		parts = append(parts,
+			"consumed_credits follows the request from the Pricing page read on 2026-11-24 (#542, core.Credits): the price is reported from the first poll, a failed task reports 0, and the prices a real capture of 2026-11-20 to 2026-11-23 showed are asserted as such")
 		// The 2026-11-23 capture is the newest multi-image-to-3d sample: every
 		// poll repeats geometry_resolution and ultra_mode, so the kind answers
 		// both keys even when the request names no geometry option (#497).

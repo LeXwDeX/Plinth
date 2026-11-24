@@ -102,8 +102,8 @@ func TestEveryKindCompletesAndDeliversItsFiles(t *testing.T) {
 	rig := f.create("/rigging", map[string]any{"input_task_id": source})
 	f.finish("/rigging", rig, key)
 	requests := map[string]map[string]any{
-		"/text-to-image":     {"prompt": "p"},
-		"/image-to-image":    {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
+		"/text-to-image":     {"ai_model": "nano-banana-pro", "prompt": "p"},
+		"/image-to-image":    {"ai_model": "nano-banana-pro", "prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
 		"/image-to-3d":       {"image_url": "https://example.test/a.png", "target_formats": []string{"glb", "obj", "stl", "usdz", "fbx", "3mf"}},
 		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}},
 		"/remesh":            {"input_task_id": source, "target_formats": []string{"glb", "fbx"}},
@@ -167,13 +167,13 @@ func TestTargetFormatsDecideTheModelURLs(t *testing.T) {
 func TestPartialFormatsScenarioOmitsOptionalFormatsOfARetexture(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	formats := []string{"glb", "obj", "stl", "3mf"}
-	id := f.create("/retexture", map[string]any{"input_task_id": f.source(), "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
+	id := f.create("/retexture", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
 	_, body := f.finish("/retexture", id, key)
 	models, _ := body["model_urls"].(map[string]any)
 	if models["glb"] == nil || models["obj"] == nil || models["stl"] != nil || models["3mf"] != nil {
 		t.Fatalf("retexture model_urls = %v, want no stl and no 3mf", models)
 	}
-	remesh := f.create("/remesh", map[string]any{"input_task_id": f.source(), "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
+	remesh := f.create("/remesh", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
 	_, body = f.finish("/remesh", remesh, key)
 	if models, _ = body["model_urls"].(map[string]any); models["stl"] == nil || models["3mf"] == nil {
 		t.Fatalf("a remesh keeps every format: %v", models)
@@ -273,7 +273,9 @@ func TestCanceledTaskStopsWithoutArtifacts(t *testing.T) {
 // texture views cannot travel with should_texture false.
 func TestMultiImageTextureViewsFollowThePictureBounds(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
-	source := f.source()
+	// The input_task_id of a multi-image task is a succeeded image generation.
+	source := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"})
+	f.finish("/text-to-image", source, key)
 	for name, body := range map[string]map[string]any{
 		"a texture view under 32 px": {"input_task_id": source, "texture_image_urls": []string{dataURI(t, 16, 16)}},
 		"texture views with texturing off": {"input_task_id": source, "should_texture": false,
@@ -380,7 +382,7 @@ func TestTaskErrorTypesFollowTheDocumentation(t *testing.T) {
 // derived from the running sample gains the terminal ones (finding #203).
 func TestPollBodiesFollowTheDocumentedStateFields(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
-	pending := f.create("/text-to-image", map[string]any{"prompt": "p"})
+	pending := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"})
 	status, _, body := f.Do("GET", f.v1("/text-to-image/"+pending), key, nil)
 	if status != http.StatusOK || body["status"] != core.StatusPending {
 		t.Fatalf("first poll = %d %v", status, body)
@@ -396,7 +398,7 @@ func TestPollBodiesFollowTheDocumentedStateFields(t *testing.T) {
 			t.Errorf("PENDING body carries %s: %v", field, body)
 		}
 	}
-	failed := f.create("/text-to-image", map[string]any{"prompt": "p"}, core.TaskErrorHeader, "timeout")
+	failed := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"}, core.TaskErrorHeader, "timeout")
 	_, body = f.finish("/text-to-image", failed, key)
 	if body["status"] != core.StatusFailed {
 		t.Fatalf("status = %v", body["status"])
@@ -475,7 +477,7 @@ func TestTextureOptionsShapeTheSuccessBody(t *testing.T) {
 		}
 	}
 
-	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "enable_pbr": true})
+	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "enable_pbr": true})
 	_, retextureBody := f.finish("/retexture", retextured, key)
 	retextureEntry := textureMaps(t, f, retextureBody)
 	for _, field := range []string{"base_color", "metallic", "normal", "roughness"} {
@@ -578,7 +580,7 @@ func (f *fixture) finishV2(id string) {
 
 func TestPollCountsAreConfigurable(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{QueuedPolls: 2, RunningPolls: 3})
-	id := f.create("/text-to-image", map[string]any{"prompt": "p"})
+	id := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"})
 	statuses, _ := f.finish("/text-to-image", id, key)
 	if got := strings.Join(statuses, ","); got != "PENDING,PENDING,IN_PROGRESS,IN_PROGRESS,IN_PROGRESS,SUCCEEDED" {
 		t.Fatalf("flow = %s", got)
@@ -721,7 +723,7 @@ func TestConcurrentServersShareNoGlobalState(t *testing.T) {
 // The polls of 2026-11-20 repeat the geometry and texture resolution the
 // request asked for, with the deprecated aliases set (ultra_mode's documented
 // 2k equivalence and hd_texture's 4k one). The fake must echo the request, not
-// the sample's fixed values, or a 1k request would look like a 4k one.
+// the sample's fixed values, or a standard request would look like a 4k one.
 func TestResolutionOptionsEchoTheRequest(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	id := f.create("/image-to-3d", map[string]any{
@@ -732,25 +734,25 @@ func TestResolutionOptionsEchoTheRequest(t *testing.T) {
 		t.Fatalf("geometry = %v ultra_mode = %v", body["geometry_resolution"], body["ultra_mode"])
 	}
 	low := f.create("/image-to-3d", map[string]any{
-		"image_url": "https://example.test/a.png", "geometry_resolution": "1k",
+		"image_url": "https://example.test/a.png", "geometry_resolution": "standard",
 	})
 	_, lowBody := f.finish("/image-to-3d", low, key)
-	if lowBody["geometry_resolution"] != "1k" || lowBody["ultra_mode"] != false {
-		t.Fatalf("a 1k request answers %v %v", lowBody["geometry_resolution"], lowBody["ultra_mode"])
+	if _, has := lowBody["geometry_resolution"]; has || lowBody["ultra_mode"] != false {
+		t.Fatalf("a standard request answers %v %v", lowBody["geometry_resolution"], lowBody["ultra_mode"])
 	}
 	// A retexture's object carries texture_resolution and hd_texture.
-	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "texture_resolution": "4k"})
+	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "texture_resolution": "4k"})
 	_, retextureBody := f.finish("/retexture", retextured, key)
 	if retextureBody["texture_resolution"] != "4k" || retextureBody["hd_texture"] != true {
 		t.Fatalf("texture = %v hd_texture = %v", retextureBody["texture_resolution"], retextureBody["hd_texture"])
 	}
-	plain := f.create("/retexture", map[string]any{"input_task_id": f.source(), "texture_resolution": "1k"})
+	plain := f.create("/retexture", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "texture_resolution": "2k"})
 	_, plainBody := f.finish("/retexture", plain, key)
-	if plainBody["texture_resolution"] != "1k" || plainBody["hd_texture"] != false {
-		t.Fatalf("a 1k texture answers %v %v", plainBody["texture_resolution"], plainBody["hd_texture"])
+	if plainBody["texture_resolution"] != "2k" || plainBody["hd_texture"] != false {
+		t.Fatalf("a 2k texture answers %v %v", plainBody["texture_resolution"], plainBody["hd_texture"])
 	}
 	// A kind whose object carries no resolution keys gains none.
-	image := f.create("/text-to-image", map[string]any{"prompt": "p"})
+	image := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"})
 	_, imageBody := f.finish("/text-to-image", image, key)
 	for _, field := range []string{"geometry_resolution", "texture_resolution", "ultra_mode", "hd_texture"} {
 		if _, has := imageBody[field]; has {

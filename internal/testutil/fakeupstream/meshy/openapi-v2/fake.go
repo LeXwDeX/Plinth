@@ -53,6 +53,10 @@ var textTo3D = core.Kind{
 	},
 	Need:    [][]string{{"mode"}},
 	Sources: []string{"preview_task_id"},
+	// A refine takes a succeeded preview of this account, and every other
+	// answer is a 400 ("invalid, not yours, or not ready").
+	SourceTypes:          map[string][]string{"preview_task_id": {"text-to-3d-preview"}},
+	SourceNotFoundStatus: http.StatusBadRequest,
 	Textured: func(request map[string]any) bool {
 		mode, _ := request["mode"].(string)
 		return mode == "refine"
@@ -65,7 +69,7 @@ var textTo3D = core.Kind{
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/text-to-3d", Evidence: fakeupstream.EvidenceReal, Sample: "POST /openapi/v2/text-to-3d",
 		DocURL: docsRoot + "text-to-3d", CheckedAt: captured,
-		Note: "preview and refine are one route; the task type follows mode; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + "). The 2026-11-20 window shows the create answering the whole queued task object (status PENDING, the task's own id and result, expires_at/started_at/finished_at null, preceding_tasks) with the accepted request echoed under input, which the fake reproduces; the 2026-10-29 sample answered only {result}"},
+		Note: "the create is checked as the page read on 2026-11-24 documents it (#542): a preview needs a prompt of at most 800 characters, a refine a preview_task_id that names a succeeded preview of the account (anything else is a 400, not a 404), geometry_resolution 2k needs meshy-7.1, latest or meshy-7 and 4k needs meshy-7.1 or latest, and the model, mode and format enums are enforced; a refine carries no ai_model (the Adapter sends none) yet any model name passes, since the real refine of 2026-11-20 sent meshy-7.1 and was accepted; consumed_credits follows the Pricing page (a preview 20 or 5, plus 5 for 2k or 4k geometry; a refine 10, or 15 at 8k) and the real prices of 2026-11-20 and 2026-11-22 are asserted; the refusal texts are constructed. preview and refine are one route; the task type follows mode; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + "). The 2026-11-20 window shows the create answering the whole queued task object (status PENDING, the task's own id and result, expires_at/started_at/finished_at null, preceding_tasks) with the accepted request echoed under input, which the fake reproduces; the 2026-10-29 sample answered only {result}"},
 	{Method: "GET", Path: "/text-to-3d/{id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /openapi/v2/text-to-3d/{id}",
 		DocURL: docsRoot + "text-to-3d", CheckedAt: captured,
 		Note: "IN_PROGRESS and SUCCEEDED polls are real for both types and the 2026-11-20 capture is the newest: its object adds input (the request as sent), expires_at null, geometry_resolution/texture_resolution as sent, ultra_mode/hd_texture and an output object with model_urls/seed/texture_urls/thumbnail_url. PENDING is constructed from the field docs and the observed poll (started_at/finished_at 0, preceding_tasks while queued; the create object has them null instead); FAILED is constructed from the in-progress structure (a failed one carries the task_error object and expires_at null); CANCELED is constructed (task-canceled scenario); texture_urls follow the request's enable_pbr in a refine, and a preview keeps the captured normal map when enable_pbr was asked for"},
