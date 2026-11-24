@@ -249,8 +249,17 @@ func (executor *Executor) prepareAgentOperation(
 func (executor *Executor) choiceScopeRefusal(ctx context.Context, command chat.ToolCommand,
 	capability generation.Capability, offering generation.Offering) (chat.ToolResult, bool) {
 	scope := command.ChoiceScope
-	if scope == nil || scope.Permits(command.Call.Name, string(capability)) {
+	if scope == nil {
 		return chat.ToolResult{}, false
+	}
+	if scope.Permits(command.Call.Name, string(capability)) {
+		// The orchestrator counts a second run of the chosen tool by the Task
+		// the first one submitted. A first run that stopped on an approval card
+		// has no Task yet, so a later call of the same reply with other
+		// arguments would raise a second card: that call is the second run.
+		if !executor.cardRaisedByAnotherCall(ctx, command) {
+			return chat.ToolResult{}, false
+		}
 	}
 	if executor.planAllowsStep(ctx, command, capability, offering) {
 		return chat.ToolResult{}, false
@@ -258,6 +267,29 @@ func (executor *Executor) choiceScopeRefusal(ctx context.Context, command chat.T
 	return chat.ToolResult{AgentContent: scope.RefusalFor(command.Call.Name, func(text string) string {
 		return executor.localized(command, text)
 	}), NoSubmission: true}, true
+}
+
+// cardRaisedByAnotherCall reports whether another call of this reply already
+// raised an approval card of the same tool that still waits for a person (#549).
+// The call's own card is not another call's: a replay of the same call stays
+// idempotent.
+func (executor *Executor) cardRaisedByAnotherCall(ctx context.Context, command chat.ToolCommand) bool {
+	limit := executor.chat.PendingApprovals.MaximumListed
+	if limit <= 0 || executor.operations == nil || executor.grants == nil {
+		return false
+	}
+	ops, err := executor.operations.ListPendingDetached(ctx, command.OwnerID, command.SessionID,
+		limit, executor.grants.ExpiryCutoff())
+	if err != nil {
+		return false
+	}
+	for _, op := range ops {
+		if op.AssistantMessageID == command.AssistantMessageID && op.ToolName == command.Call.Name &&
+			op.CallID != command.Call.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // planAllowsStep reports whether the session is in budget mode with an active

@@ -830,6 +830,10 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		h.writeQuotaFault(w, code)
 		return
 	}
+	if strings.Contains(request.lastText(), GatewayFaultMarker) {
+		h.writeGatewayFault(w, request)
+		return
+	}
 	// #401: a model with declared constraints refuses a request shape it does
 	// not accept before any completion runs, streamed or not.
 	if refusal, refused := request.modelRefusal(); refused {

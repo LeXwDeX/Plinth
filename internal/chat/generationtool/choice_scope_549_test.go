@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -62,5 +63,32 @@ func TestChoiceScopeLeavesAPlannedStepToThePlan_549(t *testing.T) {
 	result := executeBudgetCall(t, executor, command, "call-a")
 	if result.NoSubmission || gateway.submitCount != 1 {
 		t.Fatalf("planned step in a card-answer turn = %+v submits=%d", result, gateway.submitCount)
+	}
+}
+
+// The chosen step is a step once, also when it stopped on an approval card:
+// a second call of the same reply with other arguments is the second run and
+// raises no second card, while a replay of the first call stays idempotent.
+func TestChoiceScopeCountsAnApprovalCardAsTheChosenRun_549(t *testing.T) {
+	ctx := context.Background()
+	executor, command, gateway, repo := policyHarness(t, sessionMode{mode: "manual"}, "create_model_3d_from_image", "image-to-3d")
+	command.ChoiceScope = choiceScope549("create_model_3d_from_image", "image-to-3d")
+	first, err := executor.Execute(ctx, withCall(command, "call-1", `{"prompt":"wood"}`), nil)
+	if err != nil || !first.NoSubmission || first.AgentContent == "" {
+		t.Fatalf("first call = %+v err=%v", first, err)
+	}
+	second, err := executor.Execute(ctx, withCall(command, "call-2", `{"prompt":"marble"}`), nil)
+	if err != nil || !second.NoSubmission || !strings.Contains(second.AgentContent, "保轮廓") {
+		t.Fatalf("second run = %+v err=%v", second, err)
+	}
+	if got := pendingCards(t, repo, "session-a", time.Time{}); got != 1 {
+		t.Fatalf("pending cards = %d, want the chosen run's only", got)
+	}
+	replay, err := executor.Execute(ctx, withCall(command, "call-1", `{"prompt":"wood"}`), nil)
+	if err != nil || replay.AgentContent == "" || strings.Contains(replay.AgentContent, "保轮廓") {
+		t.Fatalf("replay of the first call = %+v err=%v", replay, err)
+	}
+	if gateway.submitCount != 0 {
+		t.Fatalf("submits = %d", gateway.submitCount)
 	}
 }
