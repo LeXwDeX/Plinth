@@ -524,6 +524,8 @@ export interface ProductSchema {
       spinner_frame_milliseconds: number;
       percentage_multiplier: number;
       percentage_suffix: string;
+      /** #546: rows the task drawer shows at first and adds with each "show more". */
+      task_list_page_size: number;
       advanced_model_form_feature: string;
       advanced_model_default_mode: 'regular' | 'parts';
       task_progress: {

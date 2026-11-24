@@ -7459,19 +7459,21 @@ type FrontendRuntimeSchema struct {
 	// delays the search request after typing.
 	// The title refresh pair controls how long the page re-reads a session
 	// whose automatic title is still pending after a turn completes.
-	SessionMenuPageSize                     int                       `json:"session_menu_page_size"`
-	SessionMenuSearchDebounceMilliseconds   int                       `json:"session_menu_search_debounce_milliseconds"`
-	SessionTitleRefreshAttempts             int                       `json:"session_title_refresh_attempts"`
-	SessionTitleRefreshIntervalMilliseconds int                       `json:"session_title_refresh_interval_milliseconds"`
-	DisplayLocale                           string                    `json:"display_locale"`
-	TaskAPIPrefix                           string                    `json:"task_api_prefix"`
-	SpinnerFrameMilliseconds                int                       `json:"spinner_frame_milliseconds"`
-	PercentageMultiplier                    float64                   `json:"percentage_multiplier"`
-	PercentageSuffix                        string                    `json:"percentage_suffix"`
-	AdvancedModelFormFeature                string                    `json:"advanced_model_form_feature"`
-	AdvancedModelDefaultMode                string                    `json:"advanced_model_default_mode"`
-	TaskProgress                            TaskProgressRuntimeSchema `json:"task_progress"`
-	Toaster                                 ToasterRuntimeSchema      `json:"toaster"`
+	SessionMenuPageSize                     int     `json:"session_menu_page_size"`
+	SessionMenuSearchDebounceMilliseconds   int     `json:"session_menu_search_debounce_milliseconds"`
+	SessionTitleRefreshAttempts             int     `json:"session_title_refresh_attempts"`
+	SessionTitleRefreshIntervalMilliseconds int     `json:"session_title_refresh_interval_milliseconds"`
+	DisplayLocale                           string  `json:"display_locale"`
+	TaskAPIPrefix                           string  `json:"task_api_prefix"`
+	SpinnerFrameMilliseconds                int     `json:"spinner_frame_milliseconds"`
+	PercentageMultiplier                    float64 `json:"percentage_multiplier"`
+	PercentageSuffix                        string  `json:"percentage_suffix"`
+	// TaskListPageSize is how many tasks the task drawer shows at first and adds with each "show more" (#546).
+	TaskListPageSize         int                       `json:"task_list_page_size"`
+	AdvancedModelFormFeature string                    `json:"advanced_model_form_feature"`
+	AdvancedModelDefaultMode string                    `json:"advanced_model_default_mode"`
+	TaskProgress             TaskProgressRuntimeSchema `json:"task_progress"`
+	Toaster                  ToasterRuntimeSchema      `json:"toaster"`
 	// ChatMessagePageSize is how many messages the chat column reads when it
 	// opens a conversation and each time the person asks for earlier ones.
 	ChatMessagePageSize int `json:"chat_message_page_size"`

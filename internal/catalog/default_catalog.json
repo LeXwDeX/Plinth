@@ -2691,6 +2691,7 @@
         "spinner_frame_milliseconds": 80,
         "percentage_multiplier": 100,
         "percentage_suffix": "%",
+        "task_list_page_size": 10,
         "advanced_model_form_feature": "advanced-model-form",
         "advanced_model_default_mode": "regular",
         "task_progress": {
@@ -4114,6 +4115,7 @@
         "ui.workspace.tasks.filter.queued": "排队中",
         "ui.workspace.tasks.filter.failed": "失败",
         "ui.workspace.tasks.filter.empty": "没有符合筛选的任务",
+        "ui.workspace.tasks.show_more": "—— 点击查看更多 ——",
         "ui.workspace.canvas.zoom_in": "放大",
         "ui.workspace.canvas.zoom_out": "缩小",
         "ui.workspace.canvas.zoom_reset": "重置视图",
@@ -18642,6 +18644,7 @@
             "ui.workspace.tasks.filter.queued": "Queued",
             "ui.workspace.tasks.filter.failed": "Failed",
             "ui.workspace.tasks.filter.empty": "No tasks match the filter",
+            "ui.workspace.tasks.show_more": "—— Show more ——",
             "ui.workspace.canvas.zoom_in": "Zoom in",
             "ui.workspace.canvas.zoom_out": "Zoom out",
             "ui.workspace.canvas.zoom_reset": "Reset view",

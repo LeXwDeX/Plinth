@@ -39,6 +39,7 @@ import { SideDrawer } from '@/components/ui/side-drawer';
 import { useStudioStore } from '@/store/studio-store';
 import { usePreferences } from '@/store/preference-store';
 import { filterTasks, isQueuedTask, TASK_FILTERS, type TaskFilter } from '@/lib/workspace/task-filter';
+import { newestFirst, taskListPage } from '@/lib/workspace/task-list-page';
 import {
   findTaskState,
   projectNativeTaskDetail,
@@ -142,7 +143,13 @@ export function TaskDrawer() {
   const taskFilter = usePreferences((state) => state.taskFilter);
   const setTaskFilter = usePreferences((state) => state.setTaskFilter);
   const outcomeOf = useCallback((state: string) => taskStatePresentation(schema, state).outcome, [schema]);
-  const tasks = useMemo(() => filterTasks(allTasks, taskFilter, outcomeOf), [allTasks, taskFilter, outcomeOf]);
+  // #546: newest first by creation time (a state change never moves a row), then pages of the Schema's size over what
+  // the filter kept; a new filter or session starts again at the first page. Paging only cuts the list already held.
+  const tasks = useMemo(() => newestFirst(filterTasks(allTasks, taskFilter, outcomeOf)), [allTasks, taskFilter, outcomeOf]);
+  const pagingKey = `${activeSessionId ?? ''}|${taskFilter}`;
+  const [paging, setPaging] = useState({ key: pagingKey, pages: 1 });
+  const page = taskListPage(tasks, paging.key === pagingKey ? paging.pages : 1, schema.runtime.frontend.task_list_page_size);
+  const showMore = () => setPaging((current) => ({ key: pagingKey, pages: (current.key === pagingKey ? current.pages : 1) + 1 }));
   // SkillRun checkpoints are work in progress, not a queue or a failure.
   const showLiveRows = taskFilter === 'all' || taskFilter === 'active';
   const dismissTask = useWorkspaceStore((state) => state.dismissTask);
@@ -427,7 +434,7 @@ export function TaskDrawer() {
       </Surface>)}
       {tasks.length === 0 && visibleSkillSteps.length === 0 && !(skillRunsLoading && showLiveRows) && !skillRunsError
         ? <p className="py-6 text-center text-sm text-muted-foreground" data-testid="workspace-task-empty">{allTasks.length > 0 ? text('ui.workspace.tasks.filter.empty') : ui.empty}</p> : null}
-        {tasks.map((task) => {
+        {page.shown.map((task) => {
           const chip = stateChip(task);
           const error = errorText(task);
           const running = !task.terminal && !task.notFound;
@@ -595,6 +602,16 @@ export function TaskDrawer() {
             </Surface>
           );
         })}
+      {page.more > 0 ? (
+        <button
+          type="button"
+          onClick={showMore}
+          data-testid="workspace-task-show-more"
+          className="shrink-0 rounded-md py-2 text-center text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          {text('ui.workspace.tasks.show_more')}
+        </button>
+      ) : null}
     </div>
   );
 

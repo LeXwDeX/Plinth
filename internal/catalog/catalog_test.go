@@ -332,6 +332,7 @@ const minimalApplication = `"application":{
 			"spinner_frame_milliseconds":80,
 			"percentage_multiplier":100,
 			"percentage_suffix":"%",
+			"task_list_page_size":10,
 			"advanced_model_form_feature":"advanced-model-form",
 			"advanced_model_default_mode":"regular",
 			"task_progress":{
