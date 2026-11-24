@@ -22,4 +22,20 @@ export class InFlightGuard {
   has(requestId: string): boolean {
     return this.active.has(requestId);
   }
+
+  /**
+   * Runs `work` while holding the request, and releases it however `work` ends.
+   * Resolves false, without running `work`, when the request is already being
+   * decided. Handlers go through this instead of pairing `begin` and `end` by hand
+   * (#503: a hand-written claim once read the result inverted).
+   */
+  async run(requestId: string, work: () => Promise<void>): Promise<boolean> {
+    if (!this.begin(requestId)) return false;
+    try {
+      await work();
+      return true;
+    } finally {
+      this.end(requestId);
+    }
+  }
 }
