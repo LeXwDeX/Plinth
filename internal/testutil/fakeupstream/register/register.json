@@ -4044,17 +4044,42 @@
       "provider": "openai",
       "api": "images-v1",
       "endpoints": [
-        "POST /images/generations",
+        "POST /images/generations"
+      ],
+      "category": "request-validation",
+      "status": "real",
+      "behavior": "quality=max 被接受：2026-11-25 网关对 gpt-image-2.6-sunburst 的 1024x1024、quality=max 文生图答 200，响应回显 quality max，usage 为 14 个输入文本 token、7024 个输出图像 token（按官方 30 美元/百万输出 token 约 0.21 美元），响应结构与 low 的样本相同。官方图像生成指南（2026-11-25）也写明 2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max，此前“两页冲突”的说法不再成立。xhigh 未实发，按同一读法接受；edits 见下一条。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-quality-max-2026-11-25.candidate.json",
+          "captured_at": "2026-11-25",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "openai-images-v1/quality-max-edits",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
         "POST /images/edits"
       ],
       "category": "request-validation",
-      "status": "gap",
-      "behavior": "quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。 2026-11-25 复核：官方两页说法仍冲突，行为不变。",
-      "plan": "在 2D 真实一轮里对账一次，按结果决定接受或拒绝。",
-      "issues": [
-        540
+      "status": "constructed",
+      "behavior": "图像编辑同样接受 quality=max 与 xhigh（与 generations 同一参数校验）。",
+      "basis": [
+        {
+          "source": "https://developers.openai.com/api/docs/guides/image-generation.md",
+          "section": "quality（2026-11-25：2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max）"
+        },
+        {
+          "source": "#608 generations 的真实观测（openai-images-v1-quality-max-2026-11-25.candidate.json）"
+        }
       ],
-      "checked_at": "2026-11-25"
+      "checked_at": "2026-11-25",
+      "why_not_real": "本轮只实发了一次 generations（用户同意的范围）；edits 的 quality=max 没有真实样本。"
     },
     {
       "id": "openai-images-v1/edits-shape",

@@ -23,11 +23,11 @@
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
-| `openai/images-v1` | 3 | 5 | 1 | 9 | 2026-11-09 |
+| `openai/images-v1` | 4 | 6 | 0 | 10 | 2026-11-25 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 82 | 91 | 2 | 175 | 2026-11-25 |
+| 合计 | 83 | 92 | 1 | 176 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -1310,13 +1310,20 @@
 - 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
-#### `openai-images-v1/quality-max` · request-validation · gap
+#### `openai-images-v1/quality-max` · request-validation · real
 
-- 端点：`POST /images/generations`、`POST /images/edits`
-- 行为：quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。 2026-11-25 复核：官方两页说法仍冲突，行为不变。
+- 端点：`POST /images/generations`
+- 行为：quality=max 被接受：2026-11-25 网关对 gpt-image-2.6-sunburst 的 1024x1024、quality=max 文生图答 200，响应回显 quality max，usage 为 14 个输入文本 token、7024 个输出图像 token（按官方 30 美元/百万输出 token 约 0.21 美元），响应结构与 low 的样本相同。官方图像生成指南（2026-11-25）也写明 2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max，此前“两页冲突”的说法不再成立。xhigh 未实发，按同一读法接受；edits 见下一条。
+- 样本：`internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-quality-max-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `openai-images-v1/quality-max-edits` · request-validation · constructed
+
+- 端点：`POST /images/edits`
+- 行为：图像编辑同样接受 quality=max 与 xhigh（与 generations 同一参数校验）。
+- 依据：https://developers.openai.com/api/docs/guides/image-generation.md（quality（2026-11-25：2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max））
+- 依据：#608 generations 的真实观测（openai-images-v1-quality-max-2026-11-25.candidate.json）
 - 核对日期：2026-11-25
-- 计划：在 2D 真实一轮里对账一次，按结果决定接受或拒绝。
-- Issue：#540
+- 没有真实样本的原因：本轮只实发了一次 generations（用户同意的范围）；edits 的 quality=max 没有真实样本。
 
 #### `openai-images-v1/edits-shape` · response-shape · real
 

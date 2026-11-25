@@ -50,6 +50,7 @@
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
+    "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-quality-max-2026-11-25.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-2026-11-23.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-astra-minimal-2026-11-25.candidate.json",
@@ -97,8 +98,8 @@
       "derived": 38,
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
-      "real": 149,
-      "total": 202
+      "real": 150,
+      "total": 203
     }
   },
   "incomplete": [],
@@ -3226,6 +3227,22 @@
           "enabled": true
         }
       ]
+    },
+    {
+      "adapter_key": "openai-images.v1",
+      "capability": "(scenario)",
+      "endpoint": "POST /v1/images/generations",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-quality-max-2026-11-25.candidate.json"
+      ],
+      "offerings": []
     },
     {
       "adapter_key": "openai-images.v1",
