@@ -42,7 +42,7 @@ describe('streamed turn render isolation (#291)', () => {
   it('memoizes version tiles and shares unchanged tiles between task updates', () => {
     expect(strip).toContain('const TileButton = memo(function TileButton(');
     expect(strip).toContain('const Connector = memo(function Connector(');
-    expect(strip).toContain('const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);');
+    expect(strip).toContain('const open = useCallback((tile: VersionTile, mode?: OpenMode) => openLatest.current(tile, mode), []);');
     expect(versions).toContain('const tiles = keepUnchanged(previousTiles.current, built.tiles, (tile) => tile.key);');
   });
 });

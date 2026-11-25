@@ -55,7 +55,7 @@ export function previewKindOf(target: Pick<ResultTarget, 'kind' | 'mediaType' | 
 
 /**
  * 任务详情：所有入口（版本条、全部产出、对话结果卡、任务中心、我的资源）共用的一个面板。
- * 上方预览（2D 图 / 3D 模型，可全屏），中间是由 Schema 驱动的信息，下方按任务类型和
+ * 上方预览（2D 图 / 3D 模型，可全屏），紧贴预览下方是「插入到画布」/「在舞台中打开」（#593），中间是由 Schema 驱动的信息，下方按任务类型和
  * Agent 模式显示的动作。没有 taskId 的是上传的资源：只有预览、文件信息和下载；版本条里本会话的上传与
  * Agent 裁图（#587）另有「插入到画布」。
  */
@@ -264,6 +264,21 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
         ) : null}
       </div>
 
+      {/* #593: 「插入到画布」 (a model's 「在舞台中打开」) sits right under the picture, above the rows; it stays put
+          while the rows scroll. #559: from a version it is the way back onto the board (recorded as placed). */}
+      {blockedReason || (actions.openOnCanvas && object) ? (
+        <div className="flex shrink-0 justify-center" data-testid="result-detail-place">
+          {blockedReason ? (
+            <HintTooltip name={text(openKey)} reason={blockedShort}>
+              <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text(openKey)}: ${blockedText}`} data-testid="result-detail-open-canvas-blocked"><Eye />{text(openKey)}</Action>
+            </HintTooltip>
+          ) : null}
+          {actions.openOnCanvas && object ? (
+            <Action type="button" variant="outline" size="sm" onClick={() => run(() => insertOnCanvas(object))} data-testid="result-detail-open-canvas"><Eye />{text(openKey)}</Action>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]" data-testid="result-detail-body">
         {failureText ? (
           <p className="flex items-start gap-1.5 text-xs text-destructive" role="alert" data-testid="result-detail-failure">
@@ -375,15 +390,6 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             <HintTooltip name={text('ui.result.detail.send_to_2d')} reason={blockedShort}>
               <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text('ui.result.detail.send_to_2d')}: ${blockedText}`} data-testid="result-detail-to2d-blocked"><Share2 />{text('ui.result.detail.send_to_2d')}</Action>
             </HintTooltip>
-          ) : null}
-          {blockedReason ? (
-            <HintTooltip name={text(openKey)} reason={blockedShort}>
-              <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text(openKey)}: ${blockedText}`} data-testid="result-detail-open-canvas-blocked"><Eye />{text(openKey)}</Action>
-            </HintTooltip>
-          ) : null}
-          {/* #559: the only way back onto the board from a version: insert this picture (recorded as placed). */}
-          {actions.openOnCanvas && object ? (
-            <Action type="button" variant="outline" size="sm" onClick={() => run(() => insertOnCanvas(object))} data-testid="result-detail-open-canvas"><Eye />{text(openKey)}</Action>
           ) : null}
         </div>
 

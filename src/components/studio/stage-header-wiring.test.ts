@@ -66,11 +66,12 @@ describe('stage header wiring', () => {
     expect(actions).not.toContain('three_view_turn');
   });
 
-  it('sends a tool-binding Skill (three-view) only with a picture, and fills the default text when the box is empty', () => {
+  it('sends a tool-binding Skill (three-view, four-view) with or without a picture, and fills the default text when the box is empty', () => {
     const chat = readFileSync(new URL('./chat-column.tsx', import.meta.url), 'utf8');
     expect(chat).toContain('toolSkill?.defaultMessage');
-    expect(chat).toContain("schemaText(schema, 'ui.studio.skill.needs_image')");
-    expect(chat).toMatch(/toolSkill\?\.requiresImage[\s\S]{0,400}claim\.kind === 'image'/);
+    // #593: no picture is required before sending; the Agent draws a source first when there is none.
+    expect(chat).not.toContain('ui.studio.skill.needs_image');
+    expect(chat).not.toMatch(/requiresImage/);
     expect(chat).toContain('Boolean(currentSkill?.tool)');
     // One-shot comes from the Schema flag and is spent only after startTurn resolved (`sent = true`).
     expect(chat).toMatch(/sent = true;[\s\S]{0,200}selectedSkill\?\.oneShot[\s\S]{0,300}selectSkill\(sessionId, null\)/);

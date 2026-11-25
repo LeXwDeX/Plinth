@@ -15,12 +15,23 @@ import { cn } from '@/lib/utils';
  * #405: the chips sit on a two-column grid (`grid-cols-2`, a 6px gap), and every chip fills its cell: all of them are
  * exactly as wide, half of the row less half of the gap, whatever they say (an odd one out keeps one cell, it is not
  * stretched over the row). A description that only repeats the name is left out (one line, centred); text that does
- * not fit is cut, and hovering the chip shows all of it.
+ * not fit is cut, and hovering the chip shows all of it. #593: the picture chips (object, attachments) are cards
+ * instead (`card`, below the grid); the grid keeps the text chips (mask, branch, Skill).
  */
 export const CHIP_HEIGHT_CLASS = 'h-10';
 
 /** Every chip fills its grid cell, and may shrink below its text so that the text is cut instead of widening the cell. */
 export const CHIP_WIDTH_CLASS = 'w-full min-w-0';
+
+/**
+ * #593: a picture chip (the object on the stage or board, an attachment) is a card of one fixed size instead of a
+ * strip: the 56px thumbnail on top, its kind badge centred under it, the remove button in the top-right corner. The
+ * cards sit side by side and wrap; the name and description are the hover hint and the screen-reader text.
+ */
+export const CHIP_CARD_WIDTH_CLASS = 'w-[68px]';
+
+/** The card's thumbnail square (68px less a 5px padding and a 1px border on each side). */
+export const CHIP_CARD_SQUARE_CLASS = 'size-14';
 
 export interface ContextChipProps {
   /** What goes in the 32px square: a thumbnail, an icon, or a drawing. */
@@ -45,6 +56,8 @@ export interface ContextChipProps {
   flash?: boolean;
   /** Makes the chip a drag source (an attachment dragged onto the canvas). */
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  /** #593: a picture card (`square` uses CHIP_CARD_SQUARE_CLASS, `title` is the kind badge) instead of a strip. */
+  card?: boolean;
 }
 
 const FRAME = `flex ${CHIP_WIDTH_CLASS} items-center gap-1.5 rounded-md border py-[3px] pl-[3px] pr-1 text-xs`;
@@ -58,6 +71,14 @@ export function chipFrameClass(accent: boolean, muted: boolean): string {
 }
 
 /** The 32px square. */
+export function chipCardClass(accent: boolean, muted: boolean): string {
+  return cn(
+    'relative flex shrink-0 flex-col items-center gap-1 rounded-md border p-[5px] text-xs', CHIP_CARD_WIDTH_CLASS,
+    accent && !muted ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-surface text-muted-foreground',
+    muted && 'opacity-70',
+  );
+}
+
 export function ChipSquare({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <span className={cn('relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-border bg-background text-muted-foreground', className)}>
@@ -124,7 +145,17 @@ export function ChipRemove({ label, onClick, icon, pressed, testId }: NonNullabl
   );
 }
 
-export function ContextChip({ square, title, label, subtitle, accent = false, muted = false, remove, testId, hint, data, flash = false, open, oneLine = false, onDragStart }: ContextChipProps) {
+/** The card's caption: the title (a kind badge) centred under the picture; the description is for screen readers. */
+function CardCaption({ title, subtitle }: { title: ReactNode; subtitle: string | null }) {
+  return (
+    <span className="flex h-[18px] min-w-0 max-w-full items-center justify-center">
+      {title}
+      {subtitle ? <span className="sr-only">{subtitle}</span> : null}
+    </span>
+  );
+}
+
+export function ContextChip({ square, title, label, subtitle, accent = false, muted = false, remove, testId, hint, data, flash = false, open, oneLine = false, onDragStart, card = false }: ContextChipProps) {
   const dataAttributes = Object.fromEntries(Object.entries(data ?? {}).filter(([, value]) => value !== undefined).map(([name, value]) => [`data-${name}`, String(value)]));
   const frameRef = useRef<HTMLSpanElement>(null);
   // Whether some of the text is cut off, read when the pointer or the keyboard arrives (only then can it have changed).
@@ -135,6 +166,40 @@ export function ContextChip({ square, title, label, subtitle, accent = false, mu
   // A description that only repeats the name is left out; a chip given none keeps its (blank) second line as before.
   const single = oneLine || (typeof subtitle === 'string' && subtitle.trim() !== '' && lines.subtitle === null);
   const reach = { onPointerEnter: measure, onFocus: measure };
+  if (card) {
+    // The card shows no text line that could be cut, so its whole text is always the hover hint.
+    const caption = <CardCaption title={title} subtitle={lines.subtitle} />;
+    const cardChip = (
+      <span
+        data-testid={testId}
+        className={cn(chipCardClass(accent, muted), flash && 'animate-pulse ring-2 ring-primary')}
+        data-flash={flash ? 'true' : undefined}
+        {...dataAttributes}
+        {...(onDragStart ? { draggable: true, onDragStart } : {})}
+      >
+        {open ? (
+          <HintTooltip name={open.label} hint={titleText ? lines.full : undefined} className="flex">
+            <button
+              type="button" onClick={open.onClick} aria-label={open.label} data-testid={open.testId}
+              className="flex flex-col items-center gap-1 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              {square}
+              {caption}
+            </button>
+          </HintTooltip>
+        ) : (
+          <>
+            {square}
+            {caption}
+          </>
+        )}
+        {remove ? <span className="absolute right-0.5 top-0.5 rounded-sm bg-background/90" data-testid="chip-card-remove"><ChipRemove {...remove} /></span> : null}
+      </span>
+    );
+    if (open) return cardChip;
+    if (hint) return <HintTooltip {...hint} hint={hint.hint ?? (lines.subtitle ? lines.full : undefined)} className="flex shrink-0">{cardChip}</HintTooltip>;
+    return <HintTooltip name={titleText ? lines.full : ''} className="flex shrink-0">{cardChip}</HintTooltip>;
+  }
   const chip = (
     <span
       ref={frameRef}

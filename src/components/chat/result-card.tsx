@@ -228,7 +228,7 @@ export function ImageResultCard({
               </div>
               {viewLabel ? <span className="truncate select-none px-0.5 text-center text-[11px] text-muted-foreground" data-testid="chat-result-view-label">{viewLabel}</span> : null}
               {(onPick || canReject) ? (
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   {onPick ? (
                     <HintTooltip
                       name={picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}

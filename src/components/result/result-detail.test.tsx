@@ -86,6 +86,36 @@ describe('ResultDetail', () => {
     expect(html).toContain('data-testid="result-detail-regenerate"');
   });
 
+  it('puts 「插入到画布」 right under the picture, above the rows and outside the action row (#593)', () => {
+    state.task = ready(); state.offering = offering(true);
+    const html = renderToStaticMarkup(<ResultDetail target={target} />);
+    const preview = html.indexOf('data-testid="result-detail-preview"');
+    const place = html.indexOf('data-testid="result-detail-place"');
+    const insert = html.indexOf('data-testid="result-detail-open-canvas"');
+    const body = html.indexOf('data-testid="result-detail-body"');
+    expect(preview).toBeGreaterThan(-1);
+    expect(place).toBeGreaterThan(preview);
+    expect(insert).toBeGreaterThan(place);
+    expect(body).toBeGreaterThan(insert);
+    expect(html.indexOf('data-testid="result-detail-rows"')).toBeGreaterThan(insert);
+    const actions = html.slice(html.indexOf('data-testid="result-detail-actions"'));
+    expect(actions).not.toContain('result-detail-open-canvas');
+    expect(html.match(/data-testid="result-detail-open-canvas"/g)).toHaveLength(1);
+    // Another session's result: the dimmed one sits in the same place.
+    const blocked = renderToStaticMarkup(<ResultDetail target={{ ...target, sessionId: 'other' }} />);
+    expect(blocked.indexOf('data-testid="result-detail-open-canvas-blocked"')).toBeGreaterThan(blocked.indexOf('data-testid="result-detail-place"'));
+    expect(blocked.indexOf('data-testid="result-detail-open-canvas-blocked"')).toBeLessThan(blocked.indexOf('data-testid="result-detail-body"'));
+  });
+
+  it('puts a model\'s 「在舞台中打开」 in the same place under the preview (#593)', () => {
+    state.task = ready({ capability: 'image-to-3d', assets: [{ id: 'a1', media_type: 'model/gltf-binary', kind: 'model' }] }); state.offering = offering(true);
+    const html = renderToStaticMarkup(<ResultDetail target={{ ...target, kind: 'model', url: '/api/v1/tasks/t1/assets/a1' }} />);
+    const open = html.indexOf('data-testid="result-detail-open-canvas"');
+    expect(open).toBeGreaterThan(html.indexOf('data-testid="result-detail-place"'));
+    expect(open).toBeLessThan(html.indexOf('data-testid="result-detail-body"'));
+    expect(html.slice(open, html.indexOf('</button>', open))).toContain(schemaText(schema, 'ui.result.detail.open_stage'));
+  });
+
   it('has no credits row for an unmetered provider', () => {
     state.task = ready(); state.offering = offering(false);
     expect(renderToStaticMarkup(<ResultDetail target={target} />)).not.toContain('data-key="credits"');
