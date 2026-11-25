@@ -158,7 +158,7 @@ func TestThreeAndFourViewSystemSkillsCarryTheInstructions(t *testing.T) {
 		"system-four-view":  {"four-view", "右侧", "四视图"},
 	} {
 		skill := skills[id]
-		if skill.Tool != "create_three_view" || !skill.RequiresImage || !skill.OneShot || skill.DefaultMessage == "" {
+		if skill.Tool != "create_three_view" || skill.RequiresImage || !skill.OneShot || skill.DefaultMessage == "" {
 			t.Errorf("%s = %+v", id, skill)
 		}
 		if skill.Slug != want.slug || !catalog.ValidSkillSlug(skill.Slug) {
@@ -176,5 +176,52 @@ func TestThreeAndFourViewSystemSkillsCarryTheInstructions(t *testing.T) {
 		if !strings.Contains(first, want.view) || strings.Contains(skill.Prompt, "【三视图制作要领】") {
 			t.Errorf("%s prompt does not name %q or still points at the removed craft brief: %q", id, want.view, first)
 		}
+	}
+}
+
+// #593: the three-view and four-view Skills are free: the person's picture
+// (attached, selected on the stage or referenced with @) is the source; with
+// none the Agent first makes one with 2D text-to-image and confirms which to
+// use. The rule leads each prompt, in both languages, and no Skill asks the
+// composer for a picture before sending.
+func TestThreeAndFourViewSkillsUseTheGivenPictureOrDrawOneFirst(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	skills, body := systemSkillBodies(t, application.Chat)
+	english := application.Localization.Bundles["en"].Fields
+	for id, view := range map[string]string{"system-three-view": "出三视图", "system-four-view": "出四视图"} {
+		skill := skills[id]
+		first, _, _ := strings.Cut(skill.Prompt, "\n")
+		for _, phrase := range []string{"用户已给图", "@ 引用", "就用用户的图", "没给图就先用 2D 文生图出图", "和用户确认用哪张", "再用 create_three_view " + view} {
+			if !strings.Contains(first, phrase) {
+				t.Errorf("%s first line lacks %q: %q", id, phrase, first)
+			}
+		}
+		if !strings.HasPrefix(first, "先定源图") {
+			t.Errorf("%s does not lead with the source rule: %q", id, first)
+		}
+		if skill.RequiresImage {
+			t.Errorf("%s still requires a picture before sending", id)
+		}
+		en := english["chat.skills.system_skills[id="+id+"].prompt"]
+		if !strings.HasPrefix(en, "Settle the source picture first") || !strings.Contains(en, "2D text-to-image") ||
+			!strings.Contains(en, "confirm with them which one to use") {
+			t.Errorf("%s English prompt lacks the source rule: %q", id, en)
+		}
+	}
+	// The per-view rule is unchanged: one separate picture per view.
+	if !strings.Contains(body, "每个视角一张独立图片") || !strings.Contains(body, "用户确认用哪张后再以它为源调用") {
+		t.Errorf("shared body lost a rule: %q", body)
+	}
+	// The directive names the tool as the goal, not as the only allowed tool.
+	directive := application.Chat.Skills.ToolDirectiveTemplate
+	if strings.Contains(directive, "不要用别的工具代替") || strings.Contains(directive, "必须用工具") || !strings.Contains(directive, "没给图时") {
+		t.Errorf("the Skill directive still forces the bound tool: %q", directive)
+	}
+	if en := english["chat.skills.tool_directive_template"]; strings.Contains(en, "Do not substitute another tool") || !strings.Contains(en, "when they gave none") {
+		t.Errorf("the English Skill directive still forces the bound tool: %q", en)
 	}
 }

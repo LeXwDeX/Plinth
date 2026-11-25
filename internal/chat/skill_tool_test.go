@@ -53,16 +53,20 @@ func TestToolBindingSkillDirectsTheAgentToItsTool(t *testing.T) {
 		return agent.requests[0].Messages[0].Content
 	}
 	skill := configuredChatSchema(t).Skills.SystemSkills[0]
-	directive := "本轮必须用工具 " + skill.Tool
+	directive := "本轮以工具 " + skill.Tool
 	if system := run("auto", skill.ID); !strings.Contains(system, directive) || !strings.Contains(system, skill.Prompt) {
 		t.Fatalf("auto scope with the Skill: no directive in %q", system)
+	}
+	// #593: the bound tool is the goal, not the only tool: with no picture the Agent may draw a source first.
+	if system := run("auto", skill.ID); strings.Contains(system, "不要用别的工具代替") || !strings.Contains(system, "没给图时按技能说明先用别的工具准备好输入图") {
+		t.Fatalf("the Skill directive still forbids preparing a picture with another tool: %q", system)
 	}
 	// #550: every Schema system Skill (three-view and four-view) reaches the turn.
 	if len(configuredChatSchema(t).Skills.SystemSkills) < 2 {
 		t.Fatal("the four-view system Skill is not declared")
 	}
 	for _, other := range configuredChatSchema(t).Skills.SystemSkills[1:] {
-		if system := run("auto", other.ID); !strings.Contains(system, "本轮必须用工具 "+other.Tool) ||
+		if system := run("auto", other.ID); !strings.Contains(system, "本轮以工具 "+other.Tool) ||
 			!strings.Contains(system, other.Prompt) {
 			t.Fatalf("auto scope with Skill %s: no directive in %q", other.ID, system)
 		}

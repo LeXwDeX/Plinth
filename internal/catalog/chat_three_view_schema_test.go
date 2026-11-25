@@ -278,7 +278,8 @@ func TestThreeViewIsASchemaSystemSkill(t *testing.T) {
 		t.Fatalf("system skills = %+v", skills.SystemSkills)
 	}
 	for _, skill := range skills.SystemSkills {
-		if skill.Tool != "create_three_view" || !skill.RequiresImage || skill.DefaultMessage == "" || !skill.OneShot {
+		// #593: the Skills no longer require a picture; without one the Agent draws a source first.
+		if skill.Tool != "create_three_view" || skill.RequiresImage || skill.DefaultMessage == "" || !skill.OneShot {
 			t.Fatalf("system skill = %+v", skill)
 		}
 		for _, tool := range c.Application().Chat.AgentTools {

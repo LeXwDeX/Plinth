@@ -1120,12 +1120,8 @@ export function ChatColumn() {
       const text = notedText;
       const selection = stageSelection;
       const mentions = queuedMentions ?? (reuseImages !== undefined ? [] : mentionsForTurn(text, mentionsRef.current, pickedMentions(scope)));
-      // The Skill's input is a picture: the stage selection, an attachment or an `@` reference. Without one, nothing is sent.
-      if (toolSkill?.requiresImage && reuseImages === undefined && queuedSelection === undefined
-        && images.length === 0 && mentions.length === 0 && !selection.some((claim) => claim.kind === 'image')) {
-        toast.error(schemaText(schema, 'ui.studio.skill.needs_image'));
-        return;
-      }
+      // #593: a picture-input Skill (three-view, four-view) is sent with or without a picture; without one the
+      // Agent draws a source first, as the Skill says. No send is refused for a missing picture.
       // The same words again while the first send is still on its way (a held or doubled
       // Enter): the box is only cleared once the server took the turn, so this is one message.
       if (turnRunning && !reuseImages && startingRef.current?.sessionId === sessionId && startingRef.current.text === text) return;

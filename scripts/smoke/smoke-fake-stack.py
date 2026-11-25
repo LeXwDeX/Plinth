@@ -2602,6 +2602,18 @@ def scenario_multiview_text(work, api, offerings):
     on the three-view card, as the card's buttons do. No 2D model is picked for
     the source, so the purpose recommendation chooses it and no model conflict
     card opens."""
+    # #593: choosing the four-view Skill by hand with no picture is sent as is; the
+    # Skill tells the Agent to draw a source first instead of refusing the turn.
+    picked = new_session(api)
+    rule = "没给图就先用 2D 文生图出图"
+    replies = _visual_anchor_reply_count(api, picked)
+    status, _ = api.json("POST", f"/api/chat/sessions/{picked}/messages", {
+        "content": f"我要圣母玛丽亚雕像的图 [[fake:system-contains {rule}]]", "creative_domain": "image",
+        "_skill": {"id": "system-four-view", "name": "四视图"}})
+    answered = status in (200, 201, 202) and _visual_anchor_wait_reply(api, picked, replies)
+    reply = str((_quality_final_reply(_quality_messages(api, picked)) or {}).get("content") or "") if answered else ""
+    record("multiview-text: a hand-picked four-view Skill with no picture is sent and tells the Agent to draw a source first",
+           answered and f"present: {rule}" in reply, f"send {status} reply={reply[:120]!r}")
     session = new_session(api)
     # #548: the resident craft keeps only the route; the four-view rule itself
     # lives in the system four-view Skill, which the Agent reads with use_skill.

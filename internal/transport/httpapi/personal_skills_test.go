@@ -195,7 +195,7 @@ func TestPersonalSkillRoutesScopeContentAndRejectInvalidWrites(t *testing.T) {
 		t.Fatalf("owner catalog: %d %s", catalogA.Code, catalogA.Body.String())
 	}
 	// The Schema's three-view Skill is offered with the tool it binds.
-	if !bytes.Contains(catalogA.Body.Bytes(), []byte(`"tool":"create_three_view"`)) || !bytes.Contains(catalogA.Body.Bytes(), []byte(`"requires_image":true`)) || !bytes.Contains(catalogA.Body.Bytes(), []byte(`"one_shot":true`)) {
+	if !bytes.Contains(catalogA.Body.Bytes(), []byte(`"tool":"create_three_view"`)) || bytes.Contains(catalogA.Body.Bytes(), []byte(`"requires_image":true`)) || !bytes.Contains(catalogA.Body.Bytes(), []byte(`"one_shot":true`)) {
 		t.Fatalf("catalog lacks the three-view Skill: %s", catalogA.Body.String())
 	}
 	if cache := catalogA.Header().Get("Cache-Control"); !strings.Contains(cache, "private") || !strings.Contains(cache, "no-store") {
