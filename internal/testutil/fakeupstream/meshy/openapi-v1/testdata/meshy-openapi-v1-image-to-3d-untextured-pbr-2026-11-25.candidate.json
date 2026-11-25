@@ -1,0 +1,62 @@
+[
+ {
+  "sequence": 1,
+  "metadata": {
+   "scenario": "upstream-record",
+   "connection": "meshy",
+   "protocol": "json",
+   "endpoint": "POST /openapi/v1/image-to-3d",
+   "api_version": "unknown",
+   "requested_model": "unknown",
+   "reported_model": "unknown",
+   "server_build": "unknown",
+   "captured_at": "2026-11-25T00:00:00Z",
+   "app_revision": "unknown",
+   "catalog_revision": "unknown",
+   "environment": "test",
+   "provenance": "derived"
+  },
+  "request": {
+   "method": "POST",
+   "host": "example.test",
+   "path": "/openapi/v1/image-to-3d",
+   "content_type": "application/json",
+   "headers": {
+    "accept": "application/json"
+   },
+   "body": {
+    "encoding": "json",
+    "json": {
+     "ai_model": "meshy-t2.5",
+     "enable_pbr": true,
+     "image_url": "[redacted]",
+     "model_type": "smart-topology",
+     "should_texture": false,
+     "target_formats": [
+      "glb",
+      "obj",
+      "fbx",
+      "stl",
+      "usdz",
+      "3mf"
+     ],
+     "target_polycount": 15000,
+     "texture_resolution": "8k"
+    }
+   },
+   "complete": true
+  },
+  "response": {
+   "status": 400,
+   "content_type": "application/json",
+   "body": {
+    "encoding": "json",
+    "json": {
+     "message": "enable_pbr is only supported when should_texture is true"
+    }
+   },
+   "complete": true
+  },
+  "complete": true
+ }
+]

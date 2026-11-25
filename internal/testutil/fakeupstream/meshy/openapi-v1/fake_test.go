@@ -456,12 +456,13 @@ func TestTextureOptionsShapeTheSuccessBody(t *testing.T) {
 	if entries, _ := plainBody["texture_urls"].([]any); len(entries) != 0 {
 		t.Errorf("an untextured task returns texture_urls: %v", entries)
 	}
-	// PBR on does not make a non-textured image-to-3d task report maps, even
-	// though the newest sample of the kind was captured with textures.
-	untexturedPBR := f.create("/image-to-3d", map[string]any{
-		"image_url": "https://example.test/a.png", "should_texture": false, "enable_pbr": true,
+	// PBR on does not make a non-textured task report maps, even though the
+	// newest sample of the kind was captured with textures. Single-image
+	// Image to 3D refuses the pair (#581); Multi Image to 3D takes it.
+	untexturedPBR := f.create("/multi-image-to-3d", map[string]any{
+		"image_urls": []string{"https://example.test/a.png"}, "should_texture": false, "enable_pbr": true,
 	})
-	_, untexturedBody := f.finish("/image-to-3d", untexturedPBR, key)
+	_, untexturedBody := f.finish("/multi-image-to-3d", untexturedPBR, key)
 	if entries, _ := untexturedBody["texture_urls"].([]any); len(entries) != 0 {
 		t.Errorf("an untextured task with enable_pbr returns texture_urls: %v", entries)
 	}

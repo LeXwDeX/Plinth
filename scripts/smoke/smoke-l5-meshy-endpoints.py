@@ -28,6 +28,12 @@ ART_AI_UPSTREAM_SHAPE (release-env.py smoke sets it). Each real run also needs t
   ART_AI_UPSTREAM_SHAPE=fake BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... python3 scripts/smoke/smoke-l5-meshy-endpoints.py
   python3 scripts/release-env.py smoke dev-test -- env ART_AI_LIVE_ACK=1 python3 scripts/smoke/smoke-l5-meshy-endpoints.py --live --report DIR
 
+#581 probe (--probe-untextured-pbr, off by default): one extra image-to-3d (meshy-t2.5, from the t2i picture) with
+should_texture=false and enable_pbr=true. Expected against a build before the #581 fix: Meshy answers 400 ("enable_pbr is
+only supported when should_texture is true") and spends no credits; the 2026-11-25 run did exactly that. From the #581
+fix on, the Catalog forces enable_pbr to false and leaves it off the wire when should_texture is false, so the same
+step is an accepted mesh-only generation that spends credits (its frozen quote counts against --max-credits).
+
 Every POST is sent once; a failure or timeout is only observed. Re-run a failed step with --only STEP --seed
 SOURCE=TASK_ID (a new request, after reading why). Raw payloads and downloaded bytes live in a 0700 directory
 outside the checkout and are removed at the end (--keep-raw keeps them).
@@ -253,6 +259,23 @@ def build_t25_image(ctx):
     return {"reference_assets": [ctx.asset_id("t2i", "image")], "texture_resolution": "2k", "target_polycount": 15000}
 
 
+def build_t25_image_untextured(ctx):
+    """#581 probe: should_texture off with enable_pbr on. Before the #581 fix Plinth sent the pair and Meshy answered
+    400 with no charge; since the fix the Catalog drops enable_pbr and the step is a paid mesh-only generation."""
+    return {"reference_assets": [ctx.asset_id("t2i", "image")], "should_texture": False, "enable_pbr": True,
+            "target_polycount": 15000}
+
+
+def verify_untextured_probe(ctx, task):
+    state = (task or {}).get("state") if isinstance(task, dict) else None
+    failure = engine.failure_evidence(task) or {}
+    return [("#581 probe outcome", True, f"state={state} failure_class={failure.get('class')} ambiguous={failure.get('ambiguous')}")]
+
+
+def probe_enabled(ctx):
+    return bool(ctx.arguments.probe_untextured_pbr)
+
+
 def multiview_build(resolution_of):
     def build(ctx):
         return {"reference_assets": [ctx.asset_id("t2i", "image"), ctx.asset_id("i2i", "image")],
@@ -284,6 +307,9 @@ def steps():
         engine.Step("i2i", I2I, "image-to-image", build_i2i, needs=("t2i",), verify=verify_i2i),
         engine.Step("t25_text", T25_TEXT, "text-to-3d", build_t25_text, verify=verify_t25_text),
         engine.Step("t25_image", T25_IMAGE, "image-to-3d", build_t25_image, needs=("t2i",), verify=verify_t25_image),
+        engine.Step("t25_image_untextured", T25_IMAGE, "image-to-3d", build_t25_image_untextured, needs=("t2i",),
+                    optional=True, only_if=probe_enabled, verify=verify_untextured_probe,
+                    reason="#581 probe: should_texture=false with enable_pbr=true (400 with no charge before the #581 fix)"),
         engine.Step("multiview", MULTIVIEW, "image-to-3d", multiview_build(lambda ctx: ctx.arguments.multiview_texture),
                     needs=("t2i", "i2i"), verify=verify_multiview("multiview")),
         engine.Step("multiview_2k", MULTIVIEW, "image-to-3d", multiview_build(lambda ctx: "2k"), needs=("t2i", "i2i"),
@@ -318,6 +344,9 @@ def steps():
 def add_arguments(parser):
     parser.add_argument("--multiview-texture", choices=("8k", "2k"), default="8k",
                         help="texture resolution of the multi-image step (default %(default)s, the Offering's own default)")
+    parser.add_argument("--probe-untextured-pbr", action="store_true",
+                        help="also run the #581 probe (image-to-3d with should_texture=false and enable_pbr=true): expect "
+                             "400 with no charge before the #581 fix; a paid mesh-only task after it (see the header)")
     parser.add_argument("--cleanup", metavar="EVIDENCE.json",
                         help="instead of a run: delete the upstream jobs of an earlier run (see the header)")
     parser.add_argument("--remote-ids", metavar="MAP.json",

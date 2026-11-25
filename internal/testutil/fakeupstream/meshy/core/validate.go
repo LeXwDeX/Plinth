@@ -346,6 +346,13 @@ func ImageTo3DRequestError(request map[string]any, multi bool) string {
 		return message
 	}
 	textured := request["should_texture"] != false
+	// Single image only: "true needs should_texture: true, and returns 400 with
+	// should_texture: false" (Image to 3D page, read 2026-11-25). The message is
+	// the real answer of the #581 probe (2026-11-25, no credits spent). The Multi
+	// Image to 3D page states no such rule, so the fake accepts the pair there.
+	if !multi && !textured && request["enable_pbr"] == true {
+		return "enable_pbr is only supported when should_texture is true"
+	}
 	texture := stringOf(request, "texture_model")
 	if textured {
 		if texture == "meshy-6" && stringOf(request, "ai_model") != "meshy-6" {
@@ -382,10 +389,8 @@ func smartTopologyRequest(request map[string]any) bool {
 // true, or topology quad on a remeshed model ("which meshy-6-lite does by
 // default"); and remove_lighting with meshy-6-lite and its default texture model
 // (or, single image only, with Smart Topology). The refusal texts are
-// constructed. The pages also say enable_pbr true with should_texture false
-// answers 400, which is not checked: the Catalog sends its enable_pbr default
-// whatever should_texture is, so the rule would refuse a request the platform
-// builds; it is a register gap until the Catalog omits enable_pbr there (#579).
+// constructed. enable_pbr with should_texture false is checked in
+// ImageTo3DRequestError (#581).
 func textureOptionError(request map[string]any, texture string, single bool) string {
 	model := stringOf(request, "ai_model")
 	smart := single && smartTopologyRequest(request)
