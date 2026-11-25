@@ -5,6 +5,8 @@ export interface AdministrationUsageRecord {
   userId: string;
   userName: string;
   userEmail: string;
+  /** #599: the user's current project group KEY; null when ungrouped. */
+  projectGroupKey: string | null;
   totalTasks: number;
   succeededTasks: number;
   failedTasks: number;
@@ -12,6 +14,25 @@ export interface AdministrationUsageRecord {
   priceTotals?: PriceTotal[];
   lastActiveAt: string;
   byType: Record<string, number>;
+}
+
+/** A project group's amount in one unit and its share of that unit's total (#599). */
+export interface AdministrationUsageGroupAmount extends PriceTotal {
+  /** Basis points (10000 = 100%); null when the unit's total is 0. */
+  shareBasisPoints: number | null;
+}
+
+/**
+ * One project group's spending (#599): every Task of the users who are in the
+ * group now. Shares are per unit; units are never added together.
+ */
+export interface AdministrationUsageGroup {
+  /** null for the ungrouped row. */
+  projectGroupKey: string | null;
+  totalTasks: number;
+  succeededTasks: number;
+  failedTasks: number;
+  amounts: AdministrationUsageGroupAmount[];
 }
 
 /** The estimate of every listed user together (#327), stated the way a user's row states its own. */
@@ -24,6 +45,8 @@ export interface AdministrationUsageOverview {
   users: AdministrationUsageRecord[];
   /** null when the server sent no total. */
   total: AdministrationUsageTotal | null;
+  /** Spending per project group; empty when the server sent none. */
+  groups: AdministrationUsageGroup[];
 }
 
 export interface AdministrationUsageQuery {
@@ -125,6 +148,7 @@ export function createAdministrationUsageBrowserClient(
       userId: optionalString(wire[fields.user_id]),
       userName: optionalString(wire[fields.user_name]),
       userEmail: optionalString(wire[fields.user_email]),
+      projectGroupKey: nullableString(wire[fields.project_group_key]),
       totalTasks: numberValue(wire[fields.total_tasks]),
       succeededTasks: numberValue(wire[fields.succeeded_tasks]),
       failedTasks: numberValue(wire[fields.failed_tasks]),
@@ -143,12 +167,42 @@ export function createAdministrationUsageBrowserClient(
     return { estimatedCredits: numberValue(wire[fields.estimated_credits]) };
   };
 
+  // Amounts go through the same unit and decimal checks as price totals; a
+  // group whose amounts do not pass shows none rather than a wrong figure.
+  const usageGroupAmounts = (value: unknown): AdministrationUsageGroupAmount[] => {
+    if (!Array.isArray(value)) return [];
+    const wires = value.map(asRecord);
+    const totals = parsePriceTotals(wires.map((wire) => ({
+      unit: wire[fields.unit],
+      unit_label: wire[fields.unit_label],
+      amount: wire[fields.amount],
+    })));
+    if (totals === null) return [];
+    return totals.map((total, index) => ({
+      ...total,
+      shareBasisPoints: shareBasisPoints(wires[index][fields.share_basis_points]),
+    }));
+  };
+
+  const usageGroup = (value: unknown): AdministrationUsageGroup => {
+    const wire = asRecord(value);
+    return {
+      projectGroupKey: nullableString(wire[fields.project_group_key]),
+      totalTasks: numberValue(wire[fields.total_tasks]),
+      succeededTasks: numberValue(wire[fields.succeeded_tasks]),
+      failedTasks: numberValue(wire[fields.failed_tasks]),
+      amounts: usageGroupAmounts(wire[fields.amounts]),
+    };
+  };
+
   const usageOverview = async (query: AdministrationUsageQuery): Promise<AdministrationUsageOverview> => {
     const payload = await request(usageURL(query));
     const records = payload[fields.data];
+    const groups = payload[fields.by_group];
     return {
       users: Array.isArray(records) ? records.map(usageRecord) : [],
       total: usageTotal(payload[fields.total]),
+      groups: Array.isArray(groups) ? groups.map(usageGroup) : [],
     };
   };
 
@@ -196,6 +250,16 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function optionalString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function shareBasisPoints(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10000
+    ? value
+    : null;
 }
 
 function numberValue(value: unknown): number {

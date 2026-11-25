@@ -752,6 +752,9 @@ type AdministrationUserFieldSchema struct {
 	CreatedAt string `json:"created_at"`
 	LastLogin string `json:"last_login"`
 	OpenID    string `json:"open_id"`
+	// ProjectGroupKey 是用户「项目组」KEY 的 wire 字段（#599）；只出现在管理端
+	// 用户接口，账户自助端点不带它。
+	ProjectGroupKey string `json:"project_group_key"`
 }
 
 type AdministrationUserPathParameterSchema struct {
@@ -761,6 +764,9 @@ type AdministrationUserPathParameterSchema struct {
 type AdministrationUsersLimitsSchema struct {
 	UsernameMinimumCharacters int `json:"username_minimum_characters"`
 	PasswordMinimumCharacters int `json:"password_minimum_characters"`
+	// ProjectGroupKeyPattern 是项目组 KEY 的格式（Go RE2 正则，#599）。服务端
+	// trim 后按它严格校验、不改大小写；空值表示未分组，不经过它。
+	ProjectGroupKeyPattern string `json:"project_group_key_pattern"`
 }
 
 type AdministrationUsersDefaultsSchema struct {
@@ -797,6 +803,10 @@ type AdministrationUsersAuditDetailFieldSchema struct {
 	Username string `json:"username"`
 	IsAdmin  string `json:"is_admin"`
 	IsActive string `json:"is_active"`
+	// ProjectGroupKey/PreviousProjectGroupKey 记录项目组变更后与变更前的值
+	// （#599）；建号只记新值。
+	ProjectGroupKey         string `json:"project_group_key"`
+	PreviousProjectGroupKey string `json:"previous_project_group_key"`
 }
 
 type AdministrationUsersMessageSchema struct {
@@ -810,6 +820,8 @@ type AdministrationUsersMessageSchema struct {
 	LastAdministrator string `json:"last_administrator"`
 	InvalidRequest    string `json:"invalid_request"`
 	InternalError     string `json:"internal_error"`
+	// InvalidProjectGroup 是项目组 KEY 格式非法时的 400 文案（#599）。
+	InvalidProjectGroup string `json:"invalid_project_group"`
 }
 
 type AdministrationUsersPresentationSchema struct {
@@ -1070,6 +1082,20 @@ type AdministrationUsageFieldSchema struct {
 	ByType           string `json:"by_type"`
 	// Total holds the estimate of every listed user together (#327).
 	Total string `json:"total"`
+	// ProjectGroupKey is the user's current project group on a user row and the
+	// group of a by_group row (#599); null when ungrouped. Only the
+	// administration usage endpoint states it, never the account endpoint.
+	ProjectGroupKey string `json:"project_group_key"`
+	// ByGroup lists the spending per project group (#599). Each row carries the
+	// task counts (TotalTasks, SucceededTasks, FailedTasks) and Amounts.
+	ByGroup string `json:"by_group"`
+	// Amounts lists a group's amount per unit; each item has Unit, UnitLabel,
+	// Amount and ShareBasisPoints (null when the unit's total is 0).
+	Amounts          string `json:"amounts"`
+	Unit             string `json:"unit"`
+	UnitLabel        string `json:"unit_label"`
+	Amount           string `json:"amount"`
+	ShareBasisPoints string `json:"share_basis_points"`
 }
 
 type AdministrationUsageQuerySchema struct {
@@ -7528,8 +7554,11 @@ type FrontendRuntimeSchema struct {
 	TaskIdentifierPreviewCharacters      int                         `json:"task_identifier_preview_characters"`
 	CountdownTickMilliseconds            int                         `json:"countdown_tick_milliseconds"`
 	TaskPollingIntervalMilliseconds      int                         `json:"task_polling_interval_milliseconds"`
-	HarnessRefreshMilliseconds           int                         `json:"harness_refresh_milliseconds"`
-	HarnessSaveDebounceMilliseconds      int                         `json:"harness_save_debounce_milliseconds"`
+	// TaskReadTimeoutMilliseconds bounds one read of a tracked task's detail;
+	// a read that has not answered by then counts as unavailable (#605).
+	TaskReadTimeoutMilliseconds     int `json:"task_read_timeout_milliseconds"`
+	HarnessRefreshMilliseconds      int `json:"harness_refresh_milliseconds"`
+	HarnessSaveDebounceMilliseconds int `json:"harness_save_debounce_milliseconds"`
 	// PendingApprovalsRefreshMilliseconds is how often the page re-reads the
 	// pending paid steps of the session while a turn or a task is running
 	// (#385; it was a constant in the page). It slows down the same way the

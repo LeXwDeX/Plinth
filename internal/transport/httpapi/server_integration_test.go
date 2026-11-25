@@ -1362,7 +1362,13 @@ func newHTTPHarnessWithCatalogAndProviders(
 				Username: administrationUsers.Audit.DetailFields.Username,
 				Admin:    administrationUsers.Audit.DetailFields.IsAdmin,
 				Active:   administrationUsers.Audit.DetailFields.IsActive,
+				ProjectGroupKey: administrationUsers.Audit.DetailFields.
+					ProjectGroupKey,
+				PreviousProjectGroupKey: administrationUsers.Audit.DetailFields.
+					PreviousProjectGroupKey,
 			},
+			ProjectGroupKeyPattern: administrationUsers.Limits.
+				ProjectGroupKeyPattern,
 		},
 	)
 	if err != nil {
@@ -1404,9 +1410,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		// A canvas turn may carry a selection mask (#583): the harness verifier
 		// measures only its "own-canvas-" snapshots and "own-mask-" masks.
 		CanvasInputSource: applicationSchema.Chat.Context.CanvasInputSource,
-		Preferences:                applicationSchema.Chat.Preferences,
-		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
-		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
+		Preferences:       applicationSchema.Chat.Preferences,
+		Model3DUsage:      applicationSchema.Chat.Model3DUsage,
+		Image2DUsage:      applicationSchema.Chat.Image2DUsage,
 		ExplicitModel3DValid: func(model string) bool {
 			return httpExplicitModelValid(taskCatalog.List(""), model, generation.DomainModel3D)
 		},

@@ -50,12 +50,137 @@ type coverageOffering struct {
 	Enabled    bool   `json:"enabled"`
 	Options    struct {
 		Endpoint string `json:"endpoint"`
-		// Model is the upstream model the Offering requests, when it declares one.
+		// Model is the value of the request's "model" field, when the Offering
+		// declares it here (the Tripo adapter sends it verbatim).
 		Model string `json:"model"`
+		// ModelParameter names the request field that carries the upstream
+		// model (Meshy's ai_model); its value is ModelParameterValue, else the
+		// Offering's model_id.
+		ModelParameter      string `json:"model_parameter"`
+		ModelParameterValue string `json:"model_parameter_value"`
+		// RequestTemplate fields set to "$model" carry the Offering's model_id.
+		RequestTemplate map[string]any `json:"request_template"`
 		// CreatePath is the submit route of Offerings that declare their routes
 		// as create_path/observe_path/download_path (the matting protocol).
 		CreatePath string `json:"create_path"`
 	} `json:"provider_options"`
+	Parameters []struct {
+		Name     string          `json:"name"`
+		WireName string          `json:"wire_name"`
+		Default  json.RawMessage `json:"default"`
+		Options  []struct {
+			Value any `json:"value"`
+		} `json:"options"`
+	} `json:"parameters"`
+}
+
+// coverageModelWire is what an Offering declares for the request fields that
+// carry the upstream model: field name -> the model values it can send there.
+// The field names come from the Catalog: the Provider's
+// application.provider_deprecations[].model_fields, the Offering's
+// provider_options.model_parameter and its request_template "$model" fields,
+// and "model" for provider_options.model. The values are what the Offering
+// declares for those fields: the model parameter's value, the template's
+// model_id or literal, provider_options.model, and parameter defaults and
+// options. Fields the Offering declares no value for are left out.
+func coverageModelWire(o coverageOffering, providerModelFields []string) map[string][]string {
+	fields := slices.Clone(providerModelFields)
+	wire := map[string][]string{}
+	add := func(field string, value any) {
+		text, ok := value.(string)
+		if !ok || strings.TrimSpace(field) == "" || strings.TrimSpace(text) == "" || slices.Contains(wire[field], text) {
+			return
+		}
+		wire[field] = append(wire[field], text)
+	}
+	if o.Options.Model != "" {
+		add("model", o.Options.Model)
+	}
+	if parameter := strings.TrimSpace(o.Options.ModelParameter); parameter != "" {
+		fields = append(fields, parameter)
+		value := strings.TrimSpace(o.Options.ModelParameterValue)
+		if value == "" {
+			value = o.ModelID
+		}
+		add(parameter, value)
+	}
+	for field, value := range o.Options.RequestTemplate {
+		if value == "$model" {
+			add(field, o.ModelID)
+		} else if slices.Contains(fields, field) {
+			if text, ok := value.(string); ok && !strings.HasPrefix(text, "$") {
+				add(field, text)
+			}
+		}
+	}
+	for _, parameter := range o.Parameters {
+		name := parameter.WireName
+		if name == "" {
+			name = parameter.Name
+		}
+		if !slices.Contains(fields, name) {
+			continue
+		}
+		var value any
+		if len(parameter.Default) > 0 && json.Unmarshal(parameter.Default, &value) == nil {
+			add(name, value)
+		}
+		for _, option := range parameter.Options {
+			add(name, option.Value)
+		}
+	}
+	return wire
+}
+
+// recordCoverageModels adds the models one sampled JSON request body names in
+// the given model fields, keeping per value the best evidence kind. A field
+// that is absent, not a string or empty names no model.
+func recordCoverageModels(requested map[string]map[string]string, rawBody json.RawMessage, fields []string, kind string) map[string]map[string]string {
+	var body map[string]any
+	if len(rawBody) == 0 || json.Unmarshal(rawBody, &body) != nil {
+		return requested
+	}
+	for _, field := range fields {
+		value, ok := body[field].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		if requested == nil {
+			requested = map[string]map[string]string{}
+		}
+		if requested[field] == nil {
+			requested[field] = map[string]string{}
+		}
+		if prior, seen := requested[field][value]; !seen || coverageEvidenceRank[kind] > coverageEvidenceRank[prior] {
+			requested[field][value] = kind
+		}
+	}
+	return requested
+}
+
+// coverageModelEvidence is the evidence a unit gives one Offering. A unit is
+// shared by the Offerings of one endpoint, but each sample requested one model:
+// when the unit's samples name a model in a field the Offering declares, only
+// the samples that requested the Offering's own model count (#541, #575). An
+// Offering that declares no model, or a unit whose samples name no model in its
+// fields (field absent or empty), keeps the unit's evidence.
+//
+// requested maps field -> requested value -> best evidence of the samples that
+// sent it; declared is coverageModelWire.
+func coverageModelEvidence(unitEvidence string, requested map[string]map[string]string, declared map[string][]string) string {
+	named, best := false, evidenceMissing
+	for field, values := range declared {
+		for value, kind := range requested[field] {
+			named = true
+			if slices.Contains(values, value) && coverageEvidenceRank[kind] > coverageEvidenceRank[best] {
+				best = kind
+			}
+		}
+	}
+	if !named || coverageEvidenceRank[unitEvidence] <= coverageEvidenceRank[evidenceMissing] {
+		return unitEvidence
+	}
+	return best
 }
 
 type coverageOfferingRef struct {
@@ -73,9 +198,10 @@ type coverageUnit struct {
 	Evidence      string                `json:"evidence"`
 	EvidenceFiles []string              `json:"evidence_files"`
 	Offerings     []coverageOfferingRef `json:"offerings"`
-	// requestedModels are the upstream model names the unit's samples asked for (the
-	// "model" field of a JSON request body), kept out of the matrix.
-	requestedModels []string
+	// requested are the upstream models the unit's samples asked for, per model
+	// field of a JSON request body (field -> value -> best evidence of the
+	// samples that sent it), kept out of the matrix.
+	requested map[string]map[string]string
 }
 
 type coverageOfferingRow struct {
@@ -195,6 +321,12 @@ func generateWireCoverage(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	var document struct {
+		Application struct {
+			ProviderDeprecations []struct {
+				ProviderID  string   `json:"provider_id"`
+				ModelFields []string `json:"model_fields"`
+			} `json:"provider_deprecations"`
+		} `json:"application"`
 		Offerings []coverageOffering `json:"offerings"`
 	}
 	if err := json.Unmarshal(raw, &document); err != nil {
@@ -203,11 +335,23 @@ func generateWireCoverage(t *testing.T) []byte {
 	digest := sha256.Sum256(raw)
 	samples := readCoverageSamples(t)
 
+	providerModelFields := map[string][]string{}
+	for _, entry := range document.Application.ProviderDeprecations {
+		providerModelFields[entry.ProviderID] = entry.ModelFields
+	}
 	byID := map[string]coverageOffering{}
+	modelWire := map[string]map[string][]string{}
+	var modelFields []string // every field any Offering declares a model in
 	providerAdapter := map[string]string{}
 	for _, o := range document.Offerings {
 		byID[o.ID] = o
 		providerAdapter[o.ProviderID] = o.AdapterKey
+		modelWire[o.ID] = coverageModelWire(o, providerModelFields[o.ProviderID])
+		for field := range modelWire[o.ID] {
+			if !slices.Contains(modelFields, field) {
+				modelFields = append(modelFields, field)
+			}
+		}
 	}
 	ref := func(o coverageOffering) coverageOfferingRef {
 		return coverageOfferingRef{ID: o.ID, ModelID: o.ModelID, Enabled: o.Enabled}
@@ -282,12 +426,7 @@ func generateWireCoverage(t *testing.T) []byte {
 			unit.EvidenceFiles = addUnique(unit.EvidenceFiles, sample.candidate)
 			unit.Hosts = addUnique(unit.Hosts, ex.Request.Host)
 			unit.Protocols = addUnique(unit.Protocols, ex.Metadata.Protocol)
-			var requested struct {
-				Model string `json:"model"`
-			}
-			if len(ex.Request.Body.JSON) > 0 && json.Unmarshal(ex.Request.Body.JSON, &requested) == nil {
-				unit.requestedModels = addUnique(unit.requestedModels, requested.Model)
-			}
+			unit.requested = recordCoverageModels(unit.requested, ex.Request.Body.JSON, modelFields, kind)
 
 			// Offerings served by this unit: a declared endpoint it ends with, else
 			// every enabled Offering of the same adapter and capability.
@@ -350,16 +489,12 @@ func generateWireCoverage(t *testing.T) []byte {
 		}
 		for _, o := range u.Offerings {
 			offeringUnits[o.ID] = append(offeringUnits[o.ID], id)
-			// A wire unit is shared by the Offerings of one endpoint, but its samples
-			// were requested with one model. When the samples name a model and the
-			// Offering requests a different one, the evidence does not carry over: the
-			// Offering's own request has never been seen on that wire (#541: the P2
-			// generation endpoints are the H endpoints with another model name).
-			evidence := u.Evidence
-			if model := byID[o.ID].Options.Model; model != "" && len(u.requestedModels) > 0 &&
-				!slices.Contains(u.requestedModels, model) && coverageEvidenceRank[evidence] > coverageEvidenceRank[evidenceMissing] {
-				evidence = evidenceMissing
-			}
+			// A wire unit is shared by the Offerings of one endpoint, but each of its
+			// samples was requested with one model: an Offering gets only the
+			// evidence of the samples that requested its own model, in the model
+			// field its Provider declares (#541: the P2 generation endpoints are the
+			// H endpoints with another model name; #575: Meshy's field is ai_model).
+			evidence := coverageModelEvidence(u.Evidence, u.requested, modelWire[o.ID])
 			offeringEvidence[o.ID] = append(offeringEvidence[o.ID], evidence)
 		}
 	}
@@ -511,10 +646,173 @@ func TestWireCoverageDoesNotCarryEvidenceAcrossModels(t *testing.T) {
 			if row.Evidence == evidenceReal {
 				t.Errorf("%s is %q: no real P2 request has been captured, the H samples are not its evidence", row.ID, row.Evidence)
 			}
-		case "tripo/tripo-v3.1-full/text-to-3d":
+		case "meshy/meshy-t2.5/text-to-3d", "meshy/meshy-t2.5/image-to-3d":
+			// Meshy names the model in ai_model (#575): the meshy-7.1 samples on
+			// the same endpoints are not meshy-t2.5's evidence.
+			if row.Evidence == evidenceReal {
+				t.Errorf("%s is %q: no real meshy-t2.5 request is attributed to it, the meshy-7.1 samples are not its evidence", row.ID, row.Evidence)
+			}
+		case "tripo/tripo-v3.1-full/text-to-3d", "meshy/meshy-7.1/image-to-3d":
 			if row.Evidence != evidenceReal {
 				t.Errorf("%s is %q: its model is the one the samples were requested with", row.ID, row.Evidence)
 			}
 		}
+	}
+}
+
+// The model fields an Offering is compared on come from the Catalog: the
+// Provider's provider_deprecations model_fields, the Offering's model_parameter,
+// its request_template "$model" fields and provider_options.model (#575).
+func TestCoverageModelWireReadsCatalogDeclarations(t *testing.T) {
+	raw, err := os.ReadFile(coverageCatalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Application struct {
+			ProviderDeprecations []struct {
+				ProviderID  string   `json:"provider_id"`
+				ModelFields []string `json:"model_fields"`
+			} `json:"provider_deprecations"`
+		} `json:"application"`
+		Offerings []coverageOffering `json:"offerings"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string][]string{}
+	for _, entry := range document.Application.ProviderDeprecations {
+		fields[entry.ProviderID] = entry.ModelFields
+	}
+	want := map[string]map[string][]string{
+		// model_parameter ai_model, value model_id.
+		"meshy/meshy-7.1/text-to-3d":   {"ai_model": {"meshy-7.1"}},
+		"meshy/meshy-t2.5/image-to-3d": {"ai_model": {"meshy-t2.5"}},
+		// No model_parameter: the field is the Provider's model_fields, the
+		// value the fixed ai_model parameter.
+		"meshy/meshy-t2.5/text-to-3d": {"ai_model": {"meshy-t2.5"}},
+		// model_parameter_value overrides model_id.
+		"meshy/meshy-7.1-multiview/image-to-3d": {"ai_model": {"meshy-7.1"}},
+		"meshy/processing/retexture":            {"ai_model": {"meshy-7"}},
+		// request_template "$model".
+		"openai/gpt-image-2/text-to-image":        {"model": {"gpt-image-2.6-sunburst"}},
+		"gemini/gemini-3-pro-image/text-to-image": {"model": {"gemini-3-pro-image"}},
+		// provider_options.model.
+		"tripo/tripo-v3.1-full/text-to-3d": {"model": {"v3.1-20260211"}},
+		"tripo/tripo-p2/text-to-3d":        {"model": {"P2-20260801"}},
+		// No model declared: a wire field named "model" that carries a file
+		// (Hyper3D Bang's source_asset) is not a model field.
+		"hyper3d/rodin-gen-2.5/text-to-3d": {},
+		"hyper3d/bang/local-model":         {},
+		"meshy/processing/remesh":          {},
+	}
+	seen := 0
+	for _, o := range document.Offerings {
+		expected, ok := want[o.ID]
+		if !ok {
+			continue
+		}
+		seen++
+		got := coverageModelWire(o, fields[o.ProviderID])
+		if len(got) != len(expected) {
+			t.Errorf("%s: model wire %v, want %v", o.ID, got, expected)
+			continue
+		}
+		for field, values := range expected {
+			if !slices.Equal(got[field], values) {
+				t.Errorf("%s: model wire %v, want %v", o.ID, got, expected)
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("found %d of %d Offerings in the Catalog", seen, len(want))
+	}
+}
+
+// Samples requested with one model are not the evidence of an Offering that
+// requests another model on the same endpoint, whichever field the Provider
+// names the model in (#541, #575).
+func TestCoverageModelEvidenceDoesNotCrossModels(t *testing.T) {
+	sampled := func(field string, values map[string]string) map[string]map[string]string {
+		return map[string]map[string]string{field: values}
+	}
+	for _, tc := range []struct {
+		name      string
+		unit      string
+		requested map[string]map[string]string
+		declared  map[string][]string
+		want      string
+	}{
+		{"meshy ai_model: t2.5 does not inherit the 7.1 samples", evidenceReal,
+			sampled("ai_model", map[string]string{"meshy-7.1": evidenceReal}), map[string][]string{"ai_model": {"meshy-t2.5"}}, evidenceMissing},
+		{"meshy ai_model: 7.1 keeps its own samples", evidenceReal,
+			sampled("ai_model", map[string]string{"meshy-7.1": evidenceReal}), map[string][]string{"ai_model": {"meshy-7.1"}}, evidenceReal},
+		{"meshy ai_model: t2.5 gets its own derived sample, not the 7.1 real one", evidenceReal,
+			sampled("ai_model", map[string]string{"meshy-7.1": evidenceReal, "meshy-t2.5": evidenceDerived}), map[string][]string{"ai_model": {"meshy-t2.5"}}, evidenceDerived},
+		{"model field: P2 does not inherit the v3.1 samples", evidenceReal,
+			sampled("model", map[string]string{"v3.1-20260211": evidenceReal}), map[string][]string{"model": {"P2-20260801"}}, evidenceMissing},
+		{"model field: v3.1 keeps its own samples", evidenceReal,
+			sampled("model", map[string]string{"v3.1-20260211": evidenceReal}), map[string][]string{"model": {"v3.1-20260211"}}, evidenceReal},
+		{"model field: a gpt-image-2.5 sample is not gpt-image-2.6's evidence", evidenceReal,
+			sampled("model", map[string]string{"gpt-image-2.5-sunburst": evidenceReal}), map[string][]string{"model": {"gpt-image-2.6-sunburst"}}, evidenceMissing},
+		{"a model in another field is not compared", evidenceReal,
+			sampled("model", map[string]string{"v3.1-20260211": evidenceReal}), map[string][]string{"ai_model": {"meshy-t2.5"}}, evidenceReal},
+		{"samples that name no model keep the unit evidence", evidenceReal,
+			nil, map[string][]string{"ai_model": {"meshy-t2.5"}}, evidenceReal},
+		{"an Offering that declares no model keeps the unit evidence", evidenceReal,
+			sampled("ai_model", map[string]string{"meshy-7.1": evidenceReal}), map[string][]string{}, evidenceReal},
+		{"a missing unit stays missing", evidenceMissing,
+			nil, map[string][]string{"ai_model": {"meshy-t2.5"}}, evidenceMissing},
+		{"a disabled unit keeps its class", evidenceDisabled,
+			nil, map[string][]string{"ai_model": {"meshy-7"}}, evidenceDisabled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := coverageModelEvidence(tc.unit, tc.requested, tc.declared); got != tc.want {
+				t.Errorf("evidence = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A sampled request names a model only by a non-empty string in a model field:
+// an absent, empty, blank or non-string field names none, and each value keeps
+// the best evidence of the samples that sent it.
+func TestRecordCoverageModels(t *testing.T) {
+	fields := []string{"ai_model", "model"}
+	var requested map[string]map[string]string
+	for _, body := range []string{
+		`{"prompt":"x"}`,
+		`{"ai_model":""}`,
+		`{"ai_model":"  "}`,
+		`{"model":null}`,
+		`{"model":{"name":"v3.1"}}`,
+		`not json`,
+		``,
+	} {
+		requested = recordCoverageModels(requested, json.RawMessage(body), fields, evidenceReal)
+	}
+	if len(requested) != 0 {
+		t.Fatalf("bodies without a model name recorded %v", requested)
+	}
+	requested = recordCoverageModels(requested, json.RawMessage(`{"ai_model":"meshy-t2.5","model_type":"smart-topology"}`), fields, evidenceDerived)
+	requested = recordCoverageModels(requested, json.RawMessage(`{"ai_model":"meshy-7.1"}`), fields, evidenceReal)
+	requested = recordCoverageModels(requested, json.RawMessage(`{"ai_model":"meshy-7.1"}`), fields, evidenceDerived)
+	requested = recordCoverageModels(requested, json.RawMessage(`{"model":"v3.1-20260211","ai_model":"meshy-t2.5"}`), fields, evidenceReal)
+	want := map[string]map[string]string{
+		"ai_model": {"meshy-t2.5": evidenceReal, "meshy-7.1": evidenceReal},
+		"model":    {"v3.1-20260211": evidenceReal},
+	}
+	for field, values := range want {
+		for value, kind := range values {
+			if requested[field][value] != kind {
+				t.Errorf("requested[%s][%s] = %q, want %q (all: %v)", field, value, requested[field][value], kind, requested)
+			}
+		}
+		if len(requested[field]) != len(values) {
+			t.Errorf("requested[%s] = %v, want %v", field, requested[field], values)
+		}
+	}
+	if _, ok := requested["model_type"]; ok {
+		t.Errorf("model_type is not a model field: %v", requested)
 	}
 }

@@ -55,3 +55,55 @@ describe('administration home usage card', () => {
     }
   });
 });
+
+// #599: the spending share per project group sits between the overview cards and the user table.
+describe('administration project group spending share', () => {
+  const groupsCard = (html: string) => html.split('data-testid="admin-usage-groups"')[1].split('</table>')[0];
+
+  it('lists each unit with its share, the ungrouped row last and no share for a zero total', () => {
+    state.overview = {
+      users: [
+        user('a', { projectGroupKey: 'studio-a', priceTotals: [{ unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '40' }] }),
+        user('b', { projectGroupKey: null, estimatedCredits: 60 }),
+      ],
+      total: { estimatedCredits: 0, priceTotals: [
+        { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '100' },
+        { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '0' },
+      ] },
+      groups: [
+        { projectGroupKey: 'studio-a', totalTasks: 3, succeededTasks: 2, failedTasks: 1, amounts: [
+          { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '40', shareBasisPoints: 4000 },
+          { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '0', shareBasisPoints: null },
+        ] },
+        { projectGroupKey: null, totalTasks: 1, succeededTasks: 1, failedTasks: 0, amounts: [
+          { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '60', shareBasisPoints: 6000 },
+          { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '0', shareBasisPoints: null },
+        ] },
+      ],
+    };
+    const html = renderToStaticMarkup(<AdminPage />);
+    const card = groupsCard(html);
+    expect(html.split('data-testid="admin-usage-groups"')[0]).toContain('data-testid="admin-usage-total"');
+    expect(html).toContain('项目组支出占比');
+    expect(html).toContain('按用户当前所属项目组归集');
+    expect(html).toContain('占比按各单位分别计算');
+    expect(card).toContain('studio-a');
+    expect(card).toContain('40 历史积分估算 (40.00%)');
+    expect(card).toContain('0 Tripo credits (—)');
+    expect(card).toContain('60 历史积分估算 (60.00%)');
+    expect(card.indexOf('studio-a')).toBeLessThan(card.indexOf('未分组'));
+    expect(card).not.toContain('NaN');
+    // The user table names each user's group too.
+    const userTable = html.split('data-testid="admin-usage-groups"')[1].split('</table>')[1];
+    expect(userTable).toContain('studio-a');
+    expect(userTable).toContain('未分组');
+  });
+
+  it('shows the empty state without groups, also for an older server that sends none', () => {
+    state.overview = { users: [], total: { estimatedCredits: 0 }, groups: [] };
+    const card = renderToStaticMarkup(<AdminPage />).split('data-testid="admin-usage-groups"')[1];
+    expect(card.split('用户消费排行')[0]).toContain('暂无使用记录');
+    state.overview = { users: [], total: { estimatedCredits: 0 } };
+    expect(() => renderToStaticMarkup(<AdminPage />)).not.toThrow();
+  });
+});

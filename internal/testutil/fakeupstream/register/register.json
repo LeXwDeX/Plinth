@@ -2787,7 +2787,7 @@
       "category": "response-shape",
       "status": "real",
       "behavior": "meshy-t2.5 图生 3D（2k 贴图）的轮询体：IN_PROGRESS → SUCCEEDED，2k 贴图不回显 texture_resolution 与 hd_texture，consumed_credits 15。",
-      "note": "样本只留了这个任务的轮询，创建请求没有入库，模型名来自 #568 的运行记录（轮询体本身不带 ai_model）。该轮询也没有 geometry_resolution，fake 对没给几何的请求沿用模板（#497），这里一致是因为这份样本就是模板，见 meshy-openapi-v1/resolution-echo-unsampled。wire coverage 仍按请求体的 model 字段判定，看不到 Meshy 的 ai_model，#575 未修。",
+      "note": "样本只留了这个任务的轮询，创建请求没有入库，模型名来自 #568 的运行记录（轮询体本身不带 ai_model）。该轮询也没有 geometry_resolution，fake 对没给几何的请求沿用模板（#497），这里一致是因为这份样本就是模板，见 meshy-openapi-v1/resolution-echo-unsampled。wire coverage 按 Provider 声明的模型字段（Meshy 为 ai_model）判定 Offering 行（#575），这份样本没有 meta.offering，只进 (scenario) 单元，不计入 meshy-t2.5/image-to-3d。",
       "samples": [
         {
           "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json",
@@ -2811,7 +2811,7 @@
       "wire_coverage_correction": {
         "unit": "meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d",
         "offering": "meshy/meshy-t2.5/image-to-3d",
-        "reason": "矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；入库样本里仍没有 ai_model 为 meshy-t2.5 的图生 3D 创建请求（#575）。"
+        "reason": "单元的 real 来自 ai_model 为 meshy-7.1 的样本；矩阵按 ai_model 比较后（#575），meshy-t2.5 的 Offering 行在该单元只取 ai_model 为 meshy-t2.5 的 derived 样本，整行为 partial。入库样本里仍没有 ai_model 为 meshy-t2.5 的真实图生 3D 创建请求。"
       },
       "basis": [
         {
@@ -3242,7 +3242,7 @@
       "category": "response-shape",
       "status": "real",
       "behavior": "meshy-t2.5 文生 3D：preview（target_polycount 15000）与 refine（2k 贴图、PBR）的创建对象（202，PENDING，已带价格）与 IN_PROGRESS → SUCCEEDED 轮询，input 回显请求（preview 带 ai_model meshy-t2.5）。",
-      "note": "wire coverage 仍按请求体的 model 字段判定，Meshy 的 ai_model 不被区分，#575 未修；矩阵里 meshy-t2.5/text-to-3d 的证据并不来自这份样本的模型判定。",
+      "note": "wire coverage 按 Provider 声明的模型字段（Meshy 为 ai_model）判定 Offering 行（#575），但这份样本没有 meta.offering，只进 (scenario) 单元，矩阵不把它记给 meshy-t2.5/text-to-3d：该 Offering 在 POST /openapi/v2/text-to-3d 单元上没有自己模型的样本（missing），整行为 partial。",
       "samples": [
         {
           "file": "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json",

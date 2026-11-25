@@ -10,7 +10,7 @@
 - `constructed`：没有真实样本，按所列官方文档或未入库的观测构造，写明核对日期与没有真实样本的原因。`constructed` 不等于已对齐。
 - `gap`：已知缺口或差异，写明计划与 Issue。
 
-登记表与 wire coverage 矩阵（`internal/testutil/wirefixture/testdata/wire-coverage.generated.json`）并存：矩阵按端点记 Offering 有无真实样本，共享端点的 Offering 会继承该单元的证据；登记表按行为与模型记录，并在「按行为纠正 wire coverage」一节列出被共享端点误带成 real 的行为。矩阵的生成规则不因登记表改变。
+登记表与 wire coverage 矩阵（`internal/testutil/wirefixture/testdata/wire-coverage.generated.json`）并存：矩阵按端点记 Offering 有无真实样本，单元的证据由共享端点的 Offering 共用；样本请求体在 Provider 声明的模型字段（`model`、Meshy 的 `ai_model` 等）里写了模型时，Offering 行只取请求了自身模型的样本（#575），但单元本身仍列出这些 Offering 并显示全部样本的最高证据。登记表按行为与模型记录，并在「按行为纠正 wire coverage」一节列出单元因共享端点显示为 real、而该 Offering 自己的行为没有真实样本的条目。矩阵的生成规则不因登记表改变。
 
 测试（`internal/testutil/fakeupstream/register`）保证：每个 fake 版本的每个端点至少一条记录；`real` 条目引用的样本存在、能被 wirefixture 读取、日期与来源同样本 meta 一致，并且样本里确有该端点的交换；`constructed` 条目有依据与核对日期；`gap` 条目有计划与 Issue；本文件与数据一致。
 
@@ -40,7 +40,7 @@
 | `tripo-v3/text-to-model-p-series` | `tripo.v3\|text-to-3d\|POST /v3/generation/text-to-model` | `tripo/tripo-p2/text-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的文生样本；P2 与 H 系列共用端点，P2 的请求值、拒绝与价格没有真实样本。矩阵的 Offering 行已是 partial，但单元仍把 P2 列在 real 证据下。 |
 | `tripo-v3/image-to-model-p-series` | `tripo.v3\|image-to-3d\|POST /v3/generation/image-to-model` | `tripo/tripo-p2/image-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的图生样本；P2 共用端点但没有真实样本。 |
 | `tripo-v3/multiview-to-model-p-series` | `tripo.v3\|image-to-3d\|POST /v3/generation/multiview-to-model` | `tripo/tripo-p2-multiview/image-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的多视图样本（evidence-386）；P2 多视图共用端点但没有真实样本。 |
-| `meshy-openapi-v1/t25-image-to-3d-create` | `meshy.v2\|image-to-3d\|POST /openapi/v1/image-to-3d` | `meshy/meshy-t2.5/image-to-3d` | constructed | 矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；入库样本里仍没有 ai_model 为 meshy-t2.5 的图生 3D 创建请求（#575）。 |
+| `meshy-openapi-v1/t25-image-to-3d-create` | `meshy.v2\|image-to-3d\|POST /openapi/v1/image-to-3d` | `meshy/meshy-t2.5/image-to-3d` | constructed | 单元的 real 来自 ai_model 为 meshy-7.1 的样本；矩阵按 ai_model 比较后（#575），meshy-t2.5 的 Offering 行在该单元只取 ai_model 为 meshy-t2.5 的 derived 样本，整行为 partial。入库样本里仍没有 ai_model 为 meshy-t2.5 的真实图生 3D 创建请求。 |
 
 ## 明细
 
@@ -897,7 +897,7 @@
 - 端点：`GET /image-to-3d/{id}`
 - 行为：meshy-t2.5 图生 3D（2k 贴图）的轮询体：IN_PROGRESS → SUCCEEDED，2k 贴图不回显 texture_resolution 与 hd_texture，consumed_credits 15。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
-- 备注：样本只留了这个任务的轮询，创建请求没有入库，模型名来自 #568 的运行记录（轮询体本身不带 ai_model）。该轮询也没有 geometry_resolution，fake 对没给几何的请求沿用模板（#497），这里一致是因为这份样本就是模板，见 meshy-openapi-v1/resolution-echo-unsampled。wire coverage 仍按请求体的 model 字段判定，看不到 Meshy 的 ai_model，#575 未修。
+- 备注：样本只留了这个任务的轮询，创建请求没有入库，模型名来自 #568 的运行记录（轮询体本身不带 ai_model）。该轮询也没有 geometry_resolution，fake 对没给几何的请求沿用模板（#497），这里一致是因为这份样本就是模板，见 meshy-openapi-v1/resolution-echo-unsampled。wire coverage 按 Provider 声明的模型字段（Meshy 为 ai_model）判定 Offering 行（#575），这份样本没有 meta.offering，只进 (scenario) 单元，不计入 meshy-t2.5/image-to-3d。
 
 #### `meshy-openapi-v1/t25-image-to-3d-create` · request-validation · constructed
 
@@ -907,7 +907,7 @@
 - 依据：https://docs.meshy.ai/en/api/image-to-3d（Image to 3D）
 - 核对日期：2026-11-24
 - 没有真实样本的原因：#568 的最小样本没有保留 t2.5 图生 3D 的创建交换
-- 纠正 wire coverage：单元 `meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d` 下的 `meshy/meshy-t2.5/image-to-3d`。矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；入库样本里仍没有 ai_model 为 meshy-t2.5 的图生 3D 创建请求（#575）。
+- 纠正 wire coverage：单元 `meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d` 下的 `meshy/meshy-t2.5/image-to-3d`。单元的 real 来自 ai_model 为 meshy-7.1 的样本；矩阵按 ai_model 比较后（#575），meshy-t2.5 的 Offering 行在该单元只取 ai_model 为 meshy-t2.5 的 derived 样本，整行为 partial。入库样本里仍没有 ai_model 为 meshy-t2.5 的真实图生 3D 创建请求。
 
 #### `meshy-openapi-v1/resolution-echo` · response-shape · real
 
@@ -1052,7 +1052,7 @@
 - 端点：`POST /text-to-3d`、`GET /text-to-3d/{id}`
 - 行为：meshy-t2.5 文生 3D：preview（target_polycount 15000）与 refine（2k 贴图、PBR）的创建对象（202，PENDING，已带价格）与 IN_PROGRESS → SUCCEEDED 轮询，input 回显请求（preview 带 ai_model meshy-t2.5）。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
-- 备注：wire coverage 仍按请求体的 model 字段判定，Meshy 的 ai_model 不被区分，#575 未修；矩阵里 meshy-t2.5/text-to-3d 的证据并不来自这份样本的模型判定。
+- 备注：wire coverage 按 Provider 声明的模型字段（Meshy 为 ai_model）判定 Offering 行（#575），但这份样本没有 meta.offering，只进 (scenario) 单元，矩阵不把它记给 meshy-t2.5/text-to-3d：该 Offering 在 POST /openapi/v2/text-to-3d 单元上没有自己模型的样本（missing），整行为 partial。
 
 #### `meshy-openapi-v2/resolution-echo` · response-shape · real
 

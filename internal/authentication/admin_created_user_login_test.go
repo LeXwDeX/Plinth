@@ -40,11 +40,14 @@ func TestAdminCreatedUserCanAuthenticate(t *testing.T) {
 			Resource:   "user",
 		},
 		AuditFields: administration.UserAuditFields{
-			Username: "username",
-			Admin:    "is_admin",
-			Active:   "is_active",
+			Username:                "username",
+			Admin:                   "is_admin",
+			Active:                  "is_active",
+			ProjectGroupKey:         "project_group_key",
+			PreviousProjectGroupKey: "previous_project_group_key",
 		},
-		Clock: func() time.Time { return time.Unix(0, 0).UTC() },
+		ProjectGroupKeyPattern: `^[a-z0-9][a-z0-9_-]{0,31}$`,
+		Clock:                  func() time.Time { return time.Unix(0, 0).UTC() },
 	})
 	if err != nil {
 		t.Fatal(err)

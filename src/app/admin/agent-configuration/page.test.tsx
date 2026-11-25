@@ -52,13 +52,17 @@ const snapshot: AgentConfigurationSnapshot = {
 };
 
 let calls: Array<{ route: string; body: unknown }> = [];
+// The snapshot the server returns; a test with shared Skills swaps it (#601).
+let served: AgentConfigurationSnapshot = snapshot;
+const maxSkillCount = schema.agent_configuration.limits.max_skill_count;
 
 beforeEach(() => {
   calls = [];
+  served = snapshot;
   vi.stubGlobal('fetch', vi.fn(async (route: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ route, body });
-    const payload = route === schema.agent_configuration.routes.validate ? { valid: true, effective_prompts: {} } : snapshot;
+    const payload = route === schema.agent_configuration.routes.validate ? { valid: true, effective_prompts: {} } : served;
     return { ok: true, status: 200, json: async () => payload } as Response;
   }));
 });
@@ -66,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  schema.agent_configuration.limits.max_skill_count = maxSkillCount;
 });
 
 describe('agent configuration page (#554)', () => {
@@ -100,5 +105,93 @@ describe('agent configuration page (#554)', () => {
     expect(published.configuration).not.toHaveProperty('system_prompt');
     expect(published.configuration).not.toHaveProperty('domain_context');
     expect(published.configuration.enabled_tool_names).toEqual(['get_task']);
+  });
+});
+
+describe('agent configuration shared Skills (#601)', () => {
+  const field = (container: HTMLElement, name: string) => container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[id^="agent-skill-skill_"][id$="-${name}"]`);
+  const addButton = () => screen.getByRole('button', { name: ui.add_skill }) as HTMLButtonElement;
+
+  it('says there are no shared Skills and offers to add one, without an empty search or picker', async () => {
+    const { container } = render(<AgentConfigurationPage />);
+    expect(await screen.findByText(ui.skills_empty)).toBeTruthy();
+    expect(JSON.stringify(defaultCatalog)).toContain('"agent_configuration.ui.skills_empty"');
+    expect(addButton().disabled).toBe(false);
+    expect(container.querySelector('#agent-skill-search')).toBeNull();
+    expect(container.querySelector('#agent-skill-edit')).toBeNull();
+    expect(screen.queryByRole('button', { name: ui.remove_skill })).toBeNull();
+  });
+
+  it('adds a blank shared Skill that opens for editing and is submitted for checking', async () => {
+    const { container } = render(<AgentConfigurationPage />);
+    await screen.findByText(ui.skills_empty);
+    fireEvent.click(addButton());
+    expect(screen.queryByText(ui.skills_empty)).toBeNull();
+    for (const [name, value] of [['name', 'Ink wash'], ['category', 'style'], ['prompt', 'ink wash style']] as const) {
+      const input = field(container, name);
+      expect(input).not.toBeNull();
+      expect(input!.value).toBe('');
+      fireEvent.change(input!, { target: { value } });
+      expect(field(container, name)!.value).toBe(value);
+    }
+    expect(container.querySelector('#agent-skill-search')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: ui.preview }));
+    await waitFor(() => expect(calls.some(call => call.route === schema.agent_configuration.routes.validate)).toBe(true));
+    const checked = calls.find(call => call.route === schema.agent_configuration.routes.validate)!.body as { configuration: { skills: Array<Record<string, unknown>> } };
+    expect(checked.configuration.skills).toHaveLength(1);
+    expect(checked.configuration.skills[0]).toMatchObject({ name: 'Ink wash', category: 'style', prompt: 'ink wash style', recommended_size: schema.chat.skills.creation.recommended_size, thumbnail_path: '', raw_image_url: '' });
+    expect(String(checked.configuration.skills[0].id)).toMatch(/^skill_[0-9a-f]{32}$/);
+  });
+
+  it('disables adding at the Skill limit and says why', async () => {
+    schema.agent_configuration.limits.max_skill_count = 1;
+    render(<AgentConfigurationPage />);
+    await screen.findByText(ui.skills_empty);
+    fireEvent.click(addButton());
+    const add = addButton();
+    expect(add.disabled).toBe(true);
+    fireEvent.focus(add.parentElement!);
+    fireEvent.pointerEnter(add.parentElement!);
+    fireEvent.mouseEnter(add.parentElement!);
+    expect((await screen.findByTestId('hint-reason', {}, { timeout: 2000 })).textContent).toContain(schema.content.messages['ui.unavailable.reason.admin.agent_skill_limit']);
+  });
+
+  it('disables the empty-state add when no Skill is allowed at all', async () => {
+    schema.agent_configuration.limits.max_skill_count = 0;
+    render(<AgentConfigurationPage />);
+    await screen.findByText(ui.skills_empty);
+    expect(addButton().disabled).toBe(true);
+  });
+
+  it('returns to the empty state after the last Skill is removed', async () => {
+    render(<AgentConfigurationPage />);
+    await screen.findByText(ui.skills_empty);
+    fireEvent.click(addButton());
+    fireEvent.click(screen.getByRole('button', { name: ui.remove_skill }));
+    expect(screen.getByText(ui.skills_empty)).toBeTruthy();
+    expect(addButton().disabled).toBe(false);
+  });
+
+  it('keeps search, choice, editing, adding and removing when shared Skills exist', async () => {
+    const skill = (id: string, name: string) => ({ id, name, category: 'style', recommended_size: schema.chat.skills.creation.recommended_size, thumbnail_path: '', raw_image_url: '', prompt: `${name} prompt` });
+    served = { ...snapshot, configuration: { ...configuration, skills: [skill('skill-a', 'Alpha'), skill('skill-b', 'Beta')] } };
+    const { container } = render(<AgentConfigurationPage />);
+    await screen.findByText(ui.prompts_readonly);
+    expect(screen.queryByText(ui.skills_empty)).toBeNull();
+    expect(container.querySelector('#agent-skill-search')).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#agent-skill-skill-a-name')!.value).toBe('Alpha');
+    fireEvent.change(container.querySelector('#agent-skill-skill-a-name')!, { target: { value: 'Alpha 2' } });
+    expect(container.querySelector<HTMLInputElement>('#agent-skill-skill-a-name')!.value).toBe('Alpha 2');
+    fireEvent.click(addButton());
+    const copy = field(container, 'name');
+    expect(copy).not.toBeNull();
+    expect(copy!.value).toBe('Alpha 2');
+    fireEvent.click(screen.getByRole('button', { name: ui.remove_skill }));
+    expect(field(container, 'name')).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#agent-skill-skill-a-name')!.value).toBe('Alpha 2');
+    fireEvent.click(screen.getByRole('button', { name: ui.preview }));
+    await waitFor(() => expect(calls.some(call => call.route === schema.agent_configuration.routes.validate)).toBe(true));
+    const checked = calls.find(call => call.route === schema.agent_configuration.routes.validate)!.body as { configuration: { skills: Array<{ id: string }> } };
+    expect(checked.configuration.skills.map(item => item.id)).toEqual(['skill-a', 'skill-b']);
   });
 });

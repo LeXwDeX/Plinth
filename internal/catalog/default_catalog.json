@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.33",
+    "revision": "2026-11-24.19.36",
     "terminology": {
       "user_facing": [
         {
@@ -2692,6 +2692,7 @@
         "task_identifier_preview_characters": 12,
         "countdown_tick_milliseconds": 1000,
         "task_polling_interval_milliseconds": 3000,
+        "task_read_timeout_milliseconds": 15000,
         "display_locale": "zh-CN",
         "task_api_prefix": "",
         "spinner_frame_milliseconds": 80,
@@ -14553,7 +14554,8 @@
             "is_active": "isActive",
             "created_at": "createdAt",
             "last_login": "lastLogin",
-            "open_id": "openId"
+            "open_id": "openId",
+            "project_group_key": "projectGroupKey"
           },
           "path_parameters": {
             "user_id": "userID"
@@ -14569,7 +14571,8 @@
         },
         "limits": {
           "username_minimum_characters": 2,
-          "password_minimum_characters": 6
+          "password_minimum_characters": 6,
+          "project_group_key_pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
         },
         "defaults": {
           "id_prefix": "user_",
@@ -14585,7 +14588,9 @@
           "detail_fields": {
             "username": "username",
             "is_admin": "isAdmin",
-            "is_active": "isActive"
+            "is_active": "isActive",
+            "project_group_key": "projectGroupKey",
+            "previous_project_group_key": "previousProjectGroupKey"
           }
         },
         "messages": {
@@ -14597,6 +14602,7 @@
           "duplicate_username": "用户名已存在",
           "invalid_username": "用户名至少需要 {minimum} 个字符",
           "invalid_password": "密码长度不能少于 {minimum} 位",
+          "invalid_project_group": "项目组 KEY 只能含小写字母、数字、- 和 _，须以字母或数字开头，最长 32 个字符",
           "invalid_request": "请求参数无效",
           "internal_error": "服务内部错误，请稍后重试"
         },
@@ -14659,6 +14665,10 @@
             "delete_confirm": "确认删除",
             "deleting": "删除中...",
             "password_too_short": "密码长度不能少于 {minimum} 位",
+            "column_project_group": "项目组",
+            "project_group_label": "项目组",
+            "project_group_placeholder": "例如 studio-a，留空表示未分组",
+            "project_group_description": "留空表示未分组；KEY 只能含小写字母、数字、- 和 _，以字母或数字开头，最长 32 个字符",
             "update_failed": "更新失败",
             "create_failed": "创建失败",
             "operation_failed": "操作失败",
@@ -14999,7 +15009,14 @@
             "estimated_credits": "estimatedCredits",
             "last_active_at": "lastActiveAt",
             "by_type": "byType",
-            "total": "total"
+            "total": "total",
+            "project_group_key": "projectGroupKey",
+            "by_group": "byGroup",
+            "amounts": "amounts",
+            "unit": "unit",
+            "unit_label": "unit_label",
+            "amount": "amount",
+            "share_basis_points": "share_basis_points"
           },
           "query": {
             "days": "days",
@@ -15079,7 +15096,14 @@
             "column_succeeded": "成功",
             "column_failed": "失败",
             "column_credits": "预估消耗",
-            "column_last_active": "最近活动"
+            "column_last_active": "最近活动",
+            "column_project_group": "项目组",
+            "group_title": "项目组支出占比",
+            "group_attribution": "按用户当前所属项目组归集统计范围内的全部支出：用户换组后，其历史支出随当前组计入。",
+            "group_share_note": "占比按各单位分别计算，不跨单位相加。",
+            "group_ungrouped": "未分组",
+            "column_group_amounts": "预估消耗（占比）",
+            "group_share": "{percent}%"
           }
         }
       },
@@ -17355,6 +17379,7 @@
         "skill_category": "Skill 分类",
         "add_skill": "新增 Skill",
         "remove_skill": "删除 Skill",
+        "skills_empty": "目前没有共享 Skill。系统 Skill 始终可用，不在此编辑；可在这里添加共享 Skill。",
         "history_empty": "暂无版本记录",
         "mcp_protocol": "MCP 协议",
         "mcp_unavailable": "当前接线不可执行",
@@ -20903,6 +20928,7 @@
             "administration.users.messages.duplicate_username": "Username already exists",
             "administration.users.messages.invalid_username": "Username must be at least {minimum} characters",
             "administration.users.messages.invalid_password": "Password must be at least {minimum} characters",
+            "administration.users.messages.invalid_project_group": "A project group KEY may contain only lowercase letters, digits, - and _, must start with a letter or digit, and is at most 32 characters",
             "administration.users.messages.invalid_request": "Invalid request parameters",
             "administration.users.messages.internal_error": "Internal server error. Please try again later",
             "administration.access_keys.messages.invalid_request": "Invalid request parameters",
@@ -20956,6 +20982,10 @@
             "administration.users.presentation.text.delete_confirm": "Confirm delete",
             "administration.users.presentation.text.deleting": "Deleting…",
             "administration.users.presentation.text.password_too_short": "Password must be at least {minimum} characters",
+            "administration.users.presentation.text.column_project_group": "Project group",
+            "administration.users.presentation.text.project_group_label": "Project group",
+            "administration.users.presentation.text.project_group_placeholder": "e.g. studio-a; leave blank for ungrouped",
+            "administration.users.presentation.text.project_group_description": "Leave blank for ungrouped. A KEY may contain only lowercase letters, digits, - and _, starts with a letter or digit, and is at most 32 characters",
             "administration.users.presentation.text.update_failed": "Update failed",
             "administration.users.presentation.text.create_failed": "Creation failed",
             "administration.users.presentation.text.operation_failed": "Operation failed",
@@ -21125,6 +21155,13 @@
             "administration.usage.presentation.text.column_failed": "Failed",
             "administration.usage.presentation.text.column_credits": "Estimated credits",
             "administration.usage.presentation.text.column_last_active": "Last active",
+            "administration.usage.presentation.text.column_project_group": "Project group",
+            "administration.usage.presentation.text.group_title": "Spending share by project group",
+            "administration.usage.presentation.text.group_attribution": "All spending in the range counts for the project group each user is in now: when a user changes group, their past spending moves with them.",
+            "administration.usage.presentation.text.group_share_note": "Shares are computed per unit; units are never added together.",
+            "administration.usage.presentation.text.group_ungrouped": "Ungrouped",
+            "administration.usage.presentation.text.column_group_amounts": "Estimated spending (share)",
+            "administration.usage.presentation.text.group_share": "{percent}%",
             "administration.user_assets.filters.download_actions[action=download_asset].label": "Download",
             "administration.user_assets.filters.download_actions[action=access_asset].label": "Access",
             "administration.user_assets.messages.user_not_found": "User not found",
@@ -21229,6 +21266,7 @@
             "agent_configuration.ui.skill_category": "Skill category",
             "agent_configuration.ui.add_skill": "Add Skill",
             "agent_configuration.ui.remove_skill": "Remove Skill",
+            "agent_configuration.ui.skills_empty": "There are no shared Skills yet. System Skills are always available and are not edited here; you can add a shared Skill here.",
             "agent_configuration.ui.history_empty": "No version history yet",
             "agent_configuration.ui.mcp_protocol": "MCP protocol",
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",

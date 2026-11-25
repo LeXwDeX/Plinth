@@ -1750,7 +1750,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				Username: administrationUsers.Audit.DetailFields.Username,
 				Admin:    administrationUsers.Audit.DetailFields.IsAdmin,
 				Active:   administrationUsers.Audit.DetailFields.IsActive,
+				ProjectGroupKey: administrationUsers.Audit.DetailFields.
+					ProjectGroupKey,
+				PreviousProjectGroupKey: administrationUsers.Audit.DetailFields.
+					PreviousProjectGroupKey,
 			},
+			ProjectGroupKeyPattern: administrationUsers.Limits.
+				ProjectGroupKeyPattern,
 		},
 	)
 	if err != nil {

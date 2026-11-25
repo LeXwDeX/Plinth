@@ -489,6 +489,8 @@ export interface ProductSchema {
       task_identifier_preview_characters: number;
       countdown_tick_milliseconds: number;
       task_polling_interval_milliseconds: number;
+      /** #605: how long one read of a tracked task may take before it counts as unavailable. */
+      task_read_timeout_milliseconds: number;
       harness_refresh_milliseconds: number;
       harness_save_debounce_milliseconds: number;
       /** #385: how often the session's pending paid steps are read while a turn or task runs. */
@@ -648,6 +650,7 @@ export interface AdministrationProductSchema {
         created_at: string;
         last_login: string;
         open_id: string;
+        project_group_key: string;
       };
       path_parameters: {
         user_id: string;
@@ -656,6 +659,8 @@ export interface AdministrationProductSchema {
     limits: {
       username_minimum_characters: number;
       password_minimum_characters: number;
+      /** Go RE2 pattern the server checks a trimmed project group KEY against (#599). */
+      project_group_key_pattern: string;
     };
     messages: {
       user_not_found: string;
@@ -666,6 +671,7 @@ export interface AdministrationProductSchema {
       invalid_password: string;
       invalid_request: string;
       internal_error: string;
+      invalid_project_group: string;
     };
     presentation: {
       date_locale: string;
@@ -951,6 +957,16 @@ export interface AdministrationProductSchema {
         last_active_at: string;
         by_type: string;
         total: string;
+        /** #599: a user's or by_group row's project group KEY; null when ungrouped. Administration only. */
+        project_group_key: string;
+        /** #599: spending per project group, each row with task counts and per-unit amounts. */
+        by_group: string;
+        amounts: string;
+        unit: string;
+        unit_label: string;
+        amount: string;
+        /** Share of the unit's total in basis points; null when that total is 0. */
+        share_basis_points: string;
       };
       query: {
         days: string;

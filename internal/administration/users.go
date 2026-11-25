@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -30,6 +31,11 @@ var (
 	ErrLastAdministrator = errors.New(
 		"administration: last active administrator",
 	)
+	// ErrInvalidProjectGroup：项目组 KEY 不符合 Schema 声明的格式（#599）。
+	// 服务端只 trim，不改大小写，非法值直接拒绝而不是静默改写。
+	ErrInvalidProjectGroup = errors.New(
+		"administration: invalid project group key",
+	)
 )
 
 type Actor struct {
@@ -50,6 +56,9 @@ type User struct {
 	CreatedAt time.Time
 	LastLogin *time.Time
 	OpenID    *string
+	// ProjectGroupKey 是用户所属项目组的 KEY（#599），空串表示未分组。
+	// 它只是统计归集用的标签，不是权限，不进入角色或 access.Principal。
+	ProjectGroupKey string
 }
 
 type StoredUser struct {
@@ -61,11 +70,12 @@ type StoredUser struct {
 }
 
 type CreateUser struct {
-	Username string
-	Password string
-	Name     string
-	Email    string
-	Admin    bool
+	Username        string
+	Password        string
+	Name            string
+	Email           string
+	Admin           bool
+	ProjectGroupKey string
 }
 
 type UpdateUser struct {
@@ -74,6 +84,8 @@ type UpdateUser struct {
 	Admin    *bool
 	Active   *bool
 	Password *string
+	// ProjectGroupKey 为 nil 时不变；指向空串（trim 后）时清空为未分组。
+	ProjectGroupKey *string
 }
 
 type UserRepository interface {
@@ -122,6 +134,10 @@ type UserAuditFields struct {
 	Username string
 	Admin    string
 	Active   string
+	// ProjectGroupKey 与 PreviousProjectGroupKey 记录项目组变更后与变更前的
+	// 值（未分组记为 null），以便日后按生效日期归属历史时有据可依（#599）。
+	ProjectGroupKey         string
+	PreviousProjectGroupKey string
 }
 
 // UserGuards 声明管理员数量的不变量（值来自 Schema）。
@@ -148,7 +164,9 @@ type UserServiceConfig struct {
 	DefaultActive             bool
 	AuditActions              UserAuditActions
 	AuditFields               UserAuditFields
-	Clock                     func() time.Time
+	// ProjectGroupKeyPattern 是 Schema 声明的项目组 KEY 正则（#599）。
+	ProjectGroupKeyPattern string
+	Clock                  func() time.Time
 }
 
 type UserService struct {
@@ -165,6 +183,7 @@ type UserService struct {
 	defaultActive             bool
 	auditActions              UserAuditActions
 	auditFields               UserAuditFields
+	projectGroupKeyPattern    *regexp.Regexp
 	clock                     func() time.Time
 }
 
@@ -193,10 +212,21 @@ func NewUserService(config UserServiceConfig) (*UserService, error) {
 			Username,
 		"audit admin field":  config.AuditFields.Admin,
 		"audit active field": config.AuditFields.Active,
+		"audit project group field": config.AuditFields.
+			ProjectGroupKey,
+		"audit previous project group field": config.AuditFields.
+			PreviousProjectGroupKey,
+		"project group key pattern": config.ProjectGroupKeyPattern,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return nil, fmt.Errorf("administration: %s 不能为空", name)
 		}
+	}
+	projectGroupKeyPattern, err := regexp.Compile(
+		config.ProjectGroupKeyPattern,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("administration: 项目组 KEY 正则无效: %w", err)
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -215,6 +245,7 @@ func NewUserService(config UserServiceConfig) (*UserService, error) {
 		defaultActive:             config.DefaultActive,
 		auditActions:              config.AuditActions,
 		auditFields:               config.AuditFields,
+		projectGroupKeyPattern:    projectGroupKeyPattern,
 		clock:                     config.Clock,
 	}, nil
 }
@@ -236,6 +267,10 @@ func (s *UserService) CreateUser(
 		return User{}, ErrInvalidPassword
 	}
 	if err := s.validateEmail(command.Email); err != nil {
+		return User{}, err
+	}
+	projectGroupKey, err := s.normalizeProjectGroupKey(command.ProjectGroupKey)
+	if err != nil {
 		return User{}, err
 	}
 	if existing, exists, err := s.repository.
@@ -269,14 +304,15 @@ func (s *UserService) CreateUser(
 	}
 	stored := StoredUser{
 		User: User{
-			ID:        id,
-			Username:  username,
-			Nickname:  name,
-			Name:      name,
-			Email:     strings.TrimSpace(command.Email),
-			Admin:     command.Admin,
-			Active:    s.defaultActive,
-			CreatedAt: now,
+			ID:              id,
+			Username:        username,
+			Nickname:        name,
+			Name:            name,
+			Email:           strings.TrimSpace(command.Email),
+			Admin:           command.Admin,
+			Active:          s.defaultActive,
+			CreatedAt:       now,
+			ProjectGroupKey: projectGroupKey,
 		},
 		PasswordHash: string(passwordHash),
 		Roles:        roles,
@@ -289,10 +325,32 @@ func (s *UserService) CreateUser(
 		return User{}, err
 	}
 	s.recordAudit(ctx, actor, s.auditActions.Create, stored.ID, map[string]any{
-		s.auditFields.Username: stored.Username,
-		s.auditFields.Admin:    stored.Admin,
+		s.auditFields.Username:        stored.Username,
+		s.auditFields.Admin:           stored.Admin,
+		s.auditFields.ProjectGroupKey: auditProjectGroupKey(stored.ProjectGroupKey),
 	})
 	return stored.User, nil
+}
+
+// normalizeProjectGroupKey 先 trim，再按 Schema 正则严格校验；空串表示未分组。
+// 不改写大小写：管理员输入的 KEY 要么原样合法，要么被拒。
+func (s *UserService) normalizeProjectGroupKey(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	if !s.projectGroupKeyPattern.MatchString(trimmed) {
+		return "", ErrInvalidProjectGroup
+	}
+	return trimmed, nil
+}
+
+// auditProjectGroupKey 把未分组写成 null，与 wire 上的表示一致。
+func auditProjectGroupKey(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 // validateEmail 按 Schema 声明的身份契约校验邮箱。
@@ -324,6 +382,16 @@ func (s *UserService) UpdateUser(
 		return User{}, ErrUserNotFound
 	}
 	wasActive := stored.Active
+	previousProjectGroupKey := stored.ProjectGroupKey
+	if command.ProjectGroupKey != nil {
+		projectGroupKey, err := s.normalizeProjectGroupKey(
+			*command.ProjectGroupKey,
+		)
+		if err != nil {
+			return User{}, err
+		}
+		stored.ProjectGroupKey = projectGroupKey
+	}
 	if command.Name != nil {
 		name := strings.TrimSpace(*command.Name)
 		stored.Name = name
@@ -376,9 +444,13 @@ func (s *UserService) UpdateUser(
 		return User{}, err
 	}
 	s.recordAudit(ctx, actor, s.auditActions.Update, id, map[string]any{
-		s.auditFields.Username: stored.Username,
-		s.auditFields.Admin:    stored.Admin,
-		s.auditFields.Active:   stored.Active,
+		s.auditFields.Username:        stored.Username,
+		s.auditFields.Admin:           stored.Admin,
+		s.auditFields.Active:          stored.Active,
+		s.auditFields.ProjectGroupKey: auditProjectGroupKey(stored.ProjectGroupKey),
+		s.auditFields.PreviousProjectGroupKey: auditProjectGroupKey(
+			previousProjectGroupKey,
+		),
 	})
 	if wasActive && !stored.Active {
 		s.recordAudit(

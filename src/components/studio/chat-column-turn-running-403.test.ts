@@ -1,5 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { branchUnavailableReason } from '@/lib/chat/session-branch';
+import { refreshTasksAfterDone } from '@/lib/chat/turn-settle';
+import type { TaskStateSchema } from '@/lib/product-schema';
+import { refreshSessionTasks } from '@/lib/workspace/task-read';
+import { useWorkspaceStore } from '@/store/workspace-store';
 
 // #403: wiring of the running-turn behaviour in the chat column. The behaviour itself is proved in
 // src/lib/chat/{turn-follow,turn-replace-error,turn-running}-403.test.ts and session-recovery tests; this
@@ -87,14 +93,65 @@ describe('an approved plan whose turn is over says its steps were not run (#403)
 
 describe('a reply read just before its turn ended does not stay running (#597)', () => {
   it('reads the page again after done while the reply is still pending, and recovery takes a turn that really runs', () => {
-    expect(column).toContain("import { messagesBesideStream, readUntilSettled } from '@/lib/chat/turn-settle';");
+    expect(column).toContain("import { messagesBesideStream, readUntilSettled, refreshTasksAfterDone } from '@/lib/chat/turn-settle';");
     const settle = send.slice(send.indexOf('settleStreaming(sessionId, page);'));
     expect(settle.indexOf("if (followed !== 'done') {")).toBeGreaterThan(0);
     expect(settle).toMatch(/void readUntilSettled\(\{[\s\S]{0,400}delays: SETTLE_REREAD_MILLISECONDS,[\s\S]{0,200}outcome === 'running' && shown\(\)\) setServerTurnTick/);
   });
 
+  it('reads the session\'s running tasks at done and with the rereads, not only at the next task poll (#605)', () => {
+    expect(column).toContain("import { refreshSessionTasks } from '@/lib/workspace/task-read';");
+    expect(send).toContain('timeoutMilliseconds: schema.runtime.frontend.task_read_timeout_milliseconds,');
+    const settle = send.slice(send.indexOf('settleStreaming(sessionId, page);'));
+    // Before the early return for a reply that is no longer pending: the tasks are read either way.
+    expect(settle).toMatch(/if \(followed === 'done'\) \{[\s\S]{0,500}void refreshTasksAfterDone\(\{\s*refresh: \(\) => refreshSessionTasks\(sessionId, taskRead\),\s*isCurrent: shown,\s*delays: SETTLE_REREAD_MILLISECONDS,/);
+    expect(settle.indexOf('void refreshTasksAfterDone(')).toBeLessThan(settle.indexOf('if (!page.messages.some((message) => message.isPending)) return;'));
+  });
+
   it('hides only the streaming turn\'s own pending reply next to the live buffer', () => {
     expect(column).toContain('const dbMessages = messagesBesideStream(messages, streamBuf);');
     expect(column).not.toContain('!(streamBuf && item.isPending)');
+  });
+});
+
+describe('the branch is available again once the reads after done find the turn\'s task ended (#605)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useWorkspaceStore.setState({ trackedTasks: [] });
+  });
+
+  it('runs the column\'s reads after done and derives the branch state the way the column does', async () => {
+    const state = (internal: string, terminal: boolean, outcome: TaskStateSchema['outcome']): TaskStateSchema => ({
+      internal_state: internal, public_state: internal, label: internal, color: '', terminal, outcome, progress: { mode: 'reported' },
+    });
+    const detail = (taskState: string) => new Response(JSON.stringify({ id: 'task_1', state: taskState, progress: 100, assets: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(detail('RUNNING')).mockResolvedValueOnce(detail('SUCCEEDED'));
+    vi.stubGlobal('fetch', fetchMock);
+    useWorkspaceStore.setState({ trackedTasks: [] });
+    useWorkspaceStore.getState().registerTask({ taskId: 'task_1', sessionId: 's1', capability: 'image', progressMaximum: 100, autoPreview: false });
+    // As the column: the shown session's tasks, a branch blocked while one of them has not ended.
+    const branchReason = () => branchUnavailableReason({
+      running: useWorkspaceStore.getState().trackedTasks.some((task) => task.sessionId === 's1' && !task.notFound && !task.terminal),
+    });
+    expect(branchReason()).not.toBe('');
+
+    const taskRead = {
+      route: '/api/v1/tasks/{taskID}',
+      taskStates: [state('RUNNING', false, 'running'), state('SUCCEEDED', true, 'success')],
+      progressMaximum: 100,
+      timeoutMilliseconds: 15_000,
+      isCurrent: () => true,
+    };
+    await refreshTasksAfterDone({
+      refresh: () => refreshSessionTasks('s1', taskRead),
+      isCurrent: () => true,
+      delays: [400, 1_200],
+      wait: () => Promise.resolve(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(branchReason()).toBe('');
   });
 });

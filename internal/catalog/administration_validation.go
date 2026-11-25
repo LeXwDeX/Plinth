@@ -58,6 +58,10 @@ var requiredAdministrationUserTextKeys = []string{
 	"delete_confirm",
 	"deleting",
 	"password_too_short",
+	"column_project_group",
+	"project_group_label",
+	"project_group_placeholder",
+	"project_group_description",
 	"update_failed",
 	"create_failed",
 	"operation_failed",
@@ -241,6 +245,13 @@ var requiredAdministrationUsageTextKeys = []string{
 	"column_failed",
 	"column_credits",
 	"column_last_active",
+	"column_project_group",
+	"group_title",
+	"group_attribution",
+	"group_share_note",
+	"group_ungrouped",
+	"column_group_amounts",
+	"group_share",
 }
 
 func validateAdministration(
@@ -307,6 +318,8 @@ func validateAdministration(
 		"created_at": users.API.Fields.CreatedAt,
 		"last_login": users.API.Fields.LastLogin,
 		"open_id":    users.API.Fields.OpenID,
+		"project_group_key": users.API.Fields.
+			ProjectGroupKey,
 	}
 	seenFields := make(map[string]string, len(fields))
 	for name, field := range fields {
@@ -367,6 +380,19 @@ func validateAdministration(
 		users.Limits.PasswordMinimumCharacters <= 0 {
 		return errors.New("users.limits 的字符下限必须大于 0")
 	}
+	// 项目组 KEY 的格式由 Schema 声明（#599），服务端按它校验；它必须是合法的
+	// RE2 正则，否则管理服务无法启动或会静默放行任意值。
+	if strings.TrimSpace(users.Limits.ProjectGroupKeyPattern) == "" {
+		return errors.New("users.limits.project_group_key_pattern 不能为空")
+	}
+	if _, err := regexp.Compile(
+		users.Limits.ProjectGroupKeyPattern,
+	); err != nil {
+		return fmt.Errorf(
+			"users.limits.project_group_key_pattern 不是合法正则: %w",
+			err,
+		)
+	}
 	if strings.TrimSpace(users.Defaults.IDPrefix) == "" ||
 		strings.ContainsAny(users.Defaults.IDPrefix, " /?#") {
 		return errors.New("users.defaults.id_prefix 非法")
@@ -390,9 +416,15 @@ func validateAdministration(
 		"detail_username":   users.Audit.DetailFields.Username,
 		"detail_is_admin":   users.Audit.DetailFields.IsAdmin,
 		"detail_is_active":  users.Audit.DetailFields.IsActive,
-		"user_not_found":    users.Messages.UserNotFound,
-		"self_deactivate":   users.Messages.SelfDeactivate,
-		"self_delete":       users.Messages.SelfDelete,
+		"detail_project_group_key": users.Audit.DetailFields.
+			ProjectGroupKey,
+		"detail_previous_project_group_key": users.Audit.DetailFields.
+			PreviousProjectGroupKey,
+		"invalid_project_group": users.Messages.
+			InvalidProjectGroup,
+		"user_not_found":  users.Messages.UserNotFound,
+		"self_deactivate": users.Messages.SelfDeactivate,
+		"self_delete":     users.Messages.SelfDelete,
 		"duplicate_username": users.Messages.
 			DuplicateUsername,
 		"invalid_username":   users.Messages.InvalidUsername,
@@ -405,6 +437,25 @@ func validateAdministration(
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("users 配置 %s 不能为空", name)
 		}
+	}
+	// 审计 detail 的键在同一个 JSON 对象里，重名会让一个值覆盖另一个。
+	seenDetailFields := map[string]string{}
+	for name, field := range map[string]string{
+		"username":                   users.Audit.DetailFields.Username,
+		"is_admin":                   users.Audit.DetailFields.IsAdmin,
+		"is_active":                  users.Audit.DetailFields.IsActive,
+		"project_group_key":          users.Audit.DetailFields.ProjectGroupKey,
+		"previous_project_group_key": users.Audit.DetailFields.PreviousProjectGroupKey,
+	} {
+		if previous, exists := seenDetailFields[field]; exists {
+			return fmt.Errorf(
+				"users.audit.detail_fields.%s 与 %s 不能同为 %q",
+				previous,
+				name,
+				field,
+			)
+		}
+		seenDetailFields[field] = name
 	}
 	presentation := users.Presentation
 	if strings.TrimSpace(presentation.DateLocale) == "" ||
@@ -661,6 +712,13 @@ func validateAdministrationUsage(
 		"last_active_at":     usage.API.Fields.LastActiveAt,
 		"by_type":            usage.API.Fields.ByType,
 		"total":              usage.API.Fields.Total,
+		"project_group_key":  usage.API.Fields.ProjectGroupKey,
+		"by_group":           usage.API.Fields.ByGroup,
+		"amounts":            usage.API.Fields.Amounts,
+		"unit":               usage.API.Fields.Unit,
+		"unit_label":         usage.API.Fields.UnitLabel,
+		"amount":             usage.API.Fields.Amount,
+		"share_basis_points": usage.API.Fields.ShareBasisPoints,
 		"query_days":         usage.API.Query.Days,
 		"query_start_date":   usage.API.Query.StartDate,
 		"query_end_date":     usage.API.Query.EndDate,
@@ -688,6 +746,9 @@ func validateAdministrationUsage(
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("usage 配置 %s 不能为空", name)
 		}
+	}
+	if err := validateAdministrationUsageWireObjects(usage.API.Fields); err != nil {
+		return err
 	}
 	if len(configuredRouteParameters(
 		runtime.HTTP.LegacyRoutes.AdminUsage,
@@ -1596,6 +1657,65 @@ func validateAdministrationAccessKeys(
 	for _, key := range requiredAdministrationAccessKeyTextKeys {
 		if strings.TrimSpace(presentation.Text[key]) == "" {
 			return fmt.Errorf("administration.access_keys.presentation.text[%q] 不能为空", key)
+		}
+	}
+	return nil
+}
+
+// validateAdministrationUsageWireObjects rejects two fields that share a name
+// inside one JSON object of the usage response (#599): the envelope, a user
+// row, a by_group row and one of its amounts. "price_totals" is the fixed key
+// the rows and the total already use for per-unit amounts.
+func validateAdministrationUsageWireObjects(
+	fields AdministrationUsageFieldSchema,
+) error {
+	objects := map[string]map[string]string{
+		"envelope": {
+			"data":     fields.Data,
+			"error":    fields.Error,
+			"total":    fields.Total,
+			"by_group": fields.ByGroup,
+		},
+		"user": {
+			"user_id":           fields.UserID,
+			"user_name":         fields.UserName,
+			"user_email":        fields.UserEmail,
+			"project_group_key": fields.ProjectGroupKey,
+			"total_tasks":       fields.TotalTasks,
+			"succeeded_tasks":   fields.SucceededTasks,
+			"failed_tasks":      fields.FailedTasks,
+			"estimated_credits": fields.EstimatedCredits,
+			"last_active_at":    fields.LastActiveAt,
+			"by_type":           fields.ByType,
+			"price_totals":      "price_totals",
+		},
+		"by_group": {
+			"project_group_key": fields.ProjectGroupKey,
+			"total_tasks":       fields.TotalTasks,
+			"succeeded_tasks":   fields.SucceededTasks,
+			"failed_tasks":      fields.FailedTasks,
+			"amounts":           fields.Amounts,
+		},
+		"amount": {
+			"unit":               fields.Unit,
+			"unit_label":         fields.UnitLabel,
+			"amount":             fields.Amount,
+			"share_basis_points": fields.ShareBasisPoints,
+		},
+	}
+	for object, members := range objects {
+		seen := make(map[string]string, len(members))
+		for name, field := range members {
+			if previous, exists := seen[field]; exists {
+				return fmt.Errorf(
+					"usage.api.fields 的 %s 对象中 %s 与 %s 不能同为 %q",
+					object,
+					previous,
+					name,
+					field,
+				)
+			}
+			seen[field] = name
 		}
 	}
 	return nil

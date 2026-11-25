@@ -21,8 +21,10 @@ import (
 // are both PNG; changing either would have failed upstream. Now the
 // snapshot's format is read from its bytes and anything but PNG (the only
 // format MeasureMask reads) refuses the turn with
-// ErrSelectionMaskFormatMismatch; nothing is converted. Declaring the rule per
-// Offering in the Schema, shared with the MCP path, is still open (#583).
+// ErrSelectionMaskFormatMismatch; nothing is converted. The rule is not
+// declared per Offering in the Schema: MeasureMask reads only PNG, so the
+// mask is always PNG and the two paths (this one and the MCP path) each check
+// the snapshot against that by its bytes (#583 closed on this check).
 func (service *Service) freezeSelectionMask(ctx context.Context, command StartTurn, options *TurnOptions) error {
 	if command.SelectionMask == nil {
 		return nil
