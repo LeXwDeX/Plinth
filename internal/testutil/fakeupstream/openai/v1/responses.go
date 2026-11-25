@@ -198,6 +198,9 @@ func (h *handler) planResponse(request responsesRequest, chat chatRequest, items
 			}
 		}
 	}
+	if echo, asked := chat.toolResultsEcho(); asked && len(calls) == 0 {
+		reply = echo
+	}
 	last := chat.lastText()
 	plan := responsesPlan{
 		status:       "completed",

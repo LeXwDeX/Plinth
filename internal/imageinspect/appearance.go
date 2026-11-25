@@ -393,7 +393,7 @@ func silhouetteOverlap(first, second []bool, side int, flip bool) float64 {
 func MainComponentCheck(report Report, minimum float64) Check {
 	ok := report.ComponentCount <= 1 || report.LargestComponentRatio >= minimum
 	return Check{Name: CheckMainComponent, Status: status(ok),
-		Actual: fmt.Sprintf("%.0f%% (%d components)",
+		Actual: fmt.Sprintf("%.0f%%, component_count=%d",
 			report.LargestComponentRatio*100, report.ComponentCount),
 		Expected: fmt.Sprintf("%.0f%%", minimum*100), Fix: "single_subject"}
 }

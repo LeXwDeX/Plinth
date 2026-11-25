@@ -78,6 +78,9 @@ type ThreeViews interface {
 	// the recipe's order (#65); ErrThreeViewGroupNotFound for a foreign or
 	// missing group.
 	GroupViews(ctx context.Context, owner, session, runID string) ([]GroupView, error)
+	// Groups lists the session's listed groups with their run IDs and view
+	// states (#630), so a refused group names the run IDs the Agent can use.
+	Groups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error)
 }
 
 // GroupView is one finished view of a three-view group: its view key, and the
@@ -1282,6 +1285,15 @@ func (executor *Executor) selectReferences(
 	if err != nil || !executor.canvasTurn(command) || command.Tool.CanvasSource != canvasSourceBind {
 		return references, err
 	}
+	if executor.boardShowsOnlyNamedPicture(command, references) {
+		// #631: the board is nothing but one of the pictures the call names
+		// (a version clicked on the strip whose layer sits alone on the
+		// board). Sending the snapshot too would give the model that picture
+		// twice and push the named one to image 2; the call's own list is the
+		// whole input, so the frozen references, the purpose numbering and the
+		// Agent's reference_handles stay one list.
+		return references, nil
+	}
 	// #266: the artboard snapshot the person sent is the turn's source. It
 	// leads the references whether or not the Agent named it; pictures the
 	// Agent or the person added come after it.
@@ -1292,6 +1304,34 @@ func (executor *Executor) selectReferences(
 		}
 	}
 	return bound, nil
+}
+
+// boardShowsOnlyNamedPicture reports whether the artboard snapshot of a canvas
+// turn flattens exactly one layer and that layer is a generated picture among
+// the call's references. The layer count is the client's (bounded) claim and
+// the source Task is the one the service verified for the owner and session;
+// a board whose layers are unknown, with a second layer (a drawing, another
+// picture) or whose layer is not one of the named pictures still leads (#266).
+func (executor *Executor) boardShowsOnlyNamedPicture(command chat.ToolCommand, references []string) bool {
+	var board *chat.CanvasLayout
+	for _, attachment := range command.Options.Selection {
+		if attachment.Kind != chat.AttachmentKindImage || attachment.URL == "" {
+			continue
+		}
+		if board != nil || attachment.Role != chat.AttachmentRoleCanvas || attachment.Canvas == nil {
+			return false
+		}
+		board = attachment.Canvas
+	}
+	if board == nil || board.Layers != 1 || len(board.Sources) != 1 {
+		return false
+	}
+	for _, reference := range references {
+		if executor.referenceSourceTask(command, reference) == board.Sources[0] {
+			return true
+		}
+	}
+	return false
 }
 
 // callReferences resolves the pictures a call names itself. A multiview step

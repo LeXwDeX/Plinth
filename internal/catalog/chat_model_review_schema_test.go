@@ -325,10 +325,14 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 	app.Chat.Harness.BaseTools = base
 	app.Chat.ModelReview = catalog.ChatModelReviewSchema{}
 	app.Chat.SelfCheck = catalog.ChatSelfCheckSchema{}
-	// The remedy line lives in the model_review block that just went away, so
-	// its English translation goes too.
+	// The remedy line and the review and self-check copy (#632) live in the
+	// blocks that just went away, so their English translations go too.
 	if bundle, ok := app.Localization.Bundles["en"]; ok {
-		delete(bundle.Fields, "chat.model_review.inspect.production.remedy_template")
+		for path := range bundle.Fields {
+			if strings.HasPrefix(path, "chat.model_review.") || strings.HasPrefix(path, "chat.self_check.") {
+				delete(bundle.Fields, path)
+			}
+		}
 		app.Localization.Bundles["en"] = bundle
 	}
 	// The outward MCP inspect_model runs the same inspection, so it goes with

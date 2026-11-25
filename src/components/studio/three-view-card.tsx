@@ -15,7 +15,7 @@ import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import {
-  groupMultiview, pickMultiviewModel, remainingCredits, remainingSlots, slotAction, slotReplaceable, succeededCount,
+  groupMultiview, groupProgress, pickMultiviewModel, remainingCredits, remainingSlots, requestedView, slotAction, slotReplaceable,
   type MultiviewModel, type ThreeViewGroup, type ThreeViewSlot,
 } from '@/lib/workspace/three-view';
 import { cn } from '@/lib/utils';
@@ -101,8 +101,8 @@ export interface ThreeViewCardViewProps {
 export function ThreeViewCardView({
   schema, group, busy, queued, thumbnail, onAdvance, onView, onToThreeD, model, onMultiview, onStartRemaining, onReplace,
 }: ThreeViewCardViewProps) {
-  const done = succeededCount(group);
-  const total = group.slots.filter((slot) => !slot.optional).length;
+  // #633: the same count as the version strip; a started right view (a four-view request) is part of it.
+  const { done, total } = groupProgress(group.slots);
   const front = group.slots.find((slot) => slot.key === group.modelSource.slot);
   const remaining = remainingSlots(group);
   const restCredits = remainingCredits(remaining);
@@ -132,7 +132,7 @@ export function ThreeViewCardView({
         <Layers aria-hidden className="size-4 shrink-0 text-primary" />
         <span className="text-[13px] font-semibold">{group.label || text(schema, 'title')}</span>
         <span className="ml-auto text-muted-foreground" data-testid="three-view-progress">
-          {group.complete ? text(schema, 'complete') : formatSchemaText(text(schema, 'progress'), { done, total })}
+          {group.complete && done === total ? text(schema, 'complete') : formatSchemaText(text(schema, 'progress'), { done, total })}
         </span>
       </header>
       {onReplace ? (
@@ -169,7 +169,7 @@ export function ThreeViewCardView({
               />
               <div className="flex min-w-0 items-center gap-1">
                 <span className="truncate font-medium">{slot.label}</span>
-                {slot.optional ? (
+                {!requestedView(slot) ? (
                   <span className="shrink-0 rounded-sm bg-muted px-1 text-[10px] text-muted-foreground" data-testid="three-view-optional">{text(schema, 'optional')}</span>
                 ) : null}
                 {slot.replaced ? (

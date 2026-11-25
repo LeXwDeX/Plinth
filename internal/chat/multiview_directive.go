@@ -10,14 +10,7 @@ import "strings"
 func (orchestrator *Orchestrator) multiviewDirective(registry *toolRegistry, options TurnOptions) string {
 	request := options.Multiview
 	multiview := orchestrator.schema.ThreeView.Multiview
-	if request == nil || multiview.Tool == "" {
-		return ""
-	}
-	offered := false
-	for _, tool := range registry.describe(orchestrator.agentScope.Normalize(options.AgentScope)) {
-		offered = offered || tool.Name == multiview.Tool
-	}
-	if !offered {
+	if request == nil || !orchestrator.multiviewToolOffered(registry, options) {
 		return ""
 	}
 	views := make([]string, 0, len(request.Views))
@@ -34,4 +27,19 @@ func (orchestrator *Orchestrator) multiviewDirective(registry *toolRegistry, opt
 		"{model}", request.Model,
 		"{views}", strings.Join(views, multiview.ViewSeparator),
 	).Replace(template)
+}
+
+// multiviewToolOffered reports whether the three-view schema's multiview tool
+// is among the tools this turn offers.
+func (orchestrator *Orchestrator) multiviewToolOffered(registry *toolRegistry, options TurnOptions) bool {
+	name := orchestrator.schema.ThreeView.Multiview.Tool
+	if name == "" || registry == nil {
+		return false
+	}
+	for _, tool := range registry.describe(orchestrator.agentScope.Normalize(options.AgentScope)) {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }

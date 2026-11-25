@@ -110,8 +110,8 @@ func TestTilingFlagsAGradientOnBothAxes(t *testing.T) {
 	report := inspectFor(t, encodePNG(t, 128, 128, ramp), requirements)
 	check := checkNamed(t, report.ReviewRequirements(requirements), "seamless")
 	if check.Status != StatusFail || check.Fix != "regenerate_tileable" ||
-		!strings.Contains(check.Actual, "left/right seam at y 0-127") ||
-		!strings.Contains(check.Actual, "top/bottom seam at x 0-127") {
+		!strings.Contains(check.Actual, "left_right y=0-127") ||
+		!strings.Contains(check.Actual, "top_bottom x=0-127") {
 		t.Fatalf("a gradient was not flagged on both axes: %+v", check)
 	}
 }
@@ -129,7 +129,7 @@ func TestTilingNamesWhereTheSeamBreaks(t *testing.T) {
 	}
 	report := inspectFor(t, encodePNG(t, 128, 128, patched), requirements)
 	check := checkNamed(t, report.ReviewRequirements(requirements), "seamless")
-	if check.Status != StatusFail || !strings.Contains(check.Actual, "left/right seam at y 32-79") {
+	if check.Status != StatusFail || !strings.Contains(check.Actual, "left_right y=32-79") {
 		t.Fatalf("the broken stretch was not named: %+v (%+v)", check, report.Tiling)
 	}
 	if strings.Contains(check.Actual, "top/bottom") {

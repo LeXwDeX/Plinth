@@ -13,9 +13,12 @@ Chain (one request per step, fixed Offerings, prepare -> grants -> tasks):
   > animation (from rigging)
   > motion (text-to-motion, independent)
 
-Spending (Meshy credits; the Catalog's estimates, which the frozen quotes replace where a quote exists):
-about 142 in all (6 + 6 + 15 + 20 + 40 + 5 + 1 + 15 + 5 + 3 + 5 + 1 + 0 + 10 + 10); the audit's list
-price for the same chain is about 132 (t2.5 image-to-3D 15 and retexture 10 at 2K). The unit price of a
+Spending (Meshy credits; the Catalog's estimates, which the frozen quotes replace where a quote exists), by step:
+t2i 6, i2i 6, t25_text 15, t25_image 20, multiview 40, remesh 5, convert 1, retexture 15, rigging 5,
+animation 3, uv_unwrap 5, resize 1, analyze 0, multi_color 10, motion 10: about 142 in all. (Before #633 this
+line gave the bare numbers in step order, which does not follow the chain above, so multi_color read as 0.)
+The audit's list price for the same chain is about 132 (t2.5 image-to-3D 15 and retexture 10 at 2K); a real
+retexture at 2K is charged about 10, below the Catalog's estimate of 15 that its frozen quote carries (#633). The unit price of a
 credit, and the price of the t2.5 refine step, are not listed by Meshy. The default ceiling --max-credits is 160:
 a step whose frozen quote would cross it, and every later step, is not sent. The 40-credit multi-image step is
 the dearest; with the 8K refusal fallback the worst case adds 35 more, so raise the ceiling on purpose for that.

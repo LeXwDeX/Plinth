@@ -288,6 +288,49 @@ func TestSystemContainsMarkerAnswersFromTheSystemPrompt(t *testing.T) {
 	}
 }
 
+// #630/#632: the fake-only echo marker answers the round after a tool result
+// with the tool messages of that round, so a browser run can read what the
+// tool handed back to the model. The call round itself is still a call, and a
+// round without the marker is still the fixed text.
+func TestToolResultsEchoMarkerAnswersWithTheRoundsToolResults(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "inspect_image", "parameters": map[string]any{"type": "object"}}}}
+	ask := "检查 " + ToolMarkerFor("inspect_image", `{"image":"@img1"}`) + " " + ToolResultsEchoMarker
+	_, first := f.chat(map[string]any{"model": "m", "messages": user(ask), "tools": tools})
+	if dig(t, first, "choices", 0, "message", "tool_calls", 0, "function", "name") != "inspect_image" {
+		t.Fatalf("the call round must still call the tool: %v", first)
+	}
+	round := func(text string) []map[string]any {
+		return []map[string]any{
+			{"role": "user", "content": "更早的一轮 " + ToolResultsEchoMarker},
+			{"role": "assistant", "content": "好的"},
+			{"role": "user", "content": text},
+			{"role": "assistant", "content": nil, "tool_calls": []map[string]any{{"id": "c1", "type": "function", "function": map[string]any{"name": "inspect_image", "arguments": "{}"}}}},
+			{"role": "tool", "tool_call_id": "c1", "content": `{"message":"已检查"}`},
+			{"role": "tool", "tool_call_id": "c2", "content": "第二个结果"},
+		}
+	}
+	_, echoed := f.chat(map[string]any{"model": "m", "messages": round(ask), "tools": tools})
+	want := ToolResultsEchoPrefix + `["{\"message\":\"已检查\"}","第二个结果"]`
+	if got := dig(t, echoed, "choices", 0, "message", "content"); got != want {
+		t.Fatalf("echo = %v, want %s", got, want)
+	}
+	// The marker of an earlier user message does not carry over.
+	_, plain := f.chat(map[string]any{"model": "m", "messages": round("检查一下"), "tools": tools})
+	if got := dig(t, plain, "choices", 0, "message", "content"); got != FixedReply {
+		t.Fatalf("no marker in the last user message = %v, want the fixed text", got)
+	}
+	// Responses reads the same convention from its function_call_output items.
+	_, responded := f.respondJSON(map[string]any{"model": "m", "input": []map[string]any{
+		{"role": "user", "content": ask},
+		{"type": "function_call", "call_id": "c1", "name": "inspect_image", "arguments": "{}"},
+		{"type": "function_call_output", "call_id": "c1", "output": "第二个结果"},
+	}})
+	if got := dig(t, responded, "output", 0, "content", 0, "text"); got != ToolResultsEchoPrefix+`["第二个结果"]` {
+		t.Fatalf("responses echo = %v", responded["output"])
+	}
+}
+
 func TestStreaming(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	stream := func(body map[string]any) ([]map[string]any, bool, string) {

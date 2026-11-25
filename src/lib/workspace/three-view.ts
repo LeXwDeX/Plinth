@@ -151,6 +151,21 @@ export function succeededCount(group: ThreeViewGroup): number {
   return group.slots.filter((slot) => !slot.optional && slot.status === 'succeeded').length;
 }
 
+/**
+ * The views the group is asked for (#633): every required view, and the optional one (the right view) once it was
+ * asked for — a four-view request starts it, so it is no longer "可选" and counts in the denominator. An optional
+ * view nobody started stays out, so a three-view group reads 3 / 3, not 3 / 4.
+ */
+export function requestedView(slot: Pick<ThreeViewSlot, 'optional' | 'status'>): boolean {
+  return !slot.optional || slot.status !== 'not_started';
+}
+
+/** Finished and asked-for views of a group, the one count the card and the version strip both show (#633). */
+export function groupProgress(slots: readonly Pick<ThreeViewSlot, 'optional' | 'status'>[]): { done: number; total: number } {
+  const requested = slots.filter(requestedView);
+  return { done: requested.filter((slot) => slot.status === 'succeeded').length, total: requested.length };
+}
+
 /** The view ("正面") a Task made in one of the session's three-view groups; empty for any other Task (#618). */
 export function viewLabelOfTask(groups: readonly ThreeViewGroup[], taskId: string): string {
   if (!taskId) return '';

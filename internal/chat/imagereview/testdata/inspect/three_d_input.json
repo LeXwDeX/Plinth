@@ -33,16 +33,16 @@
       "checklist_text": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。确定性检查看不出姿态、透视和投影阴影：结果里的 visual_items 列出这些要你看图判断的项（用 show_picture 看图），逐项用 visual_review 写出 pass、fail 或 not_applicable 和一句看到了什么，服务端会把它们记入自检记录；任何一项 fail 都先修图再提交。",
       "checks": [
         {
-          "actual": "subject 24.2%",
+          "actual": "subject_ratio=24.2%",
           "check": "nonblank",
-          "expected": "a visible subject",
+          "expected": "subject_ratio\u003e1%",
           "fix": "regenerate",
           "status": "pass"
         },
         {
-          "actual": "alpha=false, border spread 0.0",
+          "actual": "has_alpha=false, background_spread=0.0",
           "check": "background",
-          "expected": "transparency or border spread \u003c= 32",
+          "expected": "has_alpha=true | background_spread\u003c=32",
           "fix": "remove_background",
           "status": "pass"
         },
@@ -54,21 +54,21 @@
           "status": "pass"
         },
         {
-          "actual": "touches edge=false",
+          "actual": "touches_edge=false",
           "check": "edge",
-          "expected": "the subject stays inside the frame",
+          "expected": "touches_edge=false",
           "fix": "crop_subject",
           "status": "pass"
         },
         {
-          "actual": "1 component(s)",
+          "actual": "component_count=1",
           "check": "components",
-          "expected": "\u003c= 6",
+          "expected": "component_count\u003c=6",
           "fix": "single_subject",
           "status": "pass"
         },
         {
-          "actual": "100% (1 components)",
+          "actual": "100%, component_count=1",
           "check": "main_component",
           "expected": "60%",
           "fix": "single_subject",

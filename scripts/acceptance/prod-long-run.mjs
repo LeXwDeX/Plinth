@@ -10,11 +10,13 @@
 // 命令（--session <名字> 选会话，缺省 main）：
 //   init --title T                 新建会话、设为手工批准方式，记入 state.json
 //   say --text "…"                 经输入框发一条消息，按 --sample 秒采样（截图、任务、批准卡、会话积分），等回复与本轮任务结束
-//       [--skill 四视图]            发送前在设置的 Skills 页手选一个 Skill
+//       [--skill 四视图]            发送前在设置的 Skills 页手选一个 Skill（按行名精确匹配，其次按行名开头；不按说明里的子串）
 //       [--on-approval stop|deny|approve:<上限>]  出现批准卡时：停在卡上（缺省）、拒绝、或报价不超过上限才批准
+//                                  （上限按卡上显示的金额比较：历史积分卡比积分，原生计价卡比「50 Tripo credits」这类原生单位的数）
 //       [--reload-at S] [--switch-at S]  进行到 S 秒时刷新页面 / 切到别的会话再回来，记录前后历史消息与图片数
 //       [--max-new-tasks N]        本轮新任务超过 N 个就点停止并记 ALERT（防失控，缺省 12）
-//       [--timeout S] [--sample S] [--no-wait-tasks]
+//       [--timeout S] [--sample S] [--no-wait-tasks] [--min-wait S]  至少观察 S 秒才判定本轮安静（发消息缺省 4，点按钮与选项缺省 45）；
+//                                  本页发出的写请求（POST 等）未结束时不判定安静，退出前也等它们结束（最多 60 秒）
 //   choose --option 文本 [say 的采样参数]  在最新的选择卡（ask_choice）上点含该文本的选项并「确认」，然后像 say 一样观察这一轮
 //   click --button 文本 [say 的采样参数]  点对话栏里最后一个名字含该文本的按钮（如三视图卡片的「继续生成」），然后像 say 一样观察
 //   approve --max-credits N        批准页面上的待批准卡（报价超过上限的卡改为拒绝）；deny 拒绝全部待批准卡
@@ -49,6 +51,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolvePlaywright } from './browser_matrix/lib.mjs';
+import { minimumWaitMs, quoteOf, skillRowIndex } from './prod-long-run-lib.mjs';
 
 // ---------------------------------------------------------------- arguments and gate
 function parseArgs(argv) {
@@ -229,6 +232,12 @@ const pageErrors = [];
 page.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
 page.on('pageerror', (error) => pageErrors.push(error.message.slice(0, 300)));
 page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(redactText(message.text(), 300)); });
+// Write requests (POST/PUT/PATCH/DELETE) to the target still in flight: the turn is not quiet, and the browser is
+// not closed, while one is open (#633).
+const inflightWrites = new Set();
+page.on('request', (request) => { if (request.method() !== 'GET' && request.url().startsWith(base)) inflightWrites.add(request); });
+page.on('requestfinished', (request) => inflightWrites.delete(request));
+page.on('requestfailed', (request) => inflightWrites.delete(request));
 page.on('response', (response) => {
   if (response.status() < 400 || !response.url().startsWith(base)) return;
   netErrors.push({ status: response.status(), method: response.request().method(), path: pathOnly(response.url()), requestId: response.headers()['x-request-id'] || '' });
@@ -388,7 +397,16 @@ async function closeSettings() {
 }
 async function pickSkill(name) {
   await openSettings('skills');
-  await tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]', { hasText: name }).first().click();
+  // #633: match the row's name cell exactly (or by its start), not the whole row: the 三视图 row's description
+  // mentions 四视图, so a substring match picked it for --skill 四视图.
+  const rows = tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]');
+  const names = await rows.evaluateAll((items) => items.map((row) => {
+    const cell = row.firstElementChild;
+    return ((cell?.querySelector('span') ?? cell)?.textContent || '').trim();
+  }));
+  const index = skillRowIndex(names, name);
+  if (index < 0) throw new Error(`no Skill row named "${name}" (rows: ${names.join(' | ').slice(0, 300)})`);
+  await rows.nth(index).click();
   await page.waitForTimeout(1000);
   await closeSettings();
   return (await tid('composer-skill-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
@@ -456,23 +474,35 @@ async function cmdInit(title) {
 }
 
 async function cardSnapshot() {
+  // Same reading as quoteText; a function passed to evaluateAll runs in the page and cannot call Node-side helpers.
   return tid('studio-approval-card').evaluateAll((cards) => cards.map((card) => ({
     text: card.innerText.replace(/\s+/g, ' ').trim().slice(0, 400),
-    credits: (card.querySelector('[data-testid=studio-approval-credits]')?.innerText || '').trim(),
+    credits: ((card.querySelector('[data-testid=studio-approval-credits]')?.innerText
+      ?? card.querySelector('[data-testid=studio-approval-native-price]')?.previousElementSibling?.innerText) || '').trim(),
     kind: (card.querySelector('[data-testid=studio-approval-kind]')?.innerText || '').trim(),
     model: (card.querySelector('[data-testid=studio-approval-model]')?.innerText || '').trim(),
     canApprove: Boolean(card.querySelector('[data-testid=studio-approval-approve]')),
   }))).catch(() => []);
 }
-const creditsNumber = (value) => { const match = String(value || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)/); return match ? Number(match[1]) : NaN; };
+/**
+ * The quote a card shows: legacy credits in studio-approval-credits; a provider-native quote (「已冻结估算：50 Tripo
+ * credits」) is the label before studio-approval-native-price, whose own text is only the base and line items (#633).
+ */
+function quoteText(card) {
+  const legacy = card.querySelector('[data-testid=studio-approval-credits]');
+  if (legacy) return (legacy.innerText || '').trim();
+  const native = card.querySelector('[data-testid=studio-approval-native-price]');
+  return native ? (native.previousElementSibling?.innerText || '').trim() : '';
+}
 /** Approve every visible card whose quote is within the ceiling; a card over it, or without a readable quote, is denied. */
 async function decideCards(ceiling, decision) {
   const decided = [];
   for (let round = 0; round < 10; round += 1) {
     const card = tid('studio-approval-card').filter({ has: page.locator('[data-testid=studio-approval-approve]') }).first();
     if (!await card.count()) break;
-    const info = { text: (await card.innerText()).replace(/\s+/g, ' ').trim().slice(0, 300), credits: (await card.locator('[data-testid=studio-approval-credits]').first().innerText().catch(() => '')).trim() };
-    const quote = creditsNumber(info.credits);
+    const info = { text: (await card.innerText()).replace(/\s+/g, ' ').trim().slice(0, 300), credits: await card.evaluate(quoteText).catch(() => '') };
+    const { amount: quote, unit } = quoteOf(info.credits);
+    info.unit = unit;
     const approve = decision === 'approve' && Number.isFinite(quote) && quote <= ceiling;
     info.quote = quote;
     info.decision = approve ? 'approve' : 'deny';
@@ -558,6 +588,7 @@ async function cmdSay(sid, content, options = {}) {
   let lastSample = 0;
   let idle = 0;
   let stoppedOnCard = false;
+  const minWait = minimumWaitMs(options);
   while (Date.now() - startedAt < timeout) {
     const elapsed = Date.now() - startedAt;
     if (reloadAt && elapsed >= reloadAt) { bounces.push(await bounce(sid, 'reload')); reloadAt = 0; }
@@ -583,7 +614,9 @@ async function cmdSay(sid, content, options = {}) {
     }
     const unfinished = sample.tasks.filter((task) => !TERMINAL.test(task.state));
     const settled = !sample.running && (options['no-wait-tasks'] || unfinished.length === 0);
-    idle = settled && elapsed > 4000 ? idle + 1 : 0;
+    // #633: a clicked card button starts a request that may take a while (prepare, approval card, start); no
+    // turn runs meanwhile, so wait the minimum window and for our own write requests before calling it quiet.
+    idle = settled && elapsed > minWait && inflightWrites.size === 0 ? idle + 1 : 0;
     if (idle >= 2) break;
     await sleep(2000);
   }
@@ -1049,5 +1082,8 @@ try {
 }
 if (netErrors.length) console.log(`HTTP errors: ${netErrors.map((item) => `${item.status} ${item.method} ${item.path}${item.requestId ? ` rid=${item.requestId}` : ''}`).join('; ')}`);
 if (consoleErrors.length || pageErrors.length) console.log(`console errors: ${[...consoleErrors, ...pageErrors].slice(0, 10).join(' | ')}`);
+// #633: let a write the last step started finish before closing the browser (bounded, so a stuck request cannot hang).
+for (let waited = 0; inflightWrites.size && waited < 60000; waited += 1000) await sleep(1000);
+if (inflightWrites.size) note('ALERT', 'write requests still open when the browser closed', [...inflightWrites].map((request) => `${request.method()} ${pathOnly(request.url())}`).join('; '));
 await ctx.close();
 process.exit(exitCode);

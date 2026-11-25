@@ -309,14 +309,15 @@ describe('AssetListBoard (#329)', () => {
     await waitFor(() => expect(screen.getByTestId('asset-board-3d-item-model-a')).toBeTruthy());
 
     fireEvent.click(screen.getByTestId('asset-board-3d-item-model-a'));
-    expect(within(screen.getByTestId('asset-board-item-item-model-a')).getAllByTestId('model-viewer-mock')).toHaveLength(1);
+    // The viewer is a lazily loaded chunk: under a loaded machine it can arrive after the click's own tick.
+    await waitFor(() => expect(within(screen.getByTestId('asset-board-item-item-model-a')).getAllByTestId('model-viewer-mock')).toHaveLength(1));
     expect(screen.getAllByTestId('model-viewer-mock')).toHaveLength(1);
     expect(within(screen.getByTestId('asset-board-preview-item-model-a')).getByTestId('model-viewer-mock').getAttribute('data-src'))
       .toBe('/api/v1/tasks/task_3d_a/assets/model_a');
 
     fireEvent.click(screen.getByTestId('asset-board-3d-item-model-b'));
+    await waitFor(() => expect(within(screen.getByTestId('asset-board-item-item-model-b')).getAllByTestId('model-viewer-mock')).toHaveLength(1));
     expect(screen.getAllByTestId('model-viewer-mock')).toHaveLength(1);
-    expect(within(screen.getByTestId('asset-board-item-item-model-b')).getAllByTestId('model-viewer-mock')).toHaveLength(1);
     expect(screen.queryByTestId('asset-board-preview-item-model-a')).toBeNull();
     expect(screen.getByTestId('asset-board-3d-item-model-b').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('asset-board-3d-item-model-a').getAttribute('aria-pressed')).toBe('false');

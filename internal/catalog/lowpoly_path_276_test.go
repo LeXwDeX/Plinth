@@ -223,7 +223,7 @@ func TestTaskSourceAlternativeIsValidated(t *testing.T) {
 			setAlternative(document, decimateTriangleID, "source_task", strings.Repeat("改用别的服务。", 80))
 		}, false},
 		"without a place in the refusal template": {func(document map[string]any) {
-			plain := "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。"
+			plain := "{label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。"
 			plainEnglish := "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source."
 			messages := document["application"].(map[string]any)["runtime"].(map[string]any)["generation_messages"].(map[string]any)
 			messages["input_source_task_unsupported"] = plain

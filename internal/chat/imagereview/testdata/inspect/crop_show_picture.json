@@ -43,9 +43,9 @@
       "checklist_text": "delivery checklist",
       "checks": [
         {
-          "actual": "subject 0.0%",
+          "actual": "subject_ratio=0.0%",
           "check": "nonblank",
-          "expected": "a visible subject",
+          "expected": "subject_ratio\u003e1%",
           "fix": "regenerate",
           "status": "fail"
         },
@@ -67,7 +67,7 @@
     },
     "failed_checks": [
       {
-        "actual": "subject 0.0%",
+        "actual": "subject_ratio=0.0%",
         "check": "nonblank",
         "fix": "regenerate"
       },

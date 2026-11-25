@@ -96,7 +96,7 @@ func TestBoundProcessingObservationDoesNotCountTheCorrectionAgain(t *testing.T) 
 		t.Fatalf("first correction = %+v found=%v err=%v", record, found, err)
 	}
 	block, ok := h.content(first)["self_check"].(map[string]any)
-	if !ok || block["corrections_used"] != float64(1) || !strings.Contains(fmt.Sprint(block["message"]), "1 of 2 corrections remain") {
+	if !ok || block["corrections_used"] != float64(1) || !strings.Contains(fmt.Sprint(block["message"]), "还剩 1/2 次修正") {
 		t.Fatalf("first receipt = %v", h.content(first))
 	}
 

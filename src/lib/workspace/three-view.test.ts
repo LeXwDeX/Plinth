@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 
 import {
-  groupIsActive, groupMultiview, groupTileStatus, interleaveGroups, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
+  groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
   remainingSlots, slotAction, succeededCount, viewLabelOfTask, type ThreeViewGroup,
 } from './three-view';
 
@@ -90,6 +90,16 @@ describe('group state', () => {
       ],
     }] })[0];
     expect(succeededCount(group)).toBe(2);
+  });
+
+  // #633: the card and the version strip share one count; the right view joins it once it was asked for.
+  it('counts the optional view only once it was asked for', () => {
+    const slot = (status: string, optional = false) => ({ status, optional }) as { status: ThreeViewGroup['slots'][number]['status']; optional: boolean };
+    expect(groupProgress([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('not_started', true)])).toEqual({ done: 3, total: 3 });
+    expect(groupProgress([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('running', true)])).toEqual({ done: 3, total: 4 });
+    expect(groupProgress([slot('succeeded'), slot('not_started'), slot('succeeded'), slot('succeeded', true)])).toEqual({ done: 3, total: 4 });
+    expect(requestedView(slot('not_started', true))).toBe(false);
+    expect(requestedView(slot('denied', true))).toBe(true);
   });
 });
 

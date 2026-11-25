@@ -325,6 +325,9 @@ type OrchestratorConfig struct {
 	// SessionParameters reads the parameter values the session holds per
 	// Offering (#564). Nil keeps the block out of every prompt.
 	SessionParameters func(ownerID, sessionID string) []SessionParameterGroup
+	// ThreeViewGroups lists the session's three-view groups with their run IDs
+	// and view states (#630). Nil keeps the groups block out of every prompt.
+	ThreeViewGroups func(ctx context.Context, ownerID, sessionID string) ([]ThreeViewGroupFact, error)
 }
 
 type Orchestrator struct {
@@ -383,8 +386,11 @@ type Orchestrator struct {
 	// sessionParameters reads the session's parameter values per Offering
 	// (#564); nil keeps the block out of every prompt.
 	sessionParameters func(ownerID, sessionID string) []SessionParameterGroup
-	queue             chan ProcessTurn
-	queueMu           sync.Mutex
+	// threeViewGroups reads the session's three-view groups (#630); nil keeps
+	// the groups block out of every prompt.
+	threeViewGroups func(ctx context.Context, ownerID, sessionID string) ([]ThreeViewGroupFact, error)
+	queue           chan ProcessTurn
+	queueMu         sync.Mutex
 	// titleWaiters counts background title summaries in flight.
 	titleWaiters sync.WaitGroup
 	queued       map[string]struct{}
@@ -801,6 +807,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		stepBalances:       config.StepBalances,
 		stepCosts:          config.StepCosts,
 		sessionParameters:  config.SessionParameters,
+		threeViewGroups:    config.ThreeViewGroups,
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
@@ -2303,6 +2310,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		sections.add("skill", orchestrator.skillToolDirective(ctx, registry, options)+
 			orchestrator.styleSkillDirective(ctx, options))
 		sections.add("multiview", orchestrator.multiviewDirective(registry, options))
+		sections.add("three_view_groups", orchestrator.threeViewGroupsPrompt(ctx, registry, options, ownerID, sessionID))
 	}
 	// The session summary stands in for the messages it covers (#322). Image
 	// indices and handles are counted over the whole history either way.

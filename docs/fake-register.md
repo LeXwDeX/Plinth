@@ -19,15 +19,15 @@
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
 | `tripo/v3` | 27 | 23 | 2 | 52 | 2026-11-25 |
-| `openai/v1` | 5 | 10 | 0 | 15 | 2026-11-25 |
+| `openai/v1` | 5 | 11 | 0 | 16 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
-| `openai/images-v1` | 4 | 6 | 0 | 10 | 2026-11-25 |
+| `openai/images-v1` | 4 | 6 | 1 | 11 | 2026-11-25 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 84 | 93 | 2 | 179 | 2026-11-25 |
+| 合计 | 84 | 94 | 3 | 181 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -579,6 +579,14 @@
 - 依据：项目自有的起草提示词形状，非上游契约（chat.skills.authoring（default_catalog.json））
 - 核对日期：2026-11-25
 - 没有真实样本的原因：这是 Plinth 自己的请求约定，上游没有对应行为；真实模型的草稿质量按用户决定不做评测
+
+#### `openai-v1/chat-tool-results-echo` · response-shape · constructed
+
+- 端点：`POST /chat/completions`、`POST /responses`
+- 行为：#630/#632：最后一条消息是工具结果、且最后一条 user 消息带 [[fake:echo-tool-results]] 时，答 "tool-results: " 加该 user 消息之后全部工具消息文本的 JSON 数组（Responses 读 function_call_output）；调用工具的那一轮仍是调用，没有标记仍答固定文字。浏览器验收读不到 fake 控制面，用它从对话回复里核对工具交回给模型的内容（拒绝文案、检查结果的语言）。
+- 依据：fake 自有的请求约定，非上游契约（ToolResultsEchoMarker（internal/testutil/fakeupstream/openai/v1/fake.go））
+- 核对日期：2026-11-26
+- 没有真实样本的原因：这是只供验收脚本用的 fake 约定，上游没有对应行为
 
 #### `openai-v1/chat-image-refusals` · error-code-and-text · constructed
 
@@ -1376,6 +1384,15 @@
 - 依据：https://developers.openai.com/api/reference/resources/images/methods/edit（Create image edit（application/json：images[]、mask、image_url、file_id））
 - 核对日期：2026-11-25
 - 没有真实样本的原因：没有 JSON 编辑的真实样本；参考页只给结构，未给 file_id 未找到、URL 取不到等拒绝的状态码与措辞，均为构造
+
+#### `openai-images-v1/generated-picture-byte-weight` · artifact-shape · gap
+
+- 端点：`POST /images/generations`、`POST /images/edits`
+- 行为：fake 生图按请求尺寸出图，但画面是平铺色块，3072x5504 也只有几百 KB；真实大图有十余 MB。生成图作三视图正面或参考图时，fake 里不会超过图生图 Offering 的 max_bytes，不触发冻结前的压缩（#276 的 Fit），也模拟不了 PROD 上大图同步压缩约 51 秒的耗时（#629）。即梦同样没有体积选择；Gemini 只有测试键 fake-response-bytes-<n> 或请求头可选，dev-test 栈的固定键选不到。
+- 依据：2026-11-26 PROD 抽样（d68d1020）三视图正面图 3072x5504 点「继续生成」压缩约 51 秒、客户端断开后左侧与背面 409（#629）
+- 核对日期：2026-11-26
+- 计划：浏览器验收 F629 暂以上传一张约 24 MB 的噪点 PNG（3072x5504，脚本生成、不入库）作正面源图，锁 Gemini（上限 14.6 MB）触发压缩，覆盖同一条 Fit 与 409 链。补法：给 OpenAI 与即梦图像 fake 加与 Gemini 相同的体积选择（PadFile 填充），并加一个可经提示词选择的 fake 约定（dev-test 只能经对话改提示词），再补一个以生成大图作三视图正面的 fake 栈场景；压缩耗时另需慢速解码样本，暂不建模。
+- Issue：#629
 
 ### `gemini/images-v1`
 

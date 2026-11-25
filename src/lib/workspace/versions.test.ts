@@ -13,7 +13,7 @@ import {
   primaryParent,
   versionStatusLabel,
 } from '@/lib/workspace/versions';
-import { parseThreeViews } from '@/lib/workspace/three-view';
+import { groupProgress, parseThreeViews } from '@/lib/workspace/three-view';
 import { imageResults } from '@/lib/workspace/canvas-auto-join';
 import type { TrackedTask } from '@/store/workspace-store';
 
@@ -403,6 +403,16 @@ describe('three-view groups', () => {
     const tile = tiles.find((item) => item.key === 'g:run1')!;
     expect(tile.status).toBe('ready');
     expect(tile.views.map((view) => view.status)).toEqual(['succeeded', 'failed', 'not_started']);
+  });
+
+  // #633: the strip counts like the card, so the optional right view travels with the tile's views.
+  it('keeps which view is optional on the tile', () => {
+    const [threeView] = group([['front', 'succeeded', 'tv1'], ['left', 'succeeded', 'tv2'], ['back', 'succeeded', 'tv3'], ['right', 'not_started', '']]);
+    threeView.slots[3].optional = true;
+    const { tiles } = buildVersionTiles({ schema, graph, tracked: [], sessionId: 's1', threeViews: [threeView] });
+    const tile = tiles.find((item) => item.key === 'g:run1')!;
+    expect(tile.views.map((view) => view.optional)).toEqual([false, false, false, true]);
+    expect(groupProgress(tile.views)).toEqual({ done: 3, total: 3 });
   });
 });
 

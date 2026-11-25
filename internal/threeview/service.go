@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -661,6 +662,12 @@ func hasStep(run skillrun.Run, key string) bool {
 // is approved. It stops at a pending approval, a denial or a started task, so
 // calling it again at any point either continues or changes nothing.
 func (s *Service) drive(ctx context.Context, principal executiongrant.Principal, runID, viewKey string) error {
+	// The person asked for the view; the start outlives the request (#629).
+	// Freezing the input may re-encode a large source picture for a long
+	// time, and a client that stops waiting must not cancel it halfway: the
+	// step would stay unstarted and the work be lost. Every checkpoint below
+	// is idempotent, so a repeated start continues where this one stopped.
+	ctx = context.WithoutCancel(ctx)
 	owner := generation.OwnerID(principal.OwnerID)
 	for range 4 {
 		run, err := s.runtime.Get(ctx, owner, runID)
@@ -773,6 +780,27 @@ func (s *Service) SourceOf(ctx context.Context, owner, session, taskID string) (
 	return ModelSource{}, false, nil
 }
 
+// AgentGroups lists the session's listed groups as the Agent sees them (#630):
+// the run ID it passes as the group and where each view stands. A view the
+// person started on the card is in it as soon as the ledger has it.
+func (s *Service) AgentGroups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error) {
+	groups, err := s.List(ctx, owner, session)
+	if err != nil {
+		return nil, err
+	}
+	facts := make([]chat.ThreeViewGroupFact, 0, len(groups))
+	for _, group := range groups {
+		fact := chat.ThreeViewGroupFact{RunID: group.RunID, Views: make([]chat.ThreeViewViewFact, 0, len(group.Slots))}
+		for _, slot := range group.Slots {
+			fact.Views = append(fact.Views, chat.ThreeViewViewFact{
+				View: slot.Key, Status: string(slot.Status), TaskID: slot.TaskID, AssetID: slot.OutputAssetID,
+			})
+		}
+		facts = append(facts, fact)
+	}
+	return facts, nil
+}
+
 // ForGeneration adapts the service to the chat generation tools.
 type ForGeneration struct{ Service *Service }
 
@@ -799,6 +827,11 @@ func (a ForGeneration) GroupViews(ctx context.Context, owner, session, runID str
 		result = append(result, generationtool.GroupView{View: view.Key, TaskID: view.TaskID, AssetID: view.AssetID})
 	}
 	return result, nil
+}
+
+// Groups implements generationtool.ThreeViews.
+func (a ForGeneration) Groups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error) {
+	return a.Service.AgentGroups(ctx, owner, session)
 }
 
 var _ generationtool.ThreeViews = ForGeneration{}
