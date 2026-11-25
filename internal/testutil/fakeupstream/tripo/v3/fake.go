@@ -333,6 +333,9 @@ type task struct {
 	// of it and a retarget is checked against the rig's.
 	request map[string]any
 	polls   int
+	// runningPoll is the 1-based number of the running poll being answered
+	// (0 outside the running state); poll.go shapes progress and output by it.
+	runningPoll int
 	// failCode and failMessage are set when the task ends in "failed".
 	failCode    int
 	failMessage string
@@ -460,6 +463,11 @@ func newFake(env *fakeupstream.Env) (*handler, error) {
 // pollTemplate finds the real poll body for a task of type typ in status,
 // falling back to the closest real body of the same status.
 func (h *handler) pollTemplate(k kind, status string) map[string]any {
+	if k.Type == "text_to_model" && status == statusQueued {
+		if body := h.queuedTextTemplate(); body != nil {
+			return body // poll.go (#608)
+		}
+	}
 	for _, typ := range []string{k.Type, k.Base} {
 		if body := h.polls[typ][status]; body != nil {
 			return body
@@ -1136,8 +1144,17 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 		t.done = true
 		t.final = status
 	}
+	t.runningPoll = 0
+	if status == statusRunning {
+		t.runningPoll = n - h.env.QueuedPolls
+	}
+	running := t.runningPoll
 	h.mu.Unlock()
-	writeJSON(w, http.StatusOK, h.pollBody(r, t, status))
+	body := h.pollBody(r, t, status)
+	if status == statusRunning {
+		h.shapeRunning(r, t, body, running)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]any {
@@ -1188,6 +1205,7 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 		}
 		if ownTemplate {
 			t.echoRequest(input)
+			t.echoOmittedText(input)
 		}
 		t.echoedInput(input)
 		// A convert task shows the request it ran: the committed sample lists the

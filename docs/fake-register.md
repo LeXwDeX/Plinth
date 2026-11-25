@@ -18,7 +18,7 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
+| `tripo/v3` | 27 | 22 | 1 | 50 | 2026-11-25 |
 | `openai/v1` | 5 | 10 | 0 | 15 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 83 | 92 | 1 | 176 | 2026-11-25 |
+| 合计 | 84 | 92 | 1 | 177 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -90,16 +90,22 @@
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json`（2026-11-23，derived，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
-- 备注：queued 轮询带报价见 evidence-577-real-round 里转换任务的 queued 轮询（progress 0，credits_consumed 10）。真实 progress 并不单调（智能分割依次为 50、10、25、75），首个轮询通常已是 running：这两点只在运行记录里，样本每个任务只留首末两次轮询，fake 不复现（见 tripo-v3/poll-progress-not-modelled）。
+- 备注：queued 轮询带报价见 evidence-577-real-round 里转换任务的 queued 轮询（progress 0，credits_consumed 10）。真实 progress 并不单调（智能分割依次为 50、10、25、75），首个轮询通常已是 running：这两点只在运行记录里，样本每个任务只留首末两次轮询，fake 不复现（见 tripo-v3/poll-progress-not-modelled）；文生模型的完整轮询序列见 tripo-v3/text-poll-progress（#608）。
+
+#### `tripo-v3/text-poll-progress` · state-machine · real
+
+- 端点：`POST /generation/text-to-model`、`GET /tasks/{task_id}`
+- 行为：一次 v3.0-20250812 纯几何文生模型（2 秒一轮询，10 积分）：首个轮询 queued、progress 0、无 output 键；随后七次 running，progress 依次为 15、23、30、38、46、58、65，第一次 running 的 output 为 {}，第二次起已带 output.generated_image_url；success 为 100，同时出现 model_url、rendered_image_url 与 completed_at。轮询的 input 还显示请求未发送的 delight:false 与 texture_version:v3.5-20260815（2026-10-29 的 v3.1 模板同样请求未显示，是模型还是日期决定未知，fake 只对 v3.0-20250812 补）。fake 的文生模型任务按此序列答复（running 次数多于 7 时重复 65），queued 轮询取 running 模板去掉 output。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-608-progress.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 #### `tripo-v3/poll-progress-not-modelled` · state-machine · gap
 
 - 端点：`GET /tasks/{task_id}`、`POST /models/convert`
-- 行为：未建模：真实 progress 不单调（50、10、25、75）、首个轮询通常已是 running、转换任务的 running 轮询有时没有 output 有时已带 output.model_url；fake 依次答 queued、0/50/100，running 的 output 为空。
+- 行为：未建模：文生模型以外任务类型的 running 进度（#577 运行记录每个任务只留一个值，智能分割依次为 50、10、25、75，不单调；首个轮询通常已是 running）与转换任务 running 轮询的 output（有时没有，有时已带 output.model_url）；fake 对这些类型依次答 queued、0/50/100，running 的 output 为空。文生模型的轮询序列已由 tripo-v3/text-poll-progress 覆盖。
 - 依据：smoke-l5-tripo-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制，只入库最小集 evidence-577-real-round）（#577，2026-11-24）
-- 核对日期：2026-11-24
-- 计划：Adapter 不依赖这些细节，暂不建模；若某个 Plinth 行为开始依赖，再用运行记录补样本并建模。
-- Issue：#577
+- 核对日期：2026-11-25
+- 计划：Adapter 不依赖这些细节，暂不建模；#608 只付费跑了一次文生模型（单调、首个轮询为 queued）。若某个 Plinth 行为开始依赖其他类型的进度或转换 running 的 output，再用运行记录补样本并建模。
+- Issue：#577、#608
 
 #### `tripo-v3/task-cancelled-unknown` · state-machine · constructed
 

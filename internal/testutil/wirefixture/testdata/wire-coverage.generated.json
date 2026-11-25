@@ -61,6 +61,7 @@
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-386-multiview-model.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-negative-probes.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-608-progress.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
@@ -3350,6 +3351,7 @@
       "evidence_files": [
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-608-progress.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json"
@@ -3543,6 +3545,7 @@
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-negative-probes.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-608-progress.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
       ],
       "offerings": []
