@@ -50,6 +50,8 @@ App 端到端抽查（dev-test 生产同构测试环境，镜像 `a5e941e`）：
 
 2026-11-09 `gpt-image-2.6-sunburst` 实测（#224，用户当次同意，dev-test `OPENAI_API_KEY`，5 次请求全部 200）：`quality=max`、`quality=xhigh`（1024×1024）、`3840x2160`（quality=low）、`background=transparent`（png）、`images/edits` 带 `image[]` 与 `mask`。响应 `data[]` 为 `b64_json` 与新增的 `generation_id`，仍无 `mime_type`；顶层返回 `size`、`quality`、`background`、`output_format`、`usage`。结论：2.6 接受 2.5 的全部声明参数取值，Catalog 只切换模型 ID 与显示名；官方新增的 `complexity`、`markup`、GIF/SVG 输出未接入（SVG 见 #222）。同日经用户同意用 `fake-upstream-align official` 采集（5 个请求，其中付费 2 次）：`images/generations` 成功响应入库为新的文生图样本，`data[]` 含 `generation_id`、顶层新增 `safety_identifier`，缺 prompt 时网关返回 400 `empty_string`；fake 的文生图响应随样本更新。`images/edits` 的付费请求网关返回 503、缺图请求返回 500 `convert_request_failed`（同日手工以 `image[]`+`mask` 直测为 200），图生图样本当时暂保留 2.5 版本。网关修复后同日经用户同意重采（#227，`edits-invalid` 不计费、`edits` 付费 1 次）：缺图请求返回 400 `missing_required_parameter`（`param=image`，message 带网关 request id 后缀），带参考图请求 200，`data[]` 同样含 `generation_id`、顶层含 `safety_identifier`；图生图样本已替换为 2.6 版本，fake 的图生图响应随样本更新，对照结构差异为 0。
 
+2026-11-25 `gpt-image-2.6-sunburst` 复核（#608，用户当次同意，1 次付费请求）：1024×1024、`quality=max`、n=1 的文生图返回 200，响应回显 `quality: max`，usage 为 14 个输入文本 token、7024 个输出图像 token（按官方 30 美元/百万输出 token 约 0.21 美元），结构与 low 的样本相同；脱敏样本 `openai-images-v1-quality-max-2026-11-25` 已入库，fake 继续接受 `max`。同日官方图像生成指南写明 2.6 与 2.5 的 Sunburst、Flare 均支持 `xhigh` 与 `max`，此前“官方只给 2.5”的冲突说法不再成立。
+
 结论（GPT Image 2.5 Sunburst 全声明参数）：
 
 - mask、n（=2）、size（自定义值）、quality（low/xhigh/max，medium/high 同枚举族未单测）、output_format（png/webp/jpeg）、output_compression（=80）、background（auto/opaque/transparent）、moderation（auto/low）、16 张参考图上限**均已实测被代理接受**。

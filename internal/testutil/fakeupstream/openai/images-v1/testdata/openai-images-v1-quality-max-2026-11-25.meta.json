@@ -1,0 +1,11 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "30871f221302786f2774ec2061025916969b0511d2ed89feeb044b35e32c9615",
+  "captured_at_utc": "2026-11-25",
+  "exchanges": 1,
+  "provenance": "captured",
+  "scenario": "openai-images-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

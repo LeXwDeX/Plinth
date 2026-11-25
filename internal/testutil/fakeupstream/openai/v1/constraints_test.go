@@ -13,9 +13,19 @@ import (
 const (
 	observedToolsEffortRefusal = `{"error":{"message":"Function tools with reasoning_effort are not supported for gpt-6.2-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.","type":"invalid_request_error","param":"reasoning_effort","code":null}}`
 	observedTemperatureRefusal = `{"error":{"message":"Unsupported value: 'temperature' does not support 0 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}`
-	// Constructed from the OpenAI documents (read 2026-11-20), not observed.
-	constructedNoneRefusal = `{"error":{"message":"Unsupported value: 'reasoning_effort' does not support 'none' with this model.","type":"invalid_request_error","param":"reasoning_effort","code":"unsupported_value"}}`
+	// #608: the HTTP answer of the gateway to gpt-astra with reasoning_effort
+	// minimal on Chat Completions (2026-11-25), its requestid replaced.
+	observedMinimalRefusal = `{"error":{"message":"Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.","type":"invalid_request_error","param":"reasoning_effort","requestid":"00000000_FAKE-NODE-00000_00000-00000","code":"unsupported_value"}}`
+	// The documents say none is refused (read 2026-11-20); its words are the
+	// observed minimal refusal's, which is constructed.
+	constructedNoneRefusal = `{"error":{"message":"Unsupported value: 'reasoning_effort' does not support 'none' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.","type":"invalid_request_error","param":"reasoning_effort","requestid":"00000000_FAKE-NODE-00000_00000-00000","code":"unsupported_value"}}`
 )
+
+// relayed is a 2026-11-20 log body as the gateway answers it over HTTP: the
+// gateway adds its requestid before code (observed 2026-11-25, #608).
+func relayed(logBody string) string {
+	return strings.Replace(logBody, `,"code":`, `,"requestid":"`+gatewayRequestID+`","code":`, 1)
+}
 
 func (f *fixture) refuse(body map[string]any) (int, string) {
 	f.t.Helper()
@@ -38,19 +48,21 @@ func TestAstraRefusesTheRequestShapesTheGatewayRefused(t *testing.T) {
 			// The Agent turn as it was sent: all three at once. The tools
 			// refusal is the observed answer to it.
 			"agent turn": {map[string]any{"messages": user("hi"), "tools": lookupTools,
-				"reasoning_effort": "high", "temperature": 0}, observedToolsEffortRefusal},
+				"reasoning_effort": "high", "temperature": 0}, relayed(observedToolsEffortRefusal)},
 			"tools with a level": {map[string]any{"messages": user("hi"), "tools": lookupTools,
-				"reasoning_effort": "low"}, observedToolsEffortRefusal},
+				"reasoning_effort": "low"}, relayed(observedToolsEffortRefusal)},
 			// The title request as it was sent: a level, no tools, temperature 0.
 			"title request": {map[string]any{"messages": user("hi"), "reasoning_effort": "high",
-				"temperature": 0}, observedTemperatureRefusal},
-			"temperature without a level": {map[string]any{"messages": user("hi"), "temperature": 0}, observedTemperatureRefusal},
+				"temperature": 0}, relayed(observedTemperatureRefusal)},
+			"temperature without a level": {map[string]any{"messages": user("hi"), "temperature": 0}, relayed(observedTemperatureRefusal)},
 			// The documents say none is rejected: tools cannot be rescued by it.
 			"none": {map[string]any{"messages": user("hi"), "reasoning_effort": "none"}, constructedNoneRefusal},
 			"none with tools": {map[string]any{"messages": user("hi"), "tools": lookupTools,
 				"reasoning_effort": "none"}, constructedNoneRefusal},
 			// The model's own default effort is not none, so tools still fail.
-			"tools without a level": {map[string]any{"messages": user("hi"), "tools": lookupTools}, observedToolsEffortRefusal},
+			"tools without a level": {map[string]any{"messages": user("hi"), "tools": lookupTools}, relayed(observedToolsEffortRefusal)},
+			"minimal": {map[string]any{"messages": user("hi"), "reasoning_effort": "minimal",
+				"max_completion_tokens": 200}, observedMinimalRefusal},
 		} {
 			body := map[string]any{"model": model}
 			for key, value := range test.body {

@@ -84,7 +84,7 @@ func Profile() align.Profile {
 		RequestNotes: []string{
 			"网关为 gpt-image-2 的 OpenAI 兼容中转（Plinth 的 OPENAI_BASE_URL）；为压低费用每个付费端点只发一次，取 1024x1024、quality=low、n=1：Plinth 默认 2048x2048、quality=max，响应结构相同，只有 usage 的数值不同。",
 			"edits 的参考图在付费运行里用的是 `image[]` 分片名（Plinth 的真实写法，网关返回 200）；wirefixture 的键规则不接受方括号，样本把分片名写成 `image`，fake 两种写法都接受。",
-			"（OptIn：默认的官方运行不发这些步骤，只有 -steps 点名才发，每次发起前按 AGENTS.md 说明次数与预计费用并取得当次同意）验收一轮（#540）新增的四个步骤（generations-n2-1536x1152、generations-quality-max、generations-invalid-size、edits-two-images-mask）各发一次：n=2 的真实尺寸与 usage、quality=max 是否被网关受理（Catalog 默认值裁决，约 0.11 美元）、1000x1000 的 400 信封（官方规则：边长须为 16 的倍数；预期免费）、两张参考图加同尺寸 mask 的 edits。两张参考图与 mask 用 `image[]` 与 `mask` 分片名（Plinth 的真实写法）；wirefixture 的样本键规则不接受方括号，导出样本前须按「edits」步骤的做法处理分片名。这些步骤在真实运行前没有官方样本，fake 的对应行为是 constructed-from-docs。",
+			"（OptIn：默认的官方运行不发这些步骤，只有 -steps 点名才发，每次发起前按 AGENTS.md 说明次数与预计费用并取得当次同意）验收一轮（#540）新增的四个步骤（generations-n2-1536x1152、generations-quality-max、generations-invalid-size、edits-two-images-mask）各发一次：n=2 的真实尺寸与 usage、quality=max 是否被网关受理（Catalog 默认值裁决；#608 于 2026-11-25 实发一次：200、响应回显 quality max、7024 个输出图像 token，按官方 30 美元/百万 token 约 0.21 美元，样本 openai-images-v1-quality-max-2026-11-25）、1000x1000 的 400 信封（官方规则：边长须为 16 的倍数；预期免费）、两张参考图加同尺寸 mask 的 edits。两张参考图与 mask 用 `image[]` 与 `mask` 分片名（Plinth 的真实写法）；wirefixture 的样本键规则不接受方括号，导出样本前须按「edits」步骤的做法处理分片名。这些步骤在真实运行前没有官方样本，fake 的对应行为是 constructed-from-docs。",
 			"内容审核拒绝（400 moderation_blocked）、402、429、5xx 没有在官方网关上触发，fake 沿用真实 400 信封并换成文档里的 code 与 message。",
 		},
 		Notes: align.Notes{},

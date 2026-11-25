@@ -100,15 +100,16 @@ func TestAnimationFPSAndMotionRigRulesOfThePage(t *testing.T) {
 	motion := f.create("/text-to-motion", map[string]any{"prompt": "a person waves one hand", "duration": 2, "mode": "prime"})
 	f.finish("/text-to-motion", motion, key)
 	runPosts(t, f, "/animations", map[string]postCase{
-		"fps 30 with change_fps":            {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 30}}, http.StatusAccepted},
-		"fps 60 with change_fps":            {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 60}}, http.StatusAccepted},
-		"fps 48":                            {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 48}}, http.StatusBadRequest},
-		"fps as a string":                   {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": "30"}}, http.StatusBadRequest},
-		"fps beside fbx2usdz is ignored":    {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "fbx2usdz", "fps": 24}}, http.StatusAccepted},
-		"a motion on a biped rig":           {map[string]any{"rig_task_id": biped, "motion_task_id": motion}, http.StatusAccepted},
-		"a motion on a quadruped rig":       {map[string]any{"rig_task_id": quadruped, "motion_task_id": motion}, http.StatusBadRequest},
-		"an action on a quadruped rig":      {map[string]any{"rig_task_id": quadruped, "action_id": 0}, http.StatusAccepted},
-		"the Catalog body (rig and action)": {map[string]any{"rig_task_id": biped, "action_id": 0}, http.StatusAccepted},
+		"fps 30 with change_fps":                {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 30}}, http.StatusAccepted},
+		"fps 60 with change_fps":                {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 60}}, http.StatusAccepted},
+		"fps 48":                                {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": 48}}, http.StatusBadRequest},
+		"fps as a string":                       {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "change_fps", "fps": "30"}}, http.StatusBadRequest},
+		"fps beside fbx2usdz is ignored":        {map[string]any{"rig_task_id": biped, "action_id": 0, "post_process": map[string]any{"operation_type": "fbx2usdz", "fps": 24}}, http.StatusAccepted},
+		"a motion on a biped rig":               {map[string]any{"rig_task_id": biped, "motion_task_id": motion}, http.StatusAccepted},
+		"a motion on a quadruped rig":           {map[string]any{"rig_task_id": quadruped, "motion_task_id": motion}, http.StatusBadRequest},
+		"a quadruped action on a quadruped rig": {map[string]any{"rig_task_id": quadruped, "action_id": quadrupedAction}, http.StatusAccepted},
+		"a biped action on a quadruped rig":     {map[string]any{"rig_task_id": quadruped, "action_id": 0}, http.StatusBadRequest},
+		"the Catalog body (rig and action)":     {map[string]any{"rig_task_id": biped, "action_id": 0}, http.StatusAccepted},
 	})
 }
 

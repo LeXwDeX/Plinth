@@ -475,6 +475,21 @@ func Profile() align.Profile {
 		},
 		Notes: smartSegmentFailureNotes(),
 	}
+	// #608: the poll sequence of one geometry-only text model (v3.0, no
+	// texture, 10 credits), polled every 2 seconds so the progress values and
+	// the poll where the output keys appear are recorded. Opt-in and paid.
+	progressPoll := taskPoll()
+	progressPoll.Interval, progressPoll.Max = 2*time.Second, 600
+	profile.Steps = append(profile.Steps,
+		align.Step{Name: "progress-model", Method: "POST", OptIn: true, Path: "/generation/text-to-model", Paid: true,
+			Body: map[string]any{
+				"model": "v3.0-20250812", "prompt": "a plain low poly humanoid robot standing upright with arms out in a T pose",
+				"texture": false, "pbr": false, "face_limit": 10000,
+			},
+			Capture: map[string]string{"progress": "data.task_id"}},
+		align.Step{Name: "progress-model-poll", Method: "GET", Path: "/tasks/{progress}", RequireVar: "progress",
+			OptIn: true, Poll: progressPoll},
+	)
 	for _, probe := range Probes() {
 		profile.Steps = append(profile.Steps, probe.Step)
 	}

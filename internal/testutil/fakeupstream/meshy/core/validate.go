@@ -649,17 +649,25 @@ func AnimationRequestError(request map[string]any) string {
 	return ""
 }
 
-// AnimationSourceError is the Animation page's "Unsupported rig" 400 (read
-// 2026-11-25): "motion_task_id needs a biped rig, and Meshy rejects a quadruped
-// rig." The rig's kind is the animation_type of the rigging request behind
-// rig_task_id (default biped). Whether an action_id's rig_type matches the rig
-// needs the animation library, which the fake does not hold, so that 400 is not
-// modelled. The refusal text is constructed.
+// AnimationSourceError checks the request against the rig behind rig_task_id,
+// whose kind is the animation_type of its rigging request (default biped).
+// The Animation page's "Unsupported rig" 400 (read 2026-11-25): "motion_task_id
+// needs a biped rig, and Meshy rejects a quadruped rig" (constructed text).
+// The "Rig type mismatch" 400: an action_id or action_ids entry whose library
+// rig_type is not the rig's (animation_library.go; the quadruped-on-biped text
+// is real, #608).
 func AnimationSourceError(request map[string]any, field string, source map[string]any) string {
-	if field == "rig_task_id" && has(request, "motion_task_id") && stringOf(source, "animation_type") == "quadruped" {
+	if field != "rig_task_id" {
+		return ""
+	}
+	rigType := stringOf(source, "animation_type")
+	if rigType == "" {
+		rigType = "biped"
+	}
+	if has(request, "motion_task_id") && rigType == "quadruped" {
 		return "motion_task_id needs a biped rig; the rig_task_id task is a quadruped rig"
 	}
-	return ""
+	return actionRigTypeError(request, rigType)
 }
 
 // remeshTargetFormats are the target_formats of the Remesh page, which also
