@@ -839,9 +839,6 @@ export function Composer({
           </div>
         </DialogContent>
       </Dialog>
-      {streaming ? (
-        <p role="note" className="text-[11px] leading-4 text-muted-foreground" data-testid="composer-stop-note">{schemaText(schema, 'ui.studio.composer.stop_note')}</p>
-      ) : null}
       <ChatModelNotice />
       <GenerationModelNotice />
       {/* The status row under the box: the context usage and the compact action on the left, the tool call counter on the
