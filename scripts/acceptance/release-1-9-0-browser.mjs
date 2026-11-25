@@ -2709,8 +2709,11 @@ const cardSlots = async () => cardOf().locator('[data-testid=three-view-slot]').
   key: item.dataset.slot, status: item.dataset.status, start: Boolean(item.querySelector('[data-testid=three-view-start]')),
 })));
 async function openCard(sid) {
-  await openSession(sid);
-  await cardOf().waitFor({ timeout: 60000 });
+  // After a reload the session list can load after the first open: open the session again if the card does not show.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await openSession(sid);
+    try { await cardOf().waitFor({ timeout: attempt < 2 ? 20000 : 60000 }); return; } catch (error) { if (attempt === 2) throw error; }
+  }
 }
 /** Clicks a view's 「继续生成」 and returns the answer of its POST; `drop` reloads the page at once instead. */
 async function startView(key, { drop = false } = {}) {
@@ -2774,7 +2777,7 @@ async function advanceView(group, key, answers, reached) {
   reached[key] = (await viewStarted(group, key))?.status || 'not_started';
 }
 /** The card says what the server says: each view's status, and a start button exactly where it can start. */
-async function cardMatchesServer(group) {
+async function cardMatchesServerOnce(group) {
   const before = await groupOf(group);
   const card = await cardSlots();
   const after = await groupOf(group);
@@ -2789,6 +2792,15 @@ async function cardMatchesServer(group) {
     }
   }
   return { problems, server: slotsText(after.slots), card: card.map((entry) => `${entry.key}=${entry.status}${entry.start ? '/按钮' : ''}`).join(' ') };
+}
+/** The card re-reads when a task ends, so right after one finished it may lag the server by a few seconds: wait for the two to agree (at most 20 s). */
+async function cardMatchesServer(group) {
+  let read = await cardMatchesServerOnce(group);
+  for (let attempt = 0; attempt < 10 && read.problems.length; attempt += 1) {
+    await page.waitForTimeout(2000);
+    read = await cardMatchesServerOnce(group);
+  }
+  return read;
 }
 const answersText = (answers) => answers.map((answer) => (answer.clicked ? `${answer.key}:${answer.status}${answer.code ? ` ${answer.code}` : ''}` : `${answer.key}:${answer.note || '无按钮'}`)).join(' ');
 const answeredWell = (answers) => answers.every((answer) => !answer.clicked || answer.status === 'dropped' || (answer.status >= 200 && answer.status < 300));
