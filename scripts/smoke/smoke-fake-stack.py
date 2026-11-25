@@ -5639,14 +5639,14 @@ def scenario_vision_budget(api, offerings, work):
         record("#247 reference upload", False, f"HTTP {status}")
         return
     replies_before = assistant_reply_count(api, session)
-    # #360 makes the per-task image count a person's parameter: the Agent may no
-    # longer adjust "n", so the six candidates are asked for on the person's side
-    # of the turn (the message's own parameters) instead of through set_params.
-    marker = '[[fake:tool:refine_image {"prompt":"a red cube on a white background","reference_handles":["@img1"]}]]'
+    # #586: the image count follows what the person says. "n" is an advised
+    # parameter the Agent sets with a reason; the panel no longer writes it.
+    marker = ('[[fake:tool:set_params {"offering_id":"' + image_model + '","params":{"n":6},'
+              '"reasons":{"n":"用户要同一提示词的六个候选"}}]] '
+              '[[fake:tool:refine_image {"prompt":"a red cube on a white background","reference_handles":["@img1"]}]]')
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
         "content": "按这张参考图出六个候选 " + marker,
         "image_urls": [f"/api/v1/assets/{asset_id}"],
-        "parameters": {"n": 6},
         "creative_domain": "image", "ai_model": image_model,
     })
     if status not in (200, 201, 202) or not wait_agent_reply(api, session, replies_before, 120):
@@ -7607,6 +7607,28 @@ def scenario_asset_list_crops(api, work, stack):
                                 "SELECT COUNT(*) FROM input_asset_crops WHERE source_asset_id=?", (source_id,))
     record("#331 refused regions store no crop asset",
            count_first == 2, f"provenance rows={count_first}, want 2")
+    # #587: the crops have no Task; the session's version chain still lists
+    # each one, once, as an upload node marked as a crop (both lineage shapes).
+    for shape, path in (("session", f"/api/v1/chat/sessions/{session}/lineage"),
+                        ("first page", f"/api/v1/chat/sessions/{session}/lineage?limit=10")):
+        status, graph = api.json("GET", path)
+        crop_nodes = [node for node in (graph or {}).get("nodes") or []
+                      if node.get("kind") == "upload" and node.get("operation") == "crop"]
+        crop_ids = sorted(node.get("id") for node in crop_nodes)
+        want = sorted({f"upload:{hero_id}", f"upload:{sword_id}"})
+        record(f"#587 the {shape} lineage lists the crops as crop upload nodes",
+               status == 200 and bool(hero_id) and bool(sword_id) and crop_ids == want
+               and all(not node.get("task_id") for node in crop_nodes),
+               f"status={status} crops={crop_ids} want {want}")
+    # #587: a crop the session shows can be picked by its asset; the person's
+    # own upload (the scene picture) still cannot.
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick", {"kind": "image", "assetId": hero_id})
+    picked = json.dumps(body, ensure_ascii=False)
+    record("#587 a crop of the session can be picked",
+           status == 200 and bool(hero_id) and hero_id in picked, f"status={status} {picked[:200]}")
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick", {"kind": "image", "assetId": source_id})
+    record("#587 the person's own upload still cannot be picked", status == 400, f"status={status}")
+    api.json("DELETE", f"/api/v1/chat/sessions/{session}/pick")
 
     # Round 2: the same rectangle across turns, and the proposal whose items
     # directly name the first turn's crops.

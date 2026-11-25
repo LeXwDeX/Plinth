@@ -14,6 +14,7 @@ import {
   versionStatusLabel,
 } from '@/lib/workspace/versions';
 import { parseThreeViews } from '@/lib/workspace/three-view';
+import { imageResults } from '@/lib/workspace/canvas-auto-join';
 import type { TrackedTask } from '@/store/workspace-store';
 
 const schema = {
@@ -488,6 +489,24 @@ describe('screenshots, uploads and the link between versions', () => {
     expect(child.parents[0]).toMatchObject({ known: true, key: uploaded.key, link: 'reference' });
     // an upload is not a step of the line: results are numbered from 1
     expect(child.version).toBe(1);
+  });
+
+  it('shows each Agent crop as a version with no Task, linked to the picture it was cut from, never auto-joined (#587)', () => {
+    const crop = (id: string, minute: number) => ({
+      id: `upload:${id}`, kind: 'upload', operation: 'crop', created_at: `2026-01-01T00:0${minute}:00Z`,
+      assets: [{ id, role: 'image', media_type: 'image/png', ordinal: 0, url: `/api/v1/assets/${id}` }],
+    });
+    const lineage = parseLineage({
+      nodes: [task('img1', 1, [image('img1')]), crop('c1', 2), crop('c2', 3)],
+      edges: [edge('img1', 'upload:c1', 'source_asset', 'recorded'), edge('img1', 'upload:c2', 'source_asset', 'recorded')],
+    });
+    const { tiles, byTask } = buildVersionTiles({ schema, graph: lineage, tracked: [], sessionId: 's1' });
+    const crops = tiles.filter((tile) => tile.operation === 'crop');
+    expect(crops.map((tile) => [tile.origin, tile.taskId, tile.version])).toEqual([['upload', 'upload:c1', 0], ['upload', 'upload:c2', 0]]);
+    expect(crops[0].parents[0]).toMatchObject({ known: true, link: 'crop' });
+    expect(byTask.get('upload:c2')).toBe(crops[1].key);
+    // The automatic join only takes finished Task pictures: a crop waits in the strip until it is inserted.
+    expect(imageResults(tiles).map((result) => result.taskId)).toEqual(['img1']);
   });
 
   it('does not make a version older just because a picture was uploaded after it', () => {

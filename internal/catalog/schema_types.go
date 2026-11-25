@@ -3319,10 +3319,6 @@ type ChatSchema struct {
 	// side only; the card's visible words come from the Schema's option labels
 	// and ui.chat.choice.*.
 	ConceptDirections ChatConceptDirectionsSchema `json:"concept_directions,omitempty"`
-	// ImageCount declares the block that tells the Agent the 2D image count
-	// the person set for this session (#486). Server side only; the count is
-	// read from the session's stored settings, never from the Schema.
-	ImageCount ChatImageCountSchema `json:"image_count,omitempty"`
 	// SessionParameters declares the block that shows the Agent the
 	// parameter values the session holds per Offering before it submits
 	// (#564). Server side only; an empty template injects nothing.
@@ -3586,43 +3582,10 @@ type ChatConceptQuantitySchema struct {
 	SketchRefusal string `json:"sketch_refusal"`
 }
 
-// ChatImageCountSchema is application.chat.image_count (#486). The 2D image
-// count is the person's own setting for the whole session, not one value per
-// Offering, so the system prompt states the count they set and the Agent stops
-// guessing one or asking again. ContextTemplate is added to the system prompt
-// while the person has a count on record ({count}); without one the block is
-// left out and nothing names a number nobody chose. Server side only.
-type ChatImageCountSchema struct {
-	// ContextTemplate is the injected block ({count}).
-	ContextTemplate string `json:"context_template"`
-	// OfferingCapabilities names the Offerings the block reports on (#564):
-	// the enabled, available Offerings of these capabilities, one line per
-	// model. Empty reports on none.
-	OfferingCapabilities []schemacontract.Capability `json:"offering_capabilities,omitempty"`
-	// LimitTemplate names a model whose declared count range does not hold the
-	// session count, with the count its calls really run ({model}, {count}).
-	LimitTemplate string `json:"limit_template,omitempty"`
-	// UncountedTemplate names the models that declare no count parameter the
-	// person sets, so the session count does not reach them ({models}).
-	UncountedTemplate string `json:"uncounted_template,omitempty"`
-	// ModelSeparator joins the model names of UncountedTemplate and the
-	// reasons of OmittedTemplate.
-	ModelSeparator string `json:"model_separator,omitempty"`
-	// OmittedTemplate names a model whose count parameter the current
-	// parameter combination omits (its omit_when matches), so the session
-	// count does not reach it ({model}, {count}, {reason}).
-	OmittedTemplate string `json:"omitted_template,omitempty"`
-	// ReasonTemplate is one matched omit_when condition of OmittedTemplate,
-	// by the controlling parameter's label and the value's option label
-	// ({parameter}, {value}).
-	ReasonTemplate string `json:"reason_template,omitempty"`
-}
-
 // ChatSessionParametersSchema is application.chat.session_parameters (#564).
 // The system prompt says the parameters a session locked are followed; this
 // block shows which values those are: one line per Offering with each value
 // and who set it (the person on the panel, or the Agent with set_params).
-// The session image count is left to the image_count block.
 type ChatSessionParametersSchema struct {
 	// ContextTemplate is the injected block ({parameters}).
 	ContextTemplate string `json:"context_template"`

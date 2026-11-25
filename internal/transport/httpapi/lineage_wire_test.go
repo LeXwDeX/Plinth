@@ -105,3 +105,27 @@ func TestLineageWireMarksKeptConversions330(t *testing.T) {
 		t.Fatalf("wire = %s", text)
 	}
 }
+
+// #587: an Agent crop is an upload node marked as a crop; with no Task, its
+// picture is read from the owner's asset route.
+func TestLineageWireNamesCropsByTheirAssetRoute587(t *testing.T) {
+	t.Parallel()
+	assetItem, err := routing.ParseOne("/api/v1/assets/{assetID}", "assetID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{assetItemRoute: assetItem}
+	encoded, _ := json.Marshal(server.lineageWire("", lineage.Graph{Nodes: []lineage.Node{
+		{ID: "upload:crop-1", Kind: lineage.KindUpload, Operation: lineage.OperationCrop,
+			Assets: []lineage.Asset{{ID: "crop-1", Role: "image", MediaType: "image/png"}}},
+	}}))
+	text := string(encoded)
+	for _, want := range []string{`"kind":"upload"`, `"operation":"crop"`, `"url":"/api/v1/assets/crop-1"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("lineage wire lacks %s: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "task_id") {
+		t.Fatalf("a crop names no Task: %s", text)
+	}
+}

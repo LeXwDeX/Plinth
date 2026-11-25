@@ -75,7 +75,7 @@ import { useStudioStore } from '@/store/studio-store';
 import { useMaskStore } from '@/store/mask-store';
 import { handleOfObject } from '@/lib/workspace/object-handle';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
-import { imagesToPlace } from '@/lib/workspace/canvas-placement';
+import { imagesToPlace, placementReceiptKey } from '@/lib/workspace/canvas-placement';
 import { planAutoJoin, resultKey, withPlaced } from '@/lib/workspace/canvas-auto-join';
 import { useSessionVersions } from '@/hooks/use-session-versions';
 import type { VersionTile } from '@/lib/workspace/versions';
@@ -524,10 +524,20 @@ export function WorkspaceCanvasBoard() {
       localBitmapNodeIds(sessionID).size === 0 &&
       first.nodesHash === computeNodesHash(useCanvasStore.getState().getNodes(sessionID)) ? firstImage : null;
     // FEA-02：产物归属其他会话时不落画布（切会话后旧轮次完成场景）。
+    const boardEmpty = useCanvasStore.getState().getNodes(sessionID).length === 0;
     const urls = firstRestore ? [firstRestore.url]
-      : imagesToPlace(selection, sessionID, placedSelections.current, suppressedTaskIds, placedResults);
+      : imagesToPlace(selection, sessionID, placedSelections.current, suppressedTaskIds, placedResults, boardEmpty);
     if (!selection || urls.length === 0) return;
     placedSelections.current.add(selection);
+    // #559: an explicit insert (and the one picture a view puts on an empty board) is written to the placement
+    // receipt, so the automatic join neither adds it a second time nor brings it back after a delete.
+    const receiptKey = !firstRestore && selection.placement ? placementReceiptKey(sessionVersions.tiles, selection) : null;
+    const registerReceipt = () => {
+      if (!receiptKey || placementSession.current !== sessionID) return;
+      const store = useCanvasStore.getState();
+      const next = withPlaced(store.placedResultsBySession[sessionID] ?? null, [receiptKey]);
+      if (next) store.setPlacedResults(sessionID, next);
+    };
     // 重渲染不取消这次放置（它只发生一次）；只有切走会话或换了当前对象时才放弃。
     const stillCurrent = () => useWorkspaceStore.getState().currentObject === selection && placementSession.current === sessionID;
     const addReadyImages = async () => {
@@ -535,10 +545,10 @@ export function WorkspaceCanvasBoard() {
         const url = proxyAssetUrl(originalURL, selection.taskId);
         if (!url) continue;
         const store = useCanvasStore.getState();
-        if (store.getNodes(sessionID).some((node) => node.type === 'image' && node.imageUrl === url)) continue;
+        if (store.getNodes(sessionID).some((node) => node.type === 'image' && node.imageUrl === url)) { registerReceipt(); continue; }
         const natural = await placementSize(url);
         if (!stillCurrent()) return;
-        if (store.getNodes(sessionID).some((node) => node.type === 'image' && node.imageUrl === url)) continue;
+        if (store.getNodes(sessionID).some((node) => node.type === 'image' && node.imageUrl === url)) { registerReceipt(); continue; }
         if (firstRestore) {
           // Loading bytes must not overwrite drawing or deletion performed while that request waited.
           if (natural.width <= 0 || natural.height <= 0 || localBitmapNodeIds(sessionID).size > 0 ||
@@ -557,6 +567,7 @@ export function WorkspaceCanvasBoard() {
           x: placement.x, y: placement.y,
           width: placement.width, height: placement.height,
         })) return;
+        registerReceipt();
       }
     };
     void addReadyImages();

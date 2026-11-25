@@ -30,8 +30,9 @@ describe('buildMentionCandidates', () => {
   const list = buildMentionCandidates(sources);
 
   it('lists history, waiting uploads, versions and canvas layers, each picture once', () => {
-    expect(list.map((item) => item.handle)).toEqual(['@img3', '@img1', '@img2', '@上传的图1', '@上传的图2', '@2Dv4', '@图层2']);
-    expect(list.map((item) => item.source)).toEqual(['history', 'history', 'history', 'upload', 'upload', 'version', 'canvas']);
+    // #560: the pictures on the canvas come first ("2D v4" is shown by 图层 1), each section in source order.
+    expect(list.map((item) => item.handle)).toEqual(['@2Dv4', '@图层2', '@img3', '@img1', '@img2', '@上传的图1', '@上传的图2']);
+    expect(list.map((item) => item.source)).toEqual(['version', 'canvas', 'history', 'history', 'history', 'upload', 'upload']);
   });
 
   it('keeps the stable server handle for a picture found in several places and finds it by every name', () => {
@@ -145,7 +146,8 @@ describe('mentions before send: names are client-side only', () => {
       layers: [{ name: '图层 1', url: '/api/v1/tasks/t6/assets/a6', taskId: 't6' }],
     });
     expect(new Set(list.map((item) => item.handle)).size).toBe(list.length);
-    expect(list.map((item) => item.handle)).toEqual(['@img1', '@img1_2', '@图层1', '@图层1_2']);
+    // #560: the layer lists first (it is on the canvas) and keeps the name it was given in source order.
+    expect(list.map((item) => item.handle)).toEqual(['@图层1_2', '@img1', '@img1_2', '@图层1']);
   });
 
   it('keeps a picked layer token meaning its own picture after another layer is deleted', () => {

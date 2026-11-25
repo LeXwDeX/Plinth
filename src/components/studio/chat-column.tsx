@@ -2155,14 +2155,18 @@ export function ChatColumn() {
         url: asset.url,
       }));
     });
-    const layers = [...(canvasNodes ?? [])]
-      .filter((node) => node.type === 'image' && node.visible !== false && node.imageUrl)
-      .sort((left, right) => left.zIndex - right.zIndex)
+    // #560: a hidden layer can still be named but lists in the library. Visible layers keep their numbers; hidden
+    // ones are numbered after them, so hiding a layer does not renumber the layers still shown.
+    const pictureLayers = [...(canvasNodes ?? [])]
+      .filter((node) => node.type === 'image' && node.imageUrl)
+      .sort((left, right) => left.zIndex - right.zIndex);
+    const layers = [...pictureLayers.filter((node) => node.visible !== false), ...pictureLayers.filter((node) => node.visible === false)]
       .map((node, index) => ({
         name: formatSchemaText(schemaText(schema, 'ui.studio.composer.mention.token_layer'), { index: index + base }),
         url: node.imageUrl,
         ...(node.taskId && !node.taskId.startsWith('canvas:') && !node.taskId.startsWith('upload:') ? { taskId: node.taskId } : {}),
         ...(node.captureId ? { captureId: node.captureId } : {}),
+        ...(node.visible === false ? { hidden: true } : {}),
       }));
     const listed = buildMentionCandidates({
       history: mentionCandidates(sessionMessages),

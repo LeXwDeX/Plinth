@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
@@ -107,15 +106,6 @@ func (s *Server) agentParamsPut(writer http.ResponseWriter, request *http.Reques
 		if err := s.agentParams.SetUserOffering(key, offeringID, normalized); err != nil {
 			s.writeChatInternalError(writer, err)
 			return
-		}
-		// #486: the panel's count is the person's own expectation for the
-		// whole session, not this Offering's copy of it. Remember it once, and
-		// the prompt and every other Offering read that number. A patch about
-		// something else says nothing about the count, so it leaves it alone.
-		if name := selected.EstimatedCreditsUnitParameter; name != "" {
-			if _, edited := body.Params[name]; edited {
-				s.agentParams.SetImageCount(key, imageCountOf(normalized[name]))
-			}
 		}
 	} else {
 		s.agentParams.SetUser(key, body.Params)
@@ -602,24 +592,6 @@ func agentParamsOrNew(store *agentparams.Store) *agentparams.Store {
 	return store
 }
 
-// imageCountOf reads the count parameter of one panel patch (#486). An absent,
-// cleared or unreadable value reports zero, which hands the session back to
-// whatever each Offering declares.
-func imageCountOf(encoded json.RawMessage) int {
-	if len(encoded) == 0 || string(encoded) == "null" {
-		return 0
-	}
-	var number json.Number
-	if err := json.Unmarshal(encoded, &number); err != nil {
-		return 0
-	}
-	count, err := number.Int64()
-	if err != nil || count < 1 {
-		return 0
-	}
-	return int(count)
-}
-
 func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 	stored := s.agentParams.GetOffering(key, offeringID)
 	if offeringID == "" {
@@ -627,26 +599,22 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 	}
 	values := map[string]json.RawMessage{}
 	result := map[string]any{"params": values}
-	states := s.agentParams.OfferingStates(key, offeringID)
-	// #486: the person's image count is one value for the whole session, so
-	// every Offering that prices by a count shows the same number instead of
-	// the value one Offering kept. A session with none on record keeps the
-	// declared default, which the panel already reads from the Offering.
-	// #564: each Offering shows the count inside its own declared range, the
-	// value its next call really runs with.
-	count, hasCount := s.agentParams.ImageCount(key)
 	visible := map[string]agentparams.ParameterState{}
 	for _, o := range s.generation.Offerings("") {
 		if string(o.ID) != offeringID {
 			continue
 		}
-		for _, p := range o.Parameters {
-			if hasCount && p.Name == o.EstimatedCreditsUnitParameter && o.UserParameterAllowed(p) {
-				value := json.RawMessage(strconv.Itoa(p.ClampedCount(count)))
-				values[p.Name] = value
-				visible[p.Name] = agentparams.ParameterState{Value: value, Source: "user"}
-				continue
+		// #586: a pin the person may no longer set (an old panel image
+		// count) is skipped, so the Agent's own value for it shows.
+		states := s.agentParams.OfferingStatesExcept(key, offeringID, func(name string) bool {
+			for _, p := range o.Parameters {
+				if p.Name == name {
+					return !o.UserParameterAllowed(p) && o.AgentParameterAllowed(p)
+				}
 			}
+			return false
+		})
+		for _, p := range o.Parameters {
 			if !o.AgentParameterAllowed(p) {
 				delete(values, p.Name)
 				continue
@@ -654,6 +622,8 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 			state, ok := states[p.Name]
 			if !ok || state.Source == "default" || (state.Source == "user" && !o.UserParameterAllowed(p)) {
 				state = agentparams.ParameterState{Source: "default", Value: append(json.RawMessage(nil), p.Default...)}
+			} else if state.Source == "agent" {
+				values[p.Name] = state.Value
 			} else if raw, exists := stored[p.Name]; exists {
 				values[p.Name] = raw
 			}

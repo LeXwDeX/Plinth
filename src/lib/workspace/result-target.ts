@@ -38,6 +38,11 @@ export interface ResultTarget {
   fileName?: string;
   /** The results that came out together (the candidates of one request); ←/→ in the dialog pages through them. */
   group?: ResultTarget[];
+  /**
+   * A picture with no public Task (an upload, an Agent crop, #587) is a stage object under this synthetic id
+   * (`upload:<asset>`); `taskId` stays empty so nothing reads it as a Task.
+   */
+  stageObjectId?: string;
 }
 
 /** Identity of a result inside its group. */
@@ -80,8 +85,11 @@ function singleTargetOfTile(tile: VersionTile, sessionId: string, title: string,
   const splat = viewableGaussianSplatAsset(tile.assets);
   const attachment = !object && tile.status === 'ready' && tile.assets.length > 0 && tile.assets.every(asset => asset.kind === 'other')
     ? tile.assets.find(asset => asset.id === pick.assetId) ?? tile.assets[0] : undefined;
+  // An upload (or an Agent crop) is no Task: its detail shows the file, and it reaches the stage by its object id.
+  const upload = tile.origin === 'upload';
   return {
-    taskId: object?.taskId ?? tile.taskId,
+    taskId: upload ? undefined : object?.taskId ?? tile.taskId,
+    ...(upload && object ? { stageObjectId: object.taskId } : {}),
     sessionId,
     kind: splat ? 'splat' : object?.kind ?? (attachment ? 'other' : tile.domain === 'model' ? 'model' : 'image'),
     url: splat ? safeAssetURL(splat.url) : object?.url ?? (attachment ? safeAssetURL(attachment.url) : ''),
@@ -102,9 +110,10 @@ function singleTargetOfTile(tile: VersionTile, sessionId: string, title: string,
 
 /** The object the old click put on the stage; null for a result that has no file. */
 export function objectOfTarget(target: ResultTarget): CurrentObject | null {
-  if (!target.taskId || !target.sessionId || !target.url || target.kind === 'other' || target.kind === 'splat') return null;
+  const taskId = target.taskId || (target.kind === 'image' ? target.stageObjectId : undefined);
+  if (!taskId || !target.sessionId || !target.url || target.kind === 'other' || target.kind === 'splat') return null;
   return {
-    taskId: target.taskId, kind: target.kind, url: target.url, sessionId: target.sessionId,
+    taskId, kind: target.kind, url: target.url, sessionId: target.sessionId,
     ...(target.assetId ? { assetId: target.assetId } : {}),
     ...(target.imageUrls ? { imageUrls: target.imageUrls } : {}),
     ...(target.captureId ? { captureId: target.captureId } : {}),

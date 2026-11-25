@@ -322,19 +322,9 @@ type OrchestratorConfig struct {
 	// StepCosts reads the approximate per-step costs of the services the asset
 	// used. Nil writes them as unknown.
 	StepCosts func(ctx context.Context, ownerID, sessionID string) []StepCost
-	// ImageCount reads the 2D image count the person set for this session
-	// (#486). The second result is false when they set none, and the prompt
-	// then leaves the count out rather than naming a number nobody chose.
-	ImageCount func(ownerID, sessionID string) (int, bool)
 	// SessionParameters reads the parameter values the session holds per
 	// Offering (#564). Nil keeps the block out of every prompt.
 	SessionParameters func(ownerID, sessionID string) []SessionParameterGroup
-	// OfferingParameters reads the values the session holds for one Offering
-	// (the person's and the Agent's layers, "null" for a value cleared to the
-	// default), the same values a generation call starts from. The image count
-	// block reads them to tell whether an Offering's count parameter is sent
-	// (#564). Nil reads the declared defaults only.
-	OfferingParameters func(ownerID, sessionID, offeringID string) map[string]json.RawMessage
 }
 
 type Orchestrator struct {
@@ -390,17 +380,11 @@ type Orchestrator struct {
 	stepUsage    func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error)
 	stepBalances func(ctx context.Context) []StepBalance
 	stepCosts    func(ctx context.Context, ownerID, sessionID string) []StepCost
-	// imageCount reads the person's own 2D image count (#486); nil keeps the
-	// block out of every prompt.
-	imageCount func(ownerID, sessionID string) (int, bool)
 	// sessionParameters reads the session's parameter values per Offering
 	// (#564); nil keeps the block out of every prompt.
 	sessionParameters func(ownerID, sessionID string) []SessionParameterGroup
-	// offeringParameters reads one Offering's session values (#564); nil
-	// reads the declared defaults only.
-	offeringParameters func(ownerID, sessionID, offeringID string) map[string]json.RawMessage
-	queue              chan ProcessTurn
-	queueMu            sync.Mutex
+	queue             chan ProcessTurn
+	queueMu           sync.Mutex
 	// titleWaiters counts background title summaries in flight.
 	titleWaiters sync.WaitGroup
 	queued       map[string]struct{}
@@ -816,9 +800,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		stepUsage:          config.StepUsage,
 		stepBalances:       config.StepBalances,
 		stepCosts:          config.StepCosts,
-		imageCount:         config.ImageCount,
 		sessionParameters:  config.SessionParameters,
-		offeringParameters: config.OfferingParameters,
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
@@ -2299,7 +2281,6 @@ func (orchestrator *Orchestrator) agentRequest(
 		// selection and the framed session notes stay at the end of the prompt.
 		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain, options.ProductionBrief))
 		sections.add("concept_directions", orchestrator.conceptDirectionsPrompt(registry, scope))
-		sections.add("image_count", orchestrator.imageCountPrompt(registry, ownerID, sessionID))
 		sections.add("session_parameters", orchestrator.sessionParametersPrompt(ownerID, sessionID))
 		sections.add("candidates", orchestrator.candidatesPrompt(registry, scope))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))

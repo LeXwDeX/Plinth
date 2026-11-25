@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,11 +163,6 @@ type Config struct {
 	// source of a frozen value in the parameters list of a tool result (#296);
 	// nil leaves such a value unattributed.
 	OfferingParameterStates func(ownerID, sessionID, offeringID string) map[string]RememberedParameter
-	// ImageCount reads the 2D image count the person set for this session
-	// (#486): the one value the Offering's declared count parameter runs with,
-	// whichever Offering the turn uses. Nil leaves the stored Offering values
-	// as they are.
-	ImageCount func(ownerID, sessionID string) (int, bool)
 
 	// Logger records each refused processing step with its call and reason
 	// (#321 A, #233). Nil discards.
@@ -216,8 +210,6 @@ type Executor struct {
 	offeringParameters       func(string, string, string) map[string]json.RawMessage
 	offeringParameterReasons func(string, string, string) map[string]generation.ParameterReason
 	offeringParameterStates  func(string, string, string) map[string]RememberedParameter
-	// imageCount is the person's own 2D image count for the session (#486).
-	imageCount func(ownerID, sessionID string) (int, bool)
 
 	logger        *slog.Logger
 	modelFormats  ModelFormatStatus
@@ -288,7 +280,6 @@ func New(config Config) (*Executor, error) {
 		offeringParameters:       config.OfferingParameters,
 		offeringParameterReasons: config.OfferingParameterReasons,
 		offeringParameterStates:  config.OfferingParameterStates,
-		imageCount:               config.ImageCount,
 		logger:                   config.Logger,
 	}, nil
 }
@@ -1578,23 +1569,6 @@ func (executor *Executor) buildInput(
 			}
 			if permitted {
 				parameters[name] = value
-			}
-		}
-	}
-	// #486: the person's image count is one value for the whole session, not
-	// one per Offering (Offerings name the parameter they price by
-	// differently, n or max_images). It sits on the person's own layer, above a
-	// stale per-Offering value and below an explicit turn parameter, while a
-	// concept sketch's fixed value, applied last, still wins. #564: the one
-	// session value meets each Offering's own declared range here, so a count
-	// set on a model with a wider range runs at a narrower model's maximum
-	// instead of being refused at normalization, where the Agent cannot fix it.
-	if executor.imageCount != nil && offering.EstimatedCreditsUnitParameter != "" {
-		if parameter, declared := allowed[offering.EstimatedCreditsUnitParameter]; declared &&
-			offering.UserParameterAllowed(parameter) {
-			if count, ok := executor.imageCount(command.OwnerID, command.SessionID); ok {
-				parameters[offering.EstimatedCreditsUnitParameter] = json.RawMessage(
-					strconv.Itoa(parameter.ClampedCount(count)))
 			}
 		}
 	}

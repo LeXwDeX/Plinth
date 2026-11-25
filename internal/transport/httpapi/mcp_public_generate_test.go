@@ -565,10 +565,9 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 	// What a caller may set is listed; what it may not is refused by name and
 	// nothing is made: unknown, hidden (moderation), read-only, the prompt.
 	for name, parameters := range map[string]map[string]any{
-		"unknown":   {"no_such_parameter": 1},
-		"hidden":    {"moderation": "low"},
-		"prompt":    {"prompt": "sneaky"},
-		"user only": {"n": 2},
+		"unknown": {"no_such_parameter": 1},
+		"hidden":  {"moderation": "low"},
+		"prompt":  {"prompt": "sneaky"},
 	} {
 		before := f.countRows(`SELECT COUNT(*) FROM generation_tasks`)
 		result := call(map[string]any{"parameters": parameters})
@@ -589,11 +588,16 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 		!strings.Contains(unexplained.text[0], "$.parameter_reasons.quality") {
 		t.Fatalf("an advised change without a reason = %s", unexplained.raw)
 	}
+	// #586: the image count is advised too: the caller sets it with a reason.
+	if unexplained := call(map[string]any{"parameters": map[string]any{"n": 2}}); !unexplained.isError ||
+		!strings.Contains(unexplained.text[0], "$.parameter_reasons.n") {
+		t.Fatalf("a count without a reason = %s", unexplained.raw)
+	}
 	explained := call(map[string]any{"parameters": map[string]any{"quality": "medium"}, "parameter_reasons": map[string]any{"quality": "a draft for review"}})
 	if explained.isError {
 		t.Fatalf("an advised change with its reason = %s", explained.raw)
 	}
-	if stray := call(map[string]any{"parameter_reasons": map[string]any{"n": "why not"}}); !stray.isError || !strings.Contains(stray.text[0], "$.parameter_reasons.n") {
+	if stray := call(map[string]any{"parameter_reasons": map[string]any{"background": "why not"}}); !stray.isError || !strings.Contains(stray.text[0], "$.parameter_reasons.background") {
 		t.Fatalf("a reason for a parameter that takes none = %s", stray.raw)
 	}
 	if text := call(map[string]any{"parameter_reasons": map[string]any{"quality": 5}}); !text.isError || !strings.Contains(text.text[0], "$.parameter_reasons.quality") {
@@ -631,8 +635,11 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 				if !prompt {
 					t.Error("the prompt is not listed as an input")
 				}
-				if names["n"] != nil {
-					t.Errorf("list_services offers n, which only the person's panel can set: %v", names)
+				// #586: the count is the caller's to set, within the Offering's
+				// own range and with a reason, as an advised parameter.
+				if count := names["n"]; count == nil || count["advised"] != true || count["advice"] == "" ||
+					count["minimum"] != float64(1) || count["maximum"] != float64(10) {
+					t.Errorf("list_services does not offer n as an advised count of 1-10: %v", names["n"])
 				}
 				if names["quality"]["advised"] != true || names["quality"]["advice"] == "" {
 					t.Errorf("parameters = %v", names)

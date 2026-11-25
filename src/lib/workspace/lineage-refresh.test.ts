@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { createLineageRefreshGate, createSettledCounter, settledOutsideChain, lineageWatchSignature, type LineageWatch } from './lineage-refresh';
+import { createLineageRefreshGate, createSettledCounter, cropsOutsideChain, settledOutsideChain, lineageWatchSignature, type LineageWatch } from './lineage-refresh';
 
 const watch = (sessionId: string, settled = '', viewsDone = '', revision = 0): LineageWatch =>
   ({ sessionId, signature: lineageWatchSignature(settled, viewsDone, revision) });
@@ -81,7 +81,26 @@ describe('explicit lineage refreshes shared by every useSessionVersions consumer
   it('is shared by every useSessionVersions consumer', () => {
     const source = readFileSync(new URL('../../hooks/use-session-versions.ts', import.meta.url), 'utf8');
     expect(source).toContain('settledOutsideChain(settledIds, chainFinished)');
-    expect(source).toContain('countSettledChanges(sessionId, settled)');
+    expect(source).toContain('countSettledChanges(sessionId, changes)');
+    expect(source).toContain('cropsOutsideChain(messages, chainUploads)');
     expect(source).not.toContain('useRef<{ sessionId: string; ids: Set<string> }');
+  });
+});
+
+describe('the Agent crops the chain does not list yet (#587)', () => {
+  const messages = [
+    { attachments: [{ role: 'crop', assetId: 'c2' }, { role: 'crop', assetId: 'c1' }, { role: 'upload', assetId: 'u1' }] },
+    { attachments: [{ role: 'crop', assetId: 'c1' }] },
+    {},
+  ];
+  it('counts nothing until the chain has loaded, then only crops it lacks', () => {
+    expect(cropsOutsideChain(messages, null)).toBe('');
+    expect(cropsOutsideChain(messages, new Set())).toBe('crop:c1,crop:c2');
+    expect(cropsOutsideChain(messages, new Set(['c1', 'c2']))).toBe('');
+  });
+  it('does not flip back once the read brings them in, through the shared counter', () => {
+    const count = createSettledCounter();
+    const before = count('s1', cropsOutsideChain(messages, new Set()));
+    expect(count('s1', cropsOutsideChain(messages, new Set(['c1', 'c2'])))).toBe(before);
   });
 });

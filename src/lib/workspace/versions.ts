@@ -15,7 +15,7 @@ import type { TrackedTask } from '@/store/workspace-store';
 export type VersionDomain = 'image' | 'model';
 export type VersionStatus = 'ready' | 'pending' | 'running' | 'failed';
 /** 连接线的种类：决定图标和文案；`unknown` 画虚线。 */
-export type LinkClass = 'to_model' | 'capture' | 'process' | 'edit' | 'inpaint' | 'remove_background' | 'reference' | 'merge' | 'unknown';
+export type LinkClass = 'to_model' | 'capture' | 'process' | 'edit' | 'inpaint' | 'remove_background' | 'reference' | 'merge' | 'crop' | 'unknown';
 
 /**
  * 版本从哪里来：任务的结果；3D 截图（没有任务）；用户上传的图（没有任务）；
@@ -129,6 +129,8 @@ function refineLink(base: LinkClass, parent: Pick<VersionTile, 'origin'>, child:
   if (child.operation === 'inpaint') return 'inpaint';
   if (child.capability === 'background-removal') return 'remove_background';
   if (child.origin === 'merge') return 'merge';
+  // #587: a picture the Agent cut out of its source (an upload node marked as a crop).
+  if (child.origin === 'upload' && child.operation === 'crop') return 'crop';
   if (parent.origin === 'upload') return 'reference';
   return 'edit';
 }

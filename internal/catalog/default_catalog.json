@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.27",
+    "revision": "2026-11-24.19.29",
     "terminology": {
       "user_facing": [
         {
@@ -3666,7 +3666,7 @@
         "ui.chat.image.picked": "已选用",
         "ui.chat.image.picked_off_canvas": "已选用 · 不在画布",
         "ui.chat.image.pick_hint": "选用这张：后续步骤默认以它为准",
-        "ui.chat.image.pick_unavailable": "仅生成结果可选用",
+        "ui.chat.image.pick_unavailable": "仅生成结果与裁图可选用",
         "ui.chat.image.pick_failed": "选用失败，请重试",
         "ui.chat.image.reject": "不要这个",
         "ui.chat.image.rejected": "已否决",
@@ -3679,7 +3679,7 @@
         "ui.chat.image.reject_confirm": "确认否决",
         "ui.chat.image.reject_cancel": "取消",
         "ui.chat.image.send_to_canvas": "发送到画布",
-        "ui.chat.image.send_to_canvas_unavailable": "仅生成结果可发送到画布。上传的图片请直接在画布里添加",
+        "ui.chat.image.send_to_canvas_unavailable": "仅生成结果与裁图可发送到画布。上传的图片请直接在画布里添加",
         "ui.workspace.model_formats.title": "交付格式",
         "ui.workspace.model_formats.loading": "正在读取格式清单…",
         "ui.workspace.model_formats.load_failed": "读取格式清单失败，请稍后重试。",
@@ -5264,20 +5264,12 @@
         "ui.studio.params.no_model": "先在「生成模型」页选择模型，这里会显示该模型支持的参数。",
         "ui.studio.params.nothing": "这个模型没有可调的参数。",
         "ui.studio.params.from_skill": "来自 Skill「{skill}」的推荐尺寸",
-        "ui.studio.params.count_less": "减少数量",
-        "ui.studio.params.count_more": "增加数量",
-        "ui.studio.params.count_minimum": "已是最少数量 {count}",
-        "ui.studio.params.count_minimum_one": "已是最少数量 {count}",
-        "ui.studio.params.count_maximum": "已是最多数量 {count}",
-        "ui.studio.params.count_maximum_one": "已是最多数量 {count}",
         "ui.studio.params.no_session": "打开或新建会话后才能修改参数。",
         "ui.studio.params.edit_disabled": "当前状态下无法修改参数。",
         "ui.studio.params.condition_disabled": "当前设置（{conditions}）不允许修改此参数。",
         "ui.studio.params.cost_one": "预计 {total} 积分",
         "ui.studio.params.cost_many": "每张约 {unit} 积分，共约 {total} 积分",
         "ui.studio.params.more": "更多参数",
-        "ui.studio.params.summary_count": "{count} 张",
-        "ui.studio.params.summary_count_one": "{count} 张",
         "ui.studio.composer.send_cost": "生成约 {credits} 积分",
         "ui.studio.composer.send_cost_hint": "纯对话不消耗积分；如果生成，预计 {credits} 积分",
         "ui.studio.composer.send_with_cost": "发送。纯对话不消耗积分；如果生成，预计 {credits} 积分",
@@ -5288,6 +5280,8 @@
         "ui.studio.composer.mention.source_version": "版本",
         "ui.studio.composer.mention.source_canvas": "画布",
         "ui.studio.composer.mention.token_board": "画布",
+        "ui.studio.composer.mention.group_canvas": "画布中",
+        "ui.studio.composer.mention.group_library": "素材库",
         "ui.studio.composer.drop_hint": "松开即可加入附件",
         "ui.studio.composer.attachment.preview": "预览附件 {index}",
         "ui.studio.composer.draft.local_dropped": "有 {count} 张本地图片没能随草稿保留，请重新添加。",
@@ -5469,7 +5463,8 @@
         "ui.result.detail.copied": "提示词已复制",
         "ui.result.detail.copy_failed": "复制失败，请手动选中复制。",
         "ui.result.detail.regenerate": "用同样参数重新生成",
-        "ui.result.detail.open_canvas": "在画布中打开",
+        "ui.result.detail.open_canvas": "插入到画布",
+        "ui.result.detail.open_stage": "在舞台中打开",
         "ui.result.detail.send_to_2d": "发送到 2D",
         "ui.result.detail.no_file_running": "生成中，还没有可预览的文件。",
         "ui.result.detail.no_file_failed": "这次没有生成成功，没有文件。",
@@ -5594,6 +5589,7 @@
         "ui.studio.mask.kept": "蒙版会保留在 {label} 上，回到它就能接着用。",
         "ui.studio.mask.kept_discard": "放弃蒙版",
         "ui.studio.version.upload": "上传",
+        "ui.studio.version.crop": "裁图",
         "ui.studio.version.capture_caption": "{parent} 截图",
         "ui.studio.version.capture_caption_alone": "截图",
         "ui.studio.version.conversion_caption": "格式转换",
@@ -5601,6 +5597,7 @@
         "ui.studio.strip.link.remove_background": "由 {parent} 去背景而来",
         "ui.studio.strip.link.reference": "以 {parent} 作为参考图生成",
         "ui.studio.strip.link.merge": "由 {parent} 合并手绘而来",
+        "ui.studio.strip.link.crop": "从 {parent} 裁出",
         "ui.studio.strip.link.step.remesh": "由 {parent} 重拓扑而来",
         "ui.studio.strip.link.step.retexture": "由 {parent} 换贴图而来",
         "ui.studio.strip.link.step.rigging": "由 {parent} 绑骨而来",
@@ -5636,9 +5633,8 @@
         "ui.studio.mask.chip_title": "蒙版：{handle}",
         "ui.studio.mask.chip_title_hint": "局部重绘只改蒙版圈出的区域",
         "ui.studio.params.default_ratio": "1:1",
-        "ui.studio.params.default_count": "4",
         "ui.studio.params.chip_none": "无可调参数",
-        "ui.studio.params.chip_hint": "生成参数：比例、尺寸、张数",
+        "ui.studio.params.chip_hint": "生成参数：比例、尺寸",
         "ui.common.date.placeholder": "选择日期",
         "ui.common.date.previous_month": "上个月",
         "ui.common.date.next_month": "下个月",
@@ -7196,7 +7192,7 @@
               "edit_multiview_images",
               "create_three_view"
             ],
-            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用途推荐的参数会进入冻结输入。用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板，也不必为此先确认；只有用户明确要求换尺寸时，才提示可以调整画板。\n提示词：用模型提示词指引要求的语言（没写就用英文）写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图按 3D 制作要领里的输入图要求画（单主体、纯色背景、角色 A/T 姿态）。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时按用途推荐选择；带理由偏离时把理由写进参数说明。出图张数由用户在面板设定、服务端逐次写入（见【生成张数】），不要自行加量或多提交几次凑数。"
+            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板；只有用户明确要求换尺寸时，才提示可以调整画板。\n提示词：用模型提示词指引要求的语言（没写就用英文）写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图按 3D 制作要领里的输入图要求画。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。\n张数按用户的话定：几张不同内容的图分次提交，每条 prompt 只写一个场景，写进几个场景或「几张图」会被拼成多格总览；n 等张数参数只出同一 prompt 的变体。提交多次前先一句话说明几次、每次一个场景。已得到多格总览时，经用户明确同意才用 crop_image_regions 裁块，并说明每块只有原图一部分分辨率。"
           },
           {
             "id": "model3d_assets",
@@ -7847,7 +7843,7 @@
         {
           "name": "set_params",
           "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed, and a count the person owns (adjustment_policy user, such as the per-task image count) cannot be raised here: their session value applies. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
+          "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8816,7 +8812,7 @@
           "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says.",
+          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. How many images to make follows what the person says: the model's count parameter (such as n) only gives variants of one prompt; several different images (different scenes, characters or compositions) are separate calls with one scene per prompt, as the 2D craft brief says. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings"},
@@ -11053,17 +11049,8 @@
           "gemini/gemini-3-pro-image/text-to-image": {"image_size": "1K"}
         }
       },
-      "image_count": {
-        "context_template": "\n\n【生成张数】用户本会话把 2D 生成的张数设为 {count} 张（用户自己设的期望，不是你的判断，也不是上游限制）。服务端会把它写进每次生图调用的张数参数，一次调用就出这么多张：不要分几次补齐，不要自行加量，也不要多提交几次凑数。你改不了这个张数；用户这次要的张数和它不同时，请用户在面板上改。",
-        "offering_capabilities": ["text-to-image", "image-to-image"],
-        "limit_template": "{model} 一次最多出 {count} 张，用它时按 {count} 张出。",
-        "uncounted_template": "{models} 没有张数参数，出几张不受这个设置控制；用这些模型时如实告诉用户。",
-        "model_separator": "、",
-        "omitted_template": "{model} 在当前设置下不发送张数参数（{reason}），会话张数到不了它，这次不会按 {count} 张出；用它时如实告诉用户，用户可以在面板上改这项设置。",
-        "reason_template": "{parameter}为「{value}」"
-      },
       "session_parameters": {
-        "context_template": "\n\n【本会话参数】下面这些参数本会话已有值，提交时服务端按它们执行（张数见【生成张数】）：\n{parameters}\n用户设的照办，不要再问，也不要在 prompt 里写与它们冲突的尺寸、比例或画质；你设的可以用 set_params 改。",
+        "context_template": "\n\n【本会话参数】下面这些参数本会话已有值，提交时服务端按它们执行：\n{parameters}\n用户设的照办，不要再问，也不要在 prompt 里写与它们冲突的尺寸、比例或画质；你设的可以用 set_params 改。",
         "offering_template": "- {model}（{capability}）：{parameters}",
         "parameter_template": "{label} {value}（{source}）",
         "separator": "；",
@@ -18276,7 +18263,7 @@
             "ui.chat.image.picked": "In use",
             "ui.chat.image.picked_off_canvas": "In use · not on canvas",
             "ui.chat.image.pick_hint": "Use this image: later steps default to it",
-            "ui.chat.image.pick_unavailable": "Only generated results can be used",
+            "ui.chat.image.pick_unavailable": "Only generated results and crops can be used",
             "ui.chat.image.pick_failed": "Failed to use image, please retry",
             "ui.chat.image.reject": "Not this one",
             "ui.chat.image.rejected": "Rejected",
@@ -18289,7 +18276,7 @@
             "ui.chat.image.reject_confirm": "Reject",
             "ui.chat.image.reject_cancel": "Cancel",
             "ui.chat.image.send_to_canvas": "Send to canvas",
-            "ui.chat.image.send_to_canvas_unavailable": "Only generated results can be sent to the canvas. Add uploaded pictures on the canvas directly",
+            "ui.chat.image.send_to_canvas_unavailable": "Only generated results and crops can be sent to the canvas. Add uploaded pictures on the canvas directly",
             "ui.workspace.model_formats.title": "Delivery formats",
             "ui.workspace.model_formats.loading": "Loading format list…",
             "ui.workspace.model_formats.load_failed": "Failed to load the format list. Please try again later.",
@@ -19878,20 +19865,12 @@
             "ui.studio.params.no_model": "Choose a model on the Generation models tab first; the parameters it supports will appear here.",
             "ui.studio.params.nothing": "This model has no adjustable parameters.",
             "ui.studio.params.from_skill": "Recommended size from Skill \"{skill}\"",
-            "ui.studio.params.count_less": "Decrease count",
-            "ui.studio.params.count_more": "Increase count",
-            "ui.studio.params.count_minimum": "Already at the minimum count of {count}",
-            "ui.studio.params.count_minimum_one": "Already at the minimum count of {count}",
-            "ui.studio.params.count_maximum": "Already at the maximum count of {count}",
-            "ui.studio.params.count_maximum_one": "Already at the maximum count of {count}",
             "ui.studio.params.no_session": "Open or create a session before changing parameters.",
             "ui.studio.params.edit_disabled": "Parameters can't be changed in the current state.",
             "ui.studio.params.condition_disabled": "The current settings ({conditions}) don't allow changing this parameter.",
             "ui.studio.params.cost_one": "Estimated credits: {total}",
             "ui.studio.params.cost_many": "Credits per item: {unit}; total credits: {total}",
             "ui.studio.params.more": "More parameters",
-            "ui.studio.params.summary_count": "{count} images",
-            "ui.studio.params.summary_count_one": "{count} image",
             "ui.studio.composer.send_cost": "Generate — credits: {credits}",
             "ui.studio.composer.send_cost_hint": "Chat alone uses no credits; if it generates, estimated credits: {credits}",
             "ui.studio.composer.send_with_cost": "Send. Chat alone uses no credits; if it generates, estimated credits: {credits}",
@@ -19902,6 +19881,8 @@
             "ui.studio.composer.mention.source_version": "Version",
             "ui.studio.composer.mention.source_canvas": "Canvas",
             "ui.studio.composer.mention.token_board": "Canvas",
+            "ui.studio.composer.mention.group_canvas": "On canvas",
+            "ui.studio.composer.mention.group_library": "Library",
             "ui.studio.composer.drop_hint": "Release to add as an attachment",
             "ui.studio.composer.attachment.preview": "Preview attachment {index}",
             "ui.studio.composer.draft.local_dropped": "{count} local images couldn't be kept with the draft. Please add them again.",
@@ -20083,7 +20064,8 @@
             "ui.result.detail.copied": "Prompt copied",
             "ui.result.detail.copy_failed": "Copy failed. Select the text and copy it manually.",
             "ui.result.detail.regenerate": "Regenerate with the same parameters",
-            "ui.result.detail.open_canvas": "Open in canvas",
+            "ui.result.detail.open_canvas": "Insert into canvas",
+            "ui.result.detail.open_stage": "Open on stage",
             "ui.result.detail.send_to_2d": "Send to 2D",
             "ui.result.detail.no_file_running": "Generating. There's no file to preview yet.",
             "ui.result.detail.no_file_failed": "This generation didn't succeed, so there's no file.",
@@ -20208,6 +20190,7 @@
             "ui.studio.mask.kept": "The mask stays on {label}. Go back to it to keep using it.",
             "ui.studio.mask.kept_discard": "Discard mask",
             "ui.studio.version.upload": "Upload",
+            "ui.studio.version.crop": "Crop",
             "ui.studio.version.capture_caption": "{parent} screenshot",
             "ui.studio.version.capture_caption_alone": "Screenshot",
             "ui.studio.version.conversion_caption": "Format conversion",
@@ -20215,6 +20198,7 @@
             "ui.studio.strip.link.remove_background": "Background removed from {parent}",
             "ui.studio.strip.link.reference": "Generated with {parent} as the reference image",
             "ui.studio.strip.link.merge": "Hand-drawn content merged from {parent}",
+            "ui.studio.strip.link.crop": "Cropped from {parent}",
             "ui.studio.strip.link.step.remesh": "Remeshed from {parent}",
             "ui.studio.strip.link.step.retexture": "Retextured from {parent}",
             "ui.studio.strip.link.step.rigging": "Rigged from {parent}",
@@ -20250,9 +20234,8 @@
             "ui.studio.mask.chip_title": "Mask: {handle}",
             "ui.studio.mask.chip_title_hint": "Inpainting only changes the area outlined by the mask",
             "ui.studio.params.default_ratio": "1:1",
-            "ui.studio.params.default_count": "4",
             "ui.studio.params.chip_none": "No adjustable parameters",
-            "ui.studio.params.chip_hint": "Generation parameters: ratio, size, count",
+            "ui.studio.params.chip_hint": "Generation parameters: ratio, size",
             "ui.common.date.placeholder": "Select a date",
             "ui.common.date.previous_month": "Previous month",
             "ui.common.date.next_month": "Next month",
@@ -21577,13 +21560,7 @@
             "chat.concept_directions.quantity.option_description": "Generate {count} low-cost concept image(s); look at the directions before deciding",
             "chat.concept_directions.context_template": "\n\nDiverge then converge (#242/#360): when the person gave only a subject, a use or a vague idea, named no style, composition or reference picture, stated no count and did not ask to start directly, first open an ask_choice card of kind {quantity_kind} that asks how many concept images to look at, with options from {quantity_minimum} to {quantity_maximum} built by the server; in that reply call no {sketch_tool} or any other generation tool and open no direction card. In the next reply after the person chooses N, draw visibly different directions in parallel (each prompt names that direction's style, medium and key visual differences): for N >= 2 open one {direction_kind} card whose options carry an id, a label, one sentence of description, the thumbnail handle of the sketch and the complete refine_image arguments that continue it (rewrite prompt for that direction and point reference_handles at the sketch), with {minimum} to {maximum} options and never more than N; for N = 1 draw one sketch, open no direction card and continue refine_image with that sketch as the current direction. Directions must differ visibly (for example realistic, cartoon, low-poly), not only in colour. When the person already stated a count, do not ask: draw exactly that many (N >= 2 opens the direction card, N = 1 does not). When the style or references are already clear, or the person asked to start directly, skip both the count and the sketches and call refine_image. Never draw concept sketches in 3D mode; open at most one direction card and never repeat the same card.",
             "chat.concept_directions.limit_reached": "One reply may draw at most {maximum} concept directions; let the person choose among them before developing further.",
-            "chat.image_count.context_template": "\n\n[Image count] The person set this session's 2D image count to {count} (their own expectation, not your judgement and not an upstream limit). The server writes it into the count parameter of every image call, so one call produces that many images: do not split it over several calls, do not add more, and do not submit extra calls to make up a count. You cannot change this count; when the person asks for a different number this time, ask them to change it on the panel.",
-            "chat.image_count.limit_template": " {model} produces at most {count} per call, so its calls run with {count}.",
-            "chat.image_count.uncounted_template": " {models} take no count parameter, so this setting does not control how many images they produce; say so plainly when you use them.",
-            "chat.image_count.model_separator": ", ",
-            "chat.image_count.omitted_template": " {model} sends no count parameter with the current settings ({reason}), so the session count does not reach it and it will not produce {count} images this time; say so plainly when you use it, and the person can change that setting on the panel.",
-            "chat.image_count.reason_template": "{parameter} is \"{value}\"",
-            "chat.session_parameters.context_template": "\n\n[Session parameters] These parameters already hold values in this session, and the server runs with them when you submit (the count is in [Image count]):\n{parameters}\nFollow what the person set and do not ask again, and do not write a size, aspect ratio or quality into prompt that conflicts with them; you may change the values you set with set_params.",
+            "chat.session_parameters.context_template": "\n\n[Session parameters] These parameters already hold values in this session, and the server runs with them when you submit:\n{parameters}\nFollow what the person set and do not ask again, and do not write a size, aspect ratio or quality into prompt that conflicts with them; you may change the values you set with set_params.",
             "chat.session_parameters.offering_template": "- {model} ({capability}): {parameters}",
             "chat.session_parameters.parameter_template": "{label} {value} ({source})",
             "chat.session_parameters.separator": "; ",
@@ -22864,7 +22841,10 @@
             "独轮车跳下 (Unicycle_Jump_Dismount)": "Unicycle jump dismount",
             "生成多个视角的图片": "Generate images from multiple views",
             "单次出图张数": "Images per generation",
-            "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。": "How many images one generation task produces; billing follows the image count. The number of concept sketches is chosen separately on the concept quantity card.",
+            "一个生成任务出几张同一提示词的变体，按张数计费；要几张不同内容的图时分几次提交，概念图要画几张在概念图数量卡里单独选择。": "How many variants of the same prompt one generation task produces; billing follows the image count. Several different images are separate submissions, and the number of concept sketches is chosen separately on the concept quantity card.",
+            "默认 1 张；只在用户要同一提示词的几个变体时按他说的张数调。": "One image by default; change it only to the number of variants of one prompt the person asked for.",
+            "默认关闭，每个任务 1 张；只在用户要同一提示词的一组变体时打开。": "Off by default, one image per task; turn it on only when the person wants a set of variants of one prompt.",
+            "默认 1 张，只在打开组图时发送；按用户要的变体数调。": "One image by default, sent only with image sets on; set it to the number of variants the person asked for.",
             "生成更高精度的几何细节，仅 Meshy 7 支持且仅在预览阶段生效，额外消耗 5 积分": "Generates higher-precision geometric detail; supported by Meshy 7 only and applies only in the preview stage; costs an extra 5 credits",
             "生成更高精度的几何细节，仅 Meshy 7 支持，额外消耗 5 积分": "Generates higher-precision geometric detail; supported by Meshy 7 only; costs an extra 5 credits",
             "生成模式": "Generation mode",
@@ -24413,7 +24393,7 @@
     {
       "id": "openai/gpt-image-2/text-to-image",
       "estimated_credits_unit_parameter": "n",
-      "revision": "2026-11-09.224.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
@@ -24589,14 +24569,15 @@
         {
           "name": "n",
           "label": "单次出图张数",
-          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "description": "一个生成任务出几张同一提示词的变体，按张数计费；要几张不同内容的图时分几次提交，概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张；只在用户要同一提示词的几个变体时按他说的张数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1
           },
@@ -24754,7 +24735,7 @@
       {
       "id": "openai/gpt-image-2.5-sunburst/text-to-image",
       "estimated_credits_unit_parameter": "n",
-      "revision": "2026-10-16.213.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
@@ -24929,14 +24910,15 @@
         {
           "name": "n",
           "label": "单次出图张数",
-          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "description": "一个生成任务出几张同一提示词的变体，按张数计费；要几张不同内容的图时分几次提交，概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张；只在用户要同一提示词的几个变体时按他说的张数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1
           },
@@ -25094,7 +25076,7 @@
     {
       "id": "openai/gpt-image-2/image-to-image",
       "estimated_credits_unit_parameter": "n",
-      "revision": "2026-11-09.224.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
@@ -25305,14 +25287,15 @@
         {
           "name": "n",
           "label": "单次出图张数",
-          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "description": "一个生成任务出几张同一提示词的变体，按张数计费；要几张不同内容的图时分几次提交，概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张；只在用户要同一提示词的几个变体时按他说的张数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1
           },
@@ -25490,7 +25473,7 @@
       {
       "id": "openai/gpt-image-2.5-sunburst/image-to-image",
       "estimated_credits_unit_parameter": "n",
-      "revision": "2026-10-16.213.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
@@ -25700,14 +25683,15 @@
         {
           "name": "n",
           "label": "单次出图张数",
-          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "description": "一个生成任务出几张同一提示词的变体，按张数计费；要几张不同内容的图时分几次提交，概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张；只在用户要同一提示词的几个变体时按他说的张数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1
           },
@@ -26333,7 +26317,7 @@
     {
       "id": "jimeng/seedream-4-5/text-to-image",
       "estimated_credits_unit_parameter": "max_images",
-      "revision": "2026-09-08.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "jimeng",
       "provider_name": "火山方舟 Seedream",
       "provider_short_label": "JIMENG",
@@ -26513,7 +26497,8 @@
         {
           "name": "sequential_image_generation",
           "label": "组图生成",
-          "adjustment_policy": "user",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认关闭，每个任务 1 张；只在用户要同一提示词的一组变体时打开。",
           "type": "select",
           "options": [
             {
@@ -26526,7 +26511,7 @@
             }
           ],
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "select"
           },
           "default": "disabled"
@@ -26535,13 +26520,14 @@
           "name": "max_images",
           "label": "单次最多出图张数",
           "description": "开启组图生成时一个任务最多出几张图；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张，只在打开组图时发送；按用户要的变体数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 15,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1,
             "disabled_when": [
@@ -26663,7 +26649,7 @@
     {
       "id": "jimeng/seedream-4-5/image-to-image",
       "estimated_credits_unit_parameter": "max_images",
-      "revision": "2026-09-08.1",
+      "revision": "2026-11-25.586.1",
       "provider_id": "jimeng",
       "provider_name": "火山方舟 Seedream",
       "provider_short_label": "JIMENG",
@@ -26867,7 +26853,8 @@
         {
           "name": "sequential_image_generation",
           "label": "组图生成",
-          "adjustment_policy": "user",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认关闭，每个任务 1 张；只在用户要同一提示词的一组变体时打开。",
           "type": "select",
           "options": [
             {
@@ -26880,7 +26867,7 @@
             }
           ],
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "select"
           },
           "default": "disabled"
@@ -26889,13 +26876,14 @@
           "name": "max_images",
           "label": "单次最多出图张数",
           "description": "开启组图生成时一个任务最多出几张图；概念图要画几张在概念图数量卡里单独选择。",
-          "adjustment_policy": "user",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认 1 张，只在打开组图时发送；按用户要的变体数调。",
           "type": "number",
           "minimum": 1,
           "maximum": 15,
           "integer": true,
           "presentation": {
-            "surface": "provider",
+            "surface": "readonly",
             "control": "number",
             "step": 1,
             "disabled_when": [
