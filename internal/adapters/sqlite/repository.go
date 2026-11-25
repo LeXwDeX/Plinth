@@ -496,6 +496,9 @@ var taskSummaryCreditsMeteredMigration string
 //go:embed migrations/0114_chat_session_vision_excluded.sql
 var chatSessionVisionExcludedMigration string
 
+//go:embed migrations/0115_user_project_group.sql
+var userProjectGroupMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -610,6 +613,8 @@ func migrations() []migration {
 			sql: taskSummaryCreditsMeteredMigration},
 		migration{version: 114, name: "chat_session_vision_excluded",
 			sql: chatSessionVisionExcludedMigration},
+		migration{version: 115, name: "user_project_group",
+			sql: userProjectGroupMigration},
 	)
 }
 
@@ -641,8 +646,9 @@ func migrations() []migration {
 // platform started itself (#461) and 112 the first time an automatic
 // completion record was looked at, which is what its deadline runs from
 // (#478) and 113 the credits_metered flag of the task summary projection, which
-// the failure attribution of the external MCP reads (#517) and 114 the
-// session's vision exclusions, the images the chat model refused to read (#522).
+// the failure attribution of the external MCP reads (#517), 114 the
+// session's vision exclusions, the images the chat model refused to read (#522)
+// and 115 the nullable project group key of a user (#599).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

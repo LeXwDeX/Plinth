@@ -55,6 +55,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 		`ALTER TABLE go_chat_messages DROP COLUMN multiview`,
 		`DROP TABLE IF EXISTS model_delivery_auto_completions`,
 		`DROP TABLE IF EXISTS model_delivery_auto_completion_watermark`,
+		`ALTER TABLE authentication_users DROP COLUMN project_group_key`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

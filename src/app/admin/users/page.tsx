@@ -43,6 +43,7 @@ interface FormData {
   name: string;
   email: string;
   isAdmin: boolean;
+  projectGroupKey: string;
 }
 
 const emptyForm: FormData = {
@@ -51,7 +52,10 @@ const emptyForm: FormData = {
   name: '',
   email: '',
   isAdmin: false,
+  projectGroupKey: '',
 };
+
+const projectGroupOptionsID = 'dlg-project-group-options';
 
 export default function AdminUsersPage() {
   const { schema, text: productText } = useProductSchema();
@@ -122,6 +126,7 @@ export default function AdminUsersPage() {
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
+      projectGroupKey: user.projectGroupKey ?? '',
     });
     setDialogOpen(true);
   };
@@ -139,6 +144,7 @@ export default function AdminUsersPage() {
           name: form.name,
           email: form.email,
           isAdmin: form.isAdmin,
+          projectGroupKey: form.projectGroupKey,
           ...(form.password ? { password: form.password } : {}),
         });
         toast.success(text('updated'));
@@ -216,6 +222,11 @@ export default function AdminUsersPage() {
   const placeholder = presentation.empty_placeholder;
   const activeUsers = users.filter((user) => user.isActive).length;
   const passwordMinimum = usersSchema.limits.password_minimum_characters;
+  // #599: the input suggests the KEYs already in use; there is no built-in
+  // group list, the server validates the KEY against the Schema pattern.
+  const projectGroupKeys = Array.from(new Set(
+    users.flatMap((user) => (user.projectGroupKey ? [user.projectGroupKey] : [])),
+  )).sort();
   const usernameMinimum = usersSchema.limits.username_minimum_characters;
 
   return (
@@ -265,6 +276,9 @@ export default function AdminUsersPage() {
                     <th className="pb-2 font-medium text-muted-foreground">
                       {text('column_email')}
                     </th>
+                    <th className="pb-2 font-medium text-muted-foreground">
+                      {text('column_project_group')}
+                    </th>
                     <th className="pb-2 font-medium text-muted-foreground text-center">
                       {text('column_role')}
                     </th>
@@ -295,6 +309,9 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="py-3 text-muted-foreground">
                           {user.email || placeholder}
+                        </td>
+                        <td className="py-3 font-mono text-xs">
+                          {user.projectGroupKey || placeholder}
                         </td>
                         <td className="py-3 text-center">
                           {user.isAdmin ? (
@@ -464,6 +481,29 @@ export default function AdminUsersPage() {
                 placeholder={text('email_placeholder')}
               />)}
             </Field>
+            <Field
+              id="dlg-project-group"
+              label={text('project_group_label')}
+              help={text('project_group_description')}
+            >
+              {(controlProps) => (<Input
+                {...controlProps}
+                list={projectGroupOptionsID}
+                autoComplete="off"
+                spellCheck={false}
+                value={form.projectGroupKey}
+                onChange={(event) => setForm((current) => ({
+                  ...current,
+                  projectGroupKey: event.target.value,
+                }))}
+                placeholder={text('project_group_placeholder')}
+              />)}
+            </Field>
+            <datalist id={projectGroupOptionsID}>
+              {projectGroupKeys.map((key) => (
+                <option key={key} value={key} />
+              ))}
+            </datalist>
             <Surface variant="panel" padding="md">
               <Field id="dlg-admin" label={text('admin_label')} help={text('admin_description')}>
                 {(controlProps) => <Switch

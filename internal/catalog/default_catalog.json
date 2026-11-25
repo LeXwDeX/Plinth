@@ -14553,7 +14553,8 @@
             "is_active": "isActive",
             "created_at": "createdAt",
             "last_login": "lastLogin",
-            "open_id": "openId"
+            "open_id": "openId",
+            "project_group_key": "projectGroupKey"
           },
           "path_parameters": {
             "user_id": "userID"
@@ -14569,7 +14570,8 @@
         },
         "limits": {
           "username_minimum_characters": 2,
-          "password_minimum_characters": 6
+          "password_minimum_characters": 6,
+          "project_group_key_pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
         },
         "defaults": {
           "id_prefix": "user_",
@@ -14585,7 +14587,9 @@
           "detail_fields": {
             "username": "username",
             "is_admin": "isAdmin",
-            "is_active": "isActive"
+            "is_active": "isActive",
+            "project_group_key": "projectGroupKey",
+            "previous_project_group_key": "previousProjectGroupKey"
           }
         },
         "messages": {
@@ -14597,6 +14601,7 @@
           "duplicate_username": "用户名已存在",
           "invalid_username": "用户名至少需要 {minimum} 个字符",
           "invalid_password": "密码长度不能少于 {minimum} 位",
+          "invalid_project_group": "项目组 KEY 只能含小写字母、数字、- 和 _，须以字母或数字开头，最长 32 个字符",
           "invalid_request": "请求参数无效",
           "internal_error": "服务内部错误，请稍后重试"
         },
@@ -14659,6 +14664,10 @@
             "delete_confirm": "确认删除",
             "deleting": "删除中...",
             "password_too_short": "密码长度不能少于 {minimum} 位",
+            "column_project_group": "项目组",
+            "project_group_label": "项目组",
+            "project_group_placeholder": "例如 studio-a，留空表示未分组",
+            "project_group_description": "留空表示未分组；KEY 只能含小写字母、数字、- 和 _，以字母或数字开头，最长 32 个字符",
             "update_failed": "更新失败",
             "create_failed": "创建失败",
             "operation_failed": "操作失败",
@@ -20904,6 +20913,7 @@
             "administration.users.messages.duplicate_username": "Username already exists",
             "administration.users.messages.invalid_username": "Username must be at least {minimum} characters",
             "administration.users.messages.invalid_password": "Password must be at least {minimum} characters",
+            "administration.users.messages.invalid_project_group": "A project group KEY may contain only lowercase letters, digits, - and _, must start with a letter or digit, and is at most 32 characters",
             "administration.users.messages.invalid_request": "Invalid request parameters",
             "administration.users.messages.internal_error": "Internal server error. Please try again later",
             "administration.access_keys.messages.invalid_request": "Invalid request parameters",
@@ -20957,6 +20967,10 @@
             "administration.users.presentation.text.delete_confirm": "Confirm delete",
             "administration.users.presentation.text.deleting": "Deleting…",
             "administration.users.presentation.text.password_too_short": "Password must be at least {minimum} characters",
+            "administration.users.presentation.text.column_project_group": "Project group",
+            "administration.users.presentation.text.project_group_label": "Project group",
+            "administration.users.presentation.text.project_group_placeholder": "e.g. studio-a; leave blank for ungrouped",
+            "administration.users.presentation.text.project_group_description": "Leave blank for ungrouped. A KEY may contain only lowercase letters, digits, - and _, starts with a letter or digit, and is at most 32 characters",
             "administration.users.presentation.text.update_failed": "Update failed",
             "administration.users.presentation.text.create_failed": "Creation failed",
             "administration.users.presentation.text.operation_failed": "Operation failed",

@@ -752,6 +752,9 @@ type AdministrationUserFieldSchema struct {
 	CreatedAt string `json:"created_at"`
 	LastLogin string `json:"last_login"`
 	OpenID    string `json:"open_id"`
+	// ProjectGroupKey 是用户「项目组」KEY 的 wire 字段（#599）；只出现在管理端
+	// 用户接口，账户自助端点不带它。
+	ProjectGroupKey string `json:"project_group_key"`
 }
 
 type AdministrationUserPathParameterSchema struct {
@@ -761,6 +764,9 @@ type AdministrationUserPathParameterSchema struct {
 type AdministrationUsersLimitsSchema struct {
 	UsernameMinimumCharacters int `json:"username_minimum_characters"`
 	PasswordMinimumCharacters int `json:"password_minimum_characters"`
+	// ProjectGroupKeyPattern 是项目组 KEY 的格式（Go RE2 正则，#599）。服务端
+	// trim 后按它严格校验、不改大小写；空值表示未分组，不经过它。
+	ProjectGroupKeyPattern string `json:"project_group_key_pattern"`
 }
 
 type AdministrationUsersDefaultsSchema struct {
@@ -797,6 +803,10 @@ type AdministrationUsersAuditDetailFieldSchema struct {
 	Username string `json:"username"`
 	IsAdmin  string `json:"is_admin"`
 	IsActive string `json:"is_active"`
+	// ProjectGroupKey/PreviousProjectGroupKey 记录项目组变更后与变更前的值
+	// （#599）；建号只记新值。
+	ProjectGroupKey         string `json:"project_group_key"`
+	PreviousProjectGroupKey string `json:"previous_project_group_key"`
 }
 
 type AdministrationUsersMessageSchema struct {
@@ -810,6 +820,8 @@ type AdministrationUsersMessageSchema struct {
 	LastAdministrator string `json:"last_administrator"`
 	InvalidRequest    string `json:"invalid_request"`
 	InternalError     string `json:"internal_error"`
+	// InvalidProjectGroup 是项目组 KEY 格式非法时的 400 文案（#599）。
+	InvalidProjectGroup string `json:"invalid_project_group"`
 }
 
 type AdministrationUsersPresentationSchema struct {

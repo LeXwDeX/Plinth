@@ -126,8 +126,12 @@ func (s *Server) createAdministrationUser(
 	}
 	name, _ := administrationString(raw, fields.Name)
 	email, _ := administrationString(raw, fields.Email)
+	projectGroupKey, _, groupValid := administrationOptionalString(
+		raw,
+		fields.ProjectGroupKey,
+	)
 	admin, valid := administrationBool(raw, fields.IsAdmin)
-	if !valid {
+	if !valid || !groupValid {
 		s.writeAdministrationUserError(
 			writer,
 			http.StatusBadRequest,
@@ -139,11 +143,12 @@ func (s *Server) createAdministrationUser(
 		request.Context(),
 		s.administrationActor(request, principal),
 		administration.CreateUser{
-			Username: username,
-			Password: password,
-			Name:     name,
-			Email:    email,
-			Admin:    admin,
+			Username:        username,
+			Password:        password,
+			Name:            name,
+			Email:           email,
+			Admin:           admin,
+			ProjectGroupKey: projectGroupKey,
 		},
 	)
 	if err != nil {
@@ -236,6 +241,21 @@ func (s *Server) updateAdministrationUser(
 	} else if exists {
 		command.Active = &value
 	}
+	// 项目组 KEY（#599）：缺省不变；空串或 null 清空为未分组。它不是权限，
+	// 因此下方吊销会话的条件不包含它。
+	if value, exists, valid := administrationOptionalString(
+		raw,
+		fields.ProjectGroupKey,
+	); !valid {
+		s.writeAdministrationUserError(
+			writer,
+			http.StatusBadRequest,
+			s.application.Administration.Users.Messages.InvalidRequest,
+		)
+		return
+	} else if exists {
+		command.ProjectGroupKey = &value
+	}
 	id := request.PathValue(
 		s.application.Administration.Users.API.PathParameters.UserID,
 	)
@@ -318,17 +338,23 @@ func (s *Server) administrationUserWire(
 	if user.OpenID != nil {
 		openID = *user.OpenID
 	}
+	// 未分组在 wire 上是 null，不用魔法字符串（#599）。
+	var projectGroupKey any
+	if user.ProjectGroupKey != "" {
+		projectGroupKey = user.ProjectGroupKey
+	}
 	return map[string]any{
-		fields.ID:        user.ID,
-		fields.Username:  user.Username,
-		fields.Nickname:  user.Nickname,
-		fields.Name:      user.Name,
-		fields.Email:     user.Email,
-		fields.IsAdmin:   user.Admin,
-		fields.IsActive:  user.Active,
-		fields.CreatedAt: user.CreatedAt.UTC().Format(time.RFC3339Nano),
-		fields.LastLogin: lastLogin,
-		fields.OpenID:    openID,
+		fields.ID:              user.ID,
+		fields.Username:        user.Username,
+		fields.Nickname:        user.Nickname,
+		fields.Name:            user.Name,
+		fields.Email:           user.Email,
+		fields.IsAdmin:         user.Admin,
+		fields.IsActive:        user.Active,
+		fields.CreatedAt:       user.CreatedAt.UTC().Format(time.RFC3339Nano),
+		fields.LastLogin:       lastLogin,
+		fields.OpenID:          openID,
+		fields.ProjectGroupKey: projectGroupKey,
 	}
 }
 
@@ -434,6 +460,12 @@ func (s *Server) writeAdministrationUserDomainError(
 				users.Messages.InvalidPassword,
 				users.Limits.PasswordMinimumCharacters,
 			),
+		)
+	case errors.Is(err, administration.ErrInvalidProjectGroup):
+		s.writeAdministrationUserError(
+			writer,
+			http.StatusBadRequest,
+			users.Messages.InvalidProjectGroup,
 		)
 	case errors.Is(err, administration.ErrInvalidEmail):
 		s.writeAdministrationUserError(

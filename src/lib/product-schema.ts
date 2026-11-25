@@ -648,6 +648,7 @@ export interface AdministrationProductSchema {
         created_at: string;
         last_login: string;
         open_id: string;
+        project_group_key: string;
       };
       path_parameters: {
         user_id: string;
@@ -656,6 +657,8 @@ export interface AdministrationProductSchema {
     limits: {
       username_minimum_characters: number;
       password_minimum_characters: number;
+      /** Go RE2 pattern the server checks a trimmed project group KEY against (#599). */
+      project_group_key_pattern: string;
     };
     messages: {
       user_not_found: string;
@@ -666,6 +669,7 @@ export interface AdministrationProductSchema {
       invalid_password: string;
       invalid_request: string;
       internal_error: string;
+      invalid_project_group: string;
     };
     presentation: {
       date_locale: string;
