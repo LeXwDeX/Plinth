@@ -13,12 +13,16 @@ import (
 // be readable, select at least one pixel and have exactly the artboard
 // snapshot's pixel size; its measured facts are stored with the turn options.
 //
-// Not checked here: that the mask and the snapshot are of the same image
-// format. OpenAI's image edit requires it (#582) and the MCP path refuses a
-// mismatch before submitting (mask_format_mismatch), but a canvas turn gets it
-// only by coincidence: the artboard export (catalog output_media_type) and the
-// frontend mask export are both PNG. Changing either to another format would
-// fail upstream instead of here. How to guarantee it is undecided (#583).
+// The snapshot must also be of the mask's format (#583). OpenAI's image edit
+// takes a mask only of the same format and size as the picture it edits
+// (#582), and the MCP path refuses a mismatch before submitting
+// (mask_format_mismatch). A canvas turn used to meet it only because the
+// artboard export (catalog output_media_type) and the frontend mask export
+// are both PNG; changing either would have failed upstream. Now the
+// snapshot's format is read from its bytes and anything but PNG (the only
+// format MeasureMask reads) refuses the turn with
+// ErrSelectionMaskFormatMismatch; nothing is converted. Declaring the rule per
+// Offering in the Schema, shared with the MCP path, is still open (#583).
 func (service *Service) freezeSelectionMask(ctx context.Context, command StartTurn, options *TurnOptions) error {
 	if command.SelectionMask == nil {
 		return nil
@@ -45,6 +49,20 @@ func (service *Service) freezeSelectionMask(ctx context.Context, command StartTu
 	if mask.Width != snapshot.Canvas.Width || mask.Height != snapshot.Canvas.Height {
 		return ErrSelectionMaskSizeMismatch
 	}
+	// MeasureMask decodes only a PNG, so the mask's format is png here. A
+	// verifier that cannot read the snapshot's format refuses the mask rather
+	// than skipping the check.
+	formats, ok := service.attachments.(PictureFormatReader)
+	if !ok {
+		return ErrSelectionMaskInvalid
+	}
+	format, err := formats.PictureFormat(ctx, command.OwnerID, snapshot.AssetID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSelectionMaskInvalid, err)
+	}
+	if format != selectionMaskFormat {
+		return ErrSelectionMaskFormatMismatch
+	}
 	if !mask.Editable() {
 		return ErrSelectionMaskInvalid
 	}
@@ -52,6 +70,10 @@ func (service *Service) freezeSelectionMask(ctx context.Context, command StartTu
 	options.SelectionMask = &mask
 	return nil
 }
+
+// selectionMaskFormat is the format of every selection mask: MeasureMask reads
+// only a PNG, as the image decoders name it.
+const selectionMaskFormat = "png"
 
 // canvasSnapshotAttachment finds the verified artboard snapshot of a canvas
 // turn: the selected picture the service marked with the canvas role and whose

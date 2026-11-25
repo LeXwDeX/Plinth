@@ -36,18 +36,21 @@ var (
 	// ErrSelectionMaskWithoutCanvas rejects a selection mask on a turn that is
 	// not a canvas turn or whose snapshots did not verify; ErrSelectionMaskInvalid
 	// a mask asset that cannot be read or is not owned; ErrSelectionMaskSizeMismatch
-	// one whose size differs from the artboard snapshot (#244). A mask never
-	// degrades into a whole-image redraw.
-	ErrSelectionMaskWithoutCanvas = errors.New("chat: selection mask without a canvas snapshot")
-	ErrSelectionMaskInvalid       = errors.New("chat: selection mask invalid")
-	ErrSelectionMaskSizeMismatch  = errors.New("chat: selection mask size mismatch")
-	ErrTurnActive                 = errors.New("chat: turn already active")
-	ErrStreamNotFound             = errors.New("chat: stream not found")
-	ErrInvalidSessionPage         = errors.New("chat: invalid session page query")
-	ErrInvalidMessagePage         = errors.New("chat: invalid message page query")
-	ErrTurnCheckpointConflict     = errors.New("chat: turn checkpoint conflict")
-	ErrInvalidApprovalMode        = errors.New("chat: invalid approval mode")
-	ErrInvalidAgentScope          = errors.New("chat: invalid agent scope")
+	// one whose size differs from the artboard snapshot (#244);
+	// ErrSelectionMaskFormatMismatch one whose artboard snapshot is not of the
+	// mask's format, PNG (#583). A mask never degrades into a whole-image
+	// redraw and is never converted.
+	ErrSelectionMaskWithoutCanvas  = errors.New("chat: selection mask without a canvas snapshot")
+	ErrSelectionMaskInvalid        = errors.New("chat: selection mask invalid")
+	ErrSelectionMaskSizeMismatch   = errors.New("chat: selection mask size mismatch")
+	ErrSelectionMaskFormatMismatch = errors.New("chat: selection mask format mismatch")
+	ErrTurnActive                  = errors.New("chat: turn already active")
+	ErrStreamNotFound              = errors.New("chat: stream not found")
+	ErrInvalidSessionPage          = errors.New("chat: invalid session page query")
+	ErrInvalidMessagePage          = errors.New("chat: invalid message page query")
+	ErrTurnCheckpointConflict      = errors.New("chat: turn checkpoint conflict")
+	ErrInvalidApprovalMode         = errors.New("chat: invalid approval mode")
+	ErrInvalidAgentScope           = errors.New("chat: invalid agent scope")
 	// ErrItemSessionApprovalMode refuses an approval-mode write to an
 	// asset-list item sub-session (#328): its mode is derived from the list
 	// workflow, not chosen by a person.

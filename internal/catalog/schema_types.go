@@ -6575,6 +6575,10 @@ type ChatMessageTexts struct {
 	// failures with a reason.
 	SelectionMaskInvalid      string `json:"selection_mask_invalid,omitempty"`
 	SelectionMaskSizeMismatch string `json:"selection_mask_size_mismatch,omitempty"`
+	// SelectionMaskFormatMismatch refuses a mask whose artboard snapshot is
+	// not of the mask's format, PNG (#583): the image edit wire takes a mask
+	// only of the picture's format, and nothing is converted.
+	SelectionMaskFormatMismatch string `json:"selection_mask_format_mismatch,omitempty"`
 	// MaskUnreadableTemplate, MaskSizeMismatchTemplate and MaskUnsupportedTemplate
 	// are the Agent-facing refusals of a selection mask (#244): the mask asset
 	// could not be read or is not owned ({reason}); its pixel size differs from

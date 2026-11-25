@@ -123,3 +123,17 @@ func TestSelectionMaskSchemaRejectsIncompleteDeclarations(t *testing.T) {
 		}
 	}
 }
+
+// #583: the refusal of an artboard snapshot that is not of the mask's format
+// is shipped in Chinese and English and names the format both must share.
+func TestDefaultCatalogDeclaresSelectionMaskFormatMismatch(t *testing.T) {
+	application := defaultSelectionMaskSchema(t)
+	chinese := application.Chat.Presentation.Messages.SelectionMaskFormatMismatch
+	if !strings.Contains(chinese, "格式") || !strings.Contains(chinese, "PNG") || !strings.Contains(chinese, "未执行") {
+		t.Fatalf("selection_mask_format_mismatch = %q", chinese)
+	}
+	english := application.Localization.Bundles["en"].Fields["chat.presentation.messages.selection_mask_format_mismatch"]
+	if !strings.Contains(english, "format") || !strings.Contains(english, "PNG") || !strings.Contains(english, "not run") {
+		t.Fatalf("english selection_mask_format_mismatch = %q", english)
+	}
+}

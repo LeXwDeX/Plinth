@@ -566,6 +566,15 @@ func (s *Server) legacySendChatMessage(
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.SelectionMaskInvalid)
 	case errors.Is(err, chat.ErrSelectionMaskSizeMismatch):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.SelectionMaskSizeMismatch)
+	case errors.Is(err, chat.ErrSelectionMaskFormatMismatch):
+		// The artboard snapshot is not of the mask's format (#583): refused
+		// before anything is submitted. A Schema without the text keeps the
+		// invalid-mask refusal.
+		message := s.application.Chat.Presentation.Messages.SelectionMaskFormatMismatch
+		if message == "" {
+			message = s.application.Chat.Presentation.Messages.SelectionMaskInvalid
+		}
+		s.writeChatError(writer, http.StatusBadRequest, message)
 	case errors.Is(err, chat.ErrSelectionMaskNoModel):
 		// The frozen mask cannot be bound by any available image model: say so
 		// now instead of failing at the tool (#380 step 2). A Schema without the

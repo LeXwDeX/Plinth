@@ -1401,6 +1401,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
 		Projects:                   projectSource,
 		Attachments:                harnessAttachmentVerifier{},
+		// A canvas turn may carry a selection mask (#583): the harness verifier
+		// measures only its "own-canvas-" snapshots and "own-mask-" masks.
+		CanvasInputSource: applicationSchema.Chat.Context.CanvasInputSource,
 		Preferences:                applicationSchema.Chat.Preferences,
 		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
 		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
@@ -2295,7 +2298,42 @@ func (harnessAttachmentVerifier) VerifyAttachment(_ context.Context, _, _ string
 	if ref.CaptureID != "" {
 		attachment.Role = chat.AttachmentRoleCapture
 	}
+	if strings.HasPrefix(ref.AssetID, harnessCanvasPrefix) && ref.TaskID == "" && ref.CaptureID == "" {
+		// An artboard snapshot is an owned upload.
+		attachment.Role = chat.AttachmentRoleUpload
+	}
 	return attachment, nil
+}
+
+// harnessCanvasPrefix names the harness's artboard snapshots: 64x48 pictures
+// whose format follows the prefix ("own-canvas-jpeg-1" is a JPEG). Every other
+// asset has no readable size or format, so canvas turns stay out of the other
+// tests. harnessMaskPrefix names its 64x48 masks that select a region (#583).
+const (
+	harnessCanvasPrefix = "own-canvas-"
+	harnessMaskPrefix   = "own-mask-"
+)
+
+func (harnessAttachmentVerifier) ImageDimensions(_ context.Context, _, assetID string) (int, int, error) {
+	if !strings.HasPrefix(assetID, harnessCanvasPrefix) {
+		return 0, 0, errors.New("harness: no picture size")
+	}
+	return 64, 48, nil
+}
+
+func (harnessAttachmentVerifier) PictureFormat(_ context.Context, _, assetID string) (string, error) {
+	format, _, found := strings.Cut(strings.TrimPrefix(assetID, harnessCanvasPrefix), "-")
+	if !strings.HasPrefix(assetID, harnessCanvasPrefix) || !found {
+		return "", errors.New("harness: no picture format")
+	}
+	return format, nil
+}
+
+func (harnessAttachmentVerifier) MeasureMask(_ context.Context, _, assetID string) (chat.SelectionMask, error) {
+	if !strings.HasPrefix(assetID, harnessMaskPrefix) {
+		return chat.SelectionMask{}, errors.New("harness: no mask")
+	}
+	return chat.SelectionMask{Width: 64, Height: 48, BBox: [4]int{8, 8, 23, 23}, Coverage: 0.08}, nil
 }
 
 // harnessCompactor is the scheduler's context compactor when it has one

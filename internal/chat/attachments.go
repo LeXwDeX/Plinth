@@ -132,6 +132,15 @@ type SelectionMaskMeasurer interface {
 	MeasureMask(ctx context.Context, ownerID, assetID string) (SelectionMask, error)
 }
 
+// PictureFormatReader reads the image format of an owned input asset ("png",
+// "jpeg", "webp"), sniffed from its bytes, never from a filename or a stored
+// media type (#583). The attachment verifier implements it so a selection
+// mask is refused when its artboard snapshot is of another format: the image
+// edit wire takes a mask only of the same format as the picture it edits.
+type PictureFormatReader interface {
+	PictureFormat(ctx context.Context, ownerID, assetID string) (string, error)
+}
+
 // AttachmentVerifier validates a client claim against owner and session scope
 // and returns the canonical facts. Handle and ImageSlot are left empty.
 type AttachmentVerifier interface {

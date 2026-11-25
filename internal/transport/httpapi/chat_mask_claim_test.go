@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -82,5 +83,35 @@ func TestSelectionMaskRequestMembersFollowTheSchema(t *testing.T) {
 		`{"content":"plain","configuredMask":{"configuredMaskAsset":"mask-1"}}`)
 	if configured.Code != http.StatusBadRequest {
 		t.Fatalf("configured member names not read: status=%d body=%s", configured.Code, configured.Body)
+	}
+}
+
+// #583: a canvas turn whose artboard snapshot is not of the mask's format
+// (PNG) is refused with its own 400 text before any turn starts; a PNG
+// snapshot with the same mask is accepted.
+func TestSelectionMaskOnASnapshotOfAnotherFormatIsRefused(t *testing.T) {
+	t.Parallel()
+	scheduler := &recordingChatScheduler{}
+	_, handler, _ := newHTTPHarnessWithChatScheduler(t, scheduler, nil)
+	send := func(snapshot string) *httptest.ResponseRecorder {
+		create := performChatRequest(handler, http.MethodPost, "/api/chat/sessions", `{}`)
+		var session map[string]any
+		decodeChatRecorder(t, create, &session)
+		return performChatRequest(handler, http.MethodPost, "/api/chat/sessions/"+session["id"].(string)+"/messages",
+			`{"content":"change this area","inputSource":"canvas",`+
+				`"selection":[{"kind":"image","assetId":"`+snapshot+`","url":"/api/v1/input-assets/`+snapshot+`"}],`+
+				`"selectionMask":{"maskAssetId":"own-mask-1"}}`)
+	}
+	for _, snapshot := range []string{"own-canvas-jpeg-1", "own-canvas-webp-1"} {
+		refused := send(snapshot)
+		if refused.Code != http.StatusBadRequest || !strings.Contains(refused.Body.String(), "格式不一致") {
+			t.Fatalf("%s: status=%d body=%s", snapshot, refused.Code, refused.Body)
+		}
+	}
+	if len(scheduler.commands) != 0 {
+		t.Fatalf("refused mask started a turn: %#v", scheduler.commands)
+	}
+	if accepted := send("own-canvas-png-1"); accepted.Code != http.StatusAccepted {
+		t.Fatalf("png snapshot: status=%d body=%s", accepted.Code, accepted.Body)
 	}
 }
