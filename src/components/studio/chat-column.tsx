@@ -105,6 +105,7 @@ import { recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
 import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
+import { messagesBesideStream, readUntilSettled } from '@/lib/chat/turn-settle';
 import { replaceFailureMessage } from '@/lib/chat/turn-replace-error';
 import { hasSentWords, sessionTurnRunning } from '@/lib/chat/turn-running';
 import { selectedTranscriptText, transcriptClipboard } from '@/lib/chat/transcript-copy';
@@ -155,6 +156,9 @@ const APPROVAL_CLOCK_MILLISECONDS = 30_000;
 const LATE_TASK_HYDRATE_MILLISECONDS = [1_500, 4_000, 8_000];
 // The server writes a late task's result message when its sweep (every 2 s) sees the task end.
 const LATE_RESULT_RELOAD_MILLISECONDS = [2_500, 5_000];
+// #597: the server sends a turn's `done` just before it marks the turn ended; a read in between still calls the
+// reply pending, so it is read again at these delays until it is not.
+const SETTLE_REREAD_MILLISECONDS = [400, 1_200, 3_000, 6_000];
 
 /** Text selection on or off for the whole page; Safari reads only the -webkit- property. */
 function setPageSelectable(selectable: boolean) {
@@ -719,9 +723,9 @@ export function ChatColumn() {
     createdAt: Date.now(),
   } : null), [schema, streamUserMessage]);
   const displayMessages = useMemo((): ChatMessageType[] => {
-    const dbMessages = messages.filter(
-      (item) => !(streamBuf && item.isPending),
-    );
+    // #597: only this turn's own pending reply gives way to the live buffer; an earlier reply still marked
+    // pending (read just before its turn ended) stays in the list with its pictures.
+    const dbMessages = messagesBesideStream(messages, streamBuf);
     if (!streamBuf) return dbMessages;
     const result = [...dbMessages];
     if (optimisticUser) {
@@ -1399,7 +1403,22 @@ export function ChatColumn() {
                 // #403: the stream is over without saying the turn ended, yet the server still runs it (the stream
                 // was given up or stopped, or another turn holds the session). The session recovery reconnects it
                 // and keeps reading until it ends.
-                if (followed !== 'done' && page.messages.some((message) => message.isPending)) setServerTurnTick((tick) => tick + 1);
+                if (!page.messages.some((message) => message.isPending)) return;
+                if (followed !== 'done') {
+                  setServerTurnTick((tick) => tick + 1);
+                  return;
+                }
+                // #597: the stream said the turn ended before the server marked it so. Read again until the reply
+                // is no longer pending; one still pending after that is a turn that really runs: recovery follows it.
+                const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
+                void readUntilSettled({
+                  read: () => chatClient.listMessagePage(sessionId, { limit: messagePageSize }),
+                  apply: (next) => applyNewestMessagePage(sessionId, next),
+                  isCurrent: shown,
+                  delays: SETTLE_REREAD_MILLISECONDS,
+                }).then((outcome) => {
+                  if (outcome === 'running' && shown()) setServerTurnTick((tick) => tick + 1);
+                });
               })
               .catch(() => {
                 settled = true;

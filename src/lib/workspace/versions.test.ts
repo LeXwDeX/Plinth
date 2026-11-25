@@ -323,32 +323,25 @@ describe('folding a column of siblings', () => {
     ],
     edges: ['b1', 'b2', 'b3', 'b4', 'b5'].map((id) => edge('root', id, 'source_task', 'recorded')),
   }), tracked: [], sessionId: 's1' });
-  const keyOf = (taskId: string) => all.find((tile) => tile.taskId === taskId)!.key;
   const siblings = all.filter((tile) => tile.taskId !== 'root');
 
   it('keeps up to three siblings as they are', () => {
-    expect(foldColumn(siblings.slice(0, 3), new Set(), null).hidden).toHaveLength(0);
+    expect(foldColumn(siblings.slice(0, 3)).hidden).toHaveLength(0);
   });
 
-  it('shows two and folds the rest into +N when there are more than three', () => {
-    const folded = foldColumn(siblings, new Set(), null);
+  it('shows two and folds the rest behind 全部 when there are more than three', () => {
+    const folded = foldColumn(siblings);
     expect(folded.visible.map((tile) => tile.taskId)).toEqual(['b1', 'b2']);
     expect(folded.hidden.map((tile) => tile.taskId)).toEqual(['b3', 'b4', 'b5']);
   });
 
-  it('never folds the current version or its branch away', () => {
-    const current = keyOf('b4');
-    const branch = branchOf(all, current);
-    const folded = foldColumn(siblings, branch, current);
-    expect(folded.visible.map((tile) => tile.taskId)).toContain('b4');
-    expect(folded.visible.map((tile) => tile.taskId)).toEqual(['b1', 'b4']);
-    expect(folded.hidden).toHaveLength(3);
-  });
-
-  it('keeps column order among the visible tiles', () => {
-    const current = keyOf('b5');
-    const folded = foldColumn(siblings, branchOf(all, current), current);
-    expect(folded.visible.map((tile) => tile.taskId)).toEqual(['b1', 'b5']);
+  it('keeps the first result standing for the group, so selecting a folded one swaps nothing (#596)', () => {
+    // The strip folds at 2: one result and 「全部」. Nothing about the selection goes in, so the result that stands
+    // for the group and the order behind 「全部」 are the same before and after any click.
+    const folded = foldColumn(siblings, 2);
+    expect(folded.visible.map((tile) => tile.taskId)).toEqual(['b1']);
+    expect(folded.hidden.map((tile) => tile.taskId)).toEqual(['b2', 'b3', 'b4', 'b5']);
+    expect(foldColumn.length).toBe(1);
   });
 });
 

@@ -19,7 +19,7 @@ import { useSessionPick } from '@/hooks/use-session-pick';
 import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
-import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/compare';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
@@ -445,7 +445,7 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
           className="h-full w-full justify-center px-1 text-[11px] leading-none text-muted-foreground"
         >{schemaText(schema, 'ui.studio.strip.detail')}</Action> : null}
       </div>
-      {/* In the +N list every row shows its download: revealing it on hover left one row with the icon (the one
+      {/* A compact row always shows its download: revealing it on hover left one row with the icon (the one
           focused) and the next without, which read as a version that cannot be downloaded. */}
       <CardDownload target={target} className="absolute right-1 top-1 z-10" buttonClassName={cn('size-5', size === 'compact' && 'opacity-100')} />
       {tile.status === 'ready' ? <CandidatePopover tile={tile} sessionId={sessionId} current={current} /> : null}
@@ -546,8 +546,9 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
  * 底部的版本条：本会话每个 2D / 3D 版本一格，严格按创建时间排开（最新的在最右，#558）；格与格之间
  * 用连接线说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。来源不是紧挨着的前一格时，
  * 连接下写出来源名；用多张图做成的结果（多视图 3D）列出全部来源，不挑其中一张。点一格就是把它放上
- * 舞台（#559：只查看，不再放上画布；放上画布在详情里点「插入到画布」，或双击 2D 那一格，#593）；
- * 时间上相邻的同源结果在一列里叠起来。
+ * 舞台、成为当前对象，输入框上方的引用随之换成它（#559：不放上画布；放上画布在详情里点「插入到画布」，
+ * 或双击 2D 那一格，#593）；时间上相邻的同源结果在一列里叠起来，多了就留第一个、其余收进「更多」，
+ * 点哪一个都不改变各格的位置和这一组留在外面的那一个（#596）。
  */
 /** 切换会话、版本链还没到时的占位：几块与缩略图同尺寸的骨架。 */
 function VersionStripSkeleton({ label }: { label: string }) {
@@ -673,7 +674,8 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
   onOpen: (tile: VersionTile, mode?: OpenMode) => void;
 }) {
   const stacked = column.tiles.length > 1;
-  const folded = useMemo(() => foldColumn(column.tiles, branch, currentKey, 2), [column.tiles, branch, currentKey]);
+  // #596: what stays out is fixed by the order the results were made; the selection never changes it.
+  const folded = useMemo(() => foldColumn(column.tiles, 2), [column.tiles]);
   const sourceTiles = useMemo(
     () => (column.sources.length > 1 ? tiles.filter((tile) => column.sources.some((source) => source.key === tile.key)) : []),
     [column.sources, tiles],
@@ -699,7 +701,8 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
           ))}
           {folded.hidden.length > 0 ? (
             <FoldedTiles
-              tiles={folded.hidden}
+              tiles={column.tiles}
+              currentHidden={folded.hidden.some((tile) => tile.key === currentKey)}
               currentKey={currentKey}
               branch={branch}
               inCompareTile={inCompareTile}
@@ -714,9 +717,16 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
   );
 }
 
-/** 超过三个同源结果时折起来的那部分："+N" 打开一个列表，点哪个就把哪个放上舞台。 */
-function FoldedTiles({ tiles, currentKey, branch, inCompareTile, captionOf, sessionId, onOpen }: {
+/**
+ * 一组里放不下的结果收在「更多」后面（#596）：弹层列出这一步生成的全部内容（外面那一格也在内），按生成先后排好。
+ * 每一项和版本条上的一格一样：单击引用、双击插入画布、「详情」看详情；点哪一项都不改变顺序，也不换外面那一格。
+ * 当前对象在收起的部分时，「更多」按钮高亮。
+ */
+function FoldedTiles({ tiles, currentHidden, currentKey, branch, inCompareTile, captionOf, sessionId, onOpen }: {
+  /** Every result of the column, in the order they were made. */
   tiles: VersionTile[];
+  /** The current object is one of the results only listed here. */
+  currentHidden: boolean;
   currentKey: string | null;
   branch: Set<string>;
   inCompareTile: (tile: VersionTile) => boolean;
@@ -726,29 +736,33 @@ function FoldedTiles({ tiles, currentKey, branch, inCompareTile, captionOf, sess
 }) {
   const { schema } = useProductSchema();
   const layer = useAnchoredPositioner();
-  const label = schemaCountMessage(schema, 'ui.studio.strip.more', tiles.length, { count: tiles.length });
+  const title = schemaText(schema, 'ui.studio.strip.group_all_title');
   return (
     <li data-testid="version-fold">
       <Popover.Root>
-        <HintTooltip name={schemaText(schema, 'ui.studio.strip.more_title')} hint={label} className="flex w-full">
+        <HintTooltip name={title} className="flex w-full">
           <Popover.Trigger
-            aria-label={label}
+            aria-label={title}
+            aria-current={currentHidden ? 'true' : undefined}
             data-testid="version-fold-trigger"
-            className="flex h-8 w-full items-center justify-center rounded-md border border-dashed border-border px-2 text-[11px] font-medium text-muted-foreground hover:bg-panel-raised hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:border-primary data-popup-open:text-primary"
+            className={cn(
+              'flex h-8 w-full items-center justify-center rounded-md border border-dashed border-border px-2 text-[11px] font-medium text-muted-foreground hover:bg-panel-raised hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:border-primary data-popup-open:text-primary',
+              currentHidden && 'border-solid border-primary bg-primary/10 text-primary',
+            )}
           >
-            +{tiles.length}
+            {schemaText(schema, 'ui.studio.strip.group_all')}
           </Popover.Trigger>
         </HintTooltip>
         <Popover.Portal>
           <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
-            <Popover.Popup className="flex max-h-72 max-w-(--available-width) flex-col gap-1 overflow-y-auto rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10" data-testid="version-fold-list">
-              <Popover.Title className="text-xs font-semibold">{schemaText(schema, 'ui.studio.strip.more_title')}</Popover.Title>
-              <ol className="flex flex-col gap-0.5">
+            <Popover.Popup className="flex max-h-96 max-w-(--available-width) flex-col gap-1 overflow-y-auto rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10" data-testid="version-fold-list">
+              <Popover.Title className="text-xs font-semibold">{title}</Popover.Title>
+              <ol className="grid grid-cols-4 gap-1 p-0.5">
                 {tiles.map((tile) => (
                   <TileButton
                     key={tile.key}
                     tile={tile}
-                    size="compact"
+                    size="regular"
                     current={tile.key === currentKey}
                     inBranch={currentKey === null || branch.has(tile.key)}
                     inCompare={inCompareTile(tile)}
