@@ -245,6 +245,13 @@ var requiredAdministrationUsageTextKeys = []string{
 	"column_failed",
 	"column_credits",
 	"column_last_active",
+	"column_project_group",
+	"group_title",
+	"group_attribution",
+	"group_share_note",
+	"group_ungrouped",
+	"column_group_amounts",
+	"group_share",
 }
 
 func validateAdministration(
@@ -705,6 +712,13 @@ func validateAdministrationUsage(
 		"last_active_at":     usage.API.Fields.LastActiveAt,
 		"by_type":            usage.API.Fields.ByType,
 		"total":              usage.API.Fields.Total,
+		"project_group_key":  usage.API.Fields.ProjectGroupKey,
+		"by_group":           usage.API.Fields.ByGroup,
+		"amounts":            usage.API.Fields.Amounts,
+		"unit":               usage.API.Fields.Unit,
+		"unit_label":         usage.API.Fields.UnitLabel,
+		"amount":             usage.API.Fields.Amount,
+		"share_basis_points": usage.API.Fields.ShareBasisPoints,
 		"query_days":         usage.API.Query.Days,
 		"query_start_date":   usage.API.Query.StartDate,
 		"query_end_date":     usage.API.Query.EndDate,
@@ -732,6 +746,9 @@ func validateAdministrationUsage(
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("usage 配置 %s 不能为空", name)
 		}
+	}
+	if err := validateAdministrationUsageWireObjects(usage.API.Fields); err != nil {
+		return err
 	}
 	if len(configuredRouteParameters(
 		runtime.HTTP.LegacyRoutes.AdminUsage,
@@ -1640,6 +1657,65 @@ func validateAdministrationAccessKeys(
 	for _, key := range requiredAdministrationAccessKeyTextKeys {
 		if strings.TrimSpace(presentation.Text[key]) == "" {
 			return fmt.Errorf("administration.access_keys.presentation.text[%q] 不能为空", key)
+		}
+	}
+	return nil
+}
+
+// validateAdministrationUsageWireObjects rejects two fields that share a name
+// inside one JSON object of the usage response (#599): the envelope, a user
+// row, a by_group row and one of its amounts. "price_totals" is the fixed key
+// the rows and the total already use for per-unit amounts.
+func validateAdministrationUsageWireObjects(
+	fields AdministrationUsageFieldSchema,
+) error {
+	objects := map[string]map[string]string{
+		"envelope": {
+			"data":     fields.Data,
+			"error":    fields.Error,
+			"total":    fields.Total,
+			"by_group": fields.ByGroup,
+		},
+		"user": {
+			"user_id":           fields.UserID,
+			"user_name":         fields.UserName,
+			"user_email":        fields.UserEmail,
+			"project_group_key": fields.ProjectGroupKey,
+			"total_tasks":       fields.TotalTasks,
+			"succeeded_tasks":   fields.SucceededTasks,
+			"failed_tasks":      fields.FailedTasks,
+			"estimated_credits": fields.EstimatedCredits,
+			"last_active_at":    fields.LastActiveAt,
+			"by_type":           fields.ByType,
+			"price_totals":      "price_totals",
+		},
+		"by_group": {
+			"project_group_key": fields.ProjectGroupKey,
+			"total_tasks":       fields.TotalTasks,
+			"succeeded_tasks":   fields.SucceededTasks,
+			"failed_tasks":      fields.FailedTasks,
+			"amounts":           fields.Amounts,
+		},
+		"amount": {
+			"unit":               fields.Unit,
+			"unit_label":         fields.UnitLabel,
+			"amount":             fields.Amount,
+			"share_basis_points": fields.ShareBasisPoints,
+		},
+	}
+	for object, members := range objects {
+		seen := make(map[string]string, len(members))
+		for name, field := range members {
+			if previous, exists := seen[field]; exists {
+				return fmt.Errorf(
+					"usage.api.fields 的 %s 对象中 %s 与 %s 不能同为 %q",
+					object,
+					previous,
+					name,
+					field,
+				)
+			}
+			seen[field] = name
 		}
 	}
 	return nil

@@ -27,10 +27,14 @@ type UsageQuery struct {
 }
 
 type UsageBucket struct {
-	NativeQuote      *schema.NativeQuote
-	UserID           string
-	UserName         string
-	UserEmail        string
+	NativeQuote *schema.NativeQuote
+	UserID      string
+	UserName    string
+	UserEmail   string
+	// ProjectGroupKey is the user's current project group KEY (#599), joined
+	// live from the user record; empty when the user is ungrouped or the user
+	// record no longer exists.
+	ProjectGroupKey  string
 	TaskType         string
 	TaskStatus       string
 	TaskCount        int
@@ -61,6 +65,7 @@ type UsageSummary struct {
 	UserID           string
 	UserName         string
 	UserEmail        string
+	ProjectGroupKey  string
 	TotalTasks       int
 	SucceededTasks   int
 	FailedTasks      int
@@ -78,10 +83,12 @@ type UsageTotal struct {
 	PriceTotals      []schema.NativeAmount
 }
 
-// UsageOverview is the per-user statistics and their total.
+// UsageOverview is the per-user statistics, their total and, for the
+// administration view only, the split by project group (#599).
 type UsageOverview struct {
-	Users []UsageSummary
-	Total UsageTotal
+	Users  []UsageSummary
+	Total  UsageTotal
+	Groups []UsageGroupSummary
 }
 
 type UsageServiceConfig struct {
@@ -191,21 +198,24 @@ func (service *UsageService) Overview(
 	byUser := make(map[string]*UsageSummary)
 	amounts := map[string]*schema.PriceAccumulator{}
 	all := &schema.PriceAccumulator{}
+	groups := newUsageGroupAccumulator()
 	for _, bucket := range buckets {
 		entry := byUser[bucket.UserID]
 		if entry == nil {
 			entry = &UsageSummary{
-				UserID:       bucket.UserID,
-				UserName:     bucket.UserName,
-				UserEmail:    bucket.UserEmail,
-				LastActiveAt: bucket.LastActiveAt,
-				ByType:       map[string]int{},
+				UserID:          bucket.UserID,
+				UserName:        bucket.UserName,
+				UserEmail:       bucket.UserEmail,
+				ProjectGroupKey: bucket.ProjectGroupKey,
+				LastActiveAt:    bucket.LastActiveAt,
+				ByType:          map[string]int{},
 			}
 			byUser[bucket.UserID] = entry
 		}
 		if bucket.LastActiveAt.After(entry.LastActiveAt) {
 			entry.UserName = bucket.UserName
 			entry.UserEmail = bucket.UserEmail
+			entry.ProjectGroupKey = bucket.ProjectGroupKey
 			entry.LastActiveAt = bucket.LastActiveAt
 		}
 		entry.TotalTasks += bucket.TaskCount
@@ -221,16 +231,23 @@ func (service *UsageService) Overview(
 			if e := all.Add(bucket.EstimatedCredits, bucket.NativeQuote); e != nil {
 				return UsageOverview{}, fmt.Errorf("%w: price", ErrUsageFailed)
 			}
+			if e := groups.amounts(bucket.ProjectGroupKey).Add(bucket.EstimatedCredits, bucket.NativeQuote); e != nil {
+				return UsageOverview{}, fmt.Errorf("%w: price", ErrUsageFailed)
+			}
 			if bucket.NativeQuote == nil {
 				entry.ByType[bucket.TaskType] += bucket.EstimatedCredits
 			}
 		}
 		entry.EstimatedCredits = a.Legacy
+		group := groups.summary(bucket.ProjectGroupKey)
+		group.TotalTasks += bucket.TaskCount
 		if _, exists := service.succeededStates[bucket.TaskStatus]; exists {
 			entry.SucceededTasks += bucket.TaskCount
+			group.SucceededTasks += bucket.TaskCount
 		}
 		if _, exists := service.failedStates[bucket.TaskStatus]; exists {
 			entry.FailedTasks += bucket.TaskCount
+			group.FailedTasks += bucket.TaskCount
 		}
 	}
 	hasNative := false
@@ -255,7 +272,11 @@ func (service *UsageService) Overview(
 	if err != nil {
 		return UsageOverview{}, fmt.Errorf("%w: price", ErrUsageFailed)
 	}
-	return UsageOverview{Users: result, Total: UsageTotal{EstimatedCredits: all.Legacy, PriceTotals: totals}}, nil
+	byGroup, err := groups.overview(all, totals)
+	if err != nil {
+		return UsageOverview{}, fmt.Errorf("%w: price", ErrUsageFailed)
+	}
+	return UsageOverview{Users: result, Total: UsageTotal{EstimatedCredits: all.Legacy, PriceTotals: totals}, Groups: byGroup}, nil
 }
 
 func (service *UsageService) query(

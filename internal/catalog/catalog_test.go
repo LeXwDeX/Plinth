@@ -1593,7 +1593,10 @@ const minimalApplication = `"application":{
 					"succeeded_tasks":"succeededTasks",
 					"failed_tasks":"failedTasks",
 					"estimated_credits":"estimatedCredits",
-					"last_active_at":"lastActiveAt","by_type":"byType","total":"total"
+					"last_active_at":"lastActiveAt","by_type":"byType","total":"total",
+					"project_group_key":"projectGroupKey","by_group":"byGroup",
+					"amounts":"amounts","unit":"unit","unit_label":"unit_label",
+					"amount":"amount","share_basis_points":"share_basis_points"
 				},
 				"query":{
 					"days":"days","start_date":"startDate","end_date":"endDate"
@@ -1643,7 +1646,12 @@ const minimalApplication = `"application":{
 					"empty":"暂无使用记录","column_user":"用户",
 					"column_tasks":"任务数","column_succeeded":"成功",
 					"column_failed":"失败","column_credits":"预估消耗",
-					"column_last_active":"最近活动"
+					"column_last_active":"最近活动",
+					"column_project_group":"项目组","group_title":"项目组支出占比",
+					"group_attribution":"按用户当前所属项目组归集",
+					"group_share_note":"占比按各单位分别计算",
+					"group_ungrouped":"未分组","column_group_amounts":"预估消耗（占比）",
+					"group_share":"{percent}%"
 				}
 			}
 		},

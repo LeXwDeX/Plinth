@@ -955,6 +955,16 @@ export interface AdministrationProductSchema {
         last_active_at: string;
         by_type: string;
         total: string;
+        /** #599: a user's or by_group row's project group KEY; null when ungrouped. Administration only. */
+        project_group_key: string;
+        /** #599: spending per project group, each row with task counts and per-unit amounts. */
+        by_group: string;
+        amounts: string;
+        unit: string;
+        unit_label: string;
+        amount: string;
+        /** Share of the unit's total in basis points; null when that total is 0. */
+        share_basis_points: string;
       };
       query: {
         days: string;
