@@ -194,32 +194,17 @@ func (s *Service) DownloadFilename(taskID generation.TaskID, asset generation.As
 // host's mime table called application/x-tgif or a USDZ saved as a ZIP is
 // served as the model type it is. A packaged variant (a saved media type the
 // format lists in media_type_extensions, e.g. a glTF or OBJ ZIP) keeps its
-// own type. A file of no format is not named.
+// own type. A file of no format is not named. The decision is the Catalog's
+// DownloadMediaTypeOf, shared with every public asset projection (#622).
 func (s *Service) DownloadMediaType(asset generation.Asset) (string, bool) {
-	for _, format := range s.schema.Formats {
-		if !s.formatMatches(format, asset) {
-			continue
-		}
-		saved := strings.ToLower(strings.TrimSpace(strings.Split(asset.MediaType, ";")[0]))
-		if _, packaged := format.MediaTypeExtensions[saved]; packaged {
-			return saved, true
-		}
-		if format.DownloadMediaType == "" {
-			return "", false
-		}
-		return format.DownloadMediaType, true
-	}
-	return "", false
+	return s.schema.DownloadMediaTypeOf(asset.Role, asset.Variant, asset.MediaType)
 }
 
 // formatMediaType is the public media type of a format row: the same one the
 // single-file download route serves. A saved file that matches no format keeps
 // its stored label; every row of a target format is normalized.
 func (s *Service) formatMediaType(asset generation.Asset) string {
-	if mediaType, ok := s.DownloadMediaType(asset); ok {
-		return mediaType
-	}
-	return asset.MediaType
+	return s.schema.PublicMediaTypeOf(asset.Role, asset.Variant, asset.MediaType)
 }
 
 func (s *Service) formatMatches(format catalog.ModelFormatSchema, asset generation.Asset) bool {

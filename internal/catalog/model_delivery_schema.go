@@ -819,6 +819,48 @@ func (schema ModelDeliverySchema) FormatLabelOf(role, variant, mediaType string)
 	return "", false
 }
 
+// DownloadMediaTypeOf is the Content-Type a single download of a saved file
+// answers with (#330): the download_media_type of the first format whose
+// matches select it, so an OBJ the host's mime table called
+// application/x-tgif is served as model/obj. A packaged variant (a saved type
+// the format lists in media_type_extensions, e.g. an OBJ ZIP) keeps its own
+// type. A file of no format, or of a format without a download type, is not
+// named. It is the only place the delivered type of a saved file is decided:
+// the download route and every public asset projection read it (#622).
+func (schema ModelDeliverySchema) DownloadMediaTypeOf(role, variant, mediaType string) (string, bool) {
+	for _, format := range schema.Formats {
+		matched := false
+		for _, match := range format.Matches {
+			if match.Matches(role, variant, mediaType) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		saved := strings.ToLower(strings.TrimSpace(strings.Split(mediaType, ";")[0]))
+		if _, packaged := format.MediaTypeExtensions[saved]; packaged {
+			return saved, true
+		}
+		if format.DownloadMediaType == "" {
+			return "", false
+		}
+		return format.DownloadMediaType, true
+	}
+	return "", false
+}
+
+// PublicMediaTypeOf is the media type a public projection lists for a saved
+// file (#622): the type its download answers with, or the saved label for a
+// file the download serves as saved (images, material libraries, reports).
+func (schema ModelDeliverySchema) PublicMediaTypeOf(role, variant, mediaType string) string {
+	if declared, ok := schema.DownloadMediaTypeOf(role, variant, mediaType); ok {
+		return declared
+	}
+	return mediaType
+}
+
 func (schema ModelDeliverySchema) FormatOf(role, variant, mediaType string) (string, bool) {
 	for _, format := range schema.Formats {
 		for _, match := range format.Matches {
