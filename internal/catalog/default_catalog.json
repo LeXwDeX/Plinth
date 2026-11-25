@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.33",
+    "revision": "2026-11-24.19.34",
     "terminology": {
       "user_facing": [
         {
@@ -17355,6 +17355,7 @@
         "skill_category": "Skill 分类",
         "add_skill": "新增 Skill",
         "remove_skill": "删除 Skill",
+        "skills_empty": "目前没有共享 Skill。系统 Skill 始终可用，不在此编辑；可在这里添加共享 Skill。",
         "history_empty": "暂无版本记录",
         "mcp_protocol": "MCP 协议",
         "mcp_unavailable": "当前接线不可执行",
@@ -21229,6 +21230,7 @@
             "agent_configuration.ui.skill_category": "Skill category",
             "agent_configuration.ui.add_skill": "Add Skill",
             "agent_configuration.ui.remove_skill": "Remove Skill",
+            "agent_configuration.ui.skills_empty": "There are no shared Skills yet. System Skills are always available and are not edited here; you can add a shared Skill here.",
             "agent_configuration.ui.history_empty": "No version history yet",
             "agent_configuration.ui.mcp_protocol": "MCP protocol",
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",

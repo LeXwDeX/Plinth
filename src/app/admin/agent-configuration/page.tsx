@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
+import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot, type AgentSkillConfiguration } from '@/lib/agent-configuration';
 import { schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -63,6 +63,19 @@ export default function AgentConfigurationPage() {
     if (!draft) return;
     revise({ ...draft, [field]: enabled ? [...draft[field], name] : draft[field].filter((item) => item !== name) });
   };
+  // A new shared Skill starts from `template` under a fresh ID and opens for editing. Required fields
+  // are left to the server's check (#601); only the size the Schema recommends is filled in.
+  const addSkill = (template?: AgentSkillConfiguration) => {
+    if (!draft) return;
+    const id = newSkillID();
+    const blank: AgentSkillConfiguration = { id, name: '', category: '', recommended_size: schema.chat.skills.creation.recommended_size, thumbnail_path: '', raw_image_url: '', prompt: '' };
+    revise({ ...draft, skills: [...draft.skills, template ? { ...structuredClone(template), id } : blank] });
+    setEditingSkillId(id);
+  };
+  const addSkillAction = (template?: AgentSkillConfiguration) => {
+    const full = !draft || draft.skills.length >= schema.agent_configuration.limits.max_skill_count;
+    return <HintTooltip name={ui('add_skill')} reason={full ? schemaText(schema, 'ui.unavailable.reason.admin.agent_skill_limit') : undefined}><Action variant="outline" disabled={busy || full} onClick={() => addSkill(template)}>{ui('add_skill')}</Action></HintTooltip>;
+  };
 
   return <main className="space-y-5" data-testid="agent-configuration-admin">
     <div><h1 className="text-xl font-semibold">{ui('title')}</h1><p className="mt-1 text-sm text-muted-foreground">{ui('description')}</p></div>
@@ -86,6 +99,8 @@ export default function AgentConfigurationPage() {
         {snapshot.tools.map(tool => <Field key={tool.name} id={`agent-tool-${tool.name}`} label={tool.name} help={tool.description} layout="inline">{props => <input {...props} type="checkbox" disabled={busy} checked={draft.enabled_tool_names.includes(tool.name)} onChange={event => toggle('enabled_tool_names', tool.name, event.target.checked)} />}</Field>)}
       </Surface>
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('skills')}</h2>
+        {/* No shared Skill: say so and offer the one way to add the first (#601); a preset, when there is one, is its template. */}
+        {draft.skills.length === 0 ? <div className="space-y-3" data-testid="agent-skills-empty"><p className="text-sm text-muted-foreground">{ui('skills_empty')}</p>{addSkillAction(snapshot.presets.skills[0])}</div> : <>
         <Field id="agent-skill-search" label={ui('search')}>{props => <input {...props} type="search" value={skillSearch} onChange={event => setSkillSearch(event.target.value)} className="w-full rounded border bg-background p-2 text-sm" />}</Field>
         <Field id="agent-skill-edit" label={ui('skills')}>{props => <OptionSelect {...props} value={editingSkillId ?? draft.skills[0]?.id ?? ''} onValueChange={setEditingSkillId} options={draft.skills.filter(skill => skill.id === (editingSkillId ?? draft.skills[0]?.id) || `${skill.name} ${skill.name_zh ?? ''} ${skill.category}`.toLocaleLowerCase().includes(skillSearch.toLocaleLowerCase())).map(skill => ({ value: skill.id, label: skill.name_zh || skill.name }))} />}</Field>
         {draft.skills.map((skill, index) => ({ skill, index })).filter(({ skill }) => skill.id === (editingSkillId ?? draft.skills[0]?.id)).map(({ skill, index }) => <Surface key={skill.id} variant="inset" padding="md" className="space-y-2">
@@ -93,9 +108,9 @@ export default function AgentConfigurationPage() {
           {(['name', 'name_zh', 'category'] as const).map(field => <Field key={field} id={`agent-skill-${skill.id}-${field}`} label={ui(field === 'category' ? 'skill_category' : 'skill_name')}>{props => <input {...props} value={skill[field] ?? ''} disabled={busy} onChange={event => updateSkill(index, field, event.target.value)} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>)}
           <Field id={`agent-skill-${skill.id}-prompt`} label={ui('skill_prompt')}>{props => <textarea {...props} value={skill.prompt} maxLength={schema.agent_configuration.limits.max_skill_prompt_characters} disabled={busy} onChange={event => updateSkill(index, 'prompt', event.target.value)} rows={4} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>
           <Field id={`agent-skill-${skill.id}-image-prompt`} label={ui('image_to_image_template')}>{props => <textarea {...props} value={skill.image_to_image_template ?? ''} maxLength={schema.agent_configuration.limits.max_skill_prompt_characters} disabled={busy} onChange={event => updateSkill(index, 'image_to_image_template', event.target.value)} rows={3} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>
-          <div className="flex flex-wrap gap-2"><HintTooltip name={ui('add_skill')} reason={draft.skills.length >= schema.agent_configuration.limits.max_skill_count ? schemaText(schema, 'ui.unavailable.reason.admin.agent_skill_limit') : undefined}><Action variant="outline" disabled={busy || draft.skills.length >= schema.agent_configuration.limits.max_skill_count} onClick={() => { const id = newSkillID(); revise({ ...draft, skills: [...draft.skills, { ...structuredClone(skill), id }] }); setEditingSkillId(id); }}>{ui('add_skill')}</Action></HintTooltip><Action variant="outline" disabled={busy} onClick={() => { revise({ ...draft, skills: draft.skills.filter((_, at) => at !== index) }); setEditingSkillId(null); }}>{ui('remove_skill')}</Action></div>
+          <div className="flex flex-wrap gap-2">{addSkillAction(skill)}<Action variant="outline" disabled={busy} onClick={() => { revise({ ...draft, skills: draft.skills.filter((_, at) => at !== index) }); setEditingSkillId(null); }}>{ui('remove_skill')}</Action></div>
         </Surface>)}
-        {draft.skills.length === 0 && snapshot.presets.skills[0] ? <Action disabled={busy} onClick={() => revise({ ...draft, skills: [{ ...structuredClone(snapshot.presets.skills[0]), id: newSkillID() }] })}>{ui('add_skill')}</Action> : null}
+        </>}
       </Surface>
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('mcp')}</h2>
         {snapshot.mcp_presets.length === 0 ? <p className="text-sm text-muted-foreground">{ui('empty')}</p> : snapshot.mcp_presets.map(preset => <Field key={preset.id} id={`agent-mcp-${preset.id}`} label={preset.name} help={<>{preset.description}{preset.available === false ? <><br />{unavailableNotice('agent_mcp_unavailable', ui('mcp_unavailable'), `agent-mcp-unavailable-${preset.id}`)}</> : null}{preset.default_enabled === false ? <><br />{ui('mcp_default_off')}</> : null}<br />{ui('mcp_protocol')}: {preset.protocol_version ?? ''}<br />{ui('transport')}: {preset.transport ?? ''}<br />{ui('mcp_tools')}: {preset.tool_names.join(', ')}</>} layout="inline">{props => <input {...props} type="checkbox" disabled={busy} checked={draft.enabled_mcp_preset_ids.includes(preset.id)} onChange={event => toggle('enabled_mcp_preset_ids', preset.id, event.target.checked)} />}</Field>)}
