@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { deletePersonalSkill, listPersonalSkillIds, PersonalSkillNotFound, updatePersonalSkill } from '@/lib/personal-skills';
+import {
+  createPersonalSkill, deletePersonalSkill, draftPersonalSkill, listPersonalSkillIds, patchPersonalSkill, PersonalSkillInvalid, PersonalSkillNotFound,
+  updatePersonalSkill,
+} from '@/lib/personal-skills';
 import type { ProductSchema } from '@/lib/product-schema';
 
 const creation = {
   route: '/api/v1/chat/skills/personal',
   item_route: '/api/v1/chat/skills/personal/{skillID}',
+  draft_route: '/api/v1/chat/skills/personal/draft',
   max_name_characters: 100,
   recommended_size: 'auto',
 };
@@ -67,5 +71,37 @@ describe('personal Skill update (#152)', () => {
   it('refuses a cross-origin item route', async () => {
     const broken = { chat: { skills: { creation: { ...creation, item_route: '//evil.test/{skillID}' } } } } as unknown as ProductSchema;
     await expect(updatePersonalSkill(broken, 'x', { name: 'x', prompt: 'p', recommended_size: 'auto' })).rejects.toThrow('Invalid Skill route');
+  });
+});
+
+describe('personal Skill draft and field saves (#548)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('drafts through the Schema draft route and returns the four standard fields', async () => {
+    const draft = { slug: 'soft-watercolor', description: '画角色时使用。', prompt: '柔和水彩。', apply: 'generation-prompt' };
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ draft }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(draftPersonalSkill(schema, { name: '水彩', requirement: '用水彩' })).resolves.toEqual(draft);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/chat/skills/personal/draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '水彩', requirement: '用水彩' }), signal: undefined,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 502 }))));
+    await expect(draftPersonalSkill(schema, { name: '水彩', requirement: '用水彩' })).rejects.toThrow('HTTP 502');
+  });
+
+  it('patches one field and names the field the server refused', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ skill: { id: 'personal-a', slug: 'new-slug' } }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(patchPersonalSkill(schema, 'personal-a', { slug: 'new-slug' })).resolves.toMatchObject({ slug: 'new-slug' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/chat/skills/personal/personal-a', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: 'new-slug' }), signal: undefined,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ code: 'invalid_personal_skill_slug' }), { status: 400 }))));
+    const refused = await patchPersonalSkill(schema, 'personal-a', { slug: 'Bad' }).catch((cause: unknown) => cause);
+    expect(refused).toBeInstanceOf(PersonalSkillInvalid);
+    expect((refused as PersonalSkillInvalid).field).toBe('slug');
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ code: 'invalid_personal_skill_description' }), { status: 400 }))));
+    const created = await createPersonalSkill(schema, { name: 'n', prompt: 'p', description: 'a', recommended_size: 'auto' }, new AbortController().signal).catch((cause: unknown) => cause);
+    expect((created as PersonalSkillInvalid).field).toBe('description');
   });
 });

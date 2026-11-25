@@ -7,6 +7,9 @@ import (
 	"net/http"
 
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
+	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/skilldraft"
 )
 
 func (s *Server) personalSkills(w http.ResponseWriter, r *http.Request) {
@@ -45,11 +48,11 @@ func (s *Server) personalSkills(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, agentconfiguration.ErrPersonalSkillLimit):
 			status = http.StatusConflict
 		}
-		message := s.application.Content.Messages["ui.workspace.skills.save_failed"]
 		if errors.Is(err, agentconfiguration.ErrInvalidPersonalSkill) {
-			message = s.application.Content.Messages["ui.workspace.skills.content_invalid"]
+			s.writeInvalidPersonalSkill(w, err)
+			return
 		}
-		writeProblem(w, status, "personal_skill_create_failed", message)
+		writeProblem(w, status, "personal_skill_create_failed", s.application.Content.Messages["ui.workspace.skills.save_failed"], err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"skill": skill})
@@ -74,16 +77,109 @@ func (s *Server) updatePersonalSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	skill, err := s.agentConfiguration.UpdatePersonalSkill(r.Context(), principal.ID(), r.PathValue("skillID"), input)
+	s.writePersonalSkillChange(w, principal.ID(), skill, err)
+}
+
+// patchPersonalSkill changes only the members the body carries (#548).
+func (s *Server) patchPersonalSkill(w http.ResponseWriter, r *http.Request) {
+	principal, err := s.identity.Identify(r)
+	if err != nil {
+		writeProblem(w, http.StatusUnauthorized, "unauthenticated", s.application.Authentication.Messages.Unauthenticated)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	var input agentconfiguration.PatchPersonalSkillInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+		return
+	}
+	skill, err := s.agentConfiguration.PatchPersonalSkill(r.Context(), principal.ID(), r.PathValue("skillID"), input)
+	s.writePersonalSkillChange(w, principal.ID(), skill, err)
+}
+
+// personalSkillFieldMessages are the Schema messages of a field the
+// validator names (#548); any other invalid content keeps the general one.
+var personalSkillFieldMessages = map[string]string{
+	agentconfiguration.PersonalSkillFieldName:        "ui.workspace.skills.name_invalid",
+	agentconfiguration.PersonalSkillFieldPrompt:      "ui.workspace.skills.body_invalid",
+	agentconfiguration.PersonalSkillFieldSlug:        "ui.workspace.skills.slug_invalid",
+	agentconfiguration.PersonalSkillFieldDescription: "ui.workspace.skills.description_invalid",
+}
+
+// writeInvalidPersonalSkill answers 400 with the field the validator named:
+// the code is invalid_personal_skill_<field> so a client can show the error
+// next to that field.
+func (s *Server) writeInvalidPersonalSkill(w http.ResponseWriter, err error) {
+	field := agentconfiguration.InvalidPersonalSkillField(err)
+	if key, named := personalSkillFieldMessages[field]; named {
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill_"+field, s.application.Content.Messages[key], err)
+		return
+	}
+	writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"], err)
+}
+
+func (s *Server) writePersonalSkillChange(w http.ResponseWriter, owner string, skill catalog.SkillSchema, err error) {
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"skill": skill})
 	case errors.Is(err, agentconfiguration.ErrInvalidPersonalSkill):
-		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+		s.writeInvalidPersonalSkill(w, err)
 	case errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound):
 		writeProblem(w, http.StatusNotFound, "personal_skill_not_found", s.application.Content.Messages["ui.workspace.skills.not_found"])
 	default:
-		s.logger.Error("更新个人 Skill 失败", "owner_id", principal.ID(), "error", err)
+		s.logger.Error("更新个人 Skill 失败", "owner_id", owner, "error", err)
 		writeProblem(w, http.StatusInternalServerError, "personal_skill_update_failed", s.application.Content.Messages["ui.workspace.skills.save_failed"])
+	}
+}
+
+// draftPersonalSkill drafts a Skill from a name and a requirement with one
+// chat model call (#548). Nothing is saved; the person reviews the draft and
+// saves it through the creation route. A failure is one readable message.
+func (s *Server) draftPersonalSkill(w http.ResponseWriter, r *http.Request) {
+	principal, err := s.identity.Identify(r)
+	if err != nil {
+		writeProblem(w, http.StatusUnauthorized, "unauthenticated", s.application.Authentication.Messages.Unauthenticated)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	var input struct {
+		Name        string `json:"name"`
+		Requirement string `json:"requirement"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		writeProblem(w, http.StatusBadRequest, "invalid_skill_draft", s.application.Content.Messages["ui.workspace.skills.draft_invalid"])
+		return
+	}
+	taken, err := s.agentConfiguration.TakenSkillSlugs(r.Context(), principal.ID())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "skill_draft_failed", s.application.Content.Messages["ui.workspace.skills.draft_failed"], err)
+		return
+	}
+	locale := requestLocale(r)
+	authoring := s.application.Chat.Skills.Authoring
+	authoring.SystemPrompt = s.textIn(locale, authoring.SystemPrompt)
+	authoring.UserTemplate = s.textIn(locale, authoring.UserTemplate)
+	draft, err := s.skillDrafter.Draft(r.Context(), skilldraft.Request{
+		Name: input.Name, Requirement: input.Requirement, Authoring: authoring, Taken: taken,
+	})
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"draft": draft})
+	case errors.Is(err, skilldraft.ErrInvalidRequest):
+		writeProblem(w, http.StatusBadRequest, "invalid_skill_draft", s.application.Content.Messages["ui.workspace.skills.draft_invalid"], err)
+	case errors.Is(err, agents.ErrNotConfigured):
+		writeProblem(w, http.StatusServiceUnavailable, "agent_not_configured", s.application.Chat.Presentation.Messages.AgentNotConfigured, err)
+	default:
+		s.logger.Warn("起草个人 Skill 失败", "owner_id", principal.ID(), "error", err)
+		writeProblem(w, http.StatusBadGateway, "skill_draft_failed", s.application.Content.Messages["ui.workspace.skills.draft_failed"], err)
 	}
 }
 

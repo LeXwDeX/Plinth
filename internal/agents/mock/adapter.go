@@ -435,6 +435,11 @@ func (adapter *Adapter) Complete(
 	if request.Purpose == agents.PurposeSummary {
 		return adapter.summarize(request)
 	}
+	if request.Purpose == agents.PurposeSkillDraft {
+		completion := agents.Completion{Content: skillDraft(adapter.latestUserContent(request.Messages))}
+		completion.Usage = adapter.usage(request, completion)
+		return completion, nil
+	}
 	content := adapter.latestUserContent(request.Messages)
 	if content == "" {
 		content = adapter.summary

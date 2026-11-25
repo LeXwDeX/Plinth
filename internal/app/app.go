@@ -71,6 +71,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers"
 	"github.com/LeXwDeX/Plinth/internal/rendermanifest"
 	"github.com/LeXwDeX/Plinth/internal/scene"
+	"github.com/LeXwDeX/Plinth/internal/skilldraft"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
 	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
@@ -1360,6 +1361,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #548: a personal Skill draft runs on the default chat model, resolved
+	// exactly as for a session that chose none.
+	skillDrafter, err := skilldraft.New(skilldraft.Config{
+		Chat:                applicationSchema.Chat,
+		Agent:               agentAdapter,
+		Model:               chatService.DefaultChatModel,
+		MaxPromptCharacters: applicationSchema.AgentConfiguration.Limits.MaxSkillPromptCharacters,
+	})
+	if err != nil {
+		return nil, err
+	}
 	visionInline := referenceResolver.OpenVisionImage
 	mcpService, err := buildWorkspaceMCP(taskCatalog, module, chatService)
 	if err != nil {
@@ -2221,6 +2233,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return err == nil && owned
 		},
 		PromptEnhancer:        promptEnhancer,
+		SkillDrafter:          skillDrafter,
 		ProviderAccounts:      providerAccountService,
 		ProviderBalances:      providerBalanceReader(stepBalanceCache),
 		AssetProxy:            assetProxy,

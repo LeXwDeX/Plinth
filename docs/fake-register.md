@@ -19,7 +19,7 @@
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
-| `openai/v1` | 4 | 9 | 1 | 14 | 2026-11-23 |
+| `openai/v1` | 4 | 10 | 1 | 15 | 2026-11-23 |
 | `meshy/openapi-v1` | 23 | 22 | 2 | 47 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 79 | 89 | 5 | 173 | 2026-11-25 |
+| 合计 | 79 | 90 | 5 | 174 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -544,6 +544,14 @@
 - 依据：Model Studio OpenAI 兼容文档（流式 usage）
 - 核对日期：2026-11-24
 - 没有真实样本的原因：这些形态没有入库样本（deepseek 的 usage 在 finish_reason 块上是已观测形态），待真实一轮
+
+#### `openai-v1/chat-skill-draft` · response-shape · constructed
+
+- 端点：`POST /chat/completions`
+- 行为：#548：最后一条 user 消息带 <<<SKILL_REQUEST>>> 定界（Product Schema chat.skills.authoring.user_template 的形状）时，答一个 Skill 草稿 JSON（slug fake-skill-draft、固定 description、apply instruction、要求原文作正文）；要求里的 [[fake:skill-draft {JSON}]] 可覆盖 slug、description、prompt、apply，用来脚本化不合规 slug、画风型或空正文。
+- 依据：项目自有的起草提示词形状，非上游契约（chat.skills.authoring（default_catalog.json））
+- 核对日期：2026-11-25
+- 没有真实样本的原因：这是 Plinth 自己的请求约定，上游没有对应行为；真实模型的草稿质量按用户决定不做评测
 
 #### `openai-v1/chat-image-refusals` · error-code-and-text · constructed
 

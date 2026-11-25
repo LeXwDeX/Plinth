@@ -698,6 +698,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return errors.New("skills.creation.item_route 必须是 route 后接 /{skillID}")
 		}
 	}
+	if err := validateSkillAuthoring(schema.Skills); err != nil {
+		return err
+	}
 	if err := validateSkillRecipes(schema.Skills.Recipes); err != nil {
 		return err
 	}

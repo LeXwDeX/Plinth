@@ -108,6 +108,10 @@ export interface ChatSkill {
   defaultMessage?: string;
   /** The selection returns to none once the server accepted the message that used it. */
   oneShot?: boolean;
+  /** #548: the standard name, the description (derived when none was written) and whether it was derived. */
+  slug?: string;
+  description?: string;
+  descriptionDerived?: boolean;
 }
 
 export interface ChatSkillCatalog {
@@ -1050,6 +1054,8 @@ export function createChatBrowserClient(
         );
         const tool = optionalString(source, contract.tool);
         const defaultMessage = optionalString(source, contract.default_message);
+        const slug = contract.slug ? optionalString(source, contract.slug) : undefined;
+        const description = contract.description ? optionalString(source, contract.description) : undefined;
         const tags = array(source[contract.tags]).filter(
           (tag): tag is string => typeof tag === 'string',
         );
@@ -1068,6 +1074,10 @@ export function createChatBrowserClient(
             ? { imageToImageTemplate }
             : {}),
           ...(tags.length > 0 ? { tags } : {}),
+          ...(slug ? { slug } : {}),
+          ...(description
+            ? { description, descriptionDerived: contract.description_derived ? source[contract.description_derived] === true : false }
+            : {}),
           ...(tool
             ? {
                 tool,

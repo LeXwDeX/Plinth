@@ -61,6 +61,82 @@ func (r *Repository) UpdatePersonalSkill(ctx context.Context, owner, id string, 
 	return nil
 }
 
+// ModifyPersonalSkill reads the owner's Skill and their other Skills, applies
+// change and writes the result back in one transaction (#548). The write is
+// also conditional on the row still holding what was read, so a concurrent
+// change is never overwritten with a merge of stale content.
+func (r *Repository) ModifyPersonalSkill(
+	ctx context.Context, owner, id string,
+	change func(current catalog.SkillSchema, others []catalog.SkillSchema) (catalog.SkillSchema, error),
+) (catalog.SkillSchema, error) {
+	if owner == "" || id == "" {
+		return catalog.SkillSchema{}, agentconfiguration.ErrPersonalSkillNotFound
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id, skill_json FROM personal_skills WHERE owner_id=? ORDER BY created_at,id`, owner)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	var current catalog.SkillSchema
+	var stored string
+	found := false
+	others := []catalog.SkillSchema{}
+	for rows.Next() {
+		var rowID, encoded string
+		if err := rows.Scan(&rowID, &encoded); err != nil {
+			rows.Close()
+			return catalog.SkillSchema{}, err
+		}
+		var skill catalog.SkillSchema
+		if err := json.Unmarshal([]byte(encoded), &skill); err != nil {
+			rows.Close()
+			return catalog.SkillSchema{}, err
+		}
+		if rowID == id {
+			current, stored, found = skill, encoded, true
+			continue
+		}
+		others = append(others, skill)
+	}
+	if err := rows.Close(); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if !found {
+		return catalog.SkillSchema{}, agentconfiguration.ErrPersonalSkillNotFound
+	}
+	next, err := change(current, others)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if next.ID != id {
+		return catalog.SkillSchema{}, errors.New("personal Skill update ID mismatch")
+	}
+	encoded, err := json.Marshal(next)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE personal_skills SET skill_json=? WHERE owner_id=? AND id=? AND skill_json=?`, string(encoded), owner, id, stored)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return catalog.SkillSchema{}, err
+	} else if count == 0 {
+		return catalog.SkillSchema{}, errors.New("personal Skill changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	return next, nil
+}
+
 // DeletePersonalSkill removes one Skill only when the owner created it.
 // Turns that already froze the Skill keep their own snapshot.
 func (r *Repository) DeletePersonalSkill(ctx context.Context, owner, id string) error {

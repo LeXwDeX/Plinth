@@ -297,6 +297,9 @@ func ForRequest(request Request) Source {
 // PurposeSummary marks the summary call of a context compaction.
 const PurposeSummary = "summary"
 
+// PurposeSkillDraft marks the call that drafts a personal Skill (#548).
+const PurposeSkillDraft = "skill_draft"
+
 // Usage is the token usage the upstream reported for one request (#322).
 // The adapter never estimates it: a reply without usage has none.
 type Usage struct {
