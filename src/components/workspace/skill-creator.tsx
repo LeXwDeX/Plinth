@@ -12,7 +12,7 @@ import { schemaText } from '@/lib/product-schema';
 import type { AgentSkillConfiguration } from '@/lib/agent-configuration';
 import {
   createPersonalSkill, draftPersonalSkill, patchPersonalSkill, PersonalSkillInvalid, PersonalSkillNotFound,
-  type PersonalSkillField,
+  SkillDraftQuotaExhausted, type PersonalSkillField,
 } from '@/lib/personal-skills';
 import { captureSessionScope, isCurrentSessionScope } from '@/lib/workspace/session-scope';
 
@@ -145,12 +145,13 @@ export function SkillCreator({ sessionId, disabled, onCreated, onUpdated, onMiss
     const name = values.name.trim();
     if (!name || !requirement.trim()) { setError(text('draft_invalid')); return; }
     void run('draft', async (signal) => {
-      const draft = await draftPersonalSkill(schema, { name, requirement: requirement.trim() }, signal);
+      // 起草跟随当前会话的对话模型（#619）：额度用完时可以在对话框换模型后重试。
+      const draft = await draftPersonalSkill(schema, { name, requirement: requirement.trim(), ...(sessionId ? { session_id: sessionId } : {}) }, signal);
       if (signal.aborted) return;
       setValues({ name, slug: draft.slug, description: draft.description, prompt: draft.prompt });
       setApply(draft.apply === APPLY_INSTRUCTION ? APPLY_INSTRUCTION : APPLY_STYLE);
       setFieldErrors({}); setStep('review');
-    }, () => setError(text('draft_failed')));
+    }, (cause) => setError(text(cause instanceof SkillDraftQuotaExhausted ? 'draft_quota_exhausted' : 'draft_failed')));
   };
 
   const failFor = (field: PersonalSkillField | '') => (cause: unknown) => {

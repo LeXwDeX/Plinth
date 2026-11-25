@@ -1352,12 +1352,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	// #548: a personal Skill draft runs on the default chat model, resolved
-	// exactly as for a session that chose none.
+	// #548/#619: a personal Skill draft runs on the chat model of the session
+	// it was opened from, resolved exactly as that session's next turn; a
+	// draft without a session runs on the default.
 	skillDrafter, err := skilldraft.New(skilldraft.Config{
 		Chat:                applicationSchema.Chat,
 		Agent:               agentAdapter,
-		Model:               chatService.DefaultChatModel,
+		Model:               chatService.ChatModelFor,
 		MaxPromptCharacters: applicationSchema.AgentConfiguration.Limits.MaxSkillPromptCharacters,
 	})
 	if err != nil {

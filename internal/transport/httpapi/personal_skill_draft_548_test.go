@@ -57,7 +57,7 @@ func TestPersonalSkillDraftSaveAndPatch(t *testing.T) {
 	}
 	agent := &draftAgent{content: `{"slug":"three-view","description":"先列清单：多步任务时使用。","prompt":"先列清单再动手。","apply":"instruction"}`}
 	drafter, err := skilldraft.New(skilldraft.Config{Chat: schema.Chat, Agent: agent,
-		Model: func(context.Context) (string, string, error) { return "", "m", nil }, MaxPromptCharacters: 4000})
+		Model: func(context.Context, string, string) (string, string, error) { return "", "m", nil }, MaxPromptCharacters: 4000})
 	if err != nil {
 		t.Fatal(err)
 	}

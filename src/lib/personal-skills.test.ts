@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createPersonalSkill, deletePersonalSkill, draftPersonalSkill, listPersonalSkillIds, patchPersonalSkill, PersonalSkillInvalid, PersonalSkillNotFound,
+  SkillDraftQuotaExhausted,
   updatePersonalSkill,
 } from '@/lib/personal-skills';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -87,6 +88,20 @@ describe('personal Skill draft and field saves (#548)', () => {
     });
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 502 }))));
     await expect(draftPersonalSkill(schema, { name: '水彩', requirement: '用水彩' })).rejects.toThrow('HTTP 502');
+  });
+
+  it('drafts on the chat model of the session it was opened from and names a used-up quota (#619)', async () => {
+    const draft = { slug: 'ink', description: '画角色时使用。', prompt: '水墨。', apply: 'generation-prompt' };
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ draft }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await draftPersonalSkill(schema, { name: '水墨', requirement: '用水墨', session_id: 'session-1' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/chat/skills/personal/draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '水墨', requirement: '用水墨', session_id: 'session-1' }), signal: undefined,
+    });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ code: 'skill_draft_quota_exhausted', request_id: 'req_1' }), { status: 503 }))));
+    const refused = await draftPersonalSkill(schema, { name: '水墨', requirement: '用水墨' }).catch((cause: unknown) => cause);
+    expect(refused).toBeInstanceOf(SkillDraftQuotaExhausted);
   });
 
   it('patches one field and names the field the server refused', async () => {

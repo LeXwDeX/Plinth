@@ -3464,6 +3464,18 @@ def scenario_skill_draft(api):
     status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": '用水彩 [[fake:skill-draft {"prompt":""}]]'})
     record("#548 skill-draft: an unusable draft is one readable failure", status == 502 and (body or {}).get("detail"),
            f"status={status} body={body}")
+    # #619: a draft opened from a session runs on that session's chat model, and a used-up quota on it is the
+    # Schema's own answer (503 with its code), not the generic 502.
+    session = new_session(api)
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩", "session_id": session})
+    record("#619 skill-draft: a draft opened from a session drafts on that session's model", status == 200
+           and ((body or {}).get("draft") or {}).get("slug") == "fake-skill-draft", f"status={status} body={body}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩", "session_id": "session-not-mine"})
+    record("#619 skill-draft: another owner's session is not found", status == 404 and (body or {}).get("code") == "session_not_found",
+           f"status={status} body={body}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩 [[fake:quota:insufficient_quota]]", "session_id": session})
+    record("#619 skill-draft: a used-up chat model quota is the Schema's answer, not a 502", status == 503
+           and (body or {}).get("code") == "skill_draft_quota_exhausted" and (body or {}).get("detail"), f"status={status} body={body}")
     status, body = api.json("POST", base, {"name": "水彩角色", "prompt": draft.get("prompt") or "柔和水彩。", "slug": draft.get("slug") or "",
                                            "description": draft.get("description") or "画角色时使用。", "apply": draft.get("apply") or "instruction",
                                            "recommended_size": "2048x2048"})
