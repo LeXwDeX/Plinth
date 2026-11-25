@@ -86,7 +86,7 @@ func TestUnsupportedTaskSourceRefusalNamesTheDeclaredRoute(t *testing.T) {
 	// No route declared: the sentence is the old one, without a trailing space or
 	// a placeholder, in both languages.
 	plain := UserFacingError(invalidTaskDependency(offering, Parameter{Name: "source_task", Label: "model X"}))
-	wantPlain := "来源任务 model X 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。"
+	wantPlain := "model X 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。"
 	if plain == nil || plain.Detail != wantPlain {
 		t.Fatalf("refusal without a route = %+v", plain)
 	}

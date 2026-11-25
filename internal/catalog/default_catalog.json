@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-25.14.45",
+    "revision": "2026-11-26.03.30",
     "terminology": {
       "user_facing": [
         {
@@ -1743,8 +1743,8 @@
         "input_source_pixels": "来源图片为 {width}×{height}，超过最多 {max_pixels} 像素的限制；这一步没有提交，也没有扣积分。请换一张像素更少的图片。",
         "input_parameter_invalid": "{label}的值无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_parameters_invalid": "这次请求的输入参数无效；这一步没有提交，也没有扣积分。请检查后重试。",
-        "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
-        "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。{alternative}",
+        "input_source_task_expired": "{label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
+        "input_source_task_unsupported": "{label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。{alternative}",
         "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。",
         "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。",
         "input_parameter_range": "{label}为 {value}，按当前参数组合只能在 {minimum}–{maximum} 之间；这一步没有提交，也没有扣积分。请改为这个范围内的值，或去掉这个值改用默认值后重试。"
