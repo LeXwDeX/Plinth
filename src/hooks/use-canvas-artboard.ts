@@ -58,7 +58,7 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
   // The object was deselected with the composer chip's ✕ (#557): the turn does not carry the artboard.
   const skipped = context?.sessionId === sessionId && context.objectDeselected === true;
   const anchor = schema.canvas.frontend.artboard;
-  const { offering, model, values } = generation.nextTurn;
+  const { offering, model, values, parameterStates } = generation.nextTurn;
   const sizeParams = model.sizeParams;
   const initial = useMemo(() => initialCanvasPixels(anchor, sizeParams, values), [anchor, sizeParams, values]);
   const width = saved?.width ?? initial.width;
@@ -78,8 +78,8 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
   const boardIsSource = !skipped && nodes !== undefined
     && currentObjectSource(nodes, geometry.artboard, object, proxyAssetUrl) === 'canvas';
   const turn = useMemo(
-    () => (boardIsSource ? canvasTurnOutput(offering, values, { width, height }, anchor) : null),
-    [anchor, boardIsSource, height, offering, values, width],
+    () => (boardIsSource ? canvasTurnOutput(offering, values, { width, height }, anchor, parameterStates) : null),
+    [anchor, boardIsSource, height, offering, parameterStates, values, width],
   );
   return {
     ...geometry,
