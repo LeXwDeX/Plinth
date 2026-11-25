@@ -212,7 +212,7 @@ class PlanTest(unittest.TestCase):
 
     def test_the_meshy_chain_is_the_audited_one(self):
         names = [step.name for step in self.steps]
-        self.assertEqual(names, ["t2i", "i2i", "t25_text", "t25_image", "multiview", "multiview_2k", "remesh", "convert",
+        self.assertEqual(names, ["t2i", "i2i", "t25_text", "t25_image", "t25_image_untextured", "multiview", "multiview_2k", "remesh", "convert",
                                  "retexture", "rigging", "animation", "uv_unwrap", "resize", "analyze", "multi_color", "motion"])
         needs = {step.name: step.needs for step in self.steps}
         for name in ("convert", "retexture", "rigging", "uv_unwrap", "resize", "analyze", "multi_color"):

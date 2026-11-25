@@ -1,0 +1,35 @@
+{
+  "MaxBodyBytes": 0,
+  "Keys": {
+    "ai_model": true,
+    "enable_pbr": true,
+    "image_url": true,
+    "message": true,
+    "model_type": true,
+    "should_texture": true,
+    "target_formats": true,
+    "target_polycount": true,
+    "texture_resolution": true
+  },
+  "Allowed": {
+    "15000": true,
+    "3mf": true,
+    "8k": true,
+    "application/json": true,
+    "enable_pbr is only supported when should_texture is true": true,
+    "fbx": true,
+    "glb": true,
+    "image-to-3d": true,
+    "meshy-t2.5": true,
+    "obj": true,
+    "openapi": true,
+    "smart-topology": true,
+    "stl": true,
+    "usdz": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": null,
+  "Projection": null,
+  "QueryKeys": null
+}

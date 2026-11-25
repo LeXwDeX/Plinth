@@ -1,0 +1,12 @@
+{
+  "api_version": "unknown",
+  "candidate_sha256": "15d23a42cbedc2c183c5202cbabdb27b82190c2e8d3bb1246610fca11ed7199d",
+  "captured_at_utc": "2026-11-25",
+  "exchanges": 1,
+  "offering": "meshy/meshy-t2.5/image-to-3d",
+  "provenance": "derived",
+  "scenario": "upstream-record",
+  "source_revision": "unknown",
+  "transformation": "#581 probe, one real call through Plinth (meshy-t2.5 image-to-3d, should_texture false with enable_pbr true). The response status and body are the real answer, verbatim; Meshy spent no credits. The recorder skipped the request (an inlined picture over its body limit), so the request body is the one the Catalog of that day builds for the probe input, with image_url a placeholder; the capture time is the day only.",
+  "version": 1
+}

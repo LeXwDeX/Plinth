@@ -2429,7 +2429,7 @@
       ],
       "checked_at": "2026-11-25",
       "why_not_real": "组合拒绝没有真实请求过",
-      "note": "文档另写单图 enable_pbr true 配 should_texture false 答 400，fake 未实现：Catalog 在 should_texture 为 false 时仍发 enable_pbr 默认值，校验会拒绝平台实际可发的请求，见 gap 条目 image-to-3d-pbr-without-texture。"
+      "note": "单图 enable_pbr true 配 should_texture false 的 400 已有真实样本，见 real 条目 image-to-3d-pbr-without-texture（#581）。"
     },
     {
       "id": "meshy-openapi-v1/image-to-3d-rich-success",
@@ -2985,11 +2985,17 @@
         "POST /image-to-3d"
       ],
       "category": "request-validation",
-      "status": "gap",
-      "behavior": "Image to 3D 页写 enable_pbr true 配 should_texture false 答 400，fake 放行。",
-      "plan": "Catalog 的图生 3D Offering 先在 should_texture 为 false 时省略 enable_pbr（现在会发默认值 true），再在 fake 补这条 400 与回归测试。",
-      "issues": [
-        579
+      "status": "real",
+      "behavior": "单图 image-to-3d 收到 enable_pbr true 配 should_texture false 答 400，message 为真实答复原文 enable_pbr is only supported when should_texture is true（core.ImageTo3DRequestError）；enable_pbr false 或不带时受理。多图页没写这条，fake 照收。",
+      "note": "#581 的一次真实探针（2026-11-25，经 Plinth 的 meshy-t2.5 图生 3D，显式 should_texture false 加 enable_pbr true）：上游答 400、未扣积分。录制器因内联图片超限没留请求体，样本里的请求是当天 Catalog 为该输入构造的请求体（image_url 为占位），provenance 记为 derived；响应状态与正文是真实原文。Catalog 自 #581 起在 should_texture 为 false 时把 enable_pbr 规范为 false 并不上线，平台不再发这对组合；此前这条由 #579 登记为 gap。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d-untextured-pbr-2026-11-25.candidate.json",
+          "captured_at": "2026-11-25",
+          "provenance": "derived",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
       ],
       "checked_at": "2026-11-25"
     },

@@ -49,9 +49,9 @@ func TestImageTo3DTextureOptionRulesOfThePage(t *testing.T) {
 		"surface_mode outside the enum":         {with(single, map[string]any{"surface_mode": "soft"}), http.StatusBadRequest},
 		"surface_mode hard":                     {with(single, map[string]any{"surface_mode": "hard"}), http.StatusAccepted},
 		"surface_mode organic":                  {with(single, map[string]any{"surface_mode": "organic"}), http.StatusAccepted},
-		// The enable_pbr / should_texture 400 is not modelled (the Catalog
-		// sends its enable_pbr default with should_texture false).
-		"PBR without texture (not modelled)": {with(single, map[string]any{"should_texture": false, "enable_pbr": true}), http.StatusAccepted},
+		// The enable_pbr / should_texture 400 is real since #581
+		// (TestImageTo3DRefusesPBRWithoutTextureAsTheRealProbe).
+		"PBR without texture": {with(single, map[string]any{"should_texture": false, "enable_pbr": true}), http.StatusBadRequest},
 		// What the meshy-7.1 and meshy-t2.5 Offerings build.
 		"the meshy-7.1 Catalog body": {with(single, map[string]any{"ai_model": "meshy-7.1", "geometry_resolution": "4k", "topology": "triangle",
 			"target_polycount": 300000, "should_remesh": false, "should_texture": true, "enable_pbr": true, "texture_resolution": "8k",

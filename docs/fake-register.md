@@ -20,14 +20,14 @@
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
 | `openai/v1` | 4 | 9 | 1 | 14 | 2026-11-23 |
-| `meshy/openapi-v1` | 22 | 22 | 3 | 47 | 2026-11-24 |
+| `meshy/openapi-v1` | 23 | 22 | 2 | 47 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 3 | 5 | 1 | 9 | 2026-11-09 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 78 | 89 | 6 | 173 | 2026-11-24 |
+| 合计 | 79 | 89 | 5 | 173 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -774,7 +774,7 @@
 - 依据：https://docs.meshy.ai/en/api/pricing（Pricing）
 - 核对日期：2026-11-25
 - 没有真实样本的原因：组合拒绝没有真实请求过
-- 备注：文档另写单图 enable_pbr true 配 should_texture false 答 400，fake 未实现：Catalog 在 should_texture 为 false 时仍发 enable_pbr 默认值，校验会拒绝平台实际可发的请求，见 gap 条目 image-to-3d-pbr-without-texture。
+- 备注：单图 enable_pbr true 配 should_texture false 的 400 已有真实样本，见 real 条目 image-to-3d-pbr-without-texture（#581）。
 
 #### `meshy-openapi-v1/image-to-3d-rich-success` · response-shape · constructed
 
@@ -956,13 +956,13 @@
 - 计划：Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。
 - Issue：#579
 
-#### `meshy-openapi-v1/image-to-3d-pbr-without-texture` · request-validation · gap
+#### `meshy-openapi-v1/image-to-3d-pbr-without-texture` · request-validation · real
 
 - 端点：`POST /image-to-3d`
-- 行为：Image to 3D 页写 enable_pbr true 配 should_texture false 答 400，fake 放行。
+- 行为：单图 image-to-3d 收到 enable_pbr true 配 should_texture false 答 400，message 为真实答复原文 enable_pbr is only supported when should_texture is true（core.ImageTo3DRequestError）；enable_pbr false 或不带时受理。多图页没写这条，fake 照收。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d-untextured-pbr-2026-11-25.candidate.json`（2026-11-25，derived，app_revision `unknown`，catalog_revision `unknown`）
 - 核对日期：2026-11-25
-- 计划：Catalog 的图生 3D Offering 先在 should_texture 为 false 时省略 enable_pbr（现在会发默认值 true），再在 fake 补这条 400 与回归测试。
-- Issue：#579
+- 备注：#581 的一次真实探针（2026-11-25，经 Plinth 的 meshy-t2.5 图生 3D，显式 should_texture false 加 enable_pbr true）：上游答 400、未扣积分。录制器因内联图片超限没留请求体，样本里的请求是当天 Catalog 为该输入构造的请求体（image_url 为占位），provenance 记为 derived；响应状态与正文是真实原文。Catalog 自 #581 起在 should_texture 为 false 时把 enable_pbr 规范为 false 并不上线，平台不再发这对组合；此前这条由 #579 登记为 gap。
 
 #### `meshy-openapi-v1/animation-rig-type` · request-validation · gap
 
