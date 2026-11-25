@@ -1029,18 +1029,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// person set. The image count block reads them too (#564).
 	offeringParameterValues := func(ownerID, sessionID, offeringID string) map[string]json.RawMessage {
 		scope := agentparams.ScopeKey(ownerID, sessionID)
-		values := paramsStore.OfferingOverrides(scope, offeringID)
-		states := paramsStore.OfferingStates(scope, offeringID)
 		offering, ok := taskCatalog.Get(generation.OfferingID(offeringID))
 		if !ok {
 			return nil
 		}
-		for _, p := range offering.Parameters {
-			if states[p.Name].Source == "user" && !offering.UserParameterAllowed(p) {
-				delete(values, p.Name)
-			}
-		}
-		return values
+		// A pin the person may no longer set (an old panel count, #586)
+		// neither applies nor hides the Agent's value for it.
+		return paramsStore.OfferingOverridesExcept(scope, offeringID, userPinRetired(offering))
 	}
 	// The ledger's parameter source is the existing parameter store's
 	// last-writer state (#248): when the person's pin still equals the frozen
@@ -1164,17 +1159,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// value, the person's pin or the Agent's setting, from the same store.
 		OfferingParameterStates: func(ownerID, sessionID, offeringID string) map[string]generationtool.RememberedParameter {
 			states := map[string]generationtool.RememberedParameter{}
-			for name, state := range paramsStore.OfferingStates(agentparams.ScopeKey(ownerID, sessionID), offeringID) {
+			offering, _ := taskCatalog.Get(generation.OfferingID(offeringID))
+			for name, state := range paramsStore.OfferingStatesExcept(agentparams.ScopeKey(ownerID, sessionID), offeringID, userPinRetired(offering)) {
 				if (state.Source == "user" || state.Source == "agent") && len(state.Value) > 0 {
 					states[name] = generationtool.RememberedParameter{Value: state.Value, Source: state.Source}
 				}
 			}
 			return states
-		},
-		// #486: the Offering's declared count parameter runs with the
-		// person's own session count, not with whatever one Offering kept.
-		ImageCount: func(ownerID, sessionID string) (int, bool) {
-			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
 		},
 		Gateway:         module,
 		Tasks:           module,
@@ -1389,16 +1380,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return executionGrants.StepStatus(ctx, ownerID, sessionID)
 		},
 		StepBalances: stepBalancesFromSchema(applicationSchema, stepBalanceCache),
-		// #486: the person's own 2D image count, one value per session.
-		ImageCount: func(ownerID, sessionID string) (int, bool) {
-			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
-		},
 		// #564: the parameter values the session holds per Offering, shown
 		// to the Agent before it submits.
 		SessionParameters: sessionParameterGroups(paramsStore, taskCatalog.Get),
-		// #564: whether an Offering's count parameter is sent depends on its
-		// current values (Seedream's image set switch).
-		OfferingParameters: offeringParameterValues,
 		StepCosts: func(ctx context.Context, ownerID, sessionID string) []chat.StepCost {
 			if applicationSchema.StepPolicy == nil {
 				return nil

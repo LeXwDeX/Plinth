@@ -1,12 +1,11 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { SchemaParameters } from '@/components/form/schema-parameters';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ChoiceChips } from '@/components/ui/choice-chips';
-import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { OptionSelect } from '@/components/ui/option-select';
 import type { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
@@ -15,11 +14,11 @@ import { CanvasSizeNotice, ReferenceSizeNotice } from '@/components/canvas/canva
 import { canvasResizeForChoice } from '@/lib/workspace/canvas-size';
 import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
 import { CanvasResizeAnchor } from '@/components/canvas/canvas-resize-anchor';
-import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote } from '@/lib/pricing';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
-import { defaultParamsChipText, generationCount, paramsChipText, paramsRatioText, readonlyParameterText, sizeOptionText } from '@/lib/workspace/generation-params';
+import { paramsChipText, paramsRatioText, readonlyParameterText, sizeOptionText } from '@/lib/workspace/generation-params';
 import type { ParamSchema } from '@/lib/providers/types';
 
 /** More options than this read better as a list than as a row of chips. */
@@ -88,18 +87,15 @@ export function ParameterOrigin({ params, name, disabled = false, readonly = fal
 }
 
 /**
- * What the next turn would use, in a few words (ratio, size, count of the selected model; the product's defaults
+ * What the next turn would use, in a few words (ratio and size of the selected model; the product's default ratio
  * before a model is chosen). The settings dialog's "changed" sentence shows it when a parameter was set by hand.
  */
 export function paramsSummary(schema: ProductSchema, params: GenerationParams): string {
   const text = (key: string) => schemaText(schema, key);
-  const countText = (value: number) => schemaCountMessage(schema, 'ui.studio.params.summary_count', value, { count: value });
   if (params.modelName !== '') {
-    return paramsChipText(params.nextTurn.model, params.nextTurn.values, params.nextTurn.estimate, countText) || text('ui.studio.params.chip_none');
+    return paramsChipText(params.nextTurn.model, params.nextTurn.values) || text('ui.studio.params.chip_none');
   }
-  return params.domain === 'image'
-    ? defaultParamsChipText(text('ui.studio.params.default_ratio'), Number(text('ui.studio.params.default_count')), countText)
-    : text('ui.studio.params.chip_pick_model');
+  return params.domain === 'image' ? text('ui.studio.params.default_ratio') : text('ui.studio.params.chip_pick_model');
 }
 
 /**
@@ -162,9 +158,6 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
   const hasModel = params.modelName !== '';
   const unavailable = params.offering?.available === false;
   disabled = disabled || !params.allowed || unavailable || params.failed || !params.ready;
-  const count = model.countParam;
-  const countDisabled = count ? parameterDisabled(count, values) : false;
-  const countValue = generationCount(count, values);
   const reasonId = useId();
   const disabledReason = !hasSession ? text('ui.studio.params.no_session')
     : unavailable ? text('ui.studio.params.unavailable')
@@ -195,12 +188,6 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
         label={unavailableLabel(schema, text('ui.unavailable.reason.params.condition'))} detail={detail} />
     ) : null;
   };
-  const countReason = count ? disabledReason || conditionReason(count) : '';
-  const countLocked = !hasSession || disabled || countDisabled;
-  const countMinimum = count?.min ?? 1;
-  const countMaximum = count?.max;
-  const lessReason = countReason || (countValue <= countMinimum ? schemaCountMessage(schema, 'ui.studio.params.count_minimum', countMinimum, { count: countMinimum }) : '');
-  const moreReason = countReason || (countMaximum !== undefined && countValue >= countMaximum ? schemaCountMessage(schema, 'ui.studio.params.count_maximum', countMaximum, { count: countMaximum }) : '');
   const sizeText = (option: { value: string; label: string }) => sizeOptionText(option, text('ui.studio.params.size_option'));
   const nothingToSet = hasModel && model.paramSchemas.length === 0 && model.readonlyParams.length === 0;
   const capabilityLabel = (id: string) => schema.capabilities.find((capability) => capability.id === id)?.label_cn ?? id;
@@ -287,62 +274,16 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
         </>
       ) : null}
 
-      {count && parameterVisible(count, values) ? (
-        <>
-          {model.countDependencies.filter((param) => parameterVisible(param, values)).map((param) => (
-            <Row key={param.name} label={param.label}>
-              <ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} />
-              <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => setValue(param.name, value)} />
-              {conditionNotice(param)}
-            </Row>
-          ))}
-          <Row label={count.label}>
-            <ParameterOrigin params={params} name={count.name} disabled={!hasSession || disabled || countDisabled} />
-            <div className="flex items-center gap-2" data-testid="params-count" aria-disabled={countLocked} aria-describedby={disabledReason ? reasonId : countReason ? `${reasonId}-count` : undefined}>
-              <div className={`flex items-center rounded-md border ${countLocked ? 'border-border bg-muted text-muted-foreground' : 'border-foreground/30 bg-surface text-foreground'}`}>
-                <HintTooltip name={text('ui.studio.params.count_less')} reason={lessReason}>
-                  <button
-                    type="button"
-                    aria-label={text('ui.studio.params.count_less')}
-                    aria-description={lessReason || undefined}
-                    disabled={countLocked || countValue <= countMinimum}
-                    onClick={() => setValue(count.name, generationCount(count, { ...values, [count.name]: countValue - (count.step ?? 1) }))}
-                    className="flex size-7 items-center justify-center rounded-l-md hover:bg-panel-raised focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                  >
-                    <Minus aria-hidden className="size-3" />
-                  </button>
-                </HintTooltip>
-                <output aria-live="polite" className="min-w-8 text-center text-xs tabular-nums" data-testid="params-count-value">{countValue}</output>
-                <HintTooltip name={text('ui.studio.params.count_more')} reason={moreReason}>
-                  <button
-                    type="button"
-                    aria-label={text('ui.studio.params.count_more')}
-                    aria-description={moreReason || undefined}
-                    disabled={countLocked || (countMaximum !== undefined && countValue >= countMaximum)}
-                    onClick={() => setValue(count.name, generationCount(count, { ...values, [count.name]: countValue + (count.step ?? 1) }))}
-                    className="flex size-7 items-center justify-center rounded-r-md hover:bg-panel-raised focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                  >
-                    <Plus aria-hidden className="size-3" />
-                  </button>
-                </HintTooltip>
-              </div>
-              <span className="min-w-0 text-[11px] leading-4 text-muted-foreground" data-testid="params-cost">
-                {nativePriceLines.length > 0 ? nativePriceLines.join(' · ') : estimate.total === null
-                  ? (estimate.metered ? text('ui.workspace.harness.credits_unknown') : null)
-                  : estimate.count > 1
-                    ? formatSchemaText(text('ui.studio.params.cost_many'), { unit: estimate.unit ?? 0, total: estimate.total })
-                    : formatSchemaText(text('ui.studio.params.cost_one'), { total: estimate.total })}
-              </span>
-            </div>
-            {!disabledReason && countReason ? <div id={`${reasonId}-count`}>{conditionNotice(count)}</div> : null}
-          </Row>
-        </>
-      ) : hasModel && nativePriceLines.length > 0 ? (
+      {hasModel && nativePriceLines.length > 0 ? (
         <div className="flex flex-col gap-1 text-[11px] text-muted-foreground" data-testid="params-cost">
           {nativePriceLines.map((line, index) => <p key={index}>{line}</p>)}
         </div>
       ) : hasModel && estimate.total !== null ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="params-cost">{formatSchemaText(text('ui.studio.params.cost_one'), { total: estimate.total })}</p>
+        <p className="text-[11px] text-muted-foreground" data-testid="params-cost">
+          {estimate.count > 1
+            ? formatSchemaText(text('ui.studio.params.cost_many'), { unit: estimate.unit ?? 0, total: estimate.total })
+            : formatSchemaText(text('ui.studio.params.cost_one'), { total: estimate.total })}
+        </p>
       ) : null}
 
       {model.moreParams.length > 0 ? (

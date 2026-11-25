@@ -2,17 +2,13 @@
  * What the composer's 参数 popover shows and what a turn is estimated to cost,
  * both read from the selected model's Offerings. Nothing here names a model or a
  * parameter: the size controls are the parameters with the output-size semantic,
- * the count is whatever parameter the Offering prices by
- * (estimated_credits_unit_parameter), and the rest are listed as declared.
+ * and the rest are listed as declared.
  *
- * The count control therefore appears only on an Offering that prices by a
- * count, and that is deliberate (#486): such a parameter is the only one whose
- * number means "how many images this task produces". It is the Schema's own
- * declaration (estimated_credits_unit_parameter), never a name written here, so
- * a new model declares its count instead of this file learning it. The person's
- * own count is one value for the whole session: the server keeps it and hands
- * the same number to whichever Offering is shown, so switching model does not
- * reset the count to the model's declared default.
+ * There is no image count control (#586): how many images a turn makes follows
+ * what the person says, and the Agent sets the Offering's count parameter (an
+ * advised, read-only parameter in the Schema) or submits several calls. The
+ * estimate still multiplies by the count the request will carry
+ * (estimated_credits_unit_parameter).
  */
 
 import { offeringParamSchemas, offeringUsesNativePricing, type OfferingParameterWire, type OfferingWire } from '@/lib/agent-offerings';
@@ -29,15 +25,11 @@ export interface GenerationParamsModel {
   readonlyParams: OfferingParameterWire[];
   /** Aspect ratio and size controls (the output-size semantic). */
   sizeParams: ParamSchema[];
-  /** The numeric parameter the estimate is multiplied by, if the model has one. */
-  countParam: ParamSchema | null;
-  /** Controls the count depends on (for example the switch that turns multi-image on). */
-  countDependencies: ParamSchema[];
   /** Every other declared setting, listed under "more". */
   moreParams: ParamSchema[];
 }
 
-const EMPTY_MODEL: GenerationParamsModel = { readonlyParams: [], paramSchemas: [], sizeParams: [], countParam: null, countDependencies: [], moreParams: [] };
+const EMPTY_MODEL: GenerationParamsModel = { readonlyParams: [], paramSchemas: [], sizeParams: [], moreParams: [] };
 
 function semanticOf(offering: OfferingWire, name: string): string {
   return offering.parameters.find((item) => item.name === name)?.semantic ?? '';
@@ -53,22 +45,12 @@ export function buildGenerationParams(offerings: readonly OfferingWire[]): Gener
     !consentNames.has(param.name)
     && !CONVERSATION_SEMANTICS.has(semanticOf(first, param.name))
     && param.type !== 'asset');
-  const unitName = first.estimated_credits_unit_parameter ?? '';
-  const countParam = unitName ? common.find((param) => param.name === unitName) ?? null : null;
-  const sizeParams = common.filter((param) => param.name !== unitName && semanticOf(first, param.name) === 'output-size');
-  const countWire = first.parameters.find((wire) => wire.name === unitName);
-  const dependencyNames = new Set([
-    ...(countWire?.omit_when ?? []).map((condition) => condition.parameter),
-    ...(countWire?.presentation?.disabled_when ?? []).map((condition) => condition.parameter),
-  ]);
-  const countDependencies = common.filter((param) => dependencyNames.has(param.name) && param.name !== unitName);
-  const placed = new Set([...sizeParams, ...countDependencies, ...(countParam ? [countParam] : [])].map((param) => param.name));
+  const sizeParams = common.filter((param) => semanticOf(first, param.name) === 'output-size');
+  const placed = new Set(sizeParams.map((param) => param.name));
   return {
     paramSchemas: common,
     readonlyParams: first.parameters.filter((wire) => wire.presentation?.surface === 'readonly' && (wire.fixed === true || wire.adjustment_policy === 'advised') && wire.default !== undefined && !consentNames.has(wire.name) && !CONVERSATION_SEMANTICS.has(wire.semantic ?? '') && wire.type !== 'task' && wire.type !== 'asset' && wire.type !== 'asset-array'),
     sizeParams,
-    countParam,
-    countDependencies,
     moreParams: common.filter((param) => !placed.has(param.name)),
   };
 }
@@ -97,19 +79,6 @@ export function effectiveOfferingValues(offering: OfferingWire | undefined, ente
     }
   }
   return result;
-}
-
-/** Quantity is an effective parameter value, independent of whether a price can be estimated. */
-export function generationCount(param: ParamSchema | null, values: Record<string, unknown>): number {
-  if (!param) return 1;
-  const entered = values[param.name];
-  const raw = Number(entered === undefined || entered === null || entered === '' ? param.default : entered);
-  const fallback = Number(param.default);
-  let value = Number.isFinite(raw) ? raw : Number.isFinite(fallback) ? fallback : param.min ?? 1;
-  if (param.validation?.integer) value = Math.floor(value);
-  const minimum = param.validation?.integer && param.min !== undefined ? Math.ceil(param.min) : param.min;
-  const maximum = param.validation?.integer && param.max !== undefined ? Math.floor(param.max) : param.max;
-  return Math.min(maximum ?? Infinity, Math.max(minimum ?? 1, value));
 }
 
 export function readonlyParameterText(wire: OfferingParameterWire, values: Record<string, unknown>, separator = ', '): string {
@@ -172,19 +141,6 @@ export function skillSizeDefault(sizeParams: readonly ParamSchema[], recommended
 function optionLabel(param: ParamSchema, value: unknown): string {
   const text = String(value ?? '');
   return param.options?.find((option) => option.value === text)?.label ?? text;
-}
-
-/** What the 参数 chip says at a glance: the chosen sizes and, above one, the count. */
-export function paramsSummary(
-  model: Pick<GenerationParamsModel, 'sizeParams' | 'countParam'>,
-  values: Record<string, unknown>,
-  _estimate: Pick<CreditEstimate, 'count'>,
-  countText: (count: number) => string,
-): string {
-  const parts = model.sizeParams.map((param) => optionLabel(param, values[param.name] ?? param.default)).filter(Boolean);
-  const count = generationCount(model.countParam, values);
-  if (model.countParam && count > 1) parts.push(countText(count));
-  return parts.join(' · ');
 }
 
 function gcd(left: number, right: number): number {
@@ -288,17 +244,10 @@ function sizeChipText(param: ParamSchema, value: unknown): string {
 
 /**
  * What the 参数 chip says on its second line: every size as a ratio (with the pixel size
- * when the model words it that way) and the count, always, when the model has one.
+ * when the model words it that way).
  */
-export function paramsChipText(
-  model: Pick<GenerationParamsModel, 'sizeParams' | 'countParam'>,
-  values: Record<string, unknown>,
-  _estimate: Pick<CreditEstimate, 'count'>,
-  countText: (count: number) => string,
-): string {
-  const parts = model.sizeParams.map((param) => sizeChipText(param, values[param.name] ?? param.default)).filter(Boolean);
-  if (model.countParam) parts.push(countText(generationCount(model.countParam, values)));
-  return parts.join(' · ');
+export function paramsChipText(model: Pick<GenerationParamsModel, 'sizeParams'>, values: Record<string, unknown>): string {
+  return model.sizeParams.map((param) => sizeChipText(param, values[param.name] ?? param.default)).filter(Boolean).join(' · ');
 }
 
 /**
@@ -315,9 +264,4 @@ export function paramsRatioText(
     if (ratio) return ratio;
   }
   return entries.length > 0 ? optionLabel(entries[0].param, entries[0].value) : '';
-}
-
-/** What the chip says before a model is chosen: the product's own defaults, from the Schema. */
-export function defaultParamsChipText(ratio: string, count: number, countText: (count: number) => string): string {
-  return [ratio, countText(count)].filter(Boolean).join(' · ');
 }

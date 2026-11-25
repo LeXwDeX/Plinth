@@ -33,10 +33,10 @@ describe('Schema-driven domain parameter sections', () => {
     expect(html.match(/data-testid="params-readonly"/g)).toHaveLength(1);
   });
   it('keeps Agent scope restrictions visible and disables that domain edit controls', () => {
-    const context = params({ ...offering('model'), estimated_credits_unit_parameter: 'count' }); context.allowed = false; context.restrictedReason = 'Schema scope reason';
+    const context = params(offering('model')); context.allowed = false; context.restrictedReason = 'Schema scope reason';
     const html = renderToStaticMarkup(<ParamsDomainSection params={context} hasSession skill={null} />);
     expect(html).toContain('Schema scope reason'); expect(html).toContain('params-scope-restriction');
-    expect(html).toMatch(/<button[^>]*disabled=""/); expect(html).toContain('model exact maximum');
+    expect(html).toMatch(/data-testid="params-domain"[^>]*aria-disabled="true"/); expect(html).toContain('model exact maximum');
   });
   it('reports a domain error and unavailable operation without borrowing other model settings', () => {
     const context = params({ ...offering('model'), available: false }); context.failed = true;

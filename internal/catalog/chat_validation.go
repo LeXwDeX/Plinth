@@ -273,9 +273,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateSessionParameters(schema.SessionParameters); err != nil {
 		return err
 	}
-	if err := validateImageCount(schema.ImageCount); err != nil {
-		return err
-	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -3015,35 +3012,6 @@ func validateChatSessionGroups(api ChatAPISchema, content ContentSchema) error {
 		if !seen[source] {
 			return fmt.Errorf("chat.api.session_groups 缺少会话来源 %q（服务端会写出它）", source)
 		}
-	}
-	return nil
-}
-
-// validateImageCount checks the person's own 2D image count block (#486). The
-// block is optional: a Catalog that declares no template injects nothing. A
-// declared template must carry the count placeholder, because a block that
-// cannot state the number is the guessing this block exists to prevent.
-func validateImageCount(config ChatImageCountSchema) error {
-	if strings.TrimSpace(config.ContextTemplate) == "" {
-		return nil
-	}
-	if !strings.Contains(config.ContextTemplate, "{count}") {
-		return errors.New("chat.image_count.context_template 缺少 {count}")
-	}
-	if len(config.OfferingCapabilities) == 0 {
-		return nil
-	}
-	// #564: a block that reports per model must be able to name the model and
-	// the count it really runs, and the models the count does not reach.
-	if !strings.Contains(config.LimitTemplate, "{model}") || !strings.Contains(config.LimitTemplate, "{count}") {
-		return errors.New("chat.image_count.limit_template 缺少 {model} 或 {count}")
-	}
-	if !strings.Contains(config.UncountedTemplate, "{models}") {
-		return errors.New("chat.image_count.uncounted_template 缺少 {models}")
-	}
-	if !strings.Contains(config.OmittedTemplate, "{model}") || !strings.Contains(config.OmittedTemplate, "{reason}") ||
-		!strings.Contains(config.ReasonTemplate, "{parameter}") {
-		return errors.New("chat.image_count.omitted_template 缺少 {model} 或 {reason}，或 reason_template 缺少 {parameter}")
 	}
 	return nil
 }

@@ -7,31 +7,16 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// #564: the shipped prompts agree with what the server does with the session
-// image count and with each model's prompt language.
-func TestShippedPromptsAgreeOnImageCountAndPromptLanguage(t *testing.T) {
+// #564: the shipped prompts agree with each model's prompt language.
+func TestShippedPromptsAgreeOnPromptLanguage(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat := product.Application().Chat
 
-	// The server writes the count into every call: no text may tell the
-	// Agent to make it up over several calls or to follow a count it cannot
-	// set.
-	count := chat.ImageCount
-	for _, stale := range []string{"出不了就分几次补齐", "按用户这次说的执行"} {
-		if strings.Contains(count.ContextTemplate, stale) {
-			t.Errorf("chat.image_count.context_template still says %q", stale)
-		}
-	}
-	if len(count.OfferingCapabilities) == 0 || count.LimitTemplate == "" || count.UncountedTemplate == "" ||
-		count.OmittedTemplate == "" || count.ReasonTemplate == "" {
-		t.Error("chat.image_count does not report the per-model range, the omitted count and the models without a count")
-	}
-
-	// #360 keeps the concept sketch count on its own card: the session image
-	// count is not a stated count for the open-request trigger.
+	// #360 keeps the concept sketch count on its own card: no image count
+	// block is a stated count for the open-request trigger.
 	if strings.Contains(chat.ConceptDirections.ContextTemplate, "生成张数") {
 		t.Error("the concept quantity trigger reads the session image count, which #360 keeps separate")
 	}

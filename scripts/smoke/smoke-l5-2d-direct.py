@@ -65,6 +65,8 @@ DEFAULT_MAX_TASKS = 7
 REFERENCE_SIZE = 512
 SMALL_JIMENG_SIZE = "1920x1920"  # 3686400 pixels, the smallest area Seedream 4.5 takes
 QUALITY_REASON = "wire acceptance run: the cheapest quality is enough to observe the request and answer shape"
+COUNT_REASON = "wire acceptance run: two pictures are needed to observe a multi-picture answer"
+SEQUENCE_REASON = "wire acceptance run: the sequence mode is the case under test"
 IMAGE_SIZE_REASON = "wire acceptance run: the cheapest resolution is enough to observe the request and answer shape"
 
 # Each case is one submission. `cost` is the estimated US dollars of the default variant, `large_cost` of
@@ -146,12 +148,12 @@ def plan_run(cases, large, budget, max_tasks):
 def build_input(case, assets, large):
     """(input, parameter_reasons) of one case. `assets` holds the uploaded asset ids by name: ref_a, ref_b
     (a picture with alpha) and mask. Only parameters the Offering declares are sent; a change of an advised
-    parameter (quality, image_size) carries its reason, as the public API demands (#295)."""
+    parameter (quality, image_size, n, sequential_image_generation; #586) carries its reason, as the public API demands (#295)."""
     key = case["key"]
     refs = [assets["ref_a"], assets["ref_b"]][:case.get("refs", 0)]
     if key == "openai-generate":
         return ({"prompt": PROMPTS["text"], "size": "1536x1152", "quality": "low", "n": 2},
-                {"quality": QUALITY_REASON})
+                {"quality": QUALITY_REASON, "n": COUNT_REASON})
     if key == "openai-edits":
         return ({"prompt": PROMPTS["mask"], "reference_assets": refs, "mask": assets["mask"],
                  "size": "1024x1024", "quality": "low", "n": 1}, {"quality": QUALITY_REASON})
@@ -171,7 +173,8 @@ def build_input(case, assets, large):
                  "sequential_image_generation": "disabled"}, None)
     if key == "jimeng-sequence":
         return ({"prompt": PROMPTS["sequence"], "size": size, "sequential_image_generation": "auto",
-                 "max_images": 2}, None)
+                 "max_images": 2}, {"sequential_image_generation": SEQUENCE_REASON,
+                                                                    "max_images": SEQUENCE_REASON})
     raise ValueError(f"no input for {key}")
 
 
