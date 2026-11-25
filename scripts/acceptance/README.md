@@ -19,6 +19,7 @@ passwords. Output goes to the system temp dir (or `--out`/`OUT`), never into the
 | `cross_user.py` | 本机隔离栈（生产形态、会话登录） | AUTH-03、AUTH-09、DLV-03、ADM-01、AGT-11；`--ui` 加跑界面半边 | 约 2 分钟（`--ui` 约 3 分钟） | go、`build/go-web`；`--ui` 另需 Playwright |
 | `browser_matrix/` | 已部署环境（默认 dev-test） | I18N-01…04、I18N-06、PRV-05、TSK-01、SKL-01…03、CNV-02…08、M3D-05、M3D-06、AGT-08、AGT-09、AGT-11（界面半边）、DLV-05、ADM-01（界面半边） | 完整矩阵（2 引擎 x 2 语言 x 3 视口）约 1–2 小时；单格约 5–10 分钟 | Playwright（chromium、webkit）、`release-env.py smoke` |
 | `chrome_viewer.py` / `chrome_viewer.mjs` | 已部署环境里已有的大 GLB | M3D-01/03（查看器旋转缩放、视图模式）、DLV-01/02（大文件字节与 ZIP）、查看器加载失败与重试 | 约 5–15 分钟（取决于模型大小） | 系统 Chrome 或 Playwright Chromium、`release-env.py smoke` |
+| `release-1-9-0-browser.mjs` | 已部署环境（默认 dev-test，必须是 fake 上游形态） | v1.9.0 的 #586、#559、#587、#560（批次 1）与 #548（批次 2，未部署时 SKIP「待批次 2」），见文件头注释 | 约 3–5 分钟 | Playwright（chromium）、`release-env.py smoke`（Agent 专用账号） |
 | `studio-scenarios.mjs` | 已有脚本，Mock 栈上的 Studio 四个场景 | 见文件头注释 | — | — |
 
 `acceptance_lib.py` 是 `mock_stack.py` 与 `cross_user.py` 共用的标准库小工具（带 Cookie 的 HTTP 客户端、PNG 编解码、multipart、空闲端口），`browser_matrix/lib.mjs` 与 `fixtures.mjs` 是浏览器脚本共用的 Playwright 解析、登录和 PNG/GLB 夹具生成。
@@ -70,6 +71,7 @@ Playwright 按 `PLAYWRIGHT_MODULE_PATH`、仓库依赖、默认查找的顺序�
 | `mock_stack.py` | 只在工作目录里：临时数据库、存储、日志。进程全部在脚本结束时关闭 |
 | `cross_user.py` | 同上；另外在本机栈里建管理员和两个普通用户（随机口令，仅存在于该次运行） |
 | `browser_matrix/` | 管理员账号下：每个格子一个可复用会话 `b3-accept <引擎>-<语言>-<宽度>`；临时个人 Skill `b3-*`（脚本结束时删除）；微型 GLB 与 PNG 上传；每格一次画布合并；每个 1440 格一次 persona + 一轮聊天（只耗 LLM token）；对已有会话做一次 3D 截图转 2D。不做付费生成与批准，不建用户，不发布/重置 Agent 配置 |
+| `release-1-9-0-browser.mjs` | Agent 专用账号下：标题带 `r190-<时间戳>` 的四个会话（两张 fake 2D、一个 fake 3D、一张 256x192 PNG 上传与两张 fake 裁图、一次 2D 模型选择、批次 2 的一轮 fake use_skill）；临时个人 Skill `r190-*`（脚本结束时删除）。全部走 fake 上游，不建账号、不改配置 |
 | `chrome_viewer.py` | 不建任务。下载大 GLB（和一次 ZIP）到临时文件后立即删除；负面检查靠浏览器请求拦截篡改响应，不改服务端数据 |
 
 ## 输出位置
