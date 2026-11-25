@@ -9,7 +9,8 @@ vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () =>
 vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles: state.tiles }), tileOfObject: () => null }));
 vi.mock('@/hooks/use-session-pick', () => ({ useSessionPick: () => ({ pick: state.pick }) }));
 // #559: a strip click goes through viewOnStage (look, do not place); the record says which action ran.
-vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ openOnStage: state.stage, viewOnStage: (object: object) => state.stage({ ...object, via: 'view' }) }) }));
+// #593: a double click goes through insertOnCanvas, the same call as 「插入到画布」 in the detail.
+vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ openOnStage: state.stage, viewOnStage: (object: object) => state.stage({ ...object, via: 'view' }), insertOnCanvas: (object: object) => state.stage({ ...object, via: 'insert' }) }) }));
 vi.mock('@/hooks/use-stage-viewer', () => ({ useStageViewer: () => ({ toggleTileInCompare: state.toggle, slotOf: () => null }) }));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({ proxyAssetUrl: (url: string) => url, previewAssetUrl: (url: string) => url }) }));
 vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session', messagesBySession: { session: state.messages } }) }));
@@ -22,7 +23,7 @@ vi.mock('@/components/result/result-card-parts', () => ({
   CardDownload: () => null,
   ResultContextMenu: ({ children, target, render }: any) => {
     state.targets.push(target);
-    const collect = (nodes: ReactNode) => Children.forEach(nodes, (node) => { if (isValidElement(node)) { const element = node as ReactElement<Record<string, any>>; if (element.type === 'button') state.buttons.push(element); collect(element.props.children); } });
+    const collect = (nodes: ReactNode) => Children.forEach(nodes, (node) => { if (isValidElement(node)) { const element = node as ReactElement<Record<string, any>>; if (element.type === 'button' || element.props['data-testid'] === 'version-detail') state.buttons.push(element); collect(element.props.children); } });
     collect(children);
     return React.cloneElement(render, {}, children);
   },
@@ -140,18 +141,63 @@ describe('output strip navigation and details', () => {
     expect(html.match(/data-testid="version-tile"/g)).toHaveLength(1);
     expect(html).toContain('data-testid="version-fold-trigger"');
     expect(html).toContain(`+${count - 1}`);
-    expect(html).toContain('h-[34px]'); expect(html).toContain('h-4'); expect(html).toContain('h-8');
+    expect(html).toContain('h-[34px]'); expect(html).toContain('h-5'); expect(html).toContain('h-8');
   });
   it('keeps the tallest card and its detail row above a horizontal scrollbar', () => {
     const html = renderToStaticMarkup(<VersionStrip />);
-    // A regular card: 2+2 padding, 56 thumbnail, 2 gap, 18 label, 12 caption, 16 detail row = 108px; the list adds 4+4.
-    for (const part of ['p-0.5', 'size-14', 'gap-0.5', 'h-[18px]', 'h-3', 'h-4']) expect(html).toContain(part);
+    // A regular card: 2+2 padding, 56 thumbnail, 2 gap, 18 label, 12 caption, 20 「详情」 button row (#593) = 112px.
+    for (const part of ['p-0.5', 'size-14', 'gap-0.5', 'h-[18px]', 'h-3', 'h-5']) expect(html).toContain(part);
     expect(html).toMatch(/data-testid="version-strip" class="[^"]*\bh-36\b/);
     expect(html).toMatch(/<ol class="[^"]*\bpy-3\b/);
-    // #546: 144px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 132px: the card plus 12px above and below.
-    expect(144 - 1 - 11).toBeGreaterThanOrEqual(108 + 24);
+    // #546: 144px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 132px: 12px above the card, the card,
+    // and at least 8px below it, so the scrollbar only takes bottom padding.
+    expect(144 - 1 - 11).toBeGreaterThanOrEqual(12 + 112 + 8);
     // The selected card's 2px ring sits 12px below the strip's top edge, with 10px of room left above it.
     expect(12 - 2).toBeGreaterThanOrEqual(8);
+  });
+  it('inserts a 2D version on a double click, through the same insertOnCanvas as the detail (#593)', () => {
+    renderToStaticMarkup(<VersionStrip />);
+    // A double click is two clicks and a dblclick: the first click looks, the second repeats nothing, the dblclick inserts.
+    primary().props.onClick({ detail: 1 }); primary().props.onClick({ detail: 2 }); primary().props.onDoubleClick({});
+    expect(state.stage.mock.calls.map(([object]) => object.via)).toEqual(['view', 'insert']);
+    expect(state.stage).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: 'old', assetId: 'a', url: '/a', via: 'insert' }));
+  });
+  it('inserts an Agent crop on a double click, by its upload object (#587/#593)', () => {
+    state.tiles = [tile({ key: 'u:crop-1', taskId: 'upload:crop-1', taskIds: ['upload:crop-1'], origin: 'upload', operation: 'crop',
+      assets: [{ id: 'crop-1', kind: 'image', url: '/api/v1/assets/crop-1', role: 'image', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
+    renderToStaticMarkup(<VersionStrip />); primary().props.onDoubleClick({});
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'upload:crop-1', assetId: 'crop-1', via: 'insert' }));
+  });
+  it('keeps a double click on a 3D version to what its click does: it opens on the stage, nothing is inserted', () => {
+    state.tiles = [blankTile({ key: 'n:m1', taskId: 'm1', taskIds: ['m1'], domain: 'model', status: 'ready', origin: 'task',
+      assets: [{ id: 'glb', kind: 'model', url: '/m.glb', role: 'output', variant: '', mediaType: 'model/gltf-binary', ordinal: 0 }] })];
+    renderToStaticMarkup(<VersionStrip />);
+    primary().props.onClick({ detail: 1 }); primary().props.onClick({ detail: 2 }); primary().props.onDoubleClick({});
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'm1', kind: 'model' }));
+    expect(state.stage.mock.calls.some(([object]) => object.via === 'insert')).toBe(false);
+  });
+  it('does not insert from a double click while comparing or after a drag', () => {
+    state.compare = { slots: [] }; renderToStaticMarkup(<VersionStrip />);
+    primary().props.onDoubleClick({}); expect(state.stage).not.toHaveBeenCalled();
+    state.compare = null; state.buttons = []; renderToStaticMarkup(<VersionStrip />);
+    primary().props.onDragStart({}); primary().props.onDoubleClick({}); expect(state.stage).not.toHaveBeenCalled();
+  });
+  it('makes 「详情」 an outline button as wide as its tile, for a task and for an upload alike (#593)', () => {
+    renderToStaticMarkup(<VersionStrip />);
+    expect(detail().props).toMatchObject({ variant: 'outline', size: 'xs' });
+    expect(detail().props.className).toMatch(/\bw-full\b/);
+    expect(detail().props.className).toMatch(/\bjustify-center\b/);
+    state.buttons = [];
+    state.tiles = [tile({ key: 'u:crop-1', taskId: 'upload:crop-1', taskIds: ['upload:crop-1'], origin: 'upload', operation: 'crop',
+      assets: [{ id: 'crop-1', kind: 'image', url: '/api/v1/assets/crop-1', role: 'image', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(detail().props.className).toMatch(/\bw-full\b/);
+    expect(html).toMatch(/data-testid="version-detail"[^>]*>详情</);
+    // The tile is 96px (w-24); the row and its button fill it.
+    expect(html).toMatch(/data-testid="version-tile"[^>]*/);
+    expect(html).toContain('w-24');
   });
   it('does not turn a drag into pointer navigation and still permits keyboard activation', () => {
     renderToStaticMarkup(<VersionStrip />); primary().props.onDragStart({}); primary().props.onClick(click);

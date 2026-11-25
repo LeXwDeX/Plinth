@@ -36,9 +36,10 @@ import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 
 /**
- * The strip is exactly 128px (h-32). A regular card with its detail row is 108px and the list pads it by 4px above and
- * below; with the 1px top border that leaves 11px, room for a thin horizontal scrollbar (11px in Chromium), so the
- * scrollbar never clips the detail row and the strip does not change height when one appears (#51).
+ * The strip is exactly 144px (h-36). A regular card with its 「详情」 button row is 112px (#593) and the list pads it
+ * by 12px above and below (#546); with the 1px top border and a thin horizontal scrollbar (11px in Chromium) the
+ * scrollbar only eats into the bottom padding, never the detail button, and the strip does not change height when one
+ * appears (#51).
  * One column may hold two compact tiles.
  */
 const LINK_ICONS: Record<LinkClass, LucideIcon> = {
@@ -346,8 +347,12 @@ interface TileButtonProps {
   sessionId: string;
   /** What the version is beside its number ("三视图", "手绘", "3D v1 截图"). */
   caption: string;
-  onOpen: (tile: VersionTile) => void;
+  /** A click views the version; a double click (`insert`) puts a 2D picture on the board (#593). */
+  onOpen: (tile: VersionTile, mode?: OpenMode) => void;
 }
+
+/** #559/#593: how a strip tile is opened. `view` only looks at it; `insert` is 「插入到画布」. */
+type OpenMode = 'view' | 'insert';
 
 // Memoized (#291): the strip redraws on every task update; a tile whose own props did not change is skipped.
 const TileButton = memo(function TileButton({ tile, size, current, inBranch, inCompare, sessionId, caption, onOpen }: TileButtonProps) {
@@ -386,7 +391,13 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
           disabled={!canDisplay}
           onClick={(event) => {
             if (dragged.current && event.detail !== 0) { dragged.current = false; return; }
+            // #593: the second click of a double click repeats nothing; the double click itself inserts.
+            if (event.detail > 1) return;
             onOpen(tile);
+          }}
+          onDoubleClick={() => {
+            if (dragged.current) return;
+            onOpen(tile, 'insert');
           }}
           {...dragSource}
           onPointerDown={() => { dragged.current = false; }}
@@ -417,9 +428,12 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
           </span>
         </button>
       </HintTooltip>
-      <div className="flex h-4 items-center justify-center" data-testid="version-detail-row">
-        {detailed ? <button
+      {/* #593: 「详情」 is a button as wide as the tile, under it; a tile without details keeps the row empty. */}
+      <div className="flex h-5 items-stretch pt-0.5" data-testid="version-detail-row">
+        {detailed ? <Action
           type="button"
+          variant="outline"
+          size="xs"
           data-testid="version-detail"
           aria-label={[schemaText(schema, 'ui.studio.strip.detail'), label].join(' · ')}
           onClick={(event) => {
@@ -428,8 +442,8 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
             event.currentTarget.focus();
             openResultDetail(target);
           }}
-          className="rounded-sm px-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-        >{schemaText(schema, 'ui.studio.strip.detail')}</button> : null}
+          className="h-full w-full justify-center px-1 text-[11px] leading-none text-muted-foreground"
+        >{schemaText(schema, 'ui.studio.strip.detail')}</Action> : null}
       </div>
       {/* In the +N list every row shows its download: revealing it on hover left one row with the icon (the one
           focused) and the next without, which read as a version that cannot be downloaded. */}
@@ -532,7 +546,8 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
  * 底部的版本条：本会话每个 2D / 3D 版本一格，严格按创建时间排开（最新的在最右，#558）；格与格之间
  * 用连接线说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。来源不是紧挨着的前一格时，
  * 连接下写出来源名；用多张图做成的结果（多视图 3D）列出全部来源，不挑其中一张。点一格就是把它放上
- * 舞台（#559：只查看，不再放上画布；放上画布在详情里点「插入到画布」）；时间上相邻的同源结果在一列里叠起来。
+ * 舞台（#559：只查看，不再放上画布；放上画布在详情里点「插入到画布」，或双击 2D 那一格，#593）；
+ * 时间上相邻的同源结果在一列里叠起来。
  */
 /** 切换会话、版本链还没到时的占位：几块与缩略图同尺寸的骨架。 */
 function VersionStripSkeleton({ label }: { label: string }) {
@@ -579,12 +594,15 @@ export function VersionStrip() {
   const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, tiles), [schema, tiles]);
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick } = useSessionPick(chat, sessionId);
-  const { viewOnStage } = useObjectActions();
+  const { viewOnStage, insertOnCanvas } = useObjectActions();
 
   // The same callback for every tile and render (it reads the latest state through a ref), so memoized tiles stay put.
-  const openLatest = useRef<(tile: VersionTile) => void>(() => undefined);
-  openLatest.current = (tile: VersionTile) => {
+  const openLatest = useRef<(tile: VersionTile, mode?: OpenMode) => void>(() => undefined);
+  openLatest.current = (tile: VersionTile, mode: OpenMode = 'view') => {
     if (!sessionId) return;
+    // #593: a double click inserts a 2D picture (an upload or Agent crop too); on a model or while comparing,
+    // its clicks already did what a click does.
+    if (mode === 'insert' && (compare || tile.domain !== 'image')) return;
     if (compare) {
       // While comparing, a click puts the version into or out of a pane instead of changing the stage.
       if (tile.status === 'ready' && !toggleTileInCompare(tile)) toast.error(schemaText(schema, 'ui.studio.compare.unavailable'));
@@ -593,10 +611,13 @@ export function VersionStrip() {
     // Keep the currently viewed candidate when revisiting its tile, then fall back to the persisted pick.
     const picked = selectedTilePick(tile, object, pick?.kind === 'image' ? pick : {});
     const selected = objectOfTile(tile, sessionId, picked);
-    // #559: a click looks at the version; it does not put it on the board again. 「插入到画布」 in its detail does.
-    if (selected) viewOnStage(selected);
+    // #559: a click looks at the version; it does not put it on the board again. 「插入到画布」 in its detail, or a
+    // double click on the tile (#593), does: the same insertOnCanvas, receipt and all.
+    if (!selected) return;
+    if (mode === 'insert') insertOnCanvas(selected);
+    else viewOnStage(selected);
   };
-  const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);
+  const open = useCallback((tile: VersionTile, mode?: OpenMode) => openLatest.current(tile, mode), []);
 
   return (
     <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-36 shrink-0 items-stretch border-t border-border bg-panel">
@@ -649,7 +670,7 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
   inCompareTile: (tile: VersionTile) => boolean;
   captionOf: (tile: VersionTile) => string;
   sessionId: string;
-  onOpen: (tile: VersionTile) => void;
+  onOpen: (tile: VersionTile, mode?: OpenMode) => void;
 }) {
   const stacked = column.tiles.length > 1;
   const folded = useMemo(() => foldColumn(column.tiles, branch, currentKey, 2), [column.tiles, branch, currentKey]);
@@ -701,7 +722,7 @@ function FoldedTiles({ tiles, currentKey, branch, inCompareTile, captionOf, sess
   inCompareTile: (tile: VersionTile) => boolean;
   captionOf: (tile: VersionTile) => string;
   sessionId: string;
-  onOpen: (tile: VersionTile) => void;
+  onOpen: (tile: VersionTile, mode?: OpenMode) => void;
 }) {
   const { schema } = useProductSchema();
   const layer = useAnchoredPositioner();

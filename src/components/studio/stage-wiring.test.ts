@@ -123,7 +123,9 @@ describe('stage, right panel, lightbox and compare wiring', () => {
     expect(allOutputs).toContain('escapeClearsSelection(chosenCount, blockers)');
     // The strip retains comparison toggles; ordinary activation selects the stage and details stays a separate action.
     expect(strip).toContain('if (tile.status === \'ready\' && !toggleTileInCompare(tile))');
-    expect(strip).toContain('if (selected) viewOnStage(selected)');
+    expect(strip).toContain('else viewOnStage(selected)');
+    // #593: a double click on a 2D tile inserts it, the same insertOnCanvas as 「插入到画布」.
+    expect(strip).toContain("if (mode === 'insert') insertOnCanvas(selected)");
     expect(strip).toContain('data-testid="version-detail"');
     expect(strip).toContain('openResultDetail(target)');
     expect(strip).not.toMatch(/const open = [\s\S]*openOnStage\(next\)/);

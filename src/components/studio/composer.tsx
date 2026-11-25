@@ -11,7 +11,7 @@ import { ContextMeter } from '@/components/studio/context-meter';
 import { ChatModelNotice } from '@/components/studio/chat-model-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
-import { ChipSquare, ContextChip, CutHint } from '@/components/studio/composer-chips';
+import { CHIP_CARD_SQUARE_CLASS, ChipSquare, ContextChip, CutHint } from '@/components/studio/composer-chips';
 import { KindBadge } from '@/components/studio/kind-badge';
 import { ComposerSettings } from '@/components/studio/composer-settings';
 import { GenerationModelNotice } from '@/components/studio/model-picker';
@@ -568,122 +568,142 @@ export function Composer({
         </div>
       ) : null}
       {hasChipRow ? (
-      <div className="grid min-w-0 grid-cols-2 gap-1.5" data-testid="composer-chips">
-        {chip ? (
-          <ContextChip
-            testId="composer-object-chip"
-            // The selected object is the turn's default target (#557); a handle typed in the box wins over it: the
-            // chip says so and turns grey. Its ✕ deselects.
-            data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined, handle: chip.handle || undefined }}
-            accent
-            muted={overriding !== ''}
-            square={(
-              <ChipSquare>
-                {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
-              </ChipSquare>
-            )}
-            // #546: the picture and its kind badge only; the name ("当前：画布", "当前：@img5") is the hover hint and the
-            // screen-reader text, not a line of its own. An override still says which handle wins this turn.
-            label={currentName}
-            hint={{ name: currentName }}
-            oneLine={overriding === ''}
-            title={(
-              <span className="flex min-w-0 items-center gap-1">
-                <KindBadge kind={chip.kind} />
-                <span className="sr-only" data-testid="composer-object-name">{currentName}</span>
-              </span>
-            )}
-            subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : undefined}
-            remove={{ label: deselectLabel, onClick: onDeselectChip }}
-          />
-        ) : null}
-        {mask ? (
-          <ContextChip
-            testId="composer-mask-chip"
-            data={{ strokes: mask.strokes }}
-            accent
-            hint={{ name: schemaText(schema, 'ui.studio.mask.chip_title_hint') }}
-            square={(
-              <ChipSquare>
-                {mask.picture ? (
-                  <>
-                    <img src={mask.picture.url} alt={''} className="size-full object-cover" />
-                    <svg aria-hidden viewBox={`0 0 ${mask.picture.width} ${mask.picture.height}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 size-full">
-                      <rect width={mask.picture.width} height={mask.picture.height} className="fill-black/50" />
-                      {mask.picture.strokes.map((points, index) => (
-                        <polyline
-                          key={index}
-                          points={polylinePoints(points)}
-                          fill="none"
-                          className="stroke-primary"
-                          strokeWidth={Math.max(mask.picture!.brush, 1)}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      ))}
-                    </svg>
-                  </>
-                ) : <Paintbrush aria-hidden className="size-4 text-primary" />}
-              </ChipSquare>
-            )}
-            title={mask.handle
-              ? formatSchemaText(schemaText(schema, 'ui.studio.mask.chip_title'), { handle: mask.handle })
-              : schemaText(schema, 'ui.studio.mask.chip')}
-            subtitle={mask.strokes > 0
-              ? `${schemaCountMessage(schema, 'ui.studio.mask.chip_strokes', mask.strokes, { count: mask.strokes })} · ${schemaText(schema, 'ui.studio.mask.chip_selection')}`
-              : schemaText(schema, 'ui.studio.mask.chip_idle')}
-            remove={{ label: schemaText(schema, 'ui.studio.mask.chip_clear'), onClick: mask.onClear, testId: 'composer-mask-clear' }}
-          />
-        ) : null}
-        {branch ? (
-          <ContextChip
-            testId="composer-branch-chip"
-            accent
-            square={<ChipSquare><GitBranch aria-hidden className="size-4" /></ChipSquare>}
-            title={formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.branch'), { label: branch.label })}
-            subtitle={schemaText(schema, 'ui.studio.composer.chip.branch_sub')}
-            remove={{ label: schemaText(schema, 'ui.studio.composer.chip.branch_clear'), onClick: branch.onClear }}
-          />
-        ) : null}
-        {skillName ? (
-          <ContextChip
-            testId="composer-skill-chip"
-            square={<ChipSquare><Zap aria-hidden className="size-4" /></ChipSquare>}
-            title={schemaText(schema, 'ui.studio.composer.chip.skill')}
-            subtitle={skillName}
-            remove={{ label: schemaText(schema, 'ui.studio.composer.chip.skill_clear'), onClick: () => skill.onSelect(null) }}
-          />
-        ) : null}
-        {attachments.map((item) => {
-          const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
-          return (
+      // #593: the text chips (mask, branch, Skill) keep the two-column grid of #405; the picture chips (the object and
+      // the attachments) are fixed-size cards side by side, wrapping, under them.
+      <div className="flex min-w-0 flex-col gap-1.5" data-testid="composer-chips">
+        {mask || branch || skillName ? (
+        <div className="grid min-w-0 grid-cols-2 gap-1.5" data-testid="composer-chip-grid">
+          {mask ? (
             <ContextChip
-              key={`${item.index}-${item.url.slice(0, 32)}`}
-              testId="composer-attachment-chip"
-              flash={item.url === flashUrl}
-              onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
-              open={{
-                label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
-                onClick: () => previewAttachment(item.url, item.number),
-                testId: 'composer-attachment-open',
-              }}
+              testId="composer-mask-chip"
+              data={{ strokes: mask.strokes }}
+              accent
+              hint={{ name: schemaText(schema, 'ui.studio.mask.chip_title_hint') }}
               square={(
-                <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
+                <ChipSquare>
+                  {mask.picture ? (
+                    <>
+                      <img src={mask.picture.url} alt={''} className="size-full object-cover" />
+                      <svg aria-hidden viewBox={`0 0 ${mask.picture.width} ${mask.picture.height}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 size-full">
+                        <rect width={mask.picture.width} height={mask.picture.height} className="fill-black/50" />
+                        {mask.picture.strokes.map((points, index) => (
+                          <polyline
+                            key={index}
+                            points={polylinePoints(points)}
+                            fill="none"
+                            className="stroke-primary"
+                            strokeWidth={Math.max(mask.picture!.brush, 1)}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ))}
+                      </svg>
+                    </>
+                  ) : <Paintbrush aria-hidden className="size-4 text-primary" />}
+                </ChipSquare>
               )}
-              title={item.pinned
-                ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
-                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
-              subtitle={[
-                schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
-                purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
-              ].filter(Boolean).join(' · ')}
-              remove={{
-                label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
-                onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
-              }}
+              title={mask.handle
+                ? formatSchemaText(schemaText(schema, 'ui.studio.mask.chip_title'), { handle: mask.handle })
+                : schemaText(schema, 'ui.studio.mask.chip')}
+              subtitle={mask.strokes > 0
+                ? `${schemaCountMessage(schema, 'ui.studio.mask.chip_strokes', mask.strokes, { count: mask.strokes })} · ${schemaText(schema, 'ui.studio.mask.chip_selection')}`
+                : schemaText(schema, 'ui.studio.mask.chip_idle')}
+              remove={{ label: schemaText(schema, 'ui.studio.mask.chip_clear'), onClick: mask.onClear, testId: 'composer-mask-clear' }}
             />
-          );
-        })}
+          ) : null}
+          {branch ? (
+            <ContextChip
+              testId="composer-branch-chip"
+              accent
+              square={<ChipSquare><GitBranch aria-hidden className="size-4" /></ChipSquare>}
+              title={formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.branch'), { label: branch.label })}
+              subtitle={schemaText(schema, 'ui.studio.composer.chip.branch_sub')}
+              remove={{ label: schemaText(schema, 'ui.studio.composer.chip.branch_clear'), onClick: branch.onClear }}
+            />
+          ) : null}
+          {skillName ? (
+            <ContextChip
+              testId="composer-skill-chip"
+              square={<ChipSquare><Zap aria-hidden className="size-4" /></ChipSquare>}
+              title={schemaText(schema, 'ui.studio.composer.chip.skill')}
+              subtitle={skillName}
+              remove={{ label: schemaText(schema, 'ui.studio.composer.chip.skill_clear'), onClick: () => skill.onSelect(null) }}
+            />
+          ) : null}
+        </div>
+        ) : null}
+        {chip || attachments.length > 0 ? (
+        <div className="flex min-w-0 flex-wrap gap-1.5" data-testid="composer-chip-cards">
+          {chip ? (
+            <ContextChip
+              testId="composer-object-chip"
+              // The selected object is the turn's default target (#557); a handle typed in the box wins over it: the
+              // chip says so and turns grey. Its ✕ deselects.
+              data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined, handle: chip.handle || undefined }}
+              accent
+              muted={overriding !== ''}
+              card
+              square={(
+                <ChipSquare className={CHIP_CARD_SQUARE_CLASS}>
+                  {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
+                </ChipSquare>
+              )}
+              // #546: the picture and its kind badge only; the name ("当前：画布", "当前：@img5") is the hover hint and the
+              // screen-reader text, not a line of its own. An override still says which handle wins this turn.
+              label={currentName}
+              hint={{ name: currentName }}
+              oneLine={overriding === ''}
+              title={(
+                <span className="flex min-w-0 items-center gap-1">
+                  <KindBadge kind={chip.kind} />
+                  <span className="sr-only" data-testid="composer-object-name">{currentName}</span>
+                </span>
+              )}
+              subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : undefined}
+              remove={{ label: deselectLabel, onClick: onDeselectChip }}
+            />
+          ) : null}
+          {attachments.map((item) => {
+            const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+            const name = item.pinned
+              ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+              : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
+            return (
+              <ContextChip
+                key={`${item.index}-${item.url.slice(0, 32)}`}
+                testId="composer-attachment-chip"
+                flash={item.url === flashUrl}
+                onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
+                open={{
+                  label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
+                  onClick: () => previewAttachment(item.url, item.number),
+                  testId: 'composer-attachment-open',
+                }}
+                card
+                square={(
+                  <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} squareClassName={CHIP_CARD_SQUARE_CLASS} />
+                )}
+                // #593: the card shows the picture and its kind badge; the name and purpose are the hint and the screen-reader text.
+                label={name}
+                title={(
+                  <span className="flex min-w-0 items-center gap-1">
+                    <KindBadge kind="image" />
+                    <span className="sr-only">{name}</span>
+                  </span>
+                )}
+                subtitle={[
+                  schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
+                  purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
+                ].filter(Boolean).join(' · ')}
+                remove={{
+                  label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
+                  onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
+                }}
+              />
+            );
+          })}
+        </div>
+        ) : null}
       </div>
       ) : null}
       {hasAttachments ? (

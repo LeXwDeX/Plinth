@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { Composer, type ComposerProps } from '@/components/studio/composer';
-import { CHIP_WIDTH_CLASS, ChipSquare, ContextChip, CutHint, chipLines } from '@/components/studio/composer-chips';
+import { CHIP_CARD_SQUARE_CLASS, CHIP_CARD_WIDTH_CLASS, CHIP_WIDTH_CLASS, ChipSquare, ContextChip, CutHint, chipLines } from '@/components/studio/composer-chips';
 import { useChatStore } from '@/store/chat-store';
 
 // #405 (the scope note): the strips that show what a turn is about (the picture on the stage or board, the pictures
@@ -180,33 +180,59 @@ describe('the text that is cut', () => {
 });
 
 describe('the strips above the box', () => {
-  it('lays the stage picture, the board picture and the attachments out on one two-column grid, every cell as wide as the others', () => {
+  it('lays the stage picture, the board picture and the attachments out as fixed-size cards side by side, wrapping (#593)', () => {
     render(<Composer {...props}
       chip={{ kind: 'image', thumbnail: '/t.png', label: messages['ui.studio.composer.chip.canvas'], handle: '' }}
       images={['/a.png', '/b.png']} pinnedImage="/board.png" />);
     const row = screen.getByTestId('composer-chips');
-    expect(row.className).toMatch(/\bgrid\b/);
-    expect(row.className).toMatch(/\bgrid-cols-2\b/);
-    expect(row.className).toMatch(/\bgap-1\.5\b/);
-    expect(row.className).not.toMatch(/\bflex(-wrap)?\b/);
-    // Four chips, four cells: each one fills its cell, so an odd one out (the fourth here is alone in its row) is not wider.
-    const cells = [...row.children] as HTMLElement[];
-    expect(cells).toHaveLength(4);
-    for (const cell of cells) {
-      expect(cell.className).toMatch(/\bw-full\b/);
-      expect(cell.className).toMatch(/\bmin-w-0\b/);
-      expect(cell.className).not.toMatch(/\bcol-span-/);
+    // No text chip, so no grid; the picture cards are one wrapping row.
+    expect(screen.queryByTestId('composer-chip-grid')).toBeNull();
+    const cards = within(row).getByTestId('composer-chip-cards');
+    expect(cards.className).toMatch(/\bflex\b/);
+    expect(cards.className).toMatch(/\bflex-wrap\b/);
+    expect(cards.className).toMatch(/\bgap-1\.5\b/);
+    // Four pictures, four cards of the one fixed width, none stretched over the row.
+    const items = [...cards.children] as HTMLElement[];
+    expect(items).toHaveLength(4);
+    const frames = [screen.getByTestId('composer-object-chip'), ...screen.getAllByTestId('composer-attachment-chip')];
+    for (const frame of frames) {
+      expect(frame.className).toContain(CHIP_CARD_WIDTH_CLASS);
+      expect(frame.className).toMatch(/\bflex-col\b/);
+      expect(frame.className).not.toMatch(/\bw-full\b/);
     }
-    // The picture on the stage, the pinned board picture and both uploads are children of that one row.
-    expect(within(row).getByTestId('composer-object-chip')).toBeTruthy();
+    // The picture and the attachments are children of that one row.
     expect(within(row).getAllByTestId('composer-attachment-chip')).toHaveLength(3);
-    // No second row of chips of its own.
     expect(screen.queryByTestId('composer-attachment-list')).toBeNull();
     // Order: the object first, then the attachments in the order they were added, the board's picture last.
     const order = [...row.querySelectorAll('[data-testid="composer-object-chip"], [data-testid="composer-attachment-chip"]')].map((node) => node.textContent);
     expect(order[0]).toContain(messages['ui.studio.composer.chip.canvas']);
     expect(order[1]).toContain('上传的图 1');
     expect(order[3]).toContain(messages['ui.studio.composer.attachment.pinned']);
+  });
+
+  it('stacks each picture card: the thumbnail first, the kind badge under it, the remove button in the corner (#593)', () => {
+    render(<Composer {...props} chip={{ kind: 'model', thumbnail: '/t.png', label: '3D v1', handle: '' }} images={['/a.png']} />);
+    for (const frame of [screen.getByTestId('composer-object-chip'), screen.getByTestId('composer-attachment-chip')]) {
+      const picture = frame.querySelector(`.${CHIP_CARD_SQUARE_CLASS}`) as HTMLElement;
+      const badge = within(frame).getByTestId('kind-badge');
+      expect(picture).toBeTruthy();
+      expect(Boolean(picture.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+      expect(within(frame).getByTestId('chip-card-remove').className).toMatch(/\babsolute\b.*\btop-0\.5\b|\btop-0\.5\b.*\babsolute\b/);
+    }
+    expect(within(screen.getByTestId('composer-object-chip')).getByTestId('kind-badge').getAttribute('data-kind')).toBe('model');
+    expect(within(screen.getByTestId('composer-attachment-chip')).getByTestId('kind-badge').getAttribute('data-kind')).toBe('image');
+    // The names stay for screen readers and the controls keep their names.
+    expect(within(screen.getByTestId('composer-attachment-chip')).getByRole('button', { name: messages['ui.chat.input.remove_attachment'].replace('{index}', String(schema.chat.context.image_index_base)) })).toBeTruthy();
+    expect(screen.getByTestId('composer-attachment-open').getAttribute('aria-label')).toBe(messages['ui.studio.composer.attachment.preview'].replace('{index}', String(schema.chat.context.image_index_base)));
+  });
+
+  it('keeps the text chips (mask, branch, Skill) on the two-column grid above the cards', () => {
+    render(<Composer {...props} chip={{ kind: 'image', thumbnail: '/t.png', label: messages['ui.studio.composer.chip.canvas'], handle: '' }}
+      branch={{ label: '2D v1', onClear: noop }} />);
+    const grid = screen.getByTestId('composer-chip-grid');
+    expect(grid.className).toMatch(/\bgrid-cols-2\b/);
+    expect(within(grid).getByTestId('composer-branch-chip').className).toMatch(/\bw-full\b/);
+    expect(Boolean(grid.compareDocumentPosition(screen.getByTestId('composer-chip-cards')) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('shows the picture and the kind badge only: the name 当前：画布 is the hint and the screen-reader text (#546)', () => {

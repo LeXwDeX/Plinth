@@ -17,7 +17,7 @@ import { formatSchemaText } from '@/lib/product-schema';
  * The chip itself shows the server preview of a platform picture (#290/#292); the hover view and the pixel size
  * read the original. A picture not yet uploaded is a raster data address and is shown as it is.
  */
-export function AttachmentThumb({ url, alt }: { url: string; alt: string }) {
+export function AttachmentThumb({ url, alt, squareClassName }: { url: string; alt: string; squareClassName?: string }) {
   const { text } = useProductSchema();
   const { previewAssetUrl } = useAssetURLRewriter();
   const [active, setActive] = useState(false);
@@ -33,7 +33,7 @@ export function AttachmentThumb({ url, alt }: { url: string; alt: string }) {
       onFocus={() => setActive(true)}
       onBlur={() => setActive(false)}
     >
-      <ChipSquare>
+      <ChipSquare className={squareClassName}>
         {thumbnail ? <img src={thumbnail} alt={alt} className="size-full object-cover" /> : null}
       </ChipSquare>
       {active ? (
