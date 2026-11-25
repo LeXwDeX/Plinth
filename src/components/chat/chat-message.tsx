@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { Bot, Trash2, RefreshCw, Pencil, Ellipsis, CornerDownLeft, GitBranch, TriangleAlert } from 'lucide-react';
+import { Bot, Trash2, RefreshCw, Pencil, Ellipsis, CornerDownLeft, GitBranch, TriangleAlert, BookOpen } from 'lucide-react';
 import { type ChatAttachment, type ChatMessage as ChatMessageType, type ChatImage } from '@/store/chat-store';
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
 import { BrailleSpinner } from '@/components/ui/braille-spinner';
@@ -233,6 +233,10 @@ export const ChatMessage = memo(function ChatMessage({
   const review = isUser
     ? { calls: [], leftover: [] }
     : reviewRecordOf(schema, message.toolCalls ?? [], renders);
+  // #548: one name per Skill that took effect in this reply, whoever chose it.
+  const usedSkillNames = isUser
+    ? []
+    : [...new Set((message.usedSkills ?? []).filter((skill) => skill.applied).map((skill) => skill.displayName))];
   const collapseLines = schema.chat.frontend.reply_collapse_lines;
   const [replyOpen, setReplyOpen] = useState(false);
   const collapsibleReply = !isUser && settled && replyNeedsCollapse(displayContent, collapseLines);
@@ -317,6 +321,21 @@ export const ChatMessage = memo(function ChatMessage({
         >
           {schemaText(schema, replyOpen ? 'ui.chat.message.collapse_full' : 'ui.chat.message.expand_full')}
         </Action>
+      )}
+
+      {/* #548: the Skills this reply used, read from its stored calls, so a reload shows the same line. */}
+      {!isUser && usedSkillNames.length > 0 && (
+        <span
+          className="inline-flex max-w-[92%] items-center gap-1 rounded-md border border-border bg-panel-raised px-2 py-0.5 text-[11px] text-muted-foreground"
+          data-testid="chat-used-skills"
+        >
+          <BookOpen aria-hidden className="size-3 shrink-0" />
+          <span className="truncate">
+            {formatSchemaText(schemaText(schema, 'ui.chat.message.used_skills'), {
+              names: usedSkillNames.join(schemaText(schema, 'ui.chat.message.used_skills_separator')),
+            })}
+          </span>
+        </span>
       )}
 
       {(review.calls.length > 0 || review.leftover.length > 0) && (

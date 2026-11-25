@@ -415,8 +415,17 @@ func (executor *Executor) Execute(
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
 	ctx, state := withStepStandingState(ctx)
+	skill := &callSkill{}
+	if command.Tool.Processing == nil {
+		// #548: the call's style Skill is resolved before anything else reads
+		// the command, so a resume after an approval fingerprints the same
+		// command as the first preparation.
+		command, *skill = executor.resolveCallSkill(command)
+	}
+	ctx = withCallSkill(ctx, skill)
 	result, err := executor.execute(ctx, command, observe)
 	executor.attachStepStanding(ctx, command, &result, state)
+	executor.attachCallSkill(command, &result, *skill)
 	return result, err
 }
 
@@ -468,6 +477,11 @@ func (executor *Executor) execute(
 	}
 	if command.Tool.Processing != nil {
 		return executor.executeProcessing(ctx, command, observe)
+	}
+	// #548: a skill argument that names no listed Skill, or a Skill that does
+	// not style a prompt, is refused before anything is prepared.
+	if refusal := callSkillFrom(ctx).Refusal; refusal != "" {
+		return executor.refusal(command, refusalSkill, refusal), nil
 	}
 	// #242: one reply draws a bounded number of concept sketches; a later reply
 	// starts a fresh count. An already accepted Task is observed above and is
@@ -777,14 +791,16 @@ func (executor *Executor) execute(
 			trace.add(layer, template)
 		}
 	}
+	// A tool-binding Skill carries no style prompt for a generation tool to
+	// apply; resolveCallSkill already cleared it from the command.
 	skills, skillExecution := executor.promptSkills(command)
-	// A tool-binding Skill directs the Agent to its tool (see the orchestrator's
-	// directive); it carries no style prompt for a generation tool to apply.
-	if bound, exists := skills[command.Options.SkillID]; exists && bound.Tool != "" {
-		command.Options.SkillID = ""
-	}
 	if command.Options.SkillID != "" {
 		if _, exists := skills[command.Options.SkillID]; !exists || !slices.Contains(offering.Features, executor.chat.Skills.Feature) {
+			skill := callSkillFrom(ctx)
+			if refusal := executor.skillUnsupported(*skill); refusal != "" {
+				skill.Refusal = refusal
+				return executor.refusal(command, refusalSkill, refusal), nil
+			}
 			return chat.ToolResult{Error: "selected skill is unavailable", NoSubmission: true}, nil
 		}
 	}

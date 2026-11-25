@@ -171,6 +171,24 @@ describe('skillPickerRows', () => {
   });
 });
 
+// #548: the list shows the description; the owner's derived one carries the "write your own" note.
+describe('skillPickerRows description column', () => {
+  it('shows the description and marks only the owner derived one', () => {
+    const rows = skillPickerRows({
+      catalog: { revision: 'r', skills: [
+        { id: 'shared', displayName: 'S', prompt: 'shared body', description: '共享说明', descriptionDerived: true, recommendedSize: '' },
+        { id: 'personal-a', displayName: 'A', prompt: 'body a', description: '派生说明', descriptionDerived: true, recommendedSize: '' },
+        { id: 'personal-b', displayName: 'B', prompt: 'body b', description: '写好的说明', recommendedSize: '' },
+        { id: 'old', displayName: 'O', prompt: 'old body', recommendedSize: '' },
+      ] } as never,
+      effective: { skills: [] } as never,
+      personalIds: new Set(['personal-a', 'personal-b']), noneLabel: 'n', noneHint: 'h', editLabel: () => '', deleteLabel: () => '',
+      deleting: new Set(), onEdit: () => undefined, onDelete: () => undefined, derivedLabel: '自动生成，建议补写',
+    });
+    expect(rows.slice(0, 4).map((row) => row.cells[1].text)).toEqual(['共享说明', '派生说明 · 自动生成，建议补写', '写好的说明', 'old body']);
+  });
+});
+
 // #238: after a delete the keyboard returns to the list once the row has gone, not to the page body.
 describe('focus after deleting a personal Skill', () => {
   it('counts focus as lost only on nothing, the body, the root or the panel container', () => {

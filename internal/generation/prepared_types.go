@@ -22,7 +22,10 @@ type PrepareInputCommand struct {
 	ParameterSources map[string]string
 	// ModelChoice is who chose the model, for the approval card (#239). It is
 	// evidence only: it never changes the frozen input or its hash.
-	ModelChoice         *ModelChoice
+	ModelChoice *ModelChoice
+	// SkillChoice is the style Skill the step applies and who chose it, for
+	// the approval card (#548). Evidence only, like ModelChoice.
+	SkillChoice         *SkillChoice
 	OwnerID             OwnerID
 	SessionID           string
 	Capability          Capability
@@ -122,10 +125,22 @@ type ModelChoice struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// SkillChoice is the approval evidence of the style Skill a step applies
+// (#548): its ID, display name and who chose it ("user" or "agent"). The Skill
+// itself is already part of the frozen prompt; this names it on the card.
+type SkillChoice struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
 type PreparedInput struct {
 	// ModelChoice names who chose the step's model, when the tool declares the
 	// result key. It is approval evidence only and is excluded from InputHash.
 	ModelChoice *ModelChoice `json:"model_choice,omitempty"`
+	// SkillChoice names the style Skill the step applies (#548). It is
+	// approval evidence only and is excluded from InputHash.
+	SkillChoice *SkillChoice `json:"skill_choice,omitempty"`
 	// ReferenceLimit is set when a KeepFirstReferences preparation kept only
 	// the first reference pictures; ReferenceNote is its Schema note. Both are
 	// answered once and not stored.

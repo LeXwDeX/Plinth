@@ -28,8 +28,12 @@ func (s *Server) registerAgentConfigurationContracts() {
 		s.mux.HandleFunc("GET "+creation, s.personalSkills)
 		s.mux.HandleFunc("POST "+creation, s.personalSkills)
 	}
+	if draft := s.application.Chat.Skills.Creation.DraftRoute; draft != "" && s.skillDrafter != nil {
+		s.mux.HandleFunc("POST "+draft, s.draftPersonalSkill)
+	}
 	if item := s.application.Chat.Skills.Creation.ItemRoute; item != "" {
 		s.mux.HandleFunc("PUT "+item, s.updatePersonalSkill)
+		s.mux.HandleFunc("PATCH "+item, s.patchPersonalSkill)
 		s.mux.HandleFunc("DELETE "+item, s.deletePersonalSkill)
 	}
 }

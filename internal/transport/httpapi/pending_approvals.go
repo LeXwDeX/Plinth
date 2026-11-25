@@ -50,6 +50,12 @@ func (s *Server) listPendingApprovals(writer http.ResponseWriter, request *http.
 			choice.Reason = s.textIn(locale, choice.Reason)
 			item.ModelChoice = &choice
 		}
+		if item.SkillChoice != nil {
+			// A system Skill's name is Schema copy; a personal Skill's stays as written.
+			choice := *item.SkillChoice
+			choice.Name = s.textIn(locale, choice.Name)
+			item.SkillChoice = &choice
+		}
 		if item.ExtraItems != nil {
 			localizedItems := make([]string, len(item.ExtraItems))
 			for position, extra := range item.ExtraItems {

@@ -263,7 +263,9 @@ func (executor *Executor) promptSkillApplication(
 	if skillID == "" {
 		return promptSkillApplication{}, false
 	}
-	if bound, exists := skills[skillID]; exists && bound.Tool != "" {
+	// Only a style Skill styles a prompt: a tool-binding or instruction Skill
+	// (#548) is never applied here.
+	if bound, exists := skills[skillID]; exists && bound.Kind() != catalog.SkillKindStyle {
 		return promptSkillApplication{}, false
 	}
 	skill, exists := skills[skillID]

@@ -118,6 +118,8 @@ the framed block surviving compaction, edit/delete effects, and a second owner's
 "image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
 "next-step" the #374 direction card under a fixed function: the card opens, a tool outside the function
 is not offered, clearing the selection and answering the card follow the page's order and give every tool back,
+"skill-draft" the #548 personal Skill draft: the fake model drafts, nothing is saved until the creation route,
+PATCH changes one field, the catalog lists slug and description, a deleted Skill leaves it,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
@@ -2592,7 +2594,8 @@ def running_replies(api, session):
 
 def scenario_multiview_text(work, api, offerings):
     """#550: "生成一个圣母玛丽亚的4视图" with no picture. The Agent is told the
-    one-picture-per-view rule, draws one front source with refine_image, starts
+    one-picture-per-view rule (since #548 a resident route
+    plus the four-view Skill it reads with use_skill), draws one front source with refine_image, starts
     create_three_view from it, and the four views end as four separate pictures:
     no second refine_image draws the views into one composite. Auto approval (the
     default) submits only the front view; the person starts left, back and right
@@ -2600,13 +2603,29 @@ def scenario_multiview_text(work, api, offerings):
     the source, so the purpose recommendation chooses it and no model conflict
     card opens."""
     session = new_session(api)
-    ask = "生成一个圣母玛丽亚的4视图 [[fake:system-contains 四视图再加右侧]]"
+    # #548: the resident craft keeps only the route; the four-view rule itself
+    # lives in the system four-view Skill, which the Agent reads with use_skill.
+    route = "先 use_skill 读对应 Skill"
+    ask = f"生成一个圣母玛丽亚的4视图 [[fake:system-contains {route}]]"
     if not _visual_anchor_turn(api, session, ask, domain="image"):
-        record("multiview-text: the four-view rule reaches the Agent", False, "turn did not finish")
+        record("multiview-text: the four-view route reaches the Agent", False, "turn did not finish")
         return
     reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
-    record("multiview-text: the four-view rule reaches the Agent", "present: 四视图再加右侧" in reply,
+    record("multiview-text: the four-view route reaches the Agent", f"present: {route}" in reply,
            f"reply={reply[:120]!r}")
+    read = '[[fake:tool:use_skill {"name":"four-view"}]]'
+    if not _image_message(api, session, "生成一个圣母玛丽亚的4视图 " + read):
+        record("multiview-text: use_skill reads the four-view rule", False, "turn did not finish")
+        return
+    instructions = [str(result.get("instructions") or "")
+                    for result in _tool_results(work, "main", session, "use_skill")]
+    record("multiview-text: use_skill reads the four-view rule",
+           any("四视图再加右侧" in text for text in instructions),
+           f"results={len(instructions)} head={(instructions[-1] if instructions else '')[:80]!r}")
+    used = (_quality_final_reply(_quality_messages(api, session)) or {}).get("used_skills") or []
+    record("multiview-text: the reply records the four-view Skill as used by the Agent",
+           any(item.get("id") == "system-four-view" and item.get("source") == "agent" for item in used),
+           f"used_skills={used}")
 
     # The front source: one refine_image, no picture of several views.
     source = ('[[fake:tool:refine_image {"prompt":"Full-body front view of the Virgin Mary, one subject, '
@@ -3385,6 +3404,54 @@ def _next_step_turn(api, session, content, domain="3d", seconds=60, **fields):
             return True, ""
         time.sleep(0.4)
     return False, f"no reply within {seconds}s"
+
+
+def scenario_skill_draft(api):
+    """#548: a personal Skill drafted from a name and a requirement. The draft route runs one call on the default
+    chat model (the fake OpenAI-compatible LLM answers the authoring template's delimiters with a draft object)
+    and saves nothing; the creation route saves the reviewed draft, PATCH changes one field at a time, and the
+    Skill catalog lists the slug and the description. No real upstream is involved."""
+    base = "/api/v1/chat/skills/personal"
+    status, listed = api.json("GET", base)
+    before = len((listed or {}).get("skills") or [])
+    status, body = api.json("POST", base + "/draft", {"name": "水彩角色", "requirement": "角色设定图一律用柔和水彩、浅色背景。"})
+    draft = (body or {}).get("draft") or {}
+    record("#548 skill-draft: the draft route answers the fake model's draft", status == 200
+           and draft.get("slug") == "fake-skill-draft" and draft.get("apply") == "instruction"
+           and draft.get("description") and "柔和水彩" in (draft.get("prompt") or ""), f"status={status} draft={draft}")
+    status, listed = api.json("GET", base)
+    record("#548 skill-draft: drafting saves nothing", status == 200 and len(listed.get("skills") or []) == before,
+           f"status={status} skills={len(listed.get('skills') or [])} before={before}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": '用水彩 [[fake:skill-draft {"slug":"Bad Slug"}]]'})
+    record("#548 skill-draft: an invalid model slug is dropped, not refused",
+           status == 200 and ((body or {}).get("draft") or {}).get("slug") == "", f"status={status} body={body}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": '用水彩 [[fake:skill-draft {"prompt":""}]]'})
+    record("#548 skill-draft: an unusable draft is one readable failure", status == 502 and (body or {}).get("detail"),
+           f"status={status} body={body}")
+    status, body = api.json("POST", base, {"name": "水彩角色", "prompt": draft.get("prompt") or "柔和水彩。", "slug": draft.get("slug") or "",
+                                           "description": draft.get("description") or "画角色时使用。", "apply": draft.get("apply") or "instruction",
+                                           "recommended_size": "2048x2048"})
+    skill = (body or {}).get("skill") or {}
+    record("#548 skill-draft: the reviewed draft saves through the creation route", status == 201 and skill.get("slug") == "fake-skill-draft",
+           f"status={status} skill={skill}")
+    if not skill.get("id"):
+        return
+    item = base + "/" + skill["id"]
+    status, body = api.json("PATCH", item, {"description": "画角色设定图时使用。"})
+    patched = (body or {}).get("skill") or {}
+    record("#548 skill-draft: PATCH changes only the description", status == 200 and patched.get("description") == "画角色设定图时使用。"
+           and patched.get("prompt") == skill.get("prompt") and patched.get("slug") == skill.get("slug"), f"status={status} skill={patched}")
+    status, body = api.json("PATCH", item, {"slug": "Bad Slug"})
+    record("#548 skill-draft: an invalid slug is refused by field", status == 400 and (body or {}).get("code") == "invalid_personal_skill_slug",
+           f"status={status} body={body}")
+    status, catalog = api.json("GET", "/api/v1/chat/skills")
+    listed = next((item for item in (catalog or {}).get("skills") or [] if item.get("id") == skill["id"]), {})
+    record("#548 skill-draft: the Skill catalog lists slug and description", listed.get("slug") == "fake-skill-draft"
+           and listed.get("description") == "画角色设定图时使用。" and listed.get("description_derived") is False, f"listed={listed}")
+    status, _raw, _headers = api.call("DELETE", item)
+    status_list, catalog = api.json("GET", "/api/v1/chat/skills")
+    record("#548 skill-draft: a deleted Skill leaves the catalog", status == 204
+           and all(entry.get("id") != skill["id"] for entry in (catalog or {}).get("skills") or []), f"delete={status} list={status_list}")
 
 
 def scenario_next_step(api):
@@ -8955,7 +9022,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,tripo-endpoints,l5-direct")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,skill-draft,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,tripo-endpoints,l5-direct")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8965,7 +9032,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "skill-draft", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -8981,7 +9048,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "skill-draft", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -9038,6 +9105,8 @@ def main():
                 scenario_image_purpose(api, offerings, work)
             if "next-step" in selected:
                 scenario_next_step(api)
+            if "skill-draft" in selected:
+                scenario_skill_draft(api)
             if "work-ledger" in selected:
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:

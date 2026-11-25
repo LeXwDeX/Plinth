@@ -101,12 +101,18 @@ func TestShippedImageCraftKeepsBackgroundRemovalOnItsTool(t *testing.T) {
 // states, and the prompt and the craft briefs together stay below the size they
 // had before the pass (7814 characters: 2084 + 5730). The ceilings are not a
 // target to fill; a rule added to one place should come out of another.
+//
+// #548: the Skill directory joins the resident context. The ceiling counts
+// the routing sentence (a craft brief), the directory template and both
+// directory caps at their worst case, and stays at 7500: a directory that
+// does not fit gets smaller caps, never a higher ceiling.
 func TestShippedPromptAndCraftStayShortAndStateRulesOnce(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := product.Application().Chat.Agent
+	chat := product.Application().Chat
+	agent := chat.Agent
 	system := utf8.RuneCountInString(agent.SystemPrompt)
 	total := system
 	for _, prompt := range agent.CraftPrompts {
@@ -123,7 +129,23 @@ func TestShippedPromptAndCraftStayShortAndStateRulesOnce(t *testing.T) {
 	if system > 2000 {
 		t.Errorf("the system prompt is %d characters, want at most 2000", system)
 	}
-	if total > 7500 {
-		t.Errorf("the system prompt and craft briefs are %d characters together, want at most 7500", total)
+	directory := chat.Skills.Directory
+	if !directory.Enabled() {
+		t.Fatal("the Skill directory is not declared")
+	}
+	frame := utf8.RuneCountInString(strings.ReplaceAll(directory.Template, "{entries}", ""))
+	worst := total + frame + directory.MaxSystemCharacters + directory.MaxPersonalCharacters
+	if worst > 7500 {
+		t.Errorf("the system prompt, craft briefs and the full Skill directory are %d characters together, want at most 7500", worst)
+	}
+	// Moving the three-view brief into its Skills must shrink what a person
+	// without personal Skills carries every turn, not just move it (the
+	// resident total was 7489 before #548).
+	listed := 0
+	for _, skill := range chat.Skills.SystemSkills {
+		listed += utf8.RuneCountInString(catalog.SkillDirectoryEntry(skill, directory))
+	}
+	if resident := total + frame + listed; resident >= 7489 {
+		t.Errorf("the resident context is %d characters with the system Skills listed, want less than the 7489 before #548", resident)
 	}
 }

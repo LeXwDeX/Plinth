@@ -3,7 +3,8 @@ package chat
 import (
 	"context"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
 // skillToolDirective is the system-context block for a turn that chose a
@@ -60,7 +61,7 @@ func (orchestrator *Orchestrator) styleSkillDirective(ctx context.Context, optio
 		if skill.ID != options.SkillID {
 			continue
 		}
-		if skill.Tool != "" {
+		if skill.Kind() != catalog.SkillKindStyle {
 			return ""
 		}
 		name := skill.NameZH
@@ -79,15 +80,5 @@ func (orchestrator *Orchestrator) styleSkillDirective(ctx context.Context, optio
 // characters: enough to know the style without repeating the prompt the
 // server applies itself.
 func skillSummary(prompt string, maximum int) string {
-	text := strings.TrimSpace(prompt)
-	if line, _, found := strings.Cut(text, "\n"); found {
-		text = strings.TrimSpace(line)
-	}
-	if end := strings.IndexAny(text, "。！？!?"); end >= 0 {
-		_, size := utf8.DecodeRuneInString(text[end:])
-		text = text[:end+size]
-	} else if end := strings.Index(text, ". "); end >= 0 {
-		text = text[:end+1]
-	}
-	return truncateRunes(text, maximum)
+	return catalog.SkillSummary(prompt, maximum)
 }

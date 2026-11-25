@@ -30,6 +30,16 @@ type SkillSchema struct {
 	Prompt               string   `json:"prompt"`
 	ImageToImageTemplate string   `json:"image_to_image_template,omitempty"`
 	Tags                 []string `json:"tags,omitempty"`
+	// Slug is the Agent Skills name (#548): lower-case, unique per owner.
+	// A Skill stored without one reads a slug derived from its ID (SkillSlug).
+	Slug string `json:"slug,omitempty"`
+	// Description says what the Skill does and when to use it; the Agent's
+	// Skill directory shows it. A Skill stored without one reads a derived
+	// description (SkillDescriptionFor).
+	Description string `json:"description,omitempty"`
+	// Apply is how a Skill without a tool takes effect: generation-prompt
+	// (style) or instruction. Empty reads as style (see Kind).
+	Apply string `json:"apply,omitempty"`
 	// Tool binds the Skill to an Agent tool (Product Schema system Skills
 	// only). Choosing it directs the Agent to that tool; it never styles a
 	// generation prompt.

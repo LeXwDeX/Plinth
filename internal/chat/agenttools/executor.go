@@ -93,6 +93,9 @@ const (
 
 type Config struct {
 	Offerings func() []generation.Offering
+	// Skills is the Schema's Skill declaration: use_skill reads its directory
+	// contract and its system Skill IDs (#548).
+	Skills catalog.ChatSkillsSchema
 	// Context carries the attachment handle syntax and its refusal wording;
 	// create_three_view accepts handles beside history indices.
 	Context  catalog.ChatContextSchema
@@ -228,6 +231,7 @@ type Config struct {
 }
 
 type Executor struct {
+	skills                catalog.ChatSkillsSchema
 	offerings             func() []generation.Offering
 	context               catalog.ChatContextSchema
 	skillRuntime          *skillrun.Runtime
@@ -365,6 +369,7 @@ func New(config Config) (*Executor, error) {
 		choiceKinds[kind.ID] = kind
 	}
 	return &Executor{
+		skills:                 config.Skills,
 		choiceKinds:            choiceKinds,
 		choiceOptionInvalid:    config.ChoiceOptionInvalid,
 		briefSavedMessage:      config.BriefSavedMessage,
@@ -529,6 +534,8 @@ func (e *Executor) Execute(
 		return e.recordSelfCheck(ctx, command)
 	case ToolCreateThreeView:
 		return e.createThreeView(ctx, command, observe)
+	case ToolUseSkill:
+		return e.useSkill(command), nil
 	default:
 		// The orchestrator supplies this server-side definition after registry
 		// admission. Direct internal callers without a definition are retained

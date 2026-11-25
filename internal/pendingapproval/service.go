@@ -273,6 +273,9 @@ type Item struct {
 	// ModelChoice names who chose the model and, for a purpose, its reason
 	// (#239). Nil when the step did not report one.
 	ModelChoice *generation.ModelChoice `json:"model_choice,omitempty"`
+	// SkillChoice names the style Skill the step applies and who chose it
+	// (#548). Nil when the step applies none.
+	SkillChoice *generation.SkillChoice `json:"skill_choice,omitempty"`
 	Provider    string                  `json:"provider,omitempty"`
 	// ProviderID is the provider's account key, which the client matches to the
 	// provider's balance.
@@ -459,8 +462,8 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 	}
 	item := Item{
 		NativeQuote: prepared.NativeQuote, ParameterAdjustments: prepared.ParameterAdjustments,
-		ModelChoice: prepared.ModelChoice,
-		RequestID:   grant.RequestID, Status: status, Tool: op.ToolName,
+		ModelChoice: prepared.ModelChoice, SkillChoice: prepared.SkillChoice,
+		RequestID: grant.RequestID, Status: status, Tool: op.ToolName,
 		Capability: string(prepared.Capability), MessageID: op.AssistantMessageID,
 		CreatedAt: grant.PendingSince(), ExpiresAt: s.grants.ExpiresAt(grant),
 		RechargeTaskID: op.RechargeTaskID, Inputs: []Input{},

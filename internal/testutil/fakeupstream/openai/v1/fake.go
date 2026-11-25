@@ -878,6 +878,10 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// #548: a Skill draft request is answered with a draft object.
+	if draft, asked := request.skillDraft(); asked && !scripted && len(calls) == 0 {
+		reply = draft
+	}
 	form := request.replyForm()
 	if form.dsml && len(calls) > 0 {
 		// #536: the calls are written into the reply text, not as tool_calls.
