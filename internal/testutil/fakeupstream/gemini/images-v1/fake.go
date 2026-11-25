@@ -64,12 +64,13 @@ const (
 // decoders skip), the way a real 4K answer is several megabytes where the
 // fake's flat picture is a few hundred kilobytes; a stack whose requests cannot
 // carry extra headers selects it with the API key "fake-response-bytes-<n>".
-// The weight is capped at MaxResponseBytes so a request cannot ask the fake for
-// an arbitrary allocation.
+// The selectors are shared with the other image fakes (fakeupstream weight.go:
+// also a noise filler, the prompt marker [[fake:picture-bytes:<n>]] and the
+// stack-wide weight, #629). The weight is capped at MaxResponseBytes so a
+// request cannot ask the fake for an arbitrary allocation.
 const (
-	ResponseBytesHeader = "X-Fake-Response-Bytes"
-	responseBytesKey    = fakeupstream.KeyPrefix + "response-bytes-"
-	MaxResponseBytes    = 64 << 20
+	ResponseBytesHeader = fakeupstream.PictureBytesHeader
+	MaxResponseBytes    = fakeupstream.MaxPictureBytes
 )
 
 // maxReferences is the documented limit of reference pictures per prompt
@@ -374,20 +375,36 @@ type refusal struct {
 	code, message, param string
 }
 
-// requestedWeight reads the test-only weight selector, in bytes (0 when none).
-func requestedWeight(r *http.Request) int {
-	raw := strings.TrimSpace(r.Header.Get(ResponseBytesHeader))
-	if raw == "" {
-		var found bool
-		if raw, found = strings.CutPrefix(fakeupstream.BearerKey(r), responseBytesKey); !found {
-			return 0
+// promptText is the text of every message (a plain string content or the text
+// parts), where a prompt marker may appear.
+func (r completionRequest) promptText() string {
+	var text strings.Builder
+	for _, raw := range r.Messages {
+		var plain struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(raw, &plain) == nil {
+			text.WriteString(plain.Content)
+			text.WriteByte('\n')
+			continue
+		}
+		var parts struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(raw, &parts) != nil {
+			continue
+		}
+		for _, part := range parts.Content {
+			if part.Type == "text" {
+				text.WriteString(part.Text)
+				text.WriteByte('\n')
+			}
 		}
 	}
-	parsed, err := strconv.Atoi(raw)
-	if err != nil || parsed < 0 {
-		return 0
-	}
-	return min(parsed, MaxResponseBytes)
+	return text.String()
 }
 
 // hasReference reports whether a message carries a picture part.
@@ -482,13 +499,11 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 	if request.hasReference() {
 		format = "png"
 	}
-	file, err := fakeupstream.Picture(fakeupstream.PictureSpec{Format: format, Width: dimensions[0], Height: dimensions[1]})
+	weight := h.env.PictureWeightOf(r, request.promptText(), dimensions[0], dimensions[1])
+	file, err := fakeupstream.WeightedPicture(fakeupstream.PictureSpec{Format: format, Width: dimensions[0], Height: dimensions[1]}, weight)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	if weight := requestedWeight(r); weight > 0 {
-		file = fakeupstream.PadFile(file, weight)
 	}
 	data := file.Data
 	if scenario == fakeupstream.ScenarioArtifactCorrupt {

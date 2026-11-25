@@ -4256,16 +4256,36 @@
         "POST /images/edits"
       ],
       "category": "artifact-shape",
-      "status": "gap",
-      "behavior": "fake 生图按请求尺寸出图，但画面是平铺色块，3072x5504 也只有几百 KB；真实大图有十余 MB。生成图作三视图正面或参考图时，fake 里不会超过图生图 Offering 的 max_bytes，不触发冻结前的压缩（#276 的 Fit），也模拟不了 PROD 上大图同步压缩约 51 秒的耗时（#629）。即梦同样没有体积选择；Gemini 只有测试键 fake-response-bytes-<n> 或请求头可选，dev-test 栈的固定键选不到。",
+      "status": "constructed",
+      "behavior": "生图与编辑的图可按测试要求做到真实大图的字节量级（b64_json 内的 PNG/JPEG），生成图作三视图正面或参考图时能超过图生图 Offering 的 max_bytes、走到冻结前压缩。体积选择共用 fakeupstream 的 weight.go：请求头 X-Fake-Response-Bytes（X-Fake-Response-Filler: noise 换不可压缩填充）、测试键 fake-response-bytes-<n>[-noise]、提示词标记 [[fake:picture-bytes:<n>[:noise]]]（部署的 fake 栈只能经对话改提示词），以及 fake 控制面 PUT /fake/control/picture-weight 的全栈体积（{bytes, min_pixels, filler}，DELETE 复位；能覆盖三视图正面这种提示词由 Plinth 自己写的图）。填充是解码器跳过的块（PNG 的 tEXt 或私有 faKe 块、JPEG 的 COM 段），像素、尺寸、格式不变；文本填充可压缩、噪声填充为确定性 xorshift 字节不可压缩；上限 64 MiB，填充结果有界缓存。默认不填充，fake 图仍是几百 KB。回归：fakeupstream 与本版本的 weight 单测；fake 栈 smoke-fake-stack.py three-view 场景的「three-view heavy front」先经 Plinth 提示词带标记生成一张 20,000,000 字节的 Gemini 图，再用全栈体积让 Gemini 正面图 20,000,000 字节，点左侧、背面「继续生成」答 200 不 409，两视角冻结同一份压缩副本（撤掉 #629 修复时该场景答 409）。",
       "basis": [
         {
-          "source": "2026-11-26 PROD 抽样（d68d1020）三视图正面图 3072x5504 点「继续生成」压缩约 51 秒、客户端断开后左侧与背面 409",
+          "source": "2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒",
           "section": "#629"
         }
       ],
       "checked_at": "2026-11-26",
-      "plan": "浏览器验收 F629 暂以上传一张约 24 MB 的噪点 PNG（3072x5504，脚本生成、不入库）作正面源图，锁 Gemini（上限 14.6 MB）触发压缩，覆盖同一条 Fit 与 409 链。补法：给 OpenAI 与即梦图像 fake 加与 Gemini 相同的体积选择（PadFile 填充），并加一个可经提示词选择的 fake 约定（dev-test 只能经对话改提示词），再补一个以生成大图作三视图正面的 fake 栈场景；压缩耗时另需慢速解码样本，暂不建模。",
+      "why_not_real": "没有真实大图的字节样本：PROD 抽样只给出 Gemini 4K 图超过 14,625,000 字节这一量级，具体字节数由测试按需指定（fake 栈场景用 20,000,000），不是对真实上游体积的复刻；OpenAI 与即梦没有观测到的字节量级，按同一量级构造"
+    },
+    {
+      "id": "openai-images-v1/generated-picture-pixel-entropy",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/generations",
+        "POST /images/edits"
+      ],
+      "category": "artifact-shape",
+      "status": "gap",
+      "behavior": "fake 图（OpenAI、Gemini、即梦共用）的像素是平铺色块，体积靠解码器跳过的填充撑大；Plinth 压缩时解码后的像素很简单，无损 PNG 一步就压到几 KB，耗时可忽略。真实 4K 图像素熵高，PROD 上同一条 Fit 同步压缩约 51 秒（#629），fake 模拟不了这段耗时，也走不到 JPEG 降质或压不下去的分支。",
+      "basis": [
+        {
+          "source": "2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒",
+          "section": "#629"
+        }
+      ],
+      "checked_at": "2026-11-26",
+      "plan": "压缩耗时只在 Go 单测里用可注入的仓库钩子模拟（internal/assets/input/fit_cancel_test.go 在重编码开始时取消请求、internal/adapters/sqlite/three_view_fitted_source_test.go 在压缩中断开），产品代码不加 sleep；若要在 fake 栈复现耗时或 JPEG 分支，需要一张真实 4K 图的脱敏像素统计（或经同意采集样本）后，再给 fake 加按尺寸生成的高熵像素模式。",
       "issues": [
         629
       ]
@@ -4384,6 +4404,25 @@
       ],
       "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+    },
+    {
+      "id": "gemini-images-v1/generated-picture-byte-weight",
+      "provider": "gemini",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "data URI 里的图可按测试要求做到真实 4K 图的字节量级（文生图 JPEG、图生图 PNG），原有请求头与测试键之外，加了消息文本里的提示词标记与全栈体积。体积选择共用 fakeupstream 的 weight.go：请求头 X-Fake-Response-Bytes（X-Fake-Response-Filler: noise 换不可压缩填充）、测试键 fake-response-bytes-<n>[-noise]、提示词标记 [[fake:picture-bytes:<n>[:noise]]]（部署的 fake 栈只能经对话改提示词），以及 fake 控制面 PUT /fake/control/picture-weight 的全栈体积（{bytes, min_pixels, filler}，DELETE 复位；能覆盖三视图正面这种提示词由 Plinth 自己写的图）。填充是解码器跳过的块（PNG 的 tEXt 或私有 faKe 块、JPEG 的 COM 段），像素、尺寸、格式不变；文本填充可压缩、噪声填充为确定性 xorshift 字节不可压缩；上限 64 MiB，填充结果有界缓存。默认不填充，fake 图仍是几百 KB。",
+      "basis": [
+        {
+          "source": "2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒",
+          "section": "#629"
+        }
+      ],
+      "checked_at": "2026-11-26",
+      "why_not_real": "没有真实大图的字节样本：PROD 抽样只给出 Gemini 4K 图超过 14,625,000 字节这一量级，具体字节数由测试按需指定（fake 栈场景用 20,000,000），不是对真实上游体积的复刻；OpenAI 与即梦没有观测到的字节量级，按同一量级构造"
     },
     {
       "id": "jimeng-api-v3/generations-shape",
@@ -4512,6 +4551,26 @@
       "checked_at": "2026-11-25",
       "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；不是自然过期",
       "note": "文档无法确认：官方文档不描述签名 URL 过期后的响应（2026-11-25 核对），行为保持观测结果。"
+    },
+    {
+      "id": "jimeng-api-v3/generated-picture-byte-weight",
+      "provider": "jimeng",
+      "api": "api-v3",
+      "endpoints": [
+        "POST /images/generations",
+        "GET /files/{name}"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "b64_json 与签名 URL 取回的 JPEG 可按测试要求做到真实大图的字节量级（URL 记下生成时的体积，取回时同样填充）。体积选择共用 fakeupstream 的 weight.go：请求头 X-Fake-Response-Bytes（X-Fake-Response-Filler: noise 换不可压缩填充）、测试键 fake-response-bytes-<n>[-noise]、提示词标记 [[fake:picture-bytes:<n>[:noise]]]（部署的 fake 栈只能经对话改提示词），以及 fake 控制面 PUT /fake/control/picture-weight 的全栈体积（{bytes, min_pixels, filler}，DELETE 复位；能覆盖三视图正面这种提示词由 Plinth 自己写的图）。填充是解码器跳过的块（PNG 的 tEXt 或私有 faKe 块、JPEG 的 COM 段），像素、尺寸、格式不变；文本填充可压缩、噪声填充为确定性 xorshift 字节不可压缩；上限 64 MiB，填充结果有界缓存。默认不填充，fake 图仍是几百 KB。",
+      "basis": [
+        {
+          "source": "2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒",
+          "section": "#629"
+        }
+      ],
+      "checked_at": "2026-11-26",
+      "why_not_real": "没有真实大图的字节样本：PROD 抽样只给出 Gemini 4K 图超过 14,625,000 字节这一量级，具体字节数由测试按需指定（fake 栈场景用 20,000,000），不是对真实上游体积的复刻；OpenAI 与即梦没有观测到的字节量级，按同一量级构造"
     },
     {
       "id": "matting-api-v1/jobs-shape",

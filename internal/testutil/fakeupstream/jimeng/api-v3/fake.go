@@ -147,8 +147,10 @@ func Version() fakeupstream.Version {
 type fileState struct {
 	scenario      fakeupstream.Scenario
 	expiredIssues int
-	// width, height and variant are the picture the URL names.
+	// width, height and variant are the picture the URL names, weight the
+	// byte count a test asked for (#629).
 	width, height, variant int
+	weight                 fakeupstream.PictureWeight
 }
 
 type handler struct {
@@ -527,6 +529,7 @@ func (h *handler) generate(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]any, 0, maxImagesLimit)
 	generated := 0
+	weight := h.env.PictureWeightOf(r, request.Prompt, width, height)
 	for index := 0; index < count; index++ {
 		if scenario == fakeupstream.ScenarioPartialImages && index == 1 {
 			// The per-picture error of a partly failed sequential request is
@@ -545,12 +548,12 @@ func (h *handler) generate(w http.ResponseWriter, r *http.Request) {
 		if request.ResponseFormat == "url" {
 			h.mu.Lock()
 			id := fmt.Sprintf("fake-image-%d", len(h.files)+1)
-			h.files[id] = fileState{scenario: scenario, expiredIssues: fakeupstream.ExpiredIssues(r), width: width, height: height, variant: index}
+			h.files[id] = fileState{scenario: scenario, expiredIssues: fakeupstream.ExpiredIssues(r), width: width, height: height, variant: index, weight: weight}
 			h.mu.Unlock()
 			item["url"] = h.env.SignArtifactURL(
 				h.env.ArtifactOriginFor(r)+Prefix+"/files/"+id+".jpeg?X-Tos-Expires=86400", scenario, h.env.IssueArtifactURLs(id))
 		} else {
-			file, err := fakeupstream.Picture(fakeupstream.PictureSpec{Format: "jpeg", Width: width, Height: height, Variant: index})
+			file, err := fakeupstream.WeightedPicture(fakeupstream.PictureSpec{Format: "jpeg", Width: width, Height: height, Variant: index}, weight)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -593,7 +596,7 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, expiredBody)
 		return
 	}
-	file, err := fakeupstream.Picture(fakeupstream.PictureSpec{Format: "jpeg", Width: state.width, Height: state.height, Variant: state.variant})
+	file, err := fakeupstream.WeightedPicture(fakeupstream.PictureSpec{Format: "jpeg", Width: state.width, Height: state.height, Variant: state.variant}, state.weight)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

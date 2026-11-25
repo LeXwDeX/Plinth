@@ -67,6 +67,29 @@ func New(config Config, versions ...Version) (*Server, error) {
 		server.env.ResetChatRequests()
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// #629: the stack-wide picture weight (weight.go) is readable, settable
+	// and resettable from tests and the fake stack.
+	server.mux.HandleFunc("GET "+PictureWeightPath, func(w http.ResponseWriter, _ *http.Request) {
+		writePictureWeight(w, server.env.StackPictureWeight())
+	})
+	server.mux.HandleFunc("PUT "+PictureWeightPath, func(w http.ResponseWriter, r *http.Request) {
+		var weight PictureWeight
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&weight); err != nil {
+			http.Error(w, "picture weight: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := server.env.SetPictureWeight(weight); err != nil {
+			http.Error(w, "picture weight: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		writePictureWeight(w, server.env.StackPictureWeight())
+	})
+	server.mux.HandleFunc("DELETE "+PictureWeightPath, func(w http.ResponseWriter, _ *http.Request) {
+		_ = server.env.SetPictureWeight(PictureWeight{})
+		w.WriteHeader(http.StatusNoContent)
+	})
 	// #251: any fake stack can upload one small valid GLB as a model source,
 	// so a processing plan checkpoint can be exercised on every fault stack.
 	server.mux.HandleFunc("GET "+ModelFixturePath, func(w http.ResponseWriter, _ *http.Request) {
@@ -89,6 +112,12 @@ const RenewPath = "/fake/control/renew-artifacts"
 // ModelFixturePath serves one small valid GLB for tests and the fake stack.
 // It is public, read-only, and exists only in the fake upstream.
 const ModelFixturePath = "/fake/control/model-fixture"
+
+func writePictureWeight(w http.ResponseWriter, weight PictureWeight) {
+	w.Header().Set("Content-Type", "application/json")
+	body, _ := json.Marshal(weight)
+	_, _ = w.Write(append(body, '\n'))
+}
 
 // Versions returns the registered versions.
 func (s *Server) Versions() []Version { return append([]Version(nil), s.versions...) }

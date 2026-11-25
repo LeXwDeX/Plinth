@@ -2864,7 +2864,7 @@ async function itemF629() {
         + `不一致=${JSON.stringify(consistency.problems)} 截图 ${file}`,
     };
   });
-  record('INFO', '#629', 'fake 缺口', 'fake 生图字节很小（平铺色块），生成图作正面时不触发压缩，这里改用上传的噪点大图；压缩耗时（PROD 约 51 秒）fake 也不模拟。见 fake 登记表 openai-images-v1/generated-picture-byte-weight');
+  record('INFO', '#629', 'fake 缺口', 'fake 生图默认字节很小（平铺色块）；要让生成图变重，可经提示词标记 [[fake:picture-bytes:<n>]] 或 fake 控制面全栈体积（见 fake 登记表 openai-images-v1/generated-picture-byte-weight，fake 栈 three-view 场景已覆盖生成的大正面图），这里仍用上传的噪点大图；压缩耗时（PROD 约 51 秒）fake 不模拟，见 openai-images-v1/generated-picture-pixel-entropy');
 }
 
 // #630: the Agent can name the three-view group the person advanced on the card.
