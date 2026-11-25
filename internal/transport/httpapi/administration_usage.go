@@ -153,10 +153,50 @@ func (server *Server) listAdministrationUsage(
 		writer,
 		http.StatusOK,
 		map[string]any{
-			schema.API.Fields.Data:  records,
-			schema.API.Fields.Total: administrationUsageTotalWire(schema.API.Fields, overview.Total),
+			schema.API.Fields.Data:    records,
+			schema.API.Fields.Total:   administrationUsageTotalWire(schema.API.Fields, overview.Total),
+			schema.API.Fields.ByGroup: administrationUsageGroupsWire(schema.API.Fields, overview.Groups),
 		},
 	)
+}
+
+// administrationUsageGroupsWire states the spending per project group (#599):
+// task counts and, per unit of the total, the group's amount and its share in
+// basis points (null when the unit's total is 0). The ungrouped row has a null
+// key. Only this administration handler writes it; the account endpoint reads
+// the same service and never shows a group.
+func administrationUsageGroupsWire(
+	fields catalog.AdministrationUsageFieldSchema,
+	groups []administration.UsageGroupSummary,
+) []map[string]any {
+	result := make([]map[string]any, 0, len(groups))
+	for _, group := range groups {
+		amounts := make([]map[string]any, 0, len(group.Amounts))
+		for _, amount := range group.Amounts {
+			var share any
+			if amount.ShareBasisPoints != nil {
+				share = *amount.ShareBasisPoints
+			}
+			amounts = append(amounts, map[string]any{
+				fields.Unit:             amount.Unit,
+				fields.UnitLabel:        amount.UnitLabel,
+				fields.Amount:           amount.Amount,
+				fields.ShareBasisPoints: share,
+			})
+		}
+		var key any
+		if group.Key != nil {
+			key = *group.Key
+		}
+		result = append(result, map[string]any{
+			fields.ProjectGroupKey: key,
+			fields.TotalTasks:      group.TotalTasks,
+			fields.SucceededTasks:  group.SucceededTasks,
+			fields.FailedTasks:     group.FailedTasks,
+			fields.Amounts:         amounts,
+		})
+	}
+	return result
 }
 
 // administrationUsageTotalWire states the total of all listed users the way a
@@ -176,10 +216,15 @@ func administrationUsageWire(
 	fields catalog.AdministrationUsageFieldSchema,
 	summary administration.UsageSummary,
 ) map[string]any {
+	var projectGroupKey any
+	if summary.ProjectGroupKey != "" {
+		projectGroupKey = summary.ProjectGroupKey
+	}
 	result := map[string]any{
 		fields.UserID:           summary.UserID,
 		fields.UserName:         summary.UserName,
 		fields.UserEmail:        summary.UserEmail,
+		fields.ProjectGroupKey:  projectGroupKey,
 		fields.TotalTasks:       summary.TotalTasks,
 		fields.SucceededTasks:   summary.SucceededTasks,
 		fields.FailedTasks:      summary.FailedTasks,

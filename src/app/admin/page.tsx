@@ -28,6 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   AdministrationUsageBrowserError,
   createAdministrationUsageBrowserClient,
+  type AdministrationUsageGroupAmount,
 } from '@/lib/administration/usage-browser-client';
 import { priceTotalsAmountsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
 import { schemaText } from '@/lib/product-schema';
@@ -118,6 +119,16 @@ export default function AdminPage() {
     { revalidateOnFocus: false },
   );
   const users = usage?.users ?? [];
+  const groups = usage?.groups ?? [];
+  // #599: one unit per line, its share beside it; a unit whose total is 0 has no share.
+  const groupAmountText = (amount: AdministrationUsageGroupAmount): string => {
+    const share = amount.shareBasisPoints === null
+      ? presentation.empty_placeholder
+      : template(copy('group_share'), {
+        percent: (amount.shareBasisPoints / basisPointsPerPercent).toFixed(2),
+      });
+    return `${priceTotalsAmountsText(schema, [amount])} (${share})`;
+  };
   const rangeLabel = customRange
     ? [
       customRange.start,
@@ -315,6 +326,86 @@ export default function AdminPage() {
 
       <Separator />
 
+      <Card data-testid="admin-usage-groups">
+        <CardHeader>
+          <CardTitle className="text-base">
+            {copy('group_title')}
+          </CardTitle>
+          <CardDescription>
+            {copy('group_attribution')} {copy('group_share_note')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {usageLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : groups.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              {copy('empty')}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="pb-2 font-medium text-muted-foreground">
+                      {copy('column_project_group')}
+                    </th>
+                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                      {copy('column_tasks')}
+                    </th>
+                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                      {copy('column_succeeded')}
+                    </th>
+                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                      {copy('column_failed')}
+                    </th>
+                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                      {copy('column_group_amounts')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((group) => (
+                    <tr
+                      key={group.projectGroupKey ?? ''}
+                      className="border-b last:border-0"
+                    >
+                      <td className="py-3">
+                        {group.projectGroupKey === null ? (
+                          <span className="text-muted-foreground">
+                            {copy('group_ungrouped')}
+                          </span>
+                        ) : (
+                          <span className="font-medium">
+                            {group.projectGroupKey}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {group.totalTasks}
+                      </td>
+                      <td className="py-3 text-right tabular-nums text-success">
+                        {group.succeededTasks}
+                      </td>
+                      <td className="py-3 text-right tabular-nums text-destructive">
+                        {group.failedTasks}
+                      </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {group.amounts.length === 0
+                          ? presentation.empty_placeholder
+                          : group.amounts.map((amount) => (
+                            <p key={amount.unit}>{groupAmountText(amount)}</p>
+                          ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
@@ -349,6 +440,9 @@ export default function AdminPage() {
                     <th className="pb-2 font-medium text-muted-foreground">
                       {copy('column_user')}
                     </th>
+                    <th className="pb-2 font-medium text-muted-foreground">
+                      {copy('column_project_group')}
+                    </th>
                     <th className="pb-2 font-medium text-muted-foreground text-right">
                       {copy('column_tasks')}
                     </th>
@@ -381,6 +475,13 @@ export default function AdminPage() {
                             {user.userEmail}
                           </p>
                         </div>
+                      </td>
+                      <td className="py-3">
+                        {user.projectGroupKey ?? (
+                          <span className="text-muted-foreground">
+                            {copy('group_ungrouped')}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 text-right tabular-nums">
                         {user.totalTasks}
@@ -418,3 +519,4 @@ export default function AdminPage() {
 }
 
 const httpForbiddenStatus = 403;
+const basisPointsPerPercent = 100;

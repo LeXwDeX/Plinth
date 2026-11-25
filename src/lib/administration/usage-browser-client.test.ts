@@ -26,6 +26,13 @@ const schema = {
       last_active_at: 'lastSeen',
       by_type: 'kinds',
       total: 'overall',
+      project_group_key: 'team',
+      by_group: 'teams',
+      amounts: 'spend',
+      unit: 'currency',
+      unit_label: 'currencyName',
+      amount: 'value',
+      share_basis_points: 'bp',
     },
     query: {
       days: 'window',
@@ -78,6 +85,7 @@ describe('administration usage browser client', () => {
       userId: 'user-1',
       userName: 'Alice',
       userEmail: 'alice@example.test',
+      projectGroupKey: null,
       totalTasks: 3,
       succeededTasks: 2,
       failedTasks: 1,
@@ -93,16 +101,16 @@ describe('administration usage browser client', () => {
       routes: { usage: '/u', balance: '/b' },
       fetcher: vi.fn(async () => new Response(JSON.stringify(body))),
     }).usageOverview({ days: 7 });
-    await expect(respond({ records: [], overall: { credits: 95 } })).resolves.toEqual({ users: [], total: { estimatedCredits: 95 } });
+    await expect(respond({ records: [], overall: { credits: 95 } })).resolves.toEqual({ users: [], total: { estimatedCredits: 95 }, groups: [] });
     const totals = [
       { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '95' },
       { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '195' },
     ];
     await expect(respond({ records: [], overall: { price_totals: totals } })).resolves.toEqual({
-      users: [], total: { estimatedCredits: 0, priceTotals: totals },
+      users: [], total: { estimatedCredits: 0, priceTotals: totals }, groups: [],
     });
     // An older server without the total: none is shown rather than a wrong sum.
-    await expect(respond({ records: [] })).resolves.toEqual({ users: [], total: null });
+    await expect(respond({ records: [] })).resolves.toEqual({ users: [], total: null, groups: [] });
   });
 
   it('从 Schema 隐藏余额线协议并保留 HTTP 状态', async () => {
@@ -145,6 +153,42 @@ describe('administration usage browser client', () => {
     await expect(failureClient.listUsage({ days: 7 })).rejects.toEqual(
       new AdministrationUsageBrowserError(403, 'configured forbidden'),
     );
+  });
+
+  // #599: spending per project group, read through the Schema field names.
+  it('reads project group rows with per-unit amounts and shares', async () => {
+    const client = createAdministrationUsageBrowserClient({
+      schema,
+      routes: { usage: '/u', balance: '/b' },
+      fetcher: vi.fn(async () => new Response(JSON.stringify({
+        records: [{ owner: 'user-1', team: 'studio-a' }, { owner: 'user-2', team: null }],
+        overall: { credits: 0 },
+        teams: [
+          { team: 'studio-a', tasks: 2, done: 1, broken: 1, spend: [
+            { currency: 'legacy.credits', currencyName: 'legacy.credits', value: '40', bp: 4000 },
+            { currency: 'tripo.credit', currencyName: 'Tripo credits', value: '0.5', bp: 10000 },
+          ] },
+          { team: null, tasks: 1, done: 1, broken: 0, spend: [
+            { currency: 'legacy.credits', currencyName: 'legacy.credits', value: '0', bp: null },
+          ] },
+          { team: 'broken-amounts', tasks: 1, done: 0, broken: 0, spend: [
+            { currency: 'tripo.credit', currencyName: 'Tripo credits', value: 'NaN', bp: 1.5 },
+          ] },
+        ],
+      }))),
+    });
+    const overview = await client.usageOverview({ days: 7 });
+    expect(overview.users.map((user) => user.projectGroupKey)).toEqual(['studio-a', null]);
+    expect(overview.groups).toEqual([
+      { projectGroupKey: 'studio-a', totalTasks: 2, succeededTasks: 1, failedTasks: 1, amounts: [
+        { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '40', shareBasisPoints: 4000 },
+        { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '0.5', shareBasisPoints: 10000 },
+      ] },
+      { projectGroupKey: null, totalTasks: 1, succeededTasks: 1, failedTasks: 0, amounts: [
+        { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '0', shareBasisPoints: null },
+      ] },
+      { projectGroupKey: 'broken-amounts', totalTasks: 1, succeededTasks: 0, failedTasks: 0, amounts: [] },
+    ]);
   });
 
   it('explicitly present but invalid native totals do not fall back to legacy credits', async () => {

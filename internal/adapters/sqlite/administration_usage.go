@@ -21,30 +21,36 @@ func (r *Repository) QueryAdministrationUsage(
 	if err != nil {
 		return nil, err
 	}
-	clauses := []string{"created_unix >= ?"}
+	clauses := []string{"generation.created_unix >= ?"}
 	args := []any{unixSeconds(query.Since)}
 	if strings.TrimSpace(query.UserID) != "" {
-		clauses = append(clauses, "user_id = ?")
+		clauses = append(clauses, "generation.user_id = ?")
 		args = append(args, strings.TrimSpace(query.UserID))
 	}
 	if query.Until != nil {
-		clauses = append(clauses, "created_unix <= ?")
+		clauses = append(clauses, "generation.created_unix <= ?")
 		args = append(args, unixSeconds(*query.Until))
 	}
+	// The project group is the user's current one (#599), joined live like the
+	// user's name: a group change moves the user's whole history, a soft
+	// delete keeps it, and a Task without a user record is ungrouped. The join
+	// stays here rather than in the shared generation source.
 	rows, err := r.db.QueryContext(
 		ctx,
 		`SELECT
-			user_id,
-			user_name,
-			user_email,
-			task_type,
-			task_status,
+			generation.user_id,
+			generation.user_name,
+			generation.user_email,
+			COALESCE(member.project_group_key, ''),
+			generation.task_type,
+			generation.task_status,
 			1,
- estimated_credits,
- created_unix, native_quote_json, params_json, estimate_offering_json, charged
+ generation.estimated_credits,
+ generation.created_unix, generation.native_quote_json, generation.params_json, generation.estimate_offering_json, generation.charged
 		FROM (`+source+`) AS generation
+		LEFT JOIN authentication_users AS member ON member.id = generation.user_id
 		WHERE `+strings.Join(clauses, " AND ")+`
-		ORDER BY user_id, task_type, task_status`,
+		ORDER BY generation.user_id, generation.task_type, generation.task_status`,
 		args...,
 	)
 	if err != nil {
@@ -64,6 +70,7 @@ func (r *Repository) QueryAdministrationUsage(
 			&bucket.UserID,
 			&bucket.UserName,
 			&bucket.UserEmail,
+			&bucket.ProjectGroupKey,
 			&bucket.TaskType,
 			&bucket.TaskStatus,
 			&bucket.TaskCount,
@@ -91,7 +98,7 @@ func (r *Repository) QueryAdministrationUsage(
 		}
 		bucket.LastActiveAt = usageUnixTime(lastActiveUnix)
 		if bucket.NativeQuote == nil {
-			keyBytes, _ := json.Marshal([]any{bucket.UserID, bucket.UserName, bucket.UserEmail, bucket.TaskType, bucket.TaskStatus, bucket.Uncharged})
+			keyBytes, _ := json.Marshal([]any{bucket.UserID, bucket.UserName, bucket.UserEmail, bucket.ProjectGroupKey, bucket.TaskType, bucket.TaskStatus, bucket.Uncharged})
 			key := string(keyBytes)
 			if at, ok := legacyGroups[key]; ok {
 				old := &buckets[at]

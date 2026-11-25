@@ -1082,6 +1082,20 @@ type AdministrationUsageFieldSchema struct {
 	ByType           string `json:"by_type"`
 	// Total holds the estimate of every listed user together (#327).
 	Total string `json:"total"`
+	// ProjectGroupKey is the user's current project group on a user row and the
+	// group of a by_group row (#599); null when ungrouped. Only the
+	// administration usage endpoint states it, never the account endpoint.
+	ProjectGroupKey string `json:"project_group_key"`
+	// ByGroup lists the spending per project group (#599). Each row carries the
+	// task counts (TotalTasks, SucceededTasks, FailedTasks) and Amounts.
+	ByGroup string `json:"by_group"`
+	// Amounts lists a group's amount per unit; each item has Unit, UnitLabel,
+	// Amount and ShareBasisPoints (null when the unit's total is 0).
+	Amounts          string `json:"amounts"`
+	Unit             string `json:"unit"`
+	UnitLabel        string `json:"unit_label"`
+	Amount           string `json:"amount"`
+	ShareBasisPoints string `json:"share_basis_points"`
 }
 
 type AdministrationUsageQuerySchema struct {
