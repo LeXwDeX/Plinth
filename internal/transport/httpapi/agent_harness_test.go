@@ -206,16 +206,19 @@ func TestAgentParamsOfferingHTTPIsolationAndLegacyCompatibility(t *testing.T) {
 	}
 }
 
-// #486: the panel's count is one value for the whole session. One Offering's
-// edit is what the person chose everywhere, so the Offering they switch to
-// reports the same count instead of the number it kept for itself.
-func TestAgentParamsImageCountFollowsThePersonAcrossOfferings(t *testing.T) {
+// #586: the count is the Agent's call now. The panel cannot write it, and an
+// image_count row an older server stored for the session is ignored: every
+// Offering reports its own declared default and nothing fails.
+func TestAgentParamsIgnoreTheRetiredSessionImageCount(t *testing.T) {
 	t.Parallel()
 	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "count.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repository.Close()
+	if err := repository.SaveAgentState("owner", "session", "image_count", json.RawMessage(`4`)); err != nil {
+		t.Fatal(err)
+	}
 	taskCatalog, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -228,105 +231,37 @@ func TestAgentParamsImageCountFollowsThePersonAcrossOfferings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := agentparams.NewPersistentParameterStore(nil, nil)
+	store := agentparams.NewPersistentParameterStore(repository, nil)
 	server := &Server{generation: module, agentParams: store, ownsAgentSession: func(_ context.Context, owner, scope string) bool { return owner == "owner" && scope == "session" }}
-	key := agentparams.ScopeKey("owner", "session")
-	put := func(offeringID, body string) {
-		t.Helper()
-		response := httptest.NewRecorder()
-		server.agentParamsPut(response, httptest.NewRequest(http.MethodPut,
-			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(offeringID), strings.NewReader(body)), "owner")
-		if response.Code != http.StatusOK {
-			t.Fatalf("put %s: %d %s", offeringID, response.Code, response.Body.String())
-		}
+	if _, leaked := store.Get(agentparams.ScopeKey("owner", "session"))["image_count"]; leaked {
+		t.Fatal("the retired image_count row reached the session parameters")
 	}
-	paramsOf := func(offeringID string) map[string]json.RawMessage {
-		t.Helper()
-		response := httptest.NewRecorder()
-		server.agentParamsGet(response, httptest.NewRequest(http.MethodGet,
-			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(offeringID), nil), "owner")
-		var result struct {
-			Params map[string]json.RawMessage `json:"params"`
-		}
-		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-			t.Fatal(err)
-		}
-		return result.Params
-	}
-
-	put("openai/gpt-image-2/text-to-image", `{"params":{"n":4}}`)
-	if count, ok := store.ImageCount(key); !ok || count != 4 {
-		t.Fatalf("session count = %d (set=%v), want 4", count, ok)
-	}
-	// The person's own Offering reports it as their value, and so does the
-	// Offering that prices by a parameter of another name.
 	for _, input := range []struct{ offeringID, parameter string }{
 		{"openai/gpt-image-2/text-to-image", "n"},
 		{"jimeng/seedream-4-5/text-to-image", "max_images"},
-	} {
-		if got := string(paramsOf(input.offeringID)[input.parameter]); got != "4" {
-			t.Fatalf("%s.%s = %q, want 4", input.offeringID, input.parameter, got)
-		}
-	}
-
-	// An edit about something else is not an edit of the count.
-	put("openai/gpt-image-2/text-to-image", `{"params":{"background":"transparent"}}`)
-	if count, ok := store.ImageCount(key); !ok || count != 4 {
-		t.Fatalf("another parameter's edit changed the count to %d (set=%v)", count, ok)
-	}
-
-	// Clearing the field hands the session back to the Offerings' own values:
-	// no count to state, nothing named in the prompt.
-	put("openai/gpt-image-2/text-to-image", `{"params":{"n":null}}`)
-	if count, ok := store.ImageCount(key); ok {
-		t.Fatalf("a cleared count is still set: %d", count)
-	}
-	if got, exists := paramsOf("openai/gpt-image-2/text-to-image")["n"]; exists {
-		t.Fatalf("a cleared count is still projected: %s", got)
-	}
-}
-
-// #564: a count set on Seedream (up to 15) reaches GPT Image's panel at GPT
-// Image's own maximum (10), the value its next call really runs with, so the
-// panel never shows a number the model refuses.
-func TestAgentParamsImageCountIsClampedToEachOfferingsRange(t *testing.T) {
-	t.Parallel()
-	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "count.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	taskCatalog, err := catalog.LoadDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-	assets, err := local.New(filepath.Join(t.TempDir(), "assets"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: taskCatalog, Assets: assets, Providers: providers.NewRegistry()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := agentparams.NewPersistentParameterStore(nil, nil)
-	server := &Server{generation: module, agentParams: store, ownsAgentSession: func(_ context.Context, owner, scope string) bool { return owner == "owner" && scope == "session" }}
-	key := agentparams.ScopeKey("owner", "session")
-	store.SetImageCount(key, 15)
-	for _, input := range []struct{ offeringID, parameter, want string }{
-		{"jimeng/seedream-4-5/text-to-image", "max_images", "15"},
-		{"openai/gpt-image-2/text-to-image", "n", "10"},
 	} {
 		response := httptest.NewRecorder()
 		server.agentParamsGet(response, httptest.NewRequest(http.MethodGet,
 			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(input.offeringID), nil), "owner")
 		var result struct {
-			Params map[string]json.RawMessage `json:"params"`
+			Params map[string]json.RawMessage            `json:"params"`
+			States map[string]agentparams.ParameterState `json:"parameter_states"`
 		}
-		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-			t.Fatal(err)
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil {
+			t.Fatalf("get %s: %d %s", input.offeringID, response.Code, response.Body.String())
 		}
-		if got := string(result.Params[input.parameter]); got != input.want {
-			t.Fatalf("%s.%s = %q, want %s", input.offeringID, input.parameter, got, input.want)
+		if got, exists := result.Params[input.parameter]; exists {
+			t.Fatalf("%s.%s = %s from the retired session count", input.offeringID, input.parameter, got)
 		}
+		if state := result.States[input.parameter]; state.Source != "default" || string(state.Value) != "1" {
+			t.Fatalf("%s.%s state = %+v, want the declared default", input.offeringID, input.parameter, state)
+		}
+	}
+	response := httptest.NewRecorder()
+	server.agentParamsPut(response, httptest.NewRequest(http.MethodPut,
+		"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape("openai/gpt-image-2/text-to-image"),
+		strings.NewReader(`{"params":{"n":4}}`)), "owner")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("the panel still writes the count: %d %s", response.Code, response.Body.String())
 	}
 }

@@ -310,3 +310,51 @@ func (s *Store) OfferingIDs(scope string) []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// OfferingStatesExcept is OfferingStates with the person's pins of the named
+// parameters left out (#586): a value the person may no longer set (an old
+// panel image count) neither applies nor hides the Agent's own value for the
+// same parameter, which then shows as the Agent's. The stored rows are left
+// in place.
+func (s *Store) OfferingStatesExcept(scope, id string, retired func(name string) bool) map[string]ParameterState {
+	return s.offeringStates(withoutUserPins(s.rawParams(scope), id, retired), id)
+}
+
+// OfferingOverridesExcept is OfferingOverrides with the same pins left out.
+func (s *Store) OfferingOverridesExcept(scope, id string, retired func(name string) bool) map[string]json.RawMessage {
+	state := withoutUserPins(s.rawParams(scope), id, retired)
+	out := offeringOverrides(state, id)
+	for name, value := range s.offeringStates(state, id) {
+		if value.Source == "default" {
+			out[name] = json.RawMessage("null")
+		}
+	}
+	return out
+}
+
+// withoutUserPins drops, from a copy of the raw state, the person's layer of
+// one Offering and the session-wide values (read as the person's) for each
+// retired name.
+func withoutUserPins(state map[string]json.RawMessage, id string, retired func(name string) bool) map[string]json.RawMessage {
+	if retired == nil {
+		return state
+	}
+	state = cloneParameterValues(state)
+	prefix := offeringPrefix(id, true)
+	for key := range state {
+		name := key
+		if strings.HasPrefix(key, prefix) {
+			decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(key, prefix))
+			if err != nil {
+				continue
+			}
+			name = string(decoded)
+		} else if isOfferingStateKey(key) {
+			continue
+		}
+		if retired(name) {
+			delete(state, key)
+		}
+	}
+	return state
+}

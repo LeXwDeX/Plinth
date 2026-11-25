@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { OfferingWire } from '@/lib/agent-offerings';
-import { buildGenerationParams, effectiveOfferingValues, readonlyParameterText, defaultParamsChipText, deliverySize, staleSizeValues, estimateCredits, offeringForTurn, paramsChipText, paramsSummary, ratioOfSize, sizeOptionText, skillSizeDefault } from './generation-params';
+import { buildGenerationParams, effectiveOfferingValues, readonlyParameterText, deliverySize, staleSizeValues, estimateCredits, offeringForTurn, paramsChipText, ratioOfSize, sizeOptionText, skillSizeDefault } from './generation-params';
 
 const option = (...values: string[]) => values.map((value) => ({ value, label: value }));
 
@@ -12,7 +12,7 @@ const gpt = (capability: string, extra: object[] = []): OfferingWire => ({
   parameters: [
     { name: 'prompt', label: 'Prompt', type: 'text', semantic: 'prompt' },
     { name: 'size', label: '输出尺寸', type: 'text', semantic: 'output-size', options: option('auto', '1024x1024', '1536x1024'), default: 'auto', presentation: { surface: 'provider' } },
-    { name: 'n', label: '生成数量', type: 'number', default: 1, minimum: 1, maximum: 10, integer: true, presentation: { surface: 'provider' } },
+    { name: 'n', label: '生成数量', type: 'number', default: 1, minimum: 1, maximum: 10, integer: true, adjustment_policy: 'advised', presentation: { surface: 'readonly' } },
     { name: 'output_format', label: '格式', type: 'select', options: option('png', 'jpeg'), default: 'png', presentation: { surface: 'provider' } },
     ...extra,
   ],
@@ -24,10 +24,10 @@ const seedream: OfferingWire = {
   estimated_credits_unit_parameter: 'max_images',
   parameters: [
     { name: 'size', label: '输出尺寸', type: 'text', semantic: 'output-size', options: option('2K', '4K'), default: '2K', presentation: { surface: 'provider' } },
-    { name: 'sequential_image_generation', label: '组图', type: 'select', options: option('disabled', 'auto'), default: 'disabled', presentation: { surface: 'provider' } },
-    { name: 'max_images', label: '最多生成数量', type: 'number', default: 1, minimum: 1, maximum: 15, integer: true,
+    { name: 'sequential_image_generation', label: '组图', type: 'select', options: option('disabled', 'auto'), default: 'disabled', adjustment_policy: 'advised', presentation: { surface: 'readonly' } },
+    { name: 'max_images', label: '最多生成数量', type: 'number', default: 1, minimum: 1, maximum: 15, integer: true, adjustment_policy: 'advised',
       omit_when: [{ parameter: 'sequential_image_generation', operator: 'equals', value: 'disabled' }],
-      presentation: { surface: 'provider', disabled_when: [{ parameter: 'sequential_image_generation', operator: 'equals', value: 'disabled' }] } },
+      presentation: { surface: 'readonly', disabled_when: [{ parameter: 'sequential_image_generation', operator: 'equals', value: 'disabled' }] } },
     { name: 'watermark', label: '水印', type: 'boolean', default: false, presentation: { surface: 'provider' } },
   ],
 } as unknown as OfferingWire;
@@ -50,31 +50,30 @@ describe('the extra-credit consent flag', () => {
 });
 
 describe('buildGenerationParams', () => {
-  it('splits size, count and the rest from the Offering declaration', () => {
+  it('splits size and the rest from the Offering declaration, and shows the Agent\'s count read-only (#586)', () => {
     const model = buildGenerationParams([gpt('text-to-image')]);
     expect(model.sizeParams.map((param) => param.name)).toEqual(['size']);
-    expect(model.countParam?.name).toBe('n');
+    expect(model.paramSchemas.map((param) => param.name)).not.toContain('n');
+    expect(model.readonlyParams.map((wire) => wire.name)).toEqual(['n']);
     expect(model.moreParams.map((param) => param.name)).toEqual(['output_format']);
     // the prompt is the conversation's, never a setting
     expect(model.paramSchemas.map((param) => param.name)).not.toContain('prompt');
   });
 
-  it('shows only what the model supports: no count for a per-request model, aspect ratio from the canvas surface', () => {
+  it('shows only what the model supports: aspect ratio from the canvas surface', () => {
     const model = buildGenerationParams([gemini]);
-    expect(model.countParam).toBeNull();
     expect(model.sizeParams.map((param) => param.name)).toEqual(['aspect_ratio']);
-    expect(buildGenerationParams([])).toMatchObject({ sizeParams: [], countParam: null, paramSchemas: [] });
+    expect(buildGenerationParams([])).toMatchObject({ sizeParams: [], paramSchemas: [] });
   });
 
-  it('uses the exact first Offering rather than merging capability semantics and pulls in count dependencies', () => {
+  it('uses the exact first Offering rather than merging capability semantics', () => {
     const withMask = gpt('image-to-image', [{ name: 'mask', label: 'Mask', type: 'asset', semantic: 'mask' }, { name: 'only_here', label: 'x', type: 'boolean' }]);
     const model = buildGenerationParams([gpt('text-to-image'), withMask]);
     expect(model.paramSchemas.map((param) => param.name)).not.toContain('mask');
     expect(model.paramSchemas.map((param) => param.name)).not.toContain('only_here');
     expect(buildGenerationParams([withMask]).paramSchemas.map((param) => param.name)).toContain('only_here');
     const seed = buildGenerationParams([seedream]);
-    expect(seed.countParam?.name).toBe('max_images');
-    expect(seed.countDependencies.map((param) => param.name)).toEqual(['sequential_image_generation']);
+    expect(seed.readonlyParams.map((wire) => wire.name)).toEqual(['sequential_image_generation', 'max_images']);
     expect(seed.moreParams.map((param) => param.name)).toEqual(['watermark']);
   });
 });
@@ -129,17 +128,6 @@ describe('offeringForTurn and skillSizeDefault', () => {
   });
 });
 
-describe('paramsSummary', () => {
-  it('names the chosen sizes and the count only above one', () => {
-    const model = buildGenerationParams([gpt('text-to-image')]);
-    const countText = (count: number) => `×${count}`;
-    expect(paramsSummary(model, {}, { count: 1 }, countText)).toBe('auto');
-    expect(paramsSummary(model, { size: '1536x1024', n: 3 }, { count: 3 }, countText)).toBe('1536x1024 · ×3');
-    expect(paramsSummary(buildGenerationParams([gemini]), {}, { count: 1 }, countText)).toBe('1:1');
-    expect(paramsSummary(buildGenerationParams([]), {}, { count: 1 }, countText)).toBe('');
-  });
-});
-
 describe('sizeOptionText', () => {
   const template = '{width}×{height} · {ratio}';
   it('adds the reduced ratio to a pixel size and keeps every other label', () => {
@@ -178,23 +166,17 @@ describe('ratioOfSize', () => {
 });
 
 describe('paramsChipText', () => {
-  const countText = (count: number) => `${count} 张`;
   const model = buildGenerationParams([gpt('text-to-image')]);
 
-  it('gives the ratio, the size as the model words it and the count, always', () => {
-    expect(paramsChipText(model, { size: '1024x1536', n: 6 }, { count: 6 }, countText)).toBe('2:3 · 1024x1536 · 6 张');
-    expect(paramsChipText(model, { size: '1024x1024', n: 4 }, { count: 4 }, countText)).toBe('1:1 · 1024x1024 · 4 张');
-    // a count of one is still said: the person sees what a turn asks for
-    expect(paramsChipText(model, {}, { count: 1 }, countText)).toBe('auto · 1 张');
+  it('gives the ratio and the size as the model words it, without a count (#586)', () => {
+    expect(paramsChipText(model, { size: '1024x1536', n: 6 })).toBe('2:3 · 1024x1536');
+    expect(paramsChipText(model, { size: '1024x1024', n: 4 })).toBe('1:1 · 1024x1024');
+    expect(paramsChipText(model, {})).toBe('auto');
   });
 
-  it('says only the ratio for a model that has no count', () => {
-    expect(paramsChipText(buildGenerationParams([gemini]), {}, { count: 1 }, countText)).toBe('1:1');
-    expect(paramsChipText(buildGenerationParams([]), {}, { count: 1 }, countText)).toBe('');
-  });
-
-  it('says the product defaults before a model is chosen', () => {
-    expect(defaultParamsChipText('1:1', 4, countText)).toBe('1:1 · 4 张');
+  it('says only the ratio for a model that has a canvas size', () => {
+    expect(paramsChipText(buildGenerationParams([gemini]), {})).toBe('1:1');
+    expect(paramsChipText(buildGenerationParams([]), {})).toBe('');
   });
 });
 
@@ -252,7 +234,8 @@ describe('public read-only and effective parameter values', () => {
   ]);
   it('exposes only explicitly public fixed values, never hidden or merely noneditable settings', () => {
     const model = buildGenerationParams([offering]);
-    expect(model.readonlyParams.map((param) => param.name)).toEqual(['quality']);
+    // n is the fixture's advised count (#586); quality is its public fixed value.
+    expect(model.readonlyParams.map((param) => param.name)).toEqual(['n', 'quality']);
     expect(model.paramSchemas.map((param) => param.name)).not.toContain('quality');
     expect(model.paramSchemas.map((param) => param.name)).not.toContain('internal');
   });

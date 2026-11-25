@@ -14,9 +14,9 @@ import (
 // parameter values a session holds per Offering: the person's panel values
 // the Offering lets them set and the Agent's set_params values it lets the
 // Agent set, in declared order, each shown by its label and option label.
-// The image count is left to its own block, and a fixed or hidden parameter,
-// a cleared value and a disabled or unknown Offering are left out, so the
-// list is what the next call would really run with.
+// A fixed or hidden parameter, a cleared value, a value whose writer may no
+// longer set it (an old panel count, #586) and a disabled or unknown Offering
+// are left out, so the list is what the next call would really run with.
 func sessionParameterGroups(
 	store *agentparams.Store,
 	lookup func(generation.OfferingID) (generation.Offering, bool),
@@ -29,13 +29,13 @@ func sessionParameterGroups(
 			if !ok || !offering.Enabled {
 				continue
 			}
-			states := store.OfferingStates(scope, id)
+			states := store.OfferingStatesExcept(scope, id, userPinRetired(offering))
 			group := chat.SessionParameterGroup{Model: offering.ModelName, Capability: string(offering.Capability)}
 			if group.Model == "" {
 				group.Model = offering.ModelID
 			}
 			for _, parameter := range offering.Parameters {
-				if parameter.Name == offering.EstimatedCreditsUnitParameter || parameter.Fixed ||
+				if parameter.Fixed ||
 					(parameter.Presentation != nil && parameter.Presentation.Surface == schema.SurfaceHidden) {
 					continue
 				}
@@ -74,4 +74,18 @@ func sessionParameterDisplay(parameter schema.Parameter, value json.RawMessage) 
 		}
 	}
 	return text
+}
+
+// userPinRetired names the parameters of an Offering the person may no longer
+// set although an older release let them (#586: the panel image count). Their
+// stored pins are skipped on read, so the Agent's value for them shows.
+func userPinRetired(offering generation.Offering) func(name string) bool {
+	return func(name string) bool {
+		for _, parameter := range offering.Parameters {
+			if parameter.Name == name {
+				return !offering.UserParameterAllowed(parameter) && offering.AgentParameterAllowed(parameter)
+			}
+		}
+		return false
+	}
 }

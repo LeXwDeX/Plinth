@@ -43,6 +43,33 @@ var retiredCatalogFields = [][]string{
 	{"application", "content", "messages", "ui.studio.tool_calls.hint"},
 	{"application", "localization", "bundles", "*", "messages", "ui.studio.tool_calls.label"},
 	{"application", "localization", "bundles", "*", "messages", "ui.studio.tool_calls.hint"},
+	// #586: the 2D image count is the Agent's call from what the person says;
+	// the panel's session count control, its prompt block and its words went.
+	{"application", "chat", "image_count"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.context_template"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.limit_template"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.uncounted_template"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.model_separator"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.omitted_template"},
+	{"application", "localization", "bundles", "*", "fields", "chat.image_count.reason_template"},
+	{"application", "content", "messages", "ui.studio.params.count_less"},
+	{"application", "content", "messages", "ui.studio.params.count_more"},
+	{"application", "content", "messages", "ui.studio.params.count_minimum"},
+	{"application", "content", "messages", "ui.studio.params.count_minimum_one"},
+	{"application", "content", "messages", "ui.studio.params.count_maximum"},
+	{"application", "content", "messages", "ui.studio.params.count_maximum_one"},
+	{"application", "content", "messages", "ui.studio.params.summary_count"},
+	{"application", "content", "messages", "ui.studio.params.summary_count_one"},
+	{"application", "content", "messages", "ui.studio.params.default_count"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_less"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_more"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_minimum"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_minimum_one"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_maximum"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.count_maximum_one"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.summary_count"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.summary_count_one"},
+	{"application", "localization", "bundles", "*", "messages", "ui.studio.params.default_count"},
 }
 
 // dropRetiredFields returns the document without the retired keys. A document

@@ -19,20 +19,18 @@ const (
 	// private key so rows an older server stored never reach a parameter
 	// projection or a generation request.
 	LegacyAgentTaskIDKey = "task_id"
-	// ImageCountKey holds the 2D image count the person set for this session
-	// (#486). It is one value per session, not one per Offering: the count is
-	// the person's own expectation, and Offerings name the parameter they price
-	// by differently (n, max_images), so no parameter name can carry it. It is
-	// private state like the retired consent keys: it never appears in a
-	// parameter projection and never reaches a generation request under its own
-	// name.
-	ImageCountKey = "image_count"
+	// LegacyImageCountKey is the session-wide 2D image count the retired
+	// panel control stored (#486, #564). The count is the Agent's call now,
+	// made from what the person says (#586), and nothing writes or reads the
+	// key. It stays a private key so rows an older server stored never reach a
+	// parameter projection or a generation request; they are left in place.
+	LegacyImageCountKey = "image_count"
 )
 
 func isPrivateAgentStateKey(key string) bool {
 	switch key {
 	case ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey, ConsentRequestIDKey,
-		ConsentSnapshotKey, ConsentClaimKey, LegacyAgentTaskIDKey, ImageCountKey:
+		ConsentSnapshotKey, ConsentClaimKey, LegacyAgentTaskIDKey, LegacyImageCountKey:
 		return true
 	default:
 		return false

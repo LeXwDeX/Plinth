@@ -222,7 +222,10 @@ func TestAgentProjectionCompactsLargeOptionLists(t *testing.T) {
 	// Offerings (119,912 bytes on 2026-11-12), inside the same budget. #305 exports
 	// the GLB of the two rigs and the triangle decimation too (119,930 bytes on
 	// 2026-11-16): the pivot parameter is fixed, so it adds almost nothing.
-	if len(raw) > 120*1024 {
+	// #586 lets the Agent set the 2D image count (GPT Image n, Seedream's
+	// image set switch and maximum on six Offerings, 123,902 bytes on
+	// 2026-11-25), so the budget moves to 124 KiB.
+	if len(raw) > 124*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }
@@ -349,8 +352,9 @@ func TestAgentOfferingProjectionStatesReferenceImageCapacity(t *testing.T) {
 		}
 	}
 	// #249 moved the budget to 112 KiB when Offering knowledge joined the
-	// projection; the game-asset batch (#277, #278, #279) moved it to 120 KiB.
-	if len(raw) > 120*1024 {
+	// projection; the game-asset batch (#277, #278, #279) moved it to 120 KiB,
+	// and the Agent's 2D image count (#586) to 124 KiB.
+	if len(raw) > 124*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }

@@ -5639,14 +5639,14 @@ def scenario_vision_budget(api, offerings, work):
         record("#247 reference upload", False, f"HTTP {status}")
         return
     replies_before = assistant_reply_count(api, session)
-    # #360 makes the per-task image count a person's parameter: the Agent may no
-    # longer adjust "n", so the six candidates are asked for on the person's side
-    # of the turn (the message's own parameters) instead of through set_params.
-    marker = '[[fake:tool:refine_image {"prompt":"a red cube on a white background","reference_handles":["@img1"]}]]'
+    # #586: the image count follows what the person says. "n" is an advised
+    # parameter the Agent sets with a reason; the panel no longer writes it.
+    marker = ('[[fake:tool:set_params {"offering_id":"' + image_model + '","params":{"n":6},'
+              '"reasons":{"n":"用户要同一提示词的六个候选"}}]] '
+              '[[fake:tool:refine_image {"prompt":"a red cube on a white background","reference_handles":["@img1"]}]]')
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
         "content": "按这张参考图出六个候选 " + marker,
         "image_urls": [f"/api/v1/assets/{asset_id}"],
-        "parameters": {"n": 6},
         "creative_domain": "image", "ai_model": image_model,
     })
     if status not in (200, 201, 202) or not wait_agent_reply(api, session, replies_before, 120):
