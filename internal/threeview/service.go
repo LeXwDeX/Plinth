@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -773,6 +774,27 @@ func (s *Service) SourceOf(ctx context.Context, owner, session, taskID string) (
 	return ModelSource{}, false, nil
 }
 
+// AgentGroups lists the session's listed groups as the Agent sees them (#630):
+// the run ID it passes as the group and where each view stands. A view the
+// person started on the card is in it as soon as the ledger has it.
+func (s *Service) AgentGroups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error) {
+	groups, err := s.List(ctx, owner, session)
+	if err != nil {
+		return nil, err
+	}
+	facts := make([]chat.ThreeViewGroupFact, 0, len(groups))
+	for _, group := range groups {
+		fact := chat.ThreeViewGroupFact{RunID: group.RunID, Views: make([]chat.ThreeViewViewFact, 0, len(group.Slots))}
+		for _, slot := range group.Slots {
+			fact.Views = append(fact.Views, chat.ThreeViewViewFact{
+				View: slot.Key, Status: string(slot.Status), TaskID: slot.TaskID, AssetID: slot.OutputAssetID,
+			})
+		}
+		facts = append(facts, fact)
+	}
+	return facts, nil
+}
+
 // ForGeneration adapts the service to the chat generation tools.
 type ForGeneration struct{ Service *Service }
 
@@ -799,6 +821,11 @@ func (a ForGeneration) GroupViews(ctx context.Context, owner, session, runID str
 		result = append(result, generationtool.GroupView{View: view.Key, TaskID: view.TaskID, AssetID: view.AssetID})
 	}
 	return result, nil
+}
+
+// Groups implements generationtool.ThreeViews.
+func (a ForGeneration) Groups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error) {
+	return a.Service.AgentGroups(ctx, owner, session)
 }
 
 var _ generationtool.ThreeViews = ForGeneration{}

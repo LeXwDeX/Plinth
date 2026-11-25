@@ -24,6 +24,12 @@ type fakeThreeViews struct {
 	asked   []string
 	// groups holds the finished views of each group, keyed owner/session/run.
 	groups map[string][]generationtool.GroupView
+	// listed holds the session's listed groups (#630), keyed owner/session.
+	listed map[string][]chat.ThreeViewGroupFact
+}
+
+func (f *fakeThreeViews) Groups(_ context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error) {
+	return f.listed[owner+"/"+session], nil
 }
 
 func (f *fakeThreeViews) GroupViews(_ context.Context, owner, session, runID string) ([]generationtool.GroupView, error) {

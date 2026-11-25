@@ -55,7 +55,7 @@ func (executor *Executor) multiviewSelection(ctx context.Context, command chat.T
 	var group string
 	if raw, named := arguments[multiview.GroupArgument]; named {
 		if err := json.Unmarshal(raw, &group); err != nil || strings.TrimSpace(group) == "" {
-			return nil, executor.localized(command, messages.GroupNotFound), nil
+			return nil, executor.groupNotFound(ctx, command, ""), nil
 		}
 	}
 	if group == "" {
@@ -66,7 +66,7 @@ func (executor *Executor) multiviewSelection(ctx context.Context, command chat.T
 	}
 	views, err := executor.threeViews.GroupViews(ctx, command.OwnerID, command.SessionID, group)
 	if errors.Is(err, ErrThreeViewGroupNotFound) {
-		return nil, executor.localized(command, messages.GroupNotFound), nil
+		return nil, executor.groupNotFound(ctx, command, group), nil
 	}
 	if err != nil {
 		return nil, "", err
@@ -80,6 +80,28 @@ func (executor *Executor) multiviewSelection(ctx context.Context, command chat.T
 		pictures.URLs, pictures.Views = append(pictures.URLs, address), append(pictures.Views, view.View)
 	}
 	return pictures, "", nil
+}
+
+// groupNotFound refuses a group the Agent named that is not one of the
+// session's (#630). After the Schema's refusal it names the right value: the
+// group whose view the value is the Task or picture of, and the session's
+// listed groups with their run IDs and view states. A failed listing keeps the
+// plain refusal; nothing is prepared either way.
+func (executor *Executor) groupNotFound(ctx context.Context, command chat.ToolCommand, value string) string {
+	threeView := executor.chat.ThreeView
+	text := executor.localized(command, threeView.Messages.GroupNotFound)
+	if executor.threeViews == nil {
+		return text
+	}
+	groups, err := executor.threeViews.Groups(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return text
+	}
+	if run, found := chat.ThreeViewGroupOf(groups, value); found && threeView.Messages.GroupTaskNamed != "" {
+		text += strings.NewReplacer("{value}", strings.TrimSpace(value), "{run}", run).
+			Replace(executor.localized(command, threeView.Messages.GroupTaskNamed))
+	}
+	return text + chat.ThreeViewGroupsText(threeView, groups)
 }
 
 // isMultiviewTool reports whether the tool is the one the three-view schema

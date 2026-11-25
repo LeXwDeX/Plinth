@@ -78,6 +78,9 @@ type ThreeViews interface {
 	// the recipe's order (#65); ErrThreeViewGroupNotFound for a foreign or
 	// missing group.
 	GroupViews(ctx context.Context, owner, session, runID string) ([]GroupView, error)
+	// Groups lists the session's listed groups with their run IDs and view
+	// states (#630), so a refused group names the run IDs the Agent can use.
+	Groups(ctx context.Context, owner, session string) ([]chat.ThreeViewGroupFact, error)
 }
 
 // GroupView is one finished view of a three-view group: its view key, and the
