@@ -18,7 +18,7 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 27 | 22 | 1 | 50 | 2026-11-25 |
+| `tripo/v3` | 27 | 23 | 2 | 52 | 2026-11-25 |
 | `openai/v1` | 5 | 10 | 0 | 15 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 84 | 92 | 1 | 177 | 2026-11-25 |
+| 合计 | 84 | 93 | 2 | 179 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -247,6 +247,17 @@
 - 没有真实样本的原因：P 系列从未在多视图端点真实请求过；唯一的样本 evidence-386 用 v3.1-20260211
 - 纠正 wire coverage：单元 `tripo.v3|image-to-3d|POST /v3/generation/multiview-to-model` 下的 `tripo/tripo-p2-multiview/image-to-3d`。该单元的 real 来自 v3.1-20260211 的多视图样本（evidence-386）；P2 多视图共用端点但没有真实样本。
 
+#### `tripo-v3/p-series-face-limit` · artifact-shape · gap
+
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`
+- 行为：fake 对 P 系列生成交付固定模型，三角面数不随 face_limit 变化，也不复现真实服务超出 face_limit 的情况。
+- 依据：https://developers.tripo3d.ai/en/docs/generation-text-to-model/p（Text to model（P Series）：face_limit 为 Maximum polycount for the output mesh，P2-20260801 三角面 48–50000，未写容差（2026-11-25 复核））
+- 依据：2026-11-25 正式测试环境 L5 Tripo 端点链的三个 P2 任务（#625）（P2-20260801、纹理关、face_limit 3000：文生 3168 三角面（单 mesh 单 primitive，超出 5.6%），图生 2894，多视图 2922；三个 GLB 都是一个无贴图材质、带 UV）
+- 核对日期：2026-11-25
+- 计划：再有 P 系列真实样本时，让 fake 的 P 系列 GLB 按 face_limit 交付无贴图低模，并按真实上浮比例给出一个超出 face_limit 的场景；在此之前 L5 只在真实上游上核对面数。
+- Issue：#625
+- 备注：官方页把 face_limit 写成上限，但真实服务会略超；同一 L5 链里 v3.1 文生（face_limit 3000）为 2849 三角面，降面的 face_limit 是目标值（见 tripo-v3/decimate-request-echo）。
+
 #### `tripo-v3/image-to-splat` · response-shape · real
 
 - 端点：`POST /generation/image-to-splat`
@@ -268,6 +279,18 @@
 - 行为：任务类型 edit_multiview，input.original_task_id 指向多视图任务，输出只含被编辑的视图。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json`（2026-11-23，derived，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `tripo-v3/edit-multiview-failed` · error-code-and-text · constructed
+
+- 端点：`POST /generation/edit-multiview`、`GET /tasks/{task_id}`
+- 行为：task-failed 场景下的编辑多视图任务被受理后以 failed 结束，error_code 1001、error_message 为 Failed to generate image，credits_consumed 为 0；失败轮询体的其余字段沿用 fake 的通用失败模板（取自 animate_retarget 的真实失败轮询，input 也是那一类的，fake.go pollTemplate）。
+- 依据：2026-11-25 正式测试环境 L5 Tripo 端点链 edit_mv 的服务端日志摘录（#625）（对一个成功的 image_to_multiview 任务编辑正面（一条提示词）：任务被受理，约 35 秒后 failed，error_code 1001、error_message Failed to generate image，余额未动；同一来源、同一视图与提示词随后再发一次成功（5 积分，只交付正面））
+- 依据：https://developers.tripo3d.ai/en/docs/task-query（Task query：error_code 与 error_message 是任务级字段，与请求级 code 不同）
+- 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling：请求级 1001 为 Fatal server error，只在安全时重试）
+- 依据：https://developers.tripo3d.ai/en/docs/generation-edit-multiview（Edit multiview：请求体 input 与 prompts（view、prompt），2026-11-25 复核与 Adapter 发送形状一致）
+- 核对日期：2026-11-25
+- 没有真实样本的原因：该环境没有开上游录制，失败只留下日志里的错误码与错误文本；完整的失败轮询体（progress、output、credits_consumed 等字段）没有样本
+- 备注：一次失败、一次成功，不能区分上游偶发故障与容量问题；失败没有扣费只来自余额前后读数（面板有缓存），不是 credits_consumed 的直接读数。
 
 #### `tripo-v3/rig-check` · response-shape · real
 

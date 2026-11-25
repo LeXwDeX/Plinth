@@ -179,6 +179,18 @@ def plan_problems(steps, only, seeds):
     return problems
 
 
+def seed_session(sessions):
+    """The chat session a run with seeds continues in: the one session every seeded task belongs to, or None (no
+    seed, a seed without a session, or seeds from different sessions), and the run then opens a new session. A task
+    source can be bound to its own session (Tripo edit-multiview takes only an image-to-multiview task of the same
+    session, #625), so a step that follows a seed is sent in the seed's session."""
+    found = set(sessions)
+    if len(found) != 1:
+        return None
+    (session,) = found
+    return session or None
+
+
 def selected_steps(steps, only, seeds=()):
     """The steps to run, in chain order. A seeded step is a source the operator already has: it is read
     (run_chain), never sent again, so it is left out here even when `only` names it or selects everything."""
@@ -769,8 +781,14 @@ def execute(name, provider, steps, description, default_ceiling, unit_label, arg
         report.passed("login")
         status, offering_list = api.json("GET", "/api/v1/offerings")
         offerings = {item["id"]: item for item in offering_list.get("offerings") or []} if status == 200 else {}
-        status, session = api.json("POST", "/api/chat/sessions", {"title": f"L5 {provider} endpoints"})
-        session_id = session.get("id")
+        seeded = [api.json("GET", f"/api/v1/tasks/{task_id}") for task_id in arguments.seeds.values()]
+        session_id = seed_session([task.get("session_id") if status == 200 else None for status, task in seeded])
+        if session_id:
+            status = 200
+            print(f"INFO: continuing in the seeds' session {session_id}", flush=True)
+        else:
+            status, session = api.json("POST", "/api/chat/sessions", {"title": f"L5 {provider} endpoints"})
+            session_id = session.get("id")
         if not offerings or status not in (200, 201) or not session_id:
             report.failed("session and Offerings", f"offerings {len(offerings)}, session HTTP {status}")
             return report.finish()

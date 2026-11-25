@@ -940,6 +940,16 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		}
 		if t.scenario == fakeupstream.ScenarioTaskFailed && t.failCode == 0 {
 			t.failCode, t.failMessage = 1001, "Fake injected task failure"
+			if k.Type == "edit_multiview" {
+				// Observed once (2026-11-25, #625): an edit of the front view of a
+				// succeeded image_to_multiview task was accepted and ended "failed" with
+				// error_code 1001 "Failed to generate image", and the balance did not move.
+				// The same request (same source, view and prompt) succeeded when sent again
+				// later, so the failure is a transient one on the upstream's side. Only the
+				// code and message were kept (the production log's excerpt); the rest of
+				// the failed poll body is the fake's usual failed template.
+				t.failMessage = editMultiviewFailureMessage
+			}
 		}
 		h.mu.Lock()
 		// The rate-limits page's pools are per task category: a category that is

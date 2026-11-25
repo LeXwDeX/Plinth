@@ -41,11 +41,22 @@ export function resultKey(taskId: string, assetId: string): string {
   return `${taskId}#${assetId}`;
 }
 
+/**
+ * #618: the Task that made one picture of a version. A three-view group is one version of several Tasks whose
+ * `taskId` is the front view's; each view's picture belongs to its own view's Task (the layer is named after it).
+ */
+function taskOfAsset(tile: VersionTile, assetId: string): string {
+  return tile.slots.find((slot) => slot.assetId === assetId)?.taskId
+    || tile.views.find((view) => view.assetId === assetId)?.taskId
+    || tile.taskId;
+}
+
 /** 本会话中可以自动加入 2D 画布的结果：已完成的任务图片（不含上传、截图、合并图和 3D）。 */
 export function imageResults(tiles: readonly VersionTile[]): Array<AutoJoinCandidate & { createdAt: string }> {
   return tiles.flatMap((tile) => tile.domain === 'image' && tile.status === 'ready' && tile.origin === 'task'
     ? tile.assets.filter((asset) => asset.kind === 'image' && asset.url).map((asset) => ({
-      key: resultKey(tile.taskId, asset.id), taskId: tile.taskId, url: asset.url,
+      // The receipt key stays the version's, so results placed before keep their receipt.
+      key: resultKey(tile.taskId, asset.id), taskId: taskOfAsset(tile, asset.id), url: asset.url,
       operation: tile.operation, createdAt: tile.createdAt,
     }))
     : []);

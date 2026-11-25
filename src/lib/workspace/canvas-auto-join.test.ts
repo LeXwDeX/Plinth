@@ -97,6 +97,26 @@ describe('planAutoJoin (#262/#239)', () => {
     expect(withPlaced(['since:x', 'a'], ['a'])).toBeNull();
     expect(withPlaced(null, ['a'])).toBeNull();
   });
+
+  it('places each view of a three-view group under the Task that made it, not the front view (#618)', () => {
+    const image = (id: string) => ({ id, role: 'image', variant: '', mediaType: 'image/png', ordinal: 1, url: `/${id}.png`, kind: 'image' });
+    const group = tile('t_front', '2026-10-19T03:00:00Z', {
+      key: 'g:run_1', taskIds: ['t_front', 't_left', 't_back', 't_right'], groupLabel: '三视图',
+      assets: [image('a_front'), image('a_left'), image('a_back'), image('a_right')],
+      slots: [
+        { slot: 'front', label: '正面', taskId: 't_front', assetId: 'a_front' },
+        { slot: 'left', label: '左侧', taskId: 't_left', assetId: 'a_left' },
+        { slot: 'back', label: '背面', taskId: 't_back', assetId: 'a_back' },
+        { slot: 'right', label: '右侧', taskId: 't_right', assetId: 'a_right' },
+      ],
+    } as Partial<VersionTile>);
+    const plan = planAutoJoin([group], [SINCE_PREFIX + '2026-10-19T00:00:00Z']);
+    expect(plan.place.map((item) => [item.url, item.taskId])).toEqual([
+      ['/a_front.png', 't_front'], ['/a_left.png', 't_left'], ['/a_back.png', 't_back'], ['/a_right.png', 't_right'],
+    ]);
+    // The receipts keep their group key, so results already placed under it are not placed again.
+    expect(plan.place.map((item) => item.key)).toEqual(['t_front#a_front', 't_front#a_left', 't_front#a_back', 't_front#a_right']);
+  });
 });
 
 describe('inpaint raw results (#308/#309)', () => {
