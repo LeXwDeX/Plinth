@@ -229,7 +229,7 @@ describe('the conversation is read a page at a time', () => {
   it('reads only the newest page on every refresh and merges it with earlier pages already shown', () => {
     expect(column).not.toContain('listMessages(');
     expect(column).toContain('const messagePageSize = schema.runtime.frontend.chat_message_page_size;');
-    expect(column.match(/listMessagePage\(sessionId, \{ limit: messagePageSize \}\)/g)).toHaveLength(5);
+    expect(column.match(/listMessagePage\(sessionId, \{ limit: messagePageSize \}\)/g)).toHaveLength(6);
     expect(column).toContain('pageSize: messagePageSize,');
     expect(column).not.toMatch(/setMessages\(sessionId, (data|await)/);
   });

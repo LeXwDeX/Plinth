@@ -40,9 +40,9 @@ describe('a broken stream does not end a turn the server still runs (#403)', () 
     const settle = send.slice(send.indexOf('let settled = false;'), send.indexOf('void refreshApproval();', send.indexOf('let settled = false;')));
     expect(settle).toContain('settleStreaming(sessionId, page);');
     // The recovery reconnects the stream once more and otherwise keeps reading until the turn ends.
-    // A stream that said `done` is believed: the turn's own last event is not second-guessed by a read that can
-    // land between the event and the turn's final write.
-    expect(settle).toMatch(/if \(followed !== 'done' && page\.messages\.some\(\(message\) => message\.isPending\)\) setServerTurnTick\(\(tick\) => tick \+ 1\);/);
+    // A stream that said `done` is not reconnected; a read that landed between the event and the turn's final
+    // write is only read again (#597), and recovery is asked only when the reply still runs after that.
+    expect(settle).toMatch(/if \(!page\.messages\.some\(\(message\) => message\.isPending\)\) return;\s*if \(followed !== 'done'\) \{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
     expect(settle.indexOf('settleStreaming(sessionId, page);')).toBeLessThan(settle.indexOf('setServerTurnTick('));
   });
 });
@@ -82,5 +82,19 @@ describe('an approved plan whose turn is over says its steps were not run (#403)
     expect(badge).toContain("import { sessionTurnRunning } from '@/lib/chat/turn-running';");
     expect(badge).toMatch(/const stepsMayStillRun = useChatStore\(\(state\) => sessionTurnRunning\(/);
     expect(badge).toContain('<PlanCard plan={budget.plan} tasks={tasks} progress={budget} stepsMayStillRun={stepsMayStillRun} />');
+  });
+});
+
+describe('a reply read just before its turn ended does not stay running (#597)', () => {
+  it('reads the page again after done while the reply is still pending, and recovery takes a turn that really runs', () => {
+    expect(column).toContain("import { messagesBesideStream, readUntilSettled } from '@/lib/chat/turn-settle';");
+    const settle = send.slice(send.indexOf('settleStreaming(sessionId, page);'));
+    expect(settle.indexOf("if (followed !== 'done') {")).toBeGreaterThan(0);
+    expect(settle).toMatch(/void readUntilSettled\(\{[\s\S]{0,400}delays: SETTLE_REREAD_MILLISECONDS,[\s\S]{0,200}outcome === 'running' && shown\(\)\) setServerTurnTick/);
+  });
+
+  it('hides only the streaming turn\'s own pending reply next to the live buffer', () => {
+    expect(column).toContain('const dbMessages = messagesBesideStream(messages, streamBuf);');
+    expect(column).not.toContain('!(streamBuf && item.isPending)');
   });
 });
