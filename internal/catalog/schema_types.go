@@ -7554,8 +7554,11 @@ type FrontendRuntimeSchema struct {
 	TaskIdentifierPreviewCharacters      int                         `json:"task_identifier_preview_characters"`
 	CountdownTickMilliseconds            int                         `json:"countdown_tick_milliseconds"`
 	TaskPollingIntervalMilliseconds      int                         `json:"task_polling_interval_milliseconds"`
-	HarnessRefreshMilliseconds           int                         `json:"harness_refresh_milliseconds"`
-	HarnessSaveDebounceMilliseconds      int                         `json:"harness_save_debounce_milliseconds"`
+	// TaskReadTimeoutMilliseconds bounds one read of a tracked task's detail;
+	// a read that has not answered by then counts as unavailable (#605).
+	TaskReadTimeoutMilliseconds     int `json:"task_read_timeout_milliseconds"`
+	HarnessRefreshMilliseconds      int `json:"harness_refresh_milliseconds"`
+	HarnessSaveDebounceMilliseconds int `json:"harness_save_debounce_milliseconds"`
 	// PendingApprovalsRefreshMilliseconds is how often the page re-reads the
 	// pending paid steps of the session while a turn or a task is running
 	// (#385; it was a constant in the page). It slows down the same way the

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.35",
+    "revision": "2026-11-24.19.36",
     "terminology": {
       "user_facing": [
         {
@@ -2692,6 +2692,7 @@
         "task_identifier_preview_characters": 12,
         "countdown_tick_milliseconds": 1000,
         "task_polling_interval_milliseconds": 3000,
+        "task_read_timeout_milliseconds": 15000,
         "display_locale": "zh-CN",
         "task_api_prefix": "",
         "spinner_frame_milliseconds": 80,

@@ -317,6 +317,7 @@ const minimalApplication = `"application":{
 			"task_identifier_preview_characters":12,
 			"countdown_tick_milliseconds":1000,
 			"task_polling_interval_milliseconds":3000,
+			"task_read_timeout_milliseconds":15000,
 			"harness_refresh_milliseconds":4000,
 			"pending_approvals_refresh_milliseconds":20000,
 			"idle_polling":{"backoff_factor":2,"max_interval_milliseconds":60000},

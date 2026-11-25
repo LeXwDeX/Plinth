@@ -698,6 +698,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		frontend.TaskIdentifierPreviewCharacters <= 0 ||
 		frontend.CountdownTickMilliseconds <= 0 ||
 		frontend.TaskPollingIntervalMilliseconds <= 0 ||
+		frontend.TaskReadTimeoutMilliseconds <= 0 ||
 		frontend.HarnessRefreshMilliseconds <= 0 ||
 		frontend.PendingApprovalsRefreshMilliseconds <= 0 ||
 		frontend.SessionMenuPageSize <= 0 ||

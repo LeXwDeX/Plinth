@@ -5,7 +5,10 @@ import { useWorkspaceStore } from '@/store/workspace-store';
 /**
  * One read of a tracked task's native detail (runtime.http.routes.task_item). The task poller and the reads after a
  * turn's `done` (#605) share it, so one task has at most one read in flight: a caller that asks while a read runs
- * waits for that read. Each caller decides on its own whether the result is still wanted before writing it.
+ * waits for that read. Each caller decides on its own whether the result is still wanted before writing it: a caller
+ * that gives up only drops the result, since others may wait for the same read. The read bounds itself instead
+ * (runtime.frontend.task_read_timeout_milliseconds): one that has not answered by then is cancelled and counts as
+ * unavailable, so a request the network never answers does not hold every later read of the task.
  */
 
 export type TaskRead =
@@ -18,6 +21,8 @@ export interface TaskReadOptions {
   route: string;
   taskStates: TaskStateSchema[];
   progressMaximum: number;
+  /** runtime.frontend.task_read_timeout_milliseconds. */
+  timeoutMilliseconds: number;
 }
 
 const inFlight = new Map<string, Promise<TaskRead>>();
@@ -26,21 +31,36 @@ export function readTask(taskId: string, options: TaskReadOptions): Promise<Task
   const running = inFlight.get(taskId);
   if (running) return running;
   const read = (async (): Promise<TaskRead> => {
+    const request = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Settles the read at the timeout even if the request does not stop when cancelled.
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        request.abort();
+        reject(new Error('task read timed out'));
+      }, options.timeoutMilliseconds);
+    });
     try {
-      const response = await fetch(options.route.replace('{taskID}', encodeURIComponent(taskId)));
-      if (response.status === 404) return { kind: 'not-found' };
-      if (!response.ok) return { kind: 'unavailable' };
-      const projection = projectNativeTaskDetail(await response.json(), options.taskStates, options.progressMaximum);
-      return projection ? { kind: 'detail', projection } : { kind: 'unavailable' };
+      return await Promise.race([fetchTask(taskId, options, request.signal), timedOut]);
     } catch {
-      // A passing network error: the next read tries again.
+      // A passing network error or a read that timed out: the next read tries again.
       return { kind: 'unavailable' };
+    } finally {
+      clearTimeout(timer);
     }
   })().finally(() => {
     inFlight.delete(taskId);
   });
   inFlight.set(taskId, read);
   return read;
+}
+
+async function fetchTask(taskId: string, options: TaskReadOptions, signal: AbortSignal): Promise<TaskRead> {
+  const response = await fetch(options.route.replace('{taskID}', encodeURIComponent(taskId)), { signal });
+  if (response.status === 404) return { kind: 'not-found' };
+  if (!response.ok) return { kind: 'unavailable' };
+  const projection = projectNativeTaskDetail(await response.json(), options.taskStates, options.progressMaximum);
+  return projection ? { kind: 'detail', projection } : { kind: 'unavailable' };
 }
 
 /** Writes a read into the store; a 404 ends the task. */

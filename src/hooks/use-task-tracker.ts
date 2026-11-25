@@ -92,7 +92,12 @@ export function useTaskTracker(): void {
     return startSerialPoller(async (signal) => {
       const store = useWorkspaceStore.getState();
       const active = store.trackedTasks.filter(isActive);
-      const options = { route: schema.runtime.http.routes.task_item, taskStates: schema.task_states, progressMaximum };
+      const options = {
+        route: schema.runtime.http.routes.task_item,
+        taskStates: schema.task_states,
+        progressMaximum,
+        timeoutMilliseconds: schema.runtime.frontend.task_read_timeout_milliseconds,
+      };
       await Promise.all(
         active.map(async (task) => {
           // #605: shared with the reads after a turn's `done`, so a task has one read in flight at a time.

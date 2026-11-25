@@ -1409,6 +1409,7 @@ export function ChatColumn() {
                     route: schema.runtime.http.routes.task_item,
                     taskStates: schema.task_states,
                     progressMaximum: schema.runtime.frontend.percentage_multiplier,
+                    timeoutMilliseconds: schema.runtime.frontend.task_read_timeout_milliseconds,
                     isCurrent: shown,
                   };
                   void refreshTasksAfterDone({

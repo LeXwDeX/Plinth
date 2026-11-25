@@ -489,6 +489,8 @@ export interface ProductSchema {
       task_identifier_preview_characters: number;
       countdown_tick_milliseconds: number;
       task_polling_interval_milliseconds: number;
+      /** #605: how long one read of a tracked task may take before it counts as unavailable. */
+      task_read_timeout_milliseconds: number;
       harness_refresh_milliseconds: number;
       harness_save_debounce_milliseconds: number;
       /** #385: how often the session's pending paid steps are read while a turn or task runs. */
