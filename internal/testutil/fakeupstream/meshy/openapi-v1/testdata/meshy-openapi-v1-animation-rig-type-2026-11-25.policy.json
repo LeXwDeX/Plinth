@@ -1,0 +1,32 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "action_id": true,
+    "action_ids": true,
+    "file": true,
+    "message": true,
+    "rig_task_id": true
+  },
+  "Allowed": {
+    "0": true,
+    "1055": true,
+    "Animation 1055 is a quadruped animal animation and cannot be applied to this character. Pick an animation made for this character's rig.": true,
+    "animations": true,
+    "application/json": true,
+    "id-1": true,
+    "openapi": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "page_num": true,
+    "page_size": true,
+    "sort_by": true
+  }
+}

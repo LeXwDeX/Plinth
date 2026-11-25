@@ -335,10 +335,16 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 	}
 	for _, obs := range bundle.Obs {
 		// The step's own route is public protocol text: its fixed segments
-		// ("rigging", "stream") are allowed; {var} segments are ids, aliased.
+		// ("rigging", "stream") are allowed; an id written into the route (a
+		// not-found probe's) is aliased like any other id, {var} segments are
+		// aliased where their values are captured.
 		route, _, _ := strings.Cut(obs.Path, "?")
 		for _, part := range strings.Split(route, "/") {
-			if part != "" && !strings.Contains(part, "{") {
+			switch {
+			case part == "" || strings.Contains(part, "{"):
+			case dynamicString(part):
+				placeholder(part)
+			default:
 				policy.Allowed[part] = true
 			}
 		}

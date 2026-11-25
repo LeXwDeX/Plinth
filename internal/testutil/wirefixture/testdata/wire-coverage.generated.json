@@ -23,6 +23,7 @@
     "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-23.candidate.json",
     "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json",
@@ -1400,6 +1401,7 @@
       "capability": "(scenario)",
       "endpoint": "POST /openapi/v1/animations",
       "hosts": [
+        "api.meshy.ai",
         "example.test"
       ],
       "protocols": [
@@ -1407,6 +1409,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json",
         "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
       ],
       "offerings": []

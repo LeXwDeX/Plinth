@@ -3065,13 +3065,17 @@
         "POST /animations"
       ],
       "category": "request-validation",
-      "status": "gap",
-      "behavior": "Animation 页写 action_id / action_ids 的 rig_type 与骨骼不符答 400，fake 不判断（没有动作库的 rig_type）。",
-      "plan": "需要时把动作库的 rig_type 表放进 fake 再校验；Catalog 当前只给人形动作。",
-      "issues": [
-        579
-      ],
-      "checked_at": "2026-11-25"
+      "status": "real",
+      "behavior": "fake 持有 2026-11-25 官方动作库（GET /animations/library）的 rig_type 表（678 个 biped、127 个 quadruped）；action_id 或 action_ids 中有动作的 rig_type 与骨骼（rigging 请求的 animation_type，缺省 biped）不符时答 400，点名第一个不符的动作。quadruped 动作用在 biped 骨骼上的文案为真实观测：“Animation 1055 is a quadruped animal animation and cannot be applied to this character. Pick an animation made for this character's rig.”（单个 action_id 与 action_ids [0, 1055] 同文）。biped 动作用在 quadruped 骨骼上的文案按同一格式构造，未观测；动作库未列出的 id 不拒绝（未建模）。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json",
+          "captured_at": "2026-11-25",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
     },
     {
       "id": "meshy-openapi-v2/text-to-3d-shape",

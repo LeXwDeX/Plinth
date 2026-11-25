@@ -20,14 +20,14 @@
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
 | `openai/v1` | 4 | 10 | 1 | 15 | 2026-11-23 |
-| `meshy/openapi-v1` | 24 | 23 | 1 | 48 | 2026-11-25 |
+| `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 3 | 5 | 1 | 9 | 2026-11-09 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 80 | 91 | 4 | 175 | 2026-11-25 |
+| 合计 | 81 | 91 | 3 | 175 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -979,13 +979,11 @@
 - 核对日期：2026-11-25
 - 备注：#581 的一次真实探针（2026-11-25，经 Plinth 的 meshy-t2.5 图生 3D，显式 should_texture false 加 enable_pbr true）：上游答 400、未扣积分。录制器因内联图片超限没留请求体，样本里的请求是当天 Catalog 为该输入构造的请求体（image_url 为占位），provenance 记为 derived；响应状态与正文是真实原文。Catalog 自 #581 起在 should_texture 为 false 时把 enable_pbr 规范为 false 并不上线，平台不再发这对组合；此前这条由 #579 登记为 gap。
 
-#### `meshy-openapi-v1/animation-rig-type` · request-validation · gap
+#### `meshy-openapi-v1/animation-rig-type` · request-validation · real
 
 - 端点：`POST /animations`
-- 行为：Animation 页写 action_id / action_ids 的 rig_type 与骨骼不符答 400，fake 不判断（没有动作库的 rig_type）。
-- 核对日期：2026-11-25
-- 计划：需要时把动作库的 rig_type 表放进 fake 再校验；Catalog 当前只给人形动作。
-- Issue：#579
+- 行为：fake 持有 2026-11-25 官方动作库（GET /animations/library）的 rig_type 表（678 个 biped、127 个 quadruped）；action_id 或 action_ids 中有动作的 rig_type 与骨骼（rigging 请求的 animation_type，缺省 biped）不符时答 400，点名第一个不符的动作。quadruped 动作用在 biped 骨骼上的文案为真实观测：“Animation 1055 is a quadruped animal animation and cannot be applied to this character. Pick an animation made for this character's rig.”（单个 action_id 与 action_ids [0, 1055] 同文）。biped 动作用在 quadruped 骨骼上的文案按同一格式构造，未观测；动作库未列出的 id 不拒绝（未建模）。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 ### `meshy/openapi-v2`
 
