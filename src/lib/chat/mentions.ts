@@ -8,6 +8,13 @@ import type { ChatAttachment, ChatMessage } from '@/store/chat-store';
  */
 export type MentionSource = 'history' | 'upload' | 'version' | 'canvas';
 
+/**
+ * Where the `@` list shows a candidate (#560): `canvas` is a picture shown by a visible layer of the session's
+ * canvas (and the canvas entry itself); `library` is every other picture or model of the session, including a
+ * picture that was taken off the canvas, a hidden layer and every 3D model.
+ */
+export type MentionGroup = 'canvas' | 'library';
+
 /** The objects of a session an `@` can name: one entry per referenceable image or model. */
 export interface MentionCandidate {
   /** The token written into the text: the server handle for history objects, a client token otherwise. */
@@ -22,8 +29,10 @@ export interface MentionCandidate {
   name?: string;
   /** Other names of the same image, found by typing them (a canvas layer that shows a version). */
   aliases?: string[];
-  /** Every source the same image was found in (history first). */
+  /** Every source the same image was found in (history first). A hidden layer is a `canvas` source too. */
   sources?: MentionSource[];
+  /** The section of the `@` list; `buildMentionCandidates` lists the `canvas` section first. */
+  group?: MentionGroup;
   /** 1-based position among the pictures attached to the next message (uploads only). */
   slot?: number;
   /** The whole canvas: the dashed frame rasterised when the turn is sent. It has no IDs of its own. */
@@ -87,6 +96,8 @@ export interface LayerMentionImage {
   taskId?: string;
   assetId?: string;
   captureId?: string;
+  /** The layer is hidden: it can still be named, but it is not shown on the canvas, so it lists in the library. */
+  hidden?: boolean;
 }
 
 export interface MentionSources {
@@ -110,6 +121,10 @@ export function mentionIdentity(item: Identity): string {
   // A platform asset address names the same picture as its task and asset IDs.
   const route = item.url ? /\/tasks\/([^/?#]+)\/assets\/([^/?#]+)/.exec(item.url) : null;
   if (route) return `asset:${route[1]}/${route[2]}`;
+  // An input asset address (an uploaded picture, a board snapshot) names the asset that has no task (#560: a
+  // layer of an uploaded picture carries only its address, the chat's attachment of it only its asset ID).
+  const input = item.url && !item.url.startsWith('data:') ? /\/assets\/([^/?#]+)\/?(?:[?#]|$)/.exec(item.url) : null;
+  if (input) return `asset:/${input[1]}`;
   if (item.url && !item.url.startsWith('data:')) return `url:${item.url}`;
   return '';
 }
@@ -119,6 +134,10 @@ export function mentionIdentity(item: Identity): string {
  * server handles), the pictures waiting in the composer, generated versions and canvas layers. One
  * picture is one candidate: when it is found in several places the earliest source keeps it (so a
  * stable server handle wins) and the other names become aliases the filter also matches.
+ *
+ * #560: the list comes in two sections, the pictures a visible canvas layer shows first (`group: 'canvas'`),
+ * then the rest of the session (`group: 'library'`); each section keeps the order above. Grouping only moves
+ * entries: every handle is the one it would have without it.
  */
 export function buildMentionCandidates(sources: MentionSources): MentionCandidate[] {
   const result: MentionCandidate[] = [];
@@ -140,29 +159,34 @@ export function buildMentionCandidates(sources: MentionSources): MentionCandidat
       if (alias && alias !== existing.name) existing.aliases = [...(existing.aliases ?? []), alias];
       for (const source of candidate.sources ?? []) if (!existing.sources?.includes(source)) existing.sources = [...(existing.sources ?? []), source];
       existing.url ??= candidate.url;
+      if (candidate.group === 'canvas') existing.group = 'canvas';
       return;
     }
     if (candidate.source !== 'history') candidate = { ...candidate, handle: uniqueHandle(candidate.handle) };
     result.push(candidate);
     if (identity) byIdentity.set(identity, candidate);
   };
-  for (const candidate of sources.history) add({ ...candidate, source: 'history', sources: ['history'] }, undefined);
+  for (const candidate of sources.history) add({ ...candidate, source: 'history', sources: ['history'], group: 'library' }, undefined);
   sources.uploads.forEach((item, index) => {
     add({
-      handle: mentionToken(item.name), kind: 'image', url: item.url, name: item.name, source: 'upload', sources: ['upload'], slot: index + 1,
+      handle: mentionToken(item.name), kind: 'image', url: item.url, name: item.name, source: 'upload', sources: ['upload'], group: 'library', slot: index + 1,
       ...item.claim,
     }, item.name);
   });
   for (const item of sources.versions) {
-    add({ handle: mentionToken(item.name), kind: 'image', url: item.url, taskId: item.taskId, assetId: item.assetId, name: item.name, source: 'version', sources: ['version'] }, item.name);
+    add({
+      handle: mentionToken(item.name), kind: 'image', url: item.url, taskId: item.taskId, assetId: item.assetId, name: item.name,
+      source: 'version', sources: ['version'], group: 'library',
+    }, item.name);
   }
   for (const item of sources.layers) {
     add({
       handle: mentionToken(item.name), kind: 'image', url: item.url, taskId: item.taskId, assetId: item.assetId, captureId: item.captureId,
-      name: item.name, source: 'canvas', sources: ['canvas'],
+      name: item.name, source: 'canvas', sources: ['canvas'], group: item.hidden ? 'library' : 'canvas',
     }, item.name);
   }
-  return result;
+  // A stable sort: each section keeps the order the entries were found in.
+  return [...result.filter((candidate) => candidate.group === 'canvas'), ...result.filter((candidate) => candidate.group !== 'canvas')];
 }
 
 /**
@@ -170,13 +194,34 @@ export function buildMentionCandidates(sources: MentionSources): MentionCandidat
  * so it carries no IDs; writing its token makes the send rasterise the frame like the Agent's current object.
  */
 export function boardMentionCandidate(name: string): MentionCandidate {
-  return { handle: mentionToken(name), kind: 'image', name, source: 'canvas', sources: ['canvas'], board: true };
+  return { handle: mentionToken(name), kind: 'image', name, source: 'canvas', sources: ['canvas'], group: 'canvas', board: true };
 }
 
 /** The list with the canvas entry first; unchanged when the session has no dashed frame. */
 export function withBoardMention(candidates: readonly MentionCandidate[], board: MentionCandidate | null): MentionCandidate[] {
   if (!board) return [...candidates];
   return [board, ...candidates.filter((candidate) => candidate.handle !== board.handle)];
+}
+
+/** One section of the `@` list: a run of entries of one group, with each entry's position in the whole list. */
+export interface MentionSection<T extends MentionCandidate> {
+  /** Absent for entries without a group: those list without a section heading. */
+  group?: MentionGroup;
+  entries: { candidate: T; index: number }[];
+}
+
+/**
+ * The list cut where the group changes (#560). The headings are not entries: the positions stay the ones of
+ * the flat list, which is what the keyboard moves through.
+ */
+export function mentionSections<T extends MentionCandidate>(candidates: readonly T[]): MentionSection<T>[] {
+  const sections: MentionSection<T>[] = [];
+  candidates.forEach((candidate, index) => {
+    const last = sections[sections.length - 1];
+    if (last && last.group === candidate.group) last.entries.push({ candidate, index });
+    else sections.push({ group: candidate.group, entries: [{ candidate, index }] });
+  });
+  return sections;
 }
 
 /** Whether the text names the canvas entry. */
