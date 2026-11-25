@@ -143,6 +143,26 @@ describe('buildChatSelection', () => {
     })).toHaveLength(1);
   });
 
+  // #610: a version clicked on the strip is the current object without a layer on the board. The turn names
+  // that picture, never a canvas layer still selected from before (the bow the person moved on from).
+  it('reports the current picture itself when no board layer shows it', () => {
+    const currentObject = {
+      taskId: 'task-axe', kind: 'image' as const, url: '/api/v1/tasks/task-axe/assets/asset-axe', assetId: 'asset-axe', sessionId: 'session-1',
+    };
+    const resolveUrl = (url: string) => url;
+    expect(buildChatSelection({
+      ...base, currentObject, nodes: [imageNode('bow')], selectedNodeIds: ['bow'], resolveUrl,
+    })).toEqual([{ kind: 'image', url: '/api/v1/tasks/task-axe/assets/asset-axe', taskId: 'task-axe', assetId: 'asset-axe' }]);
+    // An uploaded picture or a drawn one names no task of its own.
+    expect(buildChatSelection({
+      ...base, currentObject: { ...currentObject, taskId: 'upload:asset-axe', url: '/api/v1/input-assets/asset-axe' }, resolveUrl,
+    })).toEqual([{ kind: 'image', url: '/api/v1/input-assets/asset-axe', assetId: 'asset-axe' }]);
+    // Its layer on the board: the canvas selection counts, as before.
+    expect(buildChatSelection({
+      ...base, currentObject, nodes: [imageNode('bow'), imageNode('axe')], selectedNodeIds: ['bow'], resolveUrl,
+    })).toEqual([{ kind: 'image', url: '/api/v1/tasks/task-bow/assets/asset-bow', taskId: 'task-bow' }]);
+  });
+
   it('reports nothing without an active session', () => {
     expect(buildChatSelection({
       ...base, sessionId: null, nodes: [imageNode('a')], selectedNodeIds: ['a'],

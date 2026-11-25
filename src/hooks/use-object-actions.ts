@@ -119,14 +119,15 @@ export function useObjectActions() {
     }
     if (!openOnStage(object)) return false;
     const delivery = object.sessionId ? boardDeliveryOf(object.sessionId) : null;
+    // #610: the board is converted only while it holds this picture's layer; otherwise the picture itself.
     if (delivery && object.sessionId
-      && currentObjectSource(useCanvasStore.getState().getNodes(object.sessionId), delivery.artboard) === 'canvas') {
+      && currentObjectSource(useCanvasStore.getState().getNodes(object.sessionId), delivery.artboard, object, proxyAssetUrl) === 'canvas') {
       void boardToThreeD(object.sessionId);
       return true;
     }
     requestObjectTurn(object);
     return true;
-  }, [boardToThreeD, openOnStage, requestObjectTurn, schema]);
+  }, [boardToThreeD, openOnStage, proxyAssetUrl, requestObjectTurn, schema]);
 
   /** An explicit image-to-Splat Agent turn. It names exactly the selected owned image and skips board rasterization. */
   const toGaussianSplat = useCallback((object: CurrentObject): boolean => {

@@ -6,7 +6,7 @@ import type { CanvasDelivery } from '../use-canvas-artboard';
 const runtime = vi.hoisted(() => ({
   context: null as { sessionId: string; hasReference: boolean; objectDeselected?: boolean } | null,
   nodes: {} as Record<string, Array<Record<string, unknown>>>,
-  object: null as { kind: string; sessionId: string; taskId: string } | null,
+  object: null as { kind: string; sessionId: string; taskId: string; url?: string } | null,
   selected: vi.fn(),
   saved: {} as Record<string, { width: number; height: number }>,
 }));
@@ -59,10 +59,19 @@ describe('canvas geometry follows the actual composer Offering context', () => {
 
   it('says what a turn sends when the artboard is its source, not the remembered size (#284)', () => {
     runtime.saved = { s: { width: 2048, height: 2048 } };
+    // The composer's own context keeps the text-to-image sizes while a picture is the current object.
+    runtime.context = { sessionId: 's', hasReference: false };
+    runtime.object = { kind: 'image', sessionId: 's', taskId: 't', url: '/api/v1/tasks/t/assets/a' };
     // Nothing in the frame: the turn does not carry the artboard.
     expect(board().turn).toBeNull();
-    // A picture inside the frame (centre 600,400): the artboard is the source and the canvas sets the size.
-    runtime.nodes = { s: [{ id: 'p', type: 'image', imageUrl: '/api/v1/assets/a', x: 0, y: 0, width: 512, height: 512, zIndex: 1 }] };
+    // #610: a picture in the frame that is not the current object (no object, or another one) is not sent.
+    runtime.nodes = { s: [{ id: 'q', type: 'image', imageUrl: '/api/v1/assets/q', taskId: 'other', x: 0, y: 0, width: 512, height: 512, zIndex: 1 }] };
+    expect(board().turn).toBeNull();
+    runtime.object = null;
+    expect(board().turn).toBeNull();
+    runtime.object = { kind: 'image', sessionId: 's', taskId: 't', url: '/api/v1/tasks/t/assets/a' };
+    // The current object's picture inside the frame (centre 600,400): the artboard is the source and the canvas sets the size.
+    runtime.nodes = { s: [{ id: 'p', type: 'image', imageUrl: '/api/v1/assets/a', taskId: 't', x: 0, y: 0, width: 512, height: 512, zIndex: 1 }] };
     const delivery = board();
     expect(delivery.fit.kind).toBe('conflict');
     expect(delivery.turn).toMatchObject({ value: '1536x1024', nearest: true });
@@ -73,8 +82,8 @@ describe('canvas geometry follows the actual composer Offering context', () => {
     runtime.object = { kind: 'model', sessionId: 's', taskId: 't' };
     expect(board().turn).toBeNull();
     // Content outside the frame only is not sent either.
-    runtime.object = null;
-    runtime.nodes = { s: [{ id: 'p', type: 'image', imageUrl: '/api/v1/assets/a', x: 5000, y: 0, width: 512, height: 512, zIndex: 1 }] };
+    runtime.object = { kind: 'image', sessionId: 's', taskId: 't', url: '/api/v1/tasks/t/assets/a' };
+    runtime.nodes = { s: [{ id: 'p', type: 'image', imageUrl: '/api/v1/assets/a', taskId: 't', x: 5000, y: 0, width: 512, height: 512, zIndex: 1 }] };
     expect(board().turn).toBeNull();
   });
 });
