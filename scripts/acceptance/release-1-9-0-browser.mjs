@@ -19,11 +19,19 @@
 //     N4  输入框上方的图片芯片是 68px 宽、高大于宽的竖排卡片（缩略图在上、徽标在下、× 在右上），不随输入框拉伸。
 //     N5  聊天栏最窄 440、最宽 640；窄栏下结果卡「选用」「不要这个」不重叠。
 //     N6  手选「四视图」「三视图」后不给图直接发送：不弹“需要一张图”，消息发出。
+//   批次 4（PR #598；Schema 没有 ui.studio.strip.group_all_title 时记 SKIP「待批次 4」）
+//     M1  #596：同一来源 N 张结果（N=4/6/8/10）在版本条只占代表图一格加「更多」；弹层标题「这一步生成的全部内容」、
+//         列出全部 N 个、在视口内可滚动（1440 与 1280 宽）；单击第 3 张只换引用芯片、代表图与顺序不变、不进画布；
+//         双击第 4 张插入画布；「详情」打开详情。
+//     M2  #597：经输入框连发 4 轮 fake refine_image，第 4 轮结束 <1 秒与 7 秒时「分支到新对话」可用、无“尚未结束”；
+//         第 5 轮进行中，前几轮的结果卡与图片一直显示。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,559,587,560,548-skill,548-chip,n1,…,n6  只跑其中几项（默认全部）
+//   R190_ITEMS=586,559,587,560,548-skill,548-chip,n1,…,n6,m1,m2  只跑其中几项（默认全部）
+//   R190_REQUIRE_BATCH4=1  目标环境缺批次 4（PR #598）时 M1/M2 记 FAIL 而不是 SKIP
+//   R190_M1_COUNTS=4,6,8,10  M1 每组的结果张数；R190_M1_WIDTHS=1440,1280  M1 看弹层的窗口宽度
 //   R190_REQUIRE_BATCH2=1  目标环境缺批次 2 能力时记 FAIL 而不是 SKIP（批次 2 部署后用）
 //   OUT=<目录>  截图与 results.json 的位置（默认系统临时目录 plinth-acceptance-r190-*，不要写进仓库）
 //   PLAYWRIGHT_MODULE_PATH  Playwright 的位置（工作树没有 node_modules 时指向主检出的 node_modules/playwright）
@@ -34,6 +42,8 @@
 //   会话 C：空会话，只用来看设置弹窗（会在该会话上选一次 2D 模型）。
 //   会话 D（批次 2）：一轮 fake use_skill 三视图。个人 Skill r190-*（结束时删除）。
 //   N6：两个空会话，各手选一个系统 Skill 后发一条文字（fake 对话模型只回文字）。N4/N5 会拖动聊天栏宽度，结束时拖回最窄。
+//   M1：每个 N 一个会话：一张 fake 文生图（@img1）加 N 个以 @img1 为参考的 fake refine_image（一轮里 N 个工具标记）。
+//   M2：一个会话，经输入框发 5 轮 fake refine_image。
 // 目标环境不是 fake 上游形态（ART_AI_UPSTREAM_SHAPE!=fake）时拒绝运行（退出码 2），不会发起真实生成。
 // 不打印口令、Cookie 或签名 URL。最后一行输出 `PASS=n FAIL=n SKIP=n`；有 FAIL 时退出码 1。
 import fs from 'node:fs';
@@ -53,7 +63,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -987,10 +997,286 @@ async function itemN6() {
   }
 }
 
+// ---------------------------------------------------------------- 批次 4：M1（#596 版本条「更多」）、M2（#597 轮次收尾）
+const REQUIRE_BATCH4 = process.env.R190_REQUIRE_BATCH4 === '1';
+const M1_COUNTS = (process.env.R190_M1_COUNTS || '4,6,8,10').split(',').map(Number).filter((count) => count >= 3);
+const M1_WIDTHS = (process.env.R190_M1_WIDTHS || '1440,1280').split(',').map(Number).filter(Boolean);
+async function batch4Gate(item, name) {
+  if (!page.url().startsWith(base)) await page.goto(`${base}/`, { waitUntil: 'load' });
+  const needle = 'ui.studio.strip.group_all_title';
+  if (await page.evaluate((key) => Boolean(window.__ART_AI_PRODUCT_SCHEMA__?.content?.messages?.[key]), needle)) return true;
+  record(REQUIRE_BATCH4 ? 'FAIL' : 'SKIP', item, name, `待批次 4：目标环境的 Product Schema 没有 ${needle}（PR #598 未部署）`);
+  return false;
+}
+const assetIdOf = (url) => (String(url || '').match(/\/assets\/([A-Za-z0-9_-]+)/) || [])[1] || '';
+const inViewport = (b, size) => b.x >= 0 && b.y >= 0 && b.x + b.width <= size.width + 0.5 && b.y + b.height <= size.height + 0.5;
+
+/**
+ * One source picture (@img1, fake text-to-image) and `count` fake edits of it (refine_image with
+ * reference_handles @img1), sent as markers in one turn (the Schema allows 20 generation calls a turn); a turn that
+ * starts fewer is followed by another with the rest. Nothing else is made between them, so the edits are adjacent
+ * results of one source: one column of the strip.
+ */
+async function seedEdits(count) {
+  const sid = await createSession(`${tag} 更多 ${count} 张`);
+  await turn(sid, '画一个红色方块 [[fake:tool:refine_image {"prompt":"a red cube on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the source picture did not succeed');
+  const edits = async () => (await sessionTasks(sid)).filter((task) => task.capability === 'image-to-image');
+  for (let round = 0; round < 3 && (await edits()).length < count; round += 1) {
+    const missing = count - (await edits()).length;
+    const markers = Array.from({ length: missing }, (_, index) => `[[fake:tool:refine_image ${JSON.stringify({ prompt: `variant ${round}-${index + 1} of the red cube`, reference_handles: ['@img1'] })}]]`);
+    await turn(sid, `同一张图出 ${missing} 个改法 ${markers.join(' ')}`);
+  }
+  const done = await waitTasks(sid, (tasks) => tasks.filter((task) => task.capability === 'image-to-image' && task.state === 'SUCCEEDED').length >= count, 240);
+  if (!done) throw new Error(`only ${(await edits()).length} of ${count} fake edits were made`);
+  return { sid, keys: (await edits()).map((task) => `n:${task.id}`) };
+}
+
+async function itemM1() {
+  if (!await batch4Gate('M1', '版本条同源多张结果收进「更多」')) return;
+  const moreText = await text('ui.studio.strip.group_all');
+  const titleText = await text('ui.studio.strip.group_all_title');
+  for (const count of M1_COUNTS) {
+    let seed;
+    try {
+      seed = await seedEdits(count);
+    } catch (error) {
+      record('FAIL', 'M1', `N=${count} 造数`, error.message);
+      continue;
+    }
+    console.log(`seed M1 N=${count} ${seed.sid}: ${seed.keys.length} edits`);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openSession(seed.sid);
+    const strip = tid('version-strip').first();
+    const stripKeys = async () => strip.locator('[data-testid=version-tile]').evaluateAll((items) => items.map((item) => item.dataset.key));
+    const column = strip.locator('[data-testid=version-column]').filter({ has: page.locator('[data-testid=version-fold]') }).first();
+    const list = tid('version-fold-list').first();
+    const openList = async () => {
+      if (!await list.isVisible().catch(() => false)) await column.locator('[data-testid=version-fold-trigger]').click();
+      await list.waitFor({ timeout: 10000 });
+      await page.waitForTimeout(500);
+    };
+    const closeList = async () => {
+      for (let attempt = 0; attempt < 2 && await list.isVisible().catch(() => false); attempt += 1) {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+      }
+    };
+    const listKeys = async () => list.locator('[data-testid=version-tile]').evaluateAll((items) => items.map((item) => item.dataset.key));
+    let representative = '';
+    let orderBefore = [];
+
+    await check('M1', `N=${count}：版本条里这一组只占代表图一格加「${moreText}」`, async () => {
+      await column.waitFor({ timeout: 20000 });
+      const visible = await column.locator('[data-testid=version-tile]').evaluateAll((items) => items.map((item) => item.dataset.key));
+      const trigger = (await column.locator('[data-testid=version-fold-trigger]').innerText()).trim();
+      const stripText = await strip.innerText();
+      const oldWords = /\+\d+/.test(stripText) || (await page.locator('body').innerText()).includes('同一来源的其他结果');
+      representative = visible[0] || '';
+      orderBefore = await stripKeys();
+      const file = await shot('M1', `N${count}-strip`);
+      return {
+        ok: visible.length === 1 && seed.keys.includes(representative) && trigger === moreText && !oldWords,
+        detail: `组内可见格=${JSON.stringify(visible)} 按钮「${trigger}」 出现「+数字」或旧标题=${oldWords} 截图 ${file}`,
+      };
+    });
+
+    for (const width of M1_WIDTHS) {
+      await check('M1', `N=${count}，窗口 ${width}：弹层标题「${titleText}」，列出全部 ${count} 个结果，在视口内、可滚动`, async () => {
+        await closeList();
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForTimeout(800);
+        await openList();
+        const title = (await list.innerText()).split('\n')[0].trim();
+        const keys = await listKeys();
+        const size = page.viewportSize();
+        const popup = await boxOf(list);
+        const scroll = await list.evaluate((node) => {
+          const style = getComputedStyle(node);
+          const overflowing = node.scrollHeight > node.clientHeight + 1;
+          const before = node.scrollTop;
+          node.scrollTop = node.scrollHeight;
+          const moved = node.scrollTop > before;
+          node.scrollTop = before;
+          return { overflowY: style.overflowY, overflowing, moved, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight };
+        });
+        const file = await shot('M1', `N${count}-popover-${width}`);
+        const all = seed.keys.every((key) => keys.includes(key)) && keys.length === count && keys[0] === representative;
+        const scrolls = ['auto', 'scroll'].includes(scroll.overflowY) && (!scroll.overflowing || scroll.moved);
+        return {
+          ok: title === titleText && all && inViewport(popup, size) && scrolls,
+          detail: `标题「${title}」 列出 ${keys.length} 个（首个是代表图=${keys[0] === representative}） 弹层 ${round(popup)} 视口 ${size.width}x${size.height} `
+            + `overflow-y=${scroll.overflowY} 内容 ${scroll.scrollHeight}/${scroll.clientHeight}px 可滚=${scroll.overflowing ? scroll.moved : '无需'} 截图 ${file}`,
+        };
+      });
+    }
+    await closeList();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(800);
+
+    await check('M1', `N=${count}：弹层里单击第 3 张，代表图与顺序不变，输入框引用换成它，不放进画布`, async () => {
+      await openList();
+      const third = list.locator('[data-testid=version-tile]').nth(2);
+      const thirdKey = await third.getAttribute('data-key');
+      const thirdAsset = assetIdOf(await third.locator('img').first().getAttribute('src'));
+      const layersBefore = await layerNames();
+      const chipSrc = () => tid('composer-object-chip').first().locator('img').first().getAttribute('src', { timeout: 3000 }).catch(() => '');
+      const chipBefore = assetIdOf(await chipSrc());
+      await third.locator('button').first().click();
+      await page.waitForTimeout(2000);
+      const stillOpen = await list.isVisible().catch(() => false);
+      await closeList();
+      const chipAsset = assetIdOf(await chipSrc());
+      const visibleAfter = await column.locator('[data-testid=version-tile]').evaluateAll((items) => items.map((item) => item.dataset.key));
+      const orderAfter = await stripKeys();
+      const layersAfter = await layerNames();
+      const file = await shot('M1', `N${count}-click-3rd`);
+      return {
+        ok: visibleAfter[0] === representative && JSON.stringify(orderAfter) === JSON.stringify(orderBefore)
+          && Boolean(thirdAsset) && chipAsset === thirdAsset && JSON.stringify(layersAfter) === JSON.stringify(layersBefore),
+        detail: `第 3 张 ${thirdKey} 资产 ${thirdAsset}；芯片资产 ${chipBefore}→${chipAsset}；代表图 ${visibleAfter[0] === representative ? '不变' : `变成 ${visibleAfter[0]}`}；`
+          + `顺序不变=${JSON.stringify(orderAfter) === JSON.stringify(orderBefore)}；图层 ${JSON.stringify(layersBefore)}→${JSON.stringify(layersAfter)}；单击后弹层仍开=${stillOpen} 截图 ${file}`,
+      };
+    });
+
+    await check('M1', `N=${count}：弹层里双击第 4 张插入画布`, async () => {
+      await openList();
+      const fourth = list.locator('[data-testid=version-tile]').nth(3);
+      const handle = ((await fourth.locator('[data-testid=version-handle-badge]').first().innerText().catch(() => '')) || '').replace(/^@/, '').trim();
+      if (!handle) return { ok: false, detail: '第 4 张没有句柄标记，无法在图层里认出它' };
+      // The automatic join may already have put it on the board: take it off first, so the double click has to bring it.
+      if ((await layerNames()).includes(handle)) {
+        await closeList();
+        await removeLayer(handle);
+        await openList();
+      }
+      const before = await layerNames();
+      await list.locator('[data-testid=version-tile]').nth(3).locator('button').first().dblclick();
+      await page.waitForTimeout(2500);
+      await closeList();
+      const after = await layerNames();
+      const file = await shot('M1', `N${count}-dblclick-4th`);
+      return { ok: !before.includes(handle) && after.includes(handle), detail: `第 4 张 ${handle}：前=${JSON.stringify(before)} 后=${JSON.stringify(after)} 截图 ${file}` };
+    });
+
+    await check('M1', `N=${count}：弹层里「详情」打开详情`, async () => {
+      await openList();
+      const item = list.locator('[data-testid=version-tile]').nth(1);
+      await item.locator('[data-testid=version-detail]').click();
+      const detail = tid('result-detail').first();
+      await detail.waitFor({ timeout: 10000 });
+      const file = await shot('M1', `N${count}-detail`);
+      const titleShown = (await tid('result-detail-dialog').first().innerText().catch(() => '')).split('\n')[0];
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      await closeList();
+      return { ok: true, detail: `详情已打开（标题「${titleShown}」） 截图 ${file}` };
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+async function itemM2() {
+  if (!await batch4Gate('M2', '连续多轮后分支按钮与历史结果')) return;
+  const sid = await createSession(`${tag} 轮次收尾`);
+  await openSession(sid);
+  const input = page.locator('[data-testid=studio-composer] textarea').first();
+  const running = async () => (await tid('composer-stop').count()) > 0;
+  const sendRound = async (index) => {
+    await input.fill(`第 ${index} 轮 [[fake:tool:refine_image ${JSON.stringify({ prompt: `round ${index}: a small wooden toy, plain background` })}]]`);
+    await input.press('Enter');
+  };
+  // Until the UI says the turn ended: the stop button showed and is gone again.
+  const waitEnded = async (index) => {
+    await waitFor(running, 15, 100);
+    const ended = await waitFor(async () => !(await running()), 180, 100);
+    if (!ended) throw new Error(`round ${index} did not end in 180 s`);
+    return Date.now();
+  };
+  const waitTask = async (index) => {
+    const tasks = await waitTasks(sid, (list) => list.filter((task) => task.state === 'SUCCEEDED').length >= index, 120);
+    if (!tasks) throw new Error(`round ${index}: its fake task did not succeed`);
+  };
+  const branchState = async () => {
+    const message = tid('chat-message').last();
+    await message.hover();
+    await message.locator('[data-testid=chat-more]').first().click();
+    const item = tid('chat-branch').first();
+    await item.waitFor({ timeout: 5000 });
+    const state = {
+      disabled: (await item.getAttribute('aria-disabled')) === 'true' || (await item.getAttribute('data-disabled')) !== null,
+      label: (await item.getAttribute('aria-label')) || '',
+    };
+    const runningText = await text('ui.unavailable.reason.branch.running');
+    state.runningHint = state.label.includes(runningText) || (await page.getByText(runningText).count()) > 0;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    return state;
+  };
+  let endedAt = 0;
+  let immediate = null;
+  await check('M2', '连续 4 轮 fake refine_image 都完成', async () => {
+    for (let index = 1; index <= 4; index += 1) {
+      await sendRound(index);
+      endedAt = await waitEnded(index);
+      // Round 4: read the branch item at once, before anything else waits (the server read comes after).
+      if (index === 4) {
+        const elapsed = Date.now() - endedAt;
+        immediate = { elapsed, ...(await branchState()), file: await shot('M2', 'branch-immediate') };
+      }
+      await waitTask(index);
+    }
+    return { ok: true, detail: '4 轮都结束，任务都已成功' };
+  });
+  await check('M2', '第 4 轮结束后立刻（<1 秒）：「分支到新对话」可用、无“回复或任务尚未结束”', async () => {
+    if (!immediate) return { ok: false, detail: '前 4 轮没有跑完，无法读第 4 轮结束时的状态' };
+    return {
+      ok: !immediate.disabled && !immediate.runningHint && immediate.elapsed < 1000,
+      detail: `结束后 ${immediate.elapsed}ms 开始读：禁用=${immediate.disabled} 有“尚未结束”提示=${immediate.runningHint} 截图 ${immediate.file}`,
+    };
+  });
+  await check('M2', '第 4 轮结束 7 秒后：「分支到新对话」可用、无“回复或任务尚未结束”', async () => {
+    const wait = endedAt + 7000 - Date.now();
+    if (wait > 0) await page.waitForTimeout(wait);
+    const state = await branchState();
+    const file = await shot('M2', 'branch-7s');
+    return { ok: !state.disabled && !state.runningHint, detail: `禁用=${state.disabled} 有“尚未结束”提示=${state.runningHint} 截图 ${file}` };
+  });
+  await check('M2', '第 5 轮进行中，前几轮的结果卡与图片一直显示（数量不减）', async () => {
+    const count = async () => page.evaluate(() => {
+      const root = document.querySelector('[data-testid=chat-messages]');
+      return {
+        img: root ? root.querySelectorAll('img').length : 0,
+        cards: root ? root.querySelectorAll('[data-testid=chat-image-result]').length : 0,
+        handles: root ? [...root.querySelectorAll('[data-testid=chat-result-handle]')].map((node) => node.innerText.trim()) : [],
+      };
+    });
+    const before = await count();
+    await sendRound(5);
+    const samples = [];
+    const end = Date.now() + 180000;
+    let seenRunning = false;
+    while (Date.now() < end) {
+      const isRunning = await running();
+      seenRunning ||= isRunning;
+      if (seenRunning && !isRunning) break;
+      if (isRunning) samples.push(await count());
+      await page.waitForTimeout(150);
+    }
+    const dropped = samples.filter((sample) => sample.img < before.img || sample.cards < before.cards || before.handles.some((handle) => !sample.handles.includes(handle)));
+    const file = await shot('M2', 'round5');
+    return {
+      ok: samples.length > 0 && dropped.length === 0,
+      detail: `发送前 img=${before.img} 卡=${before.cards} 句柄=${JSON.stringify(before.handles)}；进行中采样 ${samples.length} 次（约 ${(samples.length * 0.15).toFixed(1)}s 以上），`
+        + `其中少于发送前的 ${dropped.length} 次${dropped[0] ? `（如 img=${dropped[0].img} 卡=${dropped[0].cards}）` : ''}；fake 没有可从产品侧触发的慢任务标记，进行中窗口是本轮对话与任务轮询的自然时长 截图 ${file}`,
+    };
+  });
+}
+
 // ---------------------------------------------------------------- run
 const runners = {
   586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
-  n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5, n6: itemN6,
+  n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5, n6: itemN6, m1: itemM1, m2: itemM2,
 };
 try {
   for (const item of ITEMS) {
