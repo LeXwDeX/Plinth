@@ -15,7 +15,8 @@ import (
 
 const administrationUserColumns = `
 	id, username, password_hash, nickname, name, email, open_id, roles_json,
-	is_admin, is_active, created_at, updated_at, deleted_at, last_login`
+	is_admin, is_active, created_at, updated_at, deleted_at, last_login,
+	project_group_key`
 
 func (r *Repository) ListAdministrationUsers(
 	ctx context.Context,
@@ -80,8 +81,9 @@ func (r *Repository) CreateAdministrationUser(
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO authentication_users (
 			id, username, password_hash, nickname, name, email, roles_json,
-			is_admin, is_active, created_at, updated_at, last_login
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			is_admin, is_active, created_at, updated_at, last_login,
+			project_group_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		stored.ID,
 		stored.Username,
 		stored.PasswordHash,
@@ -94,6 +96,7 @@ func (r *Repository) CreateAdministrationUser(
 		formatTime(stored.CreatedAt),
 		formatTime(stored.UpdatedAt),
 		nullTimePointer(stored.LastLogin),
+		nullProjectGroupKey(stored.ProjectGroupKey),
 	)
 	if err != nil {
 		if isAdministrationUsernameConflict(err) {
@@ -118,7 +121,7 @@ func (r *Repository) UpdateAdministrationUser(
 		UPDATE authentication_users
 		SET password_hash = ?, nickname = ?, name = ?, email = ?,
 			roles_json = ?, is_admin = ?, is_active = ?, updated_at = ?,
-			last_login = ?
+			last_login = ?, project_group_key = ?
 		WHERE id = ? AND deleted_at IS NULL`,
 			stored.PasswordHash,
 			stored.Nickname,
@@ -129,6 +132,7 @@ func (r *Repository) UpdateAdministrationUser(
 			boolInteger(stored.Active),
 			formatTime(stored.UpdatedAt),
 			nullTimePointer(stored.LastLogin),
+			nullProjectGroupKey(stored.ProjectGroupKey),
 			stored.ID,
 		)
 		if err != nil {
@@ -420,6 +424,7 @@ func scanAdministrationUser(
 	var deletedAt sql.NullString
 	var lastLogin sql.NullString
 	var openID sql.NullString
+	var projectGroupKey sql.NullString
 	err := row.Scan(
 		&stored.ID,
 		&stored.Username,
@@ -435,6 +440,7 @@ func scanAdministrationUser(
 		&updatedAt,
 		&deletedAt,
 		&lastLogin,
+		&projectGroupKey,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -454,6 +460,8 @@ func scanAdministrationUser(
 	stored.Admin = admin != 0
 	stored.Active = active != 0
 	stored.Deleted = deletedAt.Valid
+	// NULL 表示未分组，对外统一为空串（#599）。
+	stored.ProjectGroupKey = projectGroupKey.String
 	if openID.Valid && strings.TrimSpace(openID.String) != "" {
 		value := openID.String
 		stored.OpenID = &value
@@ -474,6 +482,14 @@ func scanAdministrationUser(
 		stored.LastLogin = &parsed
 	}
 	return stored, true, nil
+}
+
+// nullProjectGroupKey 把未分组（空串）写成 NULL，列里不出现空串（#599）。
+func nullProjectGroupKey(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func requireAdministrationUser(result sql.Result) error {

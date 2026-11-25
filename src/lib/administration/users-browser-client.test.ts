@@ -25,12 +25,14 @@ const schema: AdministrationProductSchema['users'] = {
       created_at: 'registered',
       last_login: 'seen',
       open_id: 'externalId',
+      project_group_key: 'squad',
     },
     path_parameters: { user_id: 'account' },
   },
   limits: {
     username_minimum_characters: 3,
     password_minimum_characters: 9,
+    project_group_key_pattern: '^[a-z]+$',
   },
   messages: {
     user_not_found: 'configured missing',
@@ -41,6 +43,7 @@ const schema: AdministrationProductSchema['users'] = {
     invalid_password: 'configured password',
     invalid_request: 'configured request',
     internal_error: 'configured internal',
+    invalid_project_group: 'configured project group',
   },
   presentation: {
     date_locale: 'configured-locale',
@@ -109,6 +112,7 @@ describe('Administration Users Browser Client', () => {
       createdAt: '2026-07-26T00:00:00Z',
       lastLogin: null,
       openId: null,
+      projectGroupKey: null,
     }]);
     await expect(client.currentUserID()).resolves.toBe('current-account');
   });
@@ -188,6 +192,65 @@ describe('Administration Users Browser Client', () => {
         '/configured/operators/account%2Fa%20b',
         expect.objectContaining({ method: 'DELETE' }),
       ],
+    ]);
+  });
+
+  // #599: the project group KEY travels under the Schema wire field; null or
+  // a missing field reads as ungrouped, and an update sends '' to clear it.
+  it('reads and writes the project group KEY through the Schema field', async () => {
+    const wireUser = (squad: unknown) => ({
+      accountId: 'account-1',
+      login: 'alice',
+      registered: '2026-07-26T00:00:00Z',
+      squad,
+    });
+    const responses = [
+      new Response(JSON.stringify({
+        payload: [wireUser('studio-a'), wireUser(null), wireUser(7)],
+      }), { status: 200 }),
+      new Response(JSON.stringify({ payload: wireUser('studio-a') }), { status: 201 }),
+      new Response(JSON.stringify({ payload: wireUser(null) }), { status: 200 }),
+      new Response(JSON.stringify({ payload: wireUser('studio-b') }), { status: 200 }),
+    ];
+    const fetcher = vi.fn(async () => responses.shift()!);
+    const client = createAdministrationUsersBrowserClient({
+      schema,
+      authenticationAPI,
+      routes,
+      fetcher,
+    });
+
+    const listed = await client.listUsers();
+    expect(listed.map((user) => user.projectGroupKey)).toEqual([
+      'studio-a',
+      null,
+      null,
+    ]);
+    await expect(client.createUser({
+      username: 'alice',
+      password: 'credential',
+      name: '',
+      email: 'alice@example.test',
+      isAdmin: false,
+      projectGroupKey: 'studio-a',
+    })).resolves.toMatchObject({ projectGroupKey: 'studio-a' });
+    await expect(client.updateUser('account-1', { projectGroupKey: '' }))
+      .resolves.toMatchObject({ projectGroupKey: null });
+    await client.updateUser('account-1', { name: 'Alice' });
+
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+    const bodies = calls.slice(1).map(([, init]) => JSON.parse(String(init.body)));
+    expect(bodies).toEqual([
+      {
+        login: 'alice',
+        credential: 'credential',
+        displayName: '',
+        mailbox: 'alice@example.test',
+        privileged: false,
+        squad: 'studio-a',
+      },
+      { squad: '' },
+      { displayName: 'Alice' },
     ]);
   });
 

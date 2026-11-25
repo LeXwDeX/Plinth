@@ -14,6 +14,8 @@ export interface AdministrationUser {
   createdAt: string;
   lastLogin: string | null;
   openId: string | null;
+  /** Project group KEY (#599); null when the user is ungrouped. */
+  projectGroupKey: string | null;
 }
 
 export interface AdministrationUserCreate {
@@ -22,6 +24,8 @@ export interface AdministrationUserCreate {
   name: string;
   email: string;
   isAdmin: boolean;
+  /** Omitted or '' creates an ungrouped user. */
+  projectGroupKey?: string;
 }
 
 export interface AdministrationUserUpdate {
@@ -30,6 +34,8 @@ export interface AdministrationUserUpdate {
   password?: string;
   isAdmin?: boolean;
   isActive?: boolean;
+  /** Omitted keeps the group; '' clears it. */
+  projectGroupKey?: string;
 }
 
 export interface AdministrationUsersBrowserRoutes {
@@ -129,6 +135,7 @@ export function createAdministrationUsersBrowserClient(
       createdAt: optionalString(record[fields.created_at]) ?? '',
       lastLogin: optionalString(record[fields.last_login]),
       openId: optionalString(record[fields.open_id]),
+      projectGroupKey: optionalString(record[fields.project_group_key]),
     };
   };
 
@@ -152,6 +159,9 @@ export function createAdministrationUsersBrowserClient(
           [fields.name]: input.name,
           [fields.email]: input.email,
           [fields.is_admin]: input.isAdmin,
+          ...(input.projectGroupKey === undefined
+            ? {}
+            : { [fields.project_group_key]: input.projectGroupKey }),
         },
       ));
       return userWire(payload[fields.data]);
@@ -169,6 +179,9 @@ export function createAdministrationUsersBrowserClient(
       }
       if (input.isActive !== undefined) {
         body[fields.is_active] = input.isActive;
+      }
+      if (input.projectGroupKey !== undefined) {
+        body[fields.project_group_key] = input.projectGroupKey;
       }
       const payload = asRecord(await request(
         itemRoute(userID),

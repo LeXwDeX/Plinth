@@ -242,10 +242,13 @@ func newUserService(
 			Resource:   "account",
 		},
 		AuditFields: UserAuditFields{
-			Username: "login",
-			Admin:    "privileged",
-			Active:   "enabled",
+			Username:                "login",
+			Admin:                   "privileged",
+			Active:                  "enabled",
+			ProjectGroupKey:         "group",
+			PreviousProjectGroupKey: "previous_group",
 		},
+		ProjectGroupKeyPattern: `^[a-z0-9][a-z0-9_-]{0,31}$`,
 		Clock: func() time.Time {
 			return time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 		},

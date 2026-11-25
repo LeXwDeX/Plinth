@@ -1309,7 +1309,8 @@ const minimalApplication = `"application":{
 					"username":"username","password":"password","nickname":"nickname",
 					"name":"name","email":"email","is_admin":"isAdmin",
 					"is_active":"isActive","created_at":"createdAt",
-					"last_login":"lastLogin","open_id":"openId"
+					"last_login":"lastLogin","open_id":"openId",
+					"project_group_key":"projectGroupKey"
 				},
 				"path_parameters":{"user_id":"userID"},
 				"identity":{
@@ -1320,7 +1321,8 @@ const minimalApplication = `"application":{
 			"guards":{"minimum_active_administrators":1},
 			"limits":{
 				"username_minimum_characters":2,
-				"password_minimum_characters":6
+				"password_minimum_characters":6,
+				"project_group_key_pattern":"^[a-z0-9][a-z0-9_-]{0,31}$"
 			},
 			"defaults":{"id_prefix":"user_","active":true},
 			"audit":{
@@ -1331,7 +1333,9 @@ const minimalApplication = `"application":{
 				"delete_action":"admin_delete_user",
 				"resource_type":"user",
 				"detail_fields":{
-					"username":"username","is_admin":"isAdmin","is_active":"isActive"
+					"username":"username","is_admin":"isAdmin","is_active":"isActive",
+					"project_group_key":"projectGroupKey",
+					"previous_project_group_key":"previousProjectGroupKey"
 				}
 			},
 			"messages":{
@@ -1341,7 +1345,8 @@ const minimalApplication = `"application":{
 				"invalid_password":"密码至少 {minimum} 个字符",
 				"invalid_email":"邮箱不能为空或格式无效",
 				"last_administrator":"必须保留至少一个可用的管理员账号",
-				"invalid_request":"请求无效","internal_error":"内部错误"
+				"invalid_request":"请求无效","internal_error":"内部错误",
+				"invalid_project_group":"项目组 KEY 格式无效"
 			},
 			"presentation":{
 				"date_locale":"zh-CN","loading_rows":3,
@@ -1375,6 +1380,9 @@ const minimalApplication = `"application":{
 					"delete_title":"确认删除","delete_description":"确定删除吗",
 					"delete_confirm":"确认删除","deleting":"删除中",
 					"password_too_short":"密码至少 {minimum} 位",
+					"column_project_group":"项目组","project_group_label":"项目组",
+					"project_group_placeholder":"留空表示未分组",
+					"project_group_description":"留空表示未分组",
 					"update_failed":"更新失败","create_failed":"创建失败",
 					"operation_failed":"操作失败","delete_failed":"删除失败",
 					"updated":"已更新","created":"已创建",

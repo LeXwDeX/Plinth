@@ -58,6 +58,10 @@ var requiredAdministrationUserTextKeys = []string{
 	"delete_confirm",
 	"deleting",
 	"password_too_short",
+	"column_project_group",
+	"project_group_label",
+	"project_group_placeholder",
+	"project_group_description",
 	"update_failed",
 	"create_failed",
 	"operation_failed",
@@ -307,6 +311,8 @@ func validateAdministration(
 		"created_at": users.API.Fields.CreatedAt,
 		"last_login": users.API.Fields.LastLogin,
 		"open_id":    users.API.Fields.OpenID,
+		"project_group_key": users.API.Fields.
+			ProjectGroupKey,
 	}
 	seenFields := make(map[string]string, len(fields))
 	for name, field := range fields {
@@ -367,6 +373,19 @@ func validateAdministration(
 		users.Limits.PasswordMinimumCharacters <= 0 {
 		return errors.New("users.limits 的字符下限必须大于 0")
 	}
+	// 项目组 KEY 的格式由 Schema 声明（#599），服务端按它校验；它必须是合法的
+	// RE2 正则，否则管理服务无法启动或会静默放行任意值。
+	if strings.TrimSpace(users.Limits.ProjectGroupKeyPattern) == "" {
+		return errors.New("users.limits.project_group_key_pattern 不能为空")
+	}
+	if _, err := regexp.Compile(
+		users.Limits.ProjectGroupKeyPattern,
+	); err != nil {
+		return fmt.Errorf(
+			"users.limits.project_group_key_pattern 不是合法正则: %w",
+			err,
+		)
+	}
 	if strings.TrimSpace(users.Defaults.IDPrefix) == "" ||
 		strings.ContainsAny(users.Defaults.IDPrefix, " /?#") {
 		return errors.New("users.defaults.id_prefix 非法")
@@ -390,9 +409,15 @@ func validateAdministration(
 		"detail_username":   users.Audit.DetailFields.Username,
 		"detail_is_admin":   users.Audit.DetailFields.IsAdmin,
 		"detail_is_active":  users.Audit.DetailFields.IsActive,
-		"user_not_found":    users.Messages.UserNotFound,
-		"self_deactivate":   users.Messages.SelfDeactivate,
-		"self_delete":       users.Messages.SelfDelete,
+		"detail_project_group_key": users.Audit.DetailFields.
+			ProjectGroupKey,
+		"detail_previous_project_group_key": users.Audit.DetailFields.
+			PreviousProjectGroupKey,
+		"invalid_project_group": users.Messages.
+			InvalidProjectGroup,
+		"user_not_found":  users.Messages.UserNotFound,
+		"self_deactivate": users.Messages.SelfDeactivate,
+		"self_delete":     users.Messages.SelfDelete,
 		"duplicate_username": users.Messages.
 			DuplicateUsername,
 		"invalid_username":   users.Messages.InvalidUsername,
@@ -405,6 +430,25 @@ func validateAdministration(
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("users 配置 %s 不能为空", name)
 		}
+	}
+	// 审计 detail 的键在同一个 JSON 对象里，重名会让一个值覆盖另一个。
+	seenDetailFields := map[string]string{}
+	for name, field := range map[string]string{
+		"username":                   users.Audit.DetailFields.Username,
+		"is_admin":                   users.Audit.DetailFields.IsAdmin,
+		"is_active":                  users.Audit.DetailFields.IsActive,
+		"project_group_key":          users.Audit.DetailFields.ProjectGroupKey,
+		"previous_project_group_key": users.Audit.DetailFields.PreviousProjectGroupKey,
+	} {
+		if previous, exists := seenDetailFields[field]; exists {
+			return fmt.Errorf(
+				"users.audit.detail_fields.%s 与 %s 不能同为 %q",
+				previous,
+				name,
+				field,
+			)
+		}
+		seenDetailFields[field] = name
 	}
 	presentation := users.Presentation
 	if strings.TrimSpace(presentation.DateLocale) == "" ||
