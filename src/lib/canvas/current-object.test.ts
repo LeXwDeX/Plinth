@@ -13,17 +13,47 @@ const rectangle = (id: string): CanvasNode => ({
 const same = (url: string) => url;
 
 describe('Agent current object source', () => {
-  it('sends the artboard whenever it holds anything, even the object\'s one untouched picture', () => {
-    expect(currentObjectSource([image('a')], artboard)).toBe('canvas');
-    expect(currentObjectSource([image('a', { x: 0, y: 0, width: 512, height: 512 })], artboard)).toBe('canvas');
-    expect(currentObjectSource([image('a'), rectangle('r')], artboard)).toBe('canvas');
-    expect(currentObjectSource([image('a', { rotation: 10 })], artboard)).toBe('canvas');
+  const objectA = { kind: 'image', url: '/a/a', taskId: 't-a' };
+
+  it('sends the artboard while it holds the object\'s layer, even its one untouched picture', () => {
+    expect(currentObjectSource([image('a')], artboard, objectA, same)).toBe('canvas');
+    expect(currentObjectSource([image('a', { x: 0, y: 0, width: 512, height: 512 })], artboard, objectA, same)).toBe('canvas');
+    expect(currentObjectSource([image('a'), rectangle('r')], artboard, objectA, same)).toBe('canvas');
+    expect(currentObjectSource([image('a', { rotation: 10 })], artboard, objectA, same)).toBe('canvas');
+    // A brush-baked layer keeps the object's task: it is still the object, edited on the board.
+    expect(currentObjectSource([image('a', { imageUrl: '/a/baked' })], artboard, objectA, same)).toBe('canvas');
   });
 
   it('an empty artboard (hidden or outside layers only), or no artboard, keeps the object', () => {
-    expect(currentObjectSource([image('far', { x: 2000 })], artboard)).toBe('object');
-    expect(currentObjectSource([image('a', { visible: false })], artboard)).toBe('object');
-    expect(currentObjectSource([image('a'), rectangle('r')], null)).toBe('object');
+    expect(currentObjectSource([image('a', { x: 2000 })], artboard, objectA, same)).toBe('object');
+    expect(currentObjectSource([image('a', { visible: false })], artboard, objectA, same)).toBe('object');
+    expect(currentObjectSource([image('a'), rectangle('r')], null, objectA, same)).toBe('object');
+  });
+
+  // #610: the artboard is the turn's source only when the person works on the current object there. A version
+  // clicked on the strip (not on the board), or no current object at all, never sends whatever else the board
+  // holds; the person names the board with @画布 (or paints a mask) to send it.
+  it('keeps the object when the artboard holds other pictures but not the object\'s layer', () => {
+    const bow = image('bow');
+    const axe = { kind: 'image', url: '/a/axe', taskId: 't-axe' };
+    expect(currentObjectSource([bow], artboard, axe, same)).toBe('object');
+    expect(currentObjectSource([bow, rectangle('r')], artboard, axe, same)).toBe('object');
+    // The object's layer lies outside the frame while another picture is inside: still not the board.
+    expect(currentObjectSource([bow, image('axe', { x: 2000 })], artboard, axe, same)).toBe('object');
+    // Once the object's layer is in the frame, the frame (bow included) is what the person laid out.
+    expect(currentObjectSource([bow, image('axe', { x: 250 })], artboard, axe, same)).toBe('canvas');
+  });
+
+  it('never sends the artboard without a current picture, or for a 3D object', () => {
+    expect(currentObjectSource([image('a')], artboard, null, same)).toBe('object');
+    expect(currentObjectSource([image('a')], artboard, { kind: 'model', url: '/a/a', taskId: 't-a' }, same)).toBe('object');
+  });
+
+  it('matches the layer by the address the board stores (the proxied URL)', () => {
+    const proxied = (url: string) => `/proxy${url}`;
+    const object = { kind: 'image', url: '/raw/x', taskId: 'upload:x' };
+    expect(currentObjectSource([image('x', { imageUrl: '/proxy/raw/x', taskId: 'upload' })], artboard, object, proxied)).toBe('canvas');
+    expect(currentObjectSource([image('x', { imageUrl: '/raw/x', taskId: 'upload' })], artboard, object, proxied)).toBe('object');
   });
 });
 

@@ -1,3 +1,4 @@
+import { showsObject, type LayerUrl } from '@/lib/canvas/current-object';
 import type { ProductSchema } from '@/lib/product-schema';
 import type { ChatAttachment } from '@/store/chat-store';
 import type { CanvasNode } from '@/store/canvas-store';
@@ -107,6 +108,11 @@ export interface SelectionSources {
   /** 当前会话画布上的节点与被选中的节点 ID。 */
   nodes: readonly CanvasNode[];
   selectedNodeIds: readonly string[];
+  /**
+   * The address a board layer stores for the current picture (the proxied asset URL). With it, a current
+   * picture that no board layer shows is reported itself (#610); without it only the canvas selection counts.
+   */
+  resolveUrl?: LayerUrl;
 }
 
 /**
@@ -124,6 +130,13 @@ export function buildChatSelection(sources: SelectionSources): ChatAttachmentCla
       taskId: currentObject.taskId,
       ...(currentObject.assetId ? { assetId: currentObject.assetId } : {}),
     }];
+  }
+  // #610: a version clicked on the strip is the current picture without a layer on the board. The turn names
+  // that picture, not a layer still selected from before; the chip above the box shows the same picture.
+  if (currentObject?.kind === 'image' && !currentObject.captureId && sources.resolveUrl
+    && !sources.nodes.some((node) => showsObject(node, currentObject, sources.resolveUrl!))) {
+    const claim = objectClaim(currentObject);
+    return claim ? [claim] : [];
   }
   const selected = new Set(sources.selectedNodeIds);
   const claims: ChatAttachmentClaim[] = [];
@@ -148,6 +161,18 @@ export function buildChatSelection(sources: SelectionSources): ChatAttachmentCla
     });
   }
   return claims;
+}
+
+/** The current picture named by its own identity; the server verifies it for the owner and session. */
+function objectClaim(object: CurrentObject): ChatAttachmentClaim | null {
+  const url = object.url && !object.url.startsWith('data:') ? object.url : '';
+  if (!url && !object.assetId) return null;
+  return {
+    kind: 'image',
+    ...(url ? { url } : {}),
+    ...(object.taskId && !object.taskId.startsWith('canvas:') && !object.taskId.startsWith('upload:') ? { taskId: object.taskId } : {}),
+    ...(object.assetId ? { assetId: object.assetId } : {}),
+  };
 }
 
 function nodeClaim(node: CanvasNode): ChatAttachmentClaim | null {

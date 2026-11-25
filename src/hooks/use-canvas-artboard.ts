@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useGenerationParams, type GenerationParams } from '@/hooks/use-generation-params';
 import { canvasArtboard, type CanvasArtboard, type CanvasPixels } from '@/lib/canvas/artboard';
-import { artboardContent } from '@/lib/canvas/export-canvas';
+import { currentObjectSource } from '@/lib/canvas/current-object';
 import { canvasSizeFit, canvasTurnOutput, initialCanvasPixels, type CanvasSizeFit, type CanvasTurnOutput, type ReferenceTurnOutput } from '@/lib/workspace/canvas-size';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { useCanvasStore } from '@/store/canvas-store';
@@ -22,12 +23,12 @@ export interface CanvasDelivery {
   /** How the chosen 2D model's output size relates to the canvas size. */
   fit: CanvasSizeFit;
   /**
-   * #284: the output size the next turn really sends when the artboard is its source (it holds something and the
-   * composer still carries it): the server then sets the size from the canvas (#272), not from `fit`'s settings.
+   * #284: the output size the next turn really sends when the artboard is its source (it holds the current
+   * picture and the composer still carries it): the server then sets the size from the canvas (#272), not from `fit`'s settings.
    * Null when the artboard is not the source or the model has no output-size setting the canvas sets.
    */
   turn: CanvasTurnOutput | null;
-  /** The artboard is the next turn's source (it holds something, the chip was not dismissed, the stage is not 3D). */
+  /** The artboard is the next turn's source (it holds the current picture's layer, the chip was not dismissed; #610). */
   source: boolean;
   /**
    * #296: when the artboard is not the source and the composer carries one picture, the size an edit of that
@@ -46,6 +47,7 @@ export interface CanvasDelivery {
  */
 export function useCanvasArtboard(sessionId: string | null, referenceContext?: boolean): CanvasDelivery {
   const { schema } = useProductSchema();
+  const { proxyAssetUrl } = useAssetURLRewriter();
   const context = useStudioStore((state) => state.generationReferenceContext);
   const object = selectionForSession(useWorkspaceStore((state) => state.currentObject), sessionId);
   // The composer supplies attachments/pinned/skipped context. Without a composer, only a session-owned stage image counts.
@@ -71,9 +73,10 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
     artboard: canvasArtboard(anchor, { width, height }),
     pixels: { width, height },
   }), [anchor, height, width]);
-  // The same rule as the composer (currentObjectSource): an artboard that holds anything is the turn's source.
-  const boardIsSource = !skipped && object?.kind !== 'model' && nodes !== undefined
-    && artboardContent(nodes, geometry.artboard).length > 0;
+  // The same rule as the composer (currentObjectSource): an artboard that holds the current picture's layer is
+  // the turn's source (#610: other pictures alone, or no current picture, are not).
+  const boardIsSource = !skipped && nodes !== undefined
+    && currentObjectSource(nodes, geometry.artboard, object, proxyAssetUrl) === 'canvas';
   const turn = useMemo(
     () => (boardIsSource ? canvasTurnOutput(offering, values, { width, height }, anchor) : null),
     [anchor, boardIsSource, height, offering, values, width],

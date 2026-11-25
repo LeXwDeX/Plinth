@@ -22,7 +22,7 @@ describe('the painted selection travels with a canvas turn', () => {
     expect(chat).toContain('const geometry = inpaintGeometry(artboard, deliveryPixels);');
     expect(chat).toContain('paintMask(maskContext, geometry, maskDraftNow.strokes, \'#000000\');');
     expect(chat).toContain('selectionMask = { maskAssetId };');
-    expect(chat).toContain("const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard);");
+    expect(chat).toContain("const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard, sessionObject, proxyAssetUrl);");
     expect(chat).toContain('...(selectionMask ? { selectionMask } : {}),');
   });
 

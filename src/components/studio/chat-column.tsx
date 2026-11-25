@@ -1039,9 +1039,11 @@ export function ChatColumn() {
       // (which wins over the selection; the chip says so), leaves the object and the artboard out of the turn.
       const skipped = sessionObject != null
         && (deselectedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
-      // The Agent's current object is what the dashed artboard shows: whenever the artboard holds anything,
-      // it is rasterised at the chosen output pixels like every other delivery (export, send to chat,
-      // inpaint, merge) and uploaded as an input asset, even a lone untouched picture.
+      // The Agent's current object is what the dashed artboard shows while the current picture's layer is in it:
+      // the artboard is rasterised at the chosen output pixels like every other delivery (export, send to chat,
+      // inpaint, merge) and uploaded as an input asset, even a lone untouched picture. #610: other pictures on
+      // the board without the current one (a version clicked on the strip), or no current picture, never make
+      // the board the turn's source; only @画布 or a painted mask send it then.
       let canvasSelection: ChatAttachmentClaim[] | null = null;
       // Writing @画布 asks for the artboard itself: the same rasteriser, whatever the current object is.
       const namesBoard = reuseImages === undefined && mentionsBoard(written, mentionsRef.current);
@@ -1049,8 +1051,8 @@ export function ChatColumn() {
       const maskDraftNow = reuseImages === undefined && queuedSelection === undefined ? useMaskStore.getState().draft : null;
       const maskStrokesNow = maskDraftNow ? maskStrokeCount(maskDraftNow, sessionId) : 0;
       const withMask = maskStrokesNow > 0 && artboard !== null;
-      if (!queuedSelection && (namesBoard || withMask || (!skipped && sessionObject?.kind !== 'model')) && artboard) {
-        const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard);
+      if (!queuedSelection && (namesBoard || withMask || !skipped) && artboard) {
+        const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard, sessionObject, proxyAssetUrl);
         if (source === 'canvas') {
           try {
             // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
@@ -1119,6 +1121,7 @@ export function ChatColumn() {
         currentObject: sessionObject,
         nodes: canvasState.getNodes(sessionId),
         selectedNodeIds: canvasState.selectedNodeIds,
+        resolveUrl: proxyAssetUrl,
       }));
       // `@` references to pictures that have no handle yet travel as claims; the server verifies them, gives
       // the pictures handles and rewrites the tokens, so the text goes out as written (queued turns too).
@@ -2119,8 +2122,9 @@ export function ChatColumn() {
     const tile = tileOfObject(versions, sessionSelection);
     // A picture drawn on the board that is no version has no chip; a merged version (手绘) is one.
     if (sessionSelection.taskId.startsWith('canvas:') && !tile) return null;
-    // The artboard holds something: the turn carries the whole artboard.
-    if (sessionSelection.kind === 'image' && artboard && currentObjectSource(boardNodes, artboard) === 'canvas') {
+    // The artboard holds the current picture's layer: the turn carries the whole artboard (#610: not when the
+    // board holds only other pictures; the chip then shows the picture the turn names).
+    if (artboard && currentObjectSource(boardNodes, artboard, sessionSelection, proxyAssetUrl) === 'canvas') {
       return {
         kind: 'image',
         thumbnail: previewAssetUrl(sessionSelection.url),
@@ -2137,7 +2141,7 @@ export function ChatColumn() {
       label: versionLabel(schema, tile, sessionSelection.kind),
       handle: sessionSelection.handle ?? handleOfObject(sessionMessages, sessionSelection),
     };
-  }, [artboard, boardNodes, previewAssetUrl, schema, sessionMessages, sessionSelection, versions]);
+  }, [artboard, boardNodes, previewAssetUrl, proxyAssetUrl, schema, sessionMessages, sessionSelection, versions]);
   // The branch chip belongs to the version it was made for: another version on the stage drops it.
   const branchChip = useMemo((): ComposerBranch | null => {
     if (!branchFrom || !sessionSelection || objectKey(sessionSelection) !== branchFrom.key) return null;

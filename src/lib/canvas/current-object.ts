@@ -1,11 +1,14 @@
 /**
  * Which picture the Agent works on when a turn is sent. The dashed artboard is the real canvas sent upstream:
- * whatever it holds, everything visible inside it is rasterised into one picture at the chosen output pixels,
- * so the current object is:
- *  - the object's own picture (keeping its @img handle and source task) only when there is no artboard or the
- *    artboard holds nothing;
- *  - otherwise the artboard rasterised into one picture (source: the canvas), even when it holds just the
- *    object's untouched picture — the original's own size or framing is not what the person chose.
+ * everything visible inside it is rasterised into one picture at the chosen output pixels, so the current
+ * object is:
+ *  - the artboard rasterised into one picture (source: the canvas) when the current picture's own layer is
+ *    inside it, even when it holds just that untouched picture — the original's own size or framing is not
+ *    what the person chose;
+ *  - otherwise the object's own picture (keeping its @img handle and source task): no artboard, an artboard
+ *    that holds nothing, or one that holds only other pictures (#610: a version clicked on the strip is not on
+ *    the board, and the bow left there must not become image 1 of the axe's edit). No current picture means no
+ *    board either; the person sends the board explicitly with @画布 or a painted mask.
  * Pure rules; the caller rasterises and uploads.
  */
 import { artboardContent } from './export-canvas';
@@ -21,13 +24,35 @@ export function untouchedPicture(node: CanvasNode): boolean {
   return node.type === 'image' && node.crop === undefined && !node.rotation && (node.opacity ?? 1) === 1;
 }
 
+/** The current object as the board rules read it. */
+export interface BoardObject { kind: string; url: string; taskId: string; captureId?: string }
+
+/** Maps an object's address to the one its board layer stores (the proxied asset URL). */
+export type LayerUrl = (url: string, taskId: string) => string | null | undefined;
+
+/**
+ * Whether a board layer shows the current picture: the same address, a layer of the same Task (a brush-baked
+ * copy keeps the Task while its address changes), or the same 3D capture. A `canvas:` ID names no Task (a
+ * picture made on the board, shared by several layers), so only the address counts for it.
+ */
+export function showsObject(node: CanvasNode, object: BoardObject, resolveUrl: LayerUrl): boolean {
+  if (node.type !== 'image' || object.kind !== 'image') return false;
+  const url = resolveUrl(object.url, object.taskId) ?? object.url;
+  if (url && node.imageUrl === url) return true;
+  // A capture names the model it was taken from as its Task: another capture of that model is not this one.
+  if (object.captureId) return node.captureId === object.captureId;
+  return object.taskId !== '' && !object.taskId.startsWith('canvas:') && node.taskId === object.taskId;
+}
+
 export function currentObjectSource(
   nodes: readonly CanvasNode[],
   artboard: ArtboardRect | null,
+  object: BoardObject | null | undefined,
+  resolveUrl: LayerUrl,
 ): CurrentObjectSource {
-  if (!artboard) return 'object';
-  // An empty artboard has nothing to rasterise: the object, if any, is still what the turn continues from.
-  return artboardContent(nodes, artboard).length === 0 ? 'object' : 'canvas';
+  if (!artboard || !object || object.kind !== 'image') return 'object';
+  // An artboard without the object's layer (empty, or other pictures only) is not what the person works on.
+  return artboardContent(nodes, artboard).some((node) => showsObject(node, object, resolveUrl)) ? 'canvas' : 'object';
 }
 
 /**
