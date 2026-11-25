@@ -87,10 +87,18 @@ describe('an approved plan whose turn is over says its steps were not run (#403)
 
 describe('a reply read just before its turn ended does not stay running (#597)', () => {
   it('reads the page again after done while the reply is still pending, and recovery takes a turn that really runs', () => {
-    expect(column).toContain("import { messagesBesideStream, readUntilSettled } from '@/lib/chat/turn-settle';");
+    expect(column).toContain("import { messagesBesideStream, readUntilSettled, refreshTasksAfterDone } from '@/lib/chat/turn-settle';");
     const settle = send.slice(send.indexOf('settleStreaming(sessionId, page);'));
     expect(settle.indexOf("if (followed !== 'done') {")).toBeGreaterThan(0);
     expect(settle).toMatch(/void readUntilSettled\(\{[\s\S]{0,400}delays: SETTLE_REREAD_MILLISECONDS,[\s\S]{0,200}outcome === 'running' && shown\(\)\) setServerTurnTick/);
+  });
+
+  it('reads the session\'s running tasks at done and with the rereads, not only at the next task poll (#605)', () => {
+    expect(column).toContain("import { refreshSessionTasks } from '@/lib/workspace/task-read';");
+    const settle = send.slice(send.indexOf('settleStreaming(sessionId, page);'));
+    // Before the early return for a reply that is no longer pending: the tasks are read either way.
+    expect(settle).toMatch(/if \(followed === 'done'\) \{[\s\S]{0,400}void refreshTasksAfterDone\(\{\s*refresh: \(\) => refreshSessionTasks\(sessionId, taskRead\),\s*isCurrent: shown,\s*delays: SETTLE_REREAD_MILLISECONDS,/);
+    expect(settle.indexOf('void refreshTasksAfterDone(')).toBeLessThan(settle.indexOf('if (!page.messages.some((message) => message.isPending)) return;'));
   });
 
   it('hides only the streaming turn\'s own pending reply next to the live buffer', () => {

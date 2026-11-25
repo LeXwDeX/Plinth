@@ -105,7 +105,8 @@ import { recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
 import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
-import { messagesBesideStream, readUntilSettled } from '@/lib/chat/turn-settle';
+import { messagesBesideStream, readUntilSettled, refreshTasksAfterDone } from '@/lib/chat/turn-settle';
+import { refreshSessionTasks } from '@/lib/workspace/task-read';
 import { replaceFailureMessage } from '@/lib/chat/turn-replace-error';
 import { hasSentWords, sessionTurnRunning } from '@/lib/chat/turn-running';
 import { selectedTranscriptText, transcriptClipboard } from '@/lib/chat/transcript-copy';
@@ -1400,6 +1401,22 @@ export function ChatColumn() {
                 settled = true;
                 window.clearTimeout(settleFallback);
                 settleStreaming(sessionId, page);
+                const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
+                // #605: the server ended this turn's tasks with it; read them now and with the rereads below rather
+                // than leave them running (and the branch disabled) until the next task poll.
+                if (followed === 'done') {
+                  const taskRead = {
+                    route: schema.runtime.http.routes.task_item,
+                    taskStates: schema.task_states,
+                    progressMaximum: schema.runtime.frontend.percentage_multiplier,
+                    isCurrent: shown,
+                  };
+                  void refreshTasksAfterDone({
+                    refresh: () => refreshSessionTasks(sessionId, taskRead),
+                    isCurrent: shown,
+                    delays: SETTLE_REREAD_MILLISECONDS,
+                  });
+                }
                 // #403: the stream is over without saying the turn ended, yet the server still runs it (the stream
                 // was given up or stopped, or another turn holds the session). The session recovery reconnects it
                 // and keeps reading until it ends.
@@ -1410,7 +1427,6 @@ export function ChatColumn() {
                 }
                 // #597: the stream said the turn ended before the server marked it so. Read again until the reply
                 // is no longer pending; one still pending after that is a turn that really runs: recovery follows it.
-                const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
                 void readUntilSettled({
                   read: () => chatClient.listMessagePage(sessionId, { limit: messagePageSize }),
                   apply: (next) => applyNewestMessagePage(sessionId, next),

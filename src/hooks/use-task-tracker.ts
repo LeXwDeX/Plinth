@@ -18,8 +18,8 @@ import { useEffect } from 'react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { hydrateRunningTasks, hydrateSessionTasks } from '@/lib/workspace/task-hydration';
-import { projectNativeTaskDetail } from '@/lib/workspace/task-projection';
 import { startSerialPoller } from '@/lib/workspace/serial-poller';
+import { applyTaskRead, readTask } from '@/lib/workspace/task-read';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { useChatStore } from '@/store/chat-store';
 
@@ -92,37 +92,13 @@ export function useTaskTracker(): void {
     return startSerialPoller(async (signal) => {
       const store = useWorkspaceStore.getState();
       const active = store.trackedTasks.filter(isActive);
+      const options = { route: schema.runtime.http.routes.task_item, taskStates: schema.task_states, progressMaximum };
       await Promise.all(
         active.map(async (task) => {
-          const route = schema.runtime.http.routes.task_item.replace(
-            '{taskID}',
-            encodeURIComponent(task.taskId),
-          );
-          try {
-            const response = await fetch(route, { signal });
-            if (signal.aborted) return;
-            if (response.status === 404) {
-              useWorkspaceStore.getState().markTaskNotFound(task.taskId);
-              return;
-            }
-            if (!response.ok) return;
-            const raw: unknown = await response.json();
-            if (signal.aborted) return;
-            const projection = projectNativeTaskDetail(
-              raw,
-              schema.task_states,
-              progressMaximum,
-            );
-            if (projection && !signal.aborted) {
-              useWorkspaceStore.getState().applyTaskDetail(
-                task.taskId,
-                projection,
-                useChatStore.getState().activeSessionId,
-              );
-            }
-          } catch {
-            // 瞬时网络错误：静默等待下一个轮询 tick。
-          }
+          // #605: shared with the reads after a turn's `done`, so a task has one read in flight at a time.
+          const read = await readTask(task.taskId, options);
+          // 瞬时网络错误或非 2xx：静默等待下一个轮询 tick。
+          if (!signal.aborted) applyTaskRead(task.taskId, read, useChatStore.getState().activeSessionId);
         }),
       );
       // A task the person started is read in a hidden tab too: its end is announced there (tab title, notification).
