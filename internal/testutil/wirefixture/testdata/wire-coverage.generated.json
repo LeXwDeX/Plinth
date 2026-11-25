@@ -86,8 +86,8 @@
       "disabled-zero-egress": 26,
       "enabled": 58,
       "local-no-wire": 6,
-      "partial": 11,
-      "real": 41,
+      "partial": 14,
+      "real": 38,
       "total": 84
     },
     "units": {
@@ -4826,7 +4826,7 @@
       "model_id": "meshy-t2.5",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "real",
+      "evidence": "partial",
       "units": [
         "meshy.v2|image-to-3d|DELETE /openapi/v1/image-to-3d/{id}",
         "meshy.v2|image-to-3d|GET /openapi/v1/image-to-3d/{id}",
@@ -4898,7 +4898,7 @@
       "model_id": "nano-banana-pro",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "real",
+      "evidence": "partial",
       "units": [
         "meshy.v2|image-to-image|GET /openapi/v1/image-to-image/{id}",
         "meshy.v2|image-to-image|POST /openapi/v1/image-to-image"
@@ -4909,7 +4909,7 @@
       "model_id": "nano-banana-pro",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "real",
+      "evidence": "partial",
       "units": [
         "meshy.v2|text-to-image|DELETE /openapi/v1/text-to-image/{id}",
         "meshy.v2|text-to-image|GET /openapi/v1/balance",
