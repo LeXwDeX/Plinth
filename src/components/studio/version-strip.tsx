@@ -23,6 +23,7 @@ import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/compare';
 import { selectionForSession } from '@/lib/workspace/session-scope';
+import { groupProgress } from '@/lib/workspace/three-view';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
 import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
@@ -129,7 +130,8 @@ function Thumb({ tile, size, handle }: { tile: VersionTile; size: 'regular' | 'c
   const src = resolve(source);
   const text = (key: string) => schemaText(schema, `ui.studio.strip.${key}`);
   const dimension = size === 'regular' ? 'size-14' : 'size-7';
-  const finished = tile.views.filter((view) => view.status === 'succeeded').length;
+  // #633: the three-view card's count — the right view joins it once asked for, so a three-view group reads 3/3.
+  const progress = groupProgress(tile.views);
   return (
     <span className={cn('relative flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted', dimension)} data-testid="version-thumb" data-grid={grid ? grid.length : undefined}>
       {grid ? (
@@ -158,7 +160,7 @@ function Thumb({ tile, size, handle }: { tile: VersionTile; size: 'regular' | 'c
             {tile.views.map((view) => <span key={view.key} className={cn('size-1.5 rounded-full', VIEW_PIP[view.status] ?? 'bg-muted-foreground/40')} />)}
           </span>
           <span className="text-[9px] font-semibold leading-3" data-testid="version-group-count">
-            {formatSchemaText(text('group_progress'), { done: finished, total: tile.views.length })}
+            {formatSchemaText(text('group_progress'), progress)}
           </span>
         </span>
       ) : size === 'regular' && tile.slots.length > 1 ? (

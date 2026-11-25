@@ -45,6 +45,8 @@ export interface VersionSlot {
 export interface VersionView {
   key: string;
   label: string;
+  /** The group is complete without this view (the right one); it counts once it was asked for (#633). */
+  optional: boolean;
   status: ThreeViewStatus;
   taskId: string;
   assetId: string;
@@ -436,7 +438,7 @@ function addThreeViewTiles({ tiles, byKey, byTask, groups }: {
     tile.groupLabel = group.label || tile.groupLabel;
     tile.groupComplete = group.complete;
     tile.views = group.slots.map((slot) => ({
-      key: slot.key, label: slot.label, status: slot.status, taskId: slot.taskId, assetId: slot.outputAssetId,
+      key: slot.key, label: slot.label, optional: slot.optional, status: slot.status, taskId: slot.taskId, assetId: slot.outputAssetId,
     }));
     for (const slot of group.slots) if (slot.taskId) byTask.set(slot.taskId, key);
   }
