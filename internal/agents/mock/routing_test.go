@@ -546,6 +546,28 @@ func TestMultiviewDirectiveRoutesToTheMultiViewTool(t *testing.T) {
 	}
 }
 
+// #630: the person advanced the views on the card, then asked the Agent for a
+// 3D model from them. No directive names the group; the mock Agent takes the
+// newest group's run ID from the system context's groups block, never a
+// view's Task ID.
+func TestThreeViewTo3DTakesTheRunIDFromTheGroupsBlock(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	threeView := product.Application().Chat.ThreeView
+	tools := append(append([]agents.Tool{}, allTools...), agents.Tool{Name: threeView.Multiview.Tool})
+	line := func(run, views string) string {
+		return strings.NewReplacer("{run}", run, "{views}", views).Replace(threeView.Messages.GroupsContextLine)
+	}
+	block := strings.ReplaceAll(threeView.Messages.GroupsContext, "{groups}",
+		line("skill_run_new", "front=succeeded / left=succeeded / back=succeeded")+"\n"+line("skill_run_old", "front=failed"))
+	tool, arguments := plan(t, []agents.Message{{Role: "system", Content: "base" + block}, {Role: "user", Content: "用这组三视图生成 3D 模型"}}, tools)
+	if want := map[string]any{"model": "tripo-v3.1-multiview", "three_view_group": "skill_run_new"}; tool != threeView.Multiview.Tool || !reflect.DeepEqual(arguments, want) {
+		t.Fatalf("groups block: got %s %#v, want %#v", tool, arguments, want)
+	}
+}
+
 // #239: a 2D drawing request without a brief asks the 2D purpose, but only
 // when the delivery requirements are still open; a request that already names
 // the frame, size or background goes straight to the image tool.

@@ -2008,6 +2008,19 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if views := messages.ViewsUnsupported; strings.TrimSpace(views) != "" && !strings.Contains(views, "{model}") {
 		return errors.New("three_view.messages.views_unsupported 必须包含 {model}")
 	}
+	// #630: the groups block and its refusal hint name the run IDs.
+	if strings.TrimSpace(messages.GroupsContext) != "" {
+		if !strings.Contains(messages.GroupsContext, "{groups}") {
+			return errors.New("three_view.messages.groups_context 必须包含 {groups}")
+		}
+		if !strings.Contains(messages.GroupsContextLine, "{run}") || !strings.Contains(messages.GroupsContextLine, "{views}") {
+			return errors.New("three_view.messages.groups_context_line 必须包含 {run} 与 {views}")
+		}
+	}
+	if hint := messages.GroupTaskNamed; strings.TrimSpace(hint) != "" &&
+		(!strings.Contains(hint, "{value}") || !strings.Contains(hint, "{run}")) {
+		return errors.New("three_view.messages.group_task_named 必须包含 {value} 与 {run}")
+	}
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)

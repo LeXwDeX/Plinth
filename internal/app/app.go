@@ -1388,7 +1388,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// off (propose and read stay in).
 	orchestratorSchema.AgentTools = withoutAssetListExecutionTools(
 		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
+	// #630: the three-view service is built after the orchestrator; the groups
+	// block reads it once it exists, and a deployment without the recipe keeps
+	// the block out.
+	var threeViewService *threeview.Service
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		ThreeViewGroups: func(ctx context.Context, ownerID, sessionID string) ([]chat.ThreeViewGroupFact, error) {
+			if threeViewService == nil {
+				return nil, nil
+			}
+			return threeViewService.AgentGroups(ctx, ownerID, sessionID)
+		},
 		Project:           applicationSchema.Project,
 		Texts:             texts,
 		AgentProviderName: chatAgentDisplayName(applicationSchema),
@@ -2125,7 +2135,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	agentToolExecutor.SetThreeView(applicationSchema.Chat.ThreeView)
-	var threeViewService *threeview.Service
 	if applicationSchema.Chat.ThreeView.RecipeID != "" {
 		threeViewService, err = threeview.New(threeview.Config{
 			Runtime: skillRuntime, Sessions: chatService, Schema: applicationSchema.Chat.ThreeView,

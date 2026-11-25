@@ -515,6 +515,12 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		// 同一物体的多张视角图：句中点名的句柄优先，其次随这句话上传的图，最后是当前选中的图；最多 4 张。
 		return toolModelFromViews, map[string]any{"model": "tripo-v3.1-multiview", "reference_handles": viewHandles(text, uploads, chosen.images)}
 
+	case adapter.wants(request, toolModelFromViews) && viewsTo3DPattern.MatchString(text) && viewsWordPattern.MatchString(text) &&
+		listedThreeViewGroup(request) != "":
+		// 用户在三视图卡片上推进了视角，再让 Agent 用三视图生成 3D（#630）：
+		// 运行 ID 取自系统上下文的本会话三视图组（最新的一组），不是某个视角的 Task ID。
+		return toolModelFromViews, map[string]any{"model": "tripo-v3.1-multiview", "three_view_group": listedThreeViewGroup(request)}
+
 	case adapter.wants(request, toolEditMultiview) && strings.Contains(text, "四视角") &&
 		!strings.Contains(text, "生成") && multiviewEditPattern.MatchString(text):
 		// 来源是该四视角组里的一张图（句柄或当前选中），服务端解析为它的公开 Task；
@@ -812,6 +818,22 @@ var (
 	multiviewDirectiveGroup = regexp.MustCompile(`three_view_group 填 ([^\s，。,]+)`)
 	multiviewDirectiveModel = regexp.MustCompile(`model 填 ([^\s，。,]+)`)
 )
+
+// listedThreeViewGroup reads the newest group's run ID from the Schema's
+// groups block of the system context (#630), or "" when it carries none.
+var listedThreeViewGroupPattern = regexp.MustCompile(`【本会话三视图组】[^\n]*\n- ([^\s：:]+)[：:]`)
+
+func listedThreeViewGroup(request agents.Request) string {
+	for _, message := range request.Messages {
+		if message.Role != "system" {
+			continue
+		}
+		if group := listedThreeViewGroupPattern.FindStringSubmatch(message.Content); group != nil {
+			return group[1]
+		}
+	}
+	return ""
+}
 
 // directedMultiview is the call a turn with a structured multiview request
 // asks for, or nil when the system context carries no such directive.

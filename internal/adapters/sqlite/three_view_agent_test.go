@@ -164,4 +164,26 @@ func TestModelSourceOfAnOlderGroupIsStillItsFrontView(t *testing.T) {
 	if _, member, err := views.SourceOf(ctx, "owner-b", "session-b", started.Slots[0].TaskID); err != nil || member {
 		t.Fatalf("another owner's session must not see the view: member=%v err=%v", member, err)
 	}
+
+	// #630: the Agent's groups follow the listing. A view the person starts on
+	// the card shows up with its state under the group's run ID at once,
+	// without a tool result the Agent would have to see.
+	facts, err := views.AgentGroups(ctx, "owner-a", "session-a")
+	if err != nil || len(facts) != 1 || facts[0].RunID != newer.ID || len(facts[0].Views) != 1 ||
+		facts[0].Views[0].View != "front" || facts[0].Views[0].Status != string(threeview.NotStarted) {
+		t.Fatalf("the Agent's groups before the card started a view: %+v %v", facts, err)
+	}
+	schema.MaximumListed = 2
+	both, err := threeview.New(threeview.Config{Runtime: runtime, Sessions: ownsSessions{repo}, Schema: schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err = both.AgentGroups(ctx, "owner-a", "session-a")
+	if err != nil || len(facts) != 2 || facts[1].RunID != older.ID ||
+		facts[1].Views[0].Status == string(threeview.NotStarted) || facts[1].Views[0].TaskID != started.Slots[0].TaskID {
+		t.Fatalf("the view started on the card must show under its group's run ID: %+v %v", facts, err)
+	}
+	if _, err := (threeview.ForGeneration{Service: views}).Groups(ctx, "owner-b", "session-a"); err == nil {
+		t.Fatal("another owner must not read the session's groups")
+	}
 }

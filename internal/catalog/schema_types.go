@@ -4405,6 +4405,20 @@ type ChatThreeViewMessages struct {
 	// never degrades to a single-image step with one of the pictures. A
 	// Catalog without this copy words the refusal as ViewsInvalid.
 	ViewsUnsupported string `json:"views_unsupported,omitempty"`
+	// GroupsContext is the Agent's per-turn block of the session's listed
+	// three-view groups (#630): {groups} is one GroupsContextLine per group,
+	// newest first. A view the person started on the card never reaches the
+	// Agent as a tool result, so the run ID and the view states are read from
+	// the groups every turn. It also follows GroupNotFound, so a refusal names
+	// the right run IDs. Empty keeps the block out.
+	GroupsContext string `json:"groups_context,omitempty"`
+	// GroupsContextLine is one group of GroupsContext: {run} is its run ID and
+	// {views} each view as key=status, joined by multiview.view_separator.
+	GroupsContextLine string `json:"groups_context_line,omitempty"`
+	// GroupTaskNamed follows GroupNotFound when the value the Agent passed as
+	// the group is the Task or the picture of one view of a listed group
+	// (#630): {value} is that value and {run} the group's run ID.
+	GroupTaskNamed string `json:"group_task_named,omitempty"`
 }
 
 // ChatPendingApprovalsSchema is application.chat.pending_approvals. It is
