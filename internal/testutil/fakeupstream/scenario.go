@@ -232,6 +232,9 @@ type Env struct {
 	// chatRequests keeps the bounded chat request record (#247). It is test
 	// fixture data, never an upstream contract.
 	chatRequests []ChatRequestRecord
+	// pictureWeight is the stack-wide picture weight (#629, see weight.go);
+	// zero keeps every picture at its natural fake size.
+	pictureWeight PictureWeight
 }
 
 // NewEnv applies the defaults to a Config.

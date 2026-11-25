@@ -170,13 +170,21 @@ func TestResponseWeightSelectorPadsThePicture(t *testing.T) {
 		t.Fatalf("key selector: %d, %d bytes", status, len(raw))
 	}
 	// The weight is capped, and garbage is ignored.
-	if got := requestedWeight(mustRequest(t, "999999999999")); got != MaxResponseBytes {
+	env := fakeupstream.NewEnv(fakeupstream.Config{})
+	if got := env.PictureWeightOf(mustRequest(t, "999999999999"), "", 1024, 1024).Bytes; got != MaxResponseBytes {
 		t.Fatalf("requested weight = %d, want the cap %d", got, MaxResponseBytes)
 	}
 	for _, garbage := range []string{"heavy", "-5", ""} {
-		if got := requestedWeight(mustRequest(t, garbage)); got != 0 {
+		if got := env.PictureWeightOf(mustRequest(t, garbage), "", 1024, 1024).Bytes; got != 0 {
 			t.Fatalf("weight %q = %d, want 0", garbage, got)
 		}
+	}
+	// #629: the prompt marker reaches the gateway inside the message text.
+	marked := requestBody([]any{map[string]any{"type": "text", "text": "a red cube [[fake:picture-bytes:2097152]]"}})
+	if status, body := complete(f, marked); status != http.StatusOK {
+		t.Fatalf("marked prompt: %d %v", status, body)
+	} else if _, _, size := decodedPicture(t, body); size < 2<<20 {
+		t.Fatalf("marked prompt picture = %d bytes, want at least %d", size, 2<<20)
 	}
 	// It also pads an edit's PNG.
 	status, body = complete(f, references(1), ResponseBytesHeader, fmt.Sprint(weight))

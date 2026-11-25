@@ -5,9 +5,11 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -233,8 +235,10 @@ func subjectJPEGAt(spec PictureSpec) ([]byte, error) {
 // which every decoder skips. It stands in for a real 4K answer, whose JPEG is
 // several megabytes: the fake's own flat pictures are far smaller than a real
 // photograph, so a test of response limits and timeouts asks for the weight
-// explicitly. The filler is a fixed pattern.
-func PadJPEG(data []byte, size int) []byte {
+// explicitly. The filler is a fixed text pattern (PadFileWith also has noise).
+func PadJPEG(data []byte, size int) []byte { return padJPEG(data, size, FillerText) }
+
+func padJPEG(data []byte, size int, filler Filler) []byte {
 	if size <= len(data) || len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
 		return data
 	}
@@ -244,22 +248,31 @@ func PadJPEG(data []byte, size int) []byte {
 	const segment = 65533             // a COM segment holds at most 65533 bytes of text
 	out := make([]byte, 0, len(data)) // grows by append up to the bounded size; no allocation by caller value
 	out = append(out, data[:2]...)
-	filler := bytes.Repeat([]byte("fake-upstream-padding "), segment/22+1)[:segment]
+	source := newPaddingSource(filler)
 	for len(out)+4+segment+len(data)-2 <= size {
 		out = append(out, 0xFF, 0xFE, 0xFF, 0xFF)
-		out = append(out, filler...)
+		out = source.appendSegment(out, segment)
 	}
 	if rest := size - len(out) - (len(data) - 2); rest > 4 {
 		length := rest - 2 // the length field counts itself
 		out = append(out, 0xFF, 0xFE, byte(length>>8), byte(length))
-		out = append(out, filler[:length-2]...)
+		out = source.appendSegment(out, length-2)
 	}
 	return append(out, data[2:]...)
 }
 
 // PadPNG grows a PNG to at least size bytes with one ancillary tEXt chunk
 // before IEND, which every decoder skips (see PadJPEG).
-func PadPNG(data []byte, size int) []byte {
+func PadPNG(data []byte, size int) []byte { return padPNG(data, size, FillerText) }
+
+// noiseChunk is the private ancillary chunk that carries noise padding: tEXt
+// must hold Latin-1 text without NUL bytes, so arbitrary bytes go in a chunk
+// of their own. The lower-case first and second letters mark it ancillary and
+// private, the upper-case third is the reserved bit and the lower-case fourth
+// marks it safe to copy, so every decoder skips it.
+const noiseChunk = "faKe"
+
+func padPNG(data []byte, size int, filler Filler) []byte {
 	const trailer = 12 // the IEND chunk: length, type, CRC
 	if size <= len(data) || len(data) < trailer || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 		return data
@@ -267,28 +280,77 @@ func PadPNG(data []byte, size int) []byte {
 	if size > MaxPaddedJPEGBytes {
 		size = MaxPaddedJPEGBytes
 	}
-	const overhead = 12 + len("Comment\x00") // chunk framing plus the keyword
+	kind, keyword := "tEXt", "Comment\x00"
+	if filler == FillerNoise {
+		kind, keyword = noiseChunk, ""
+	}
+	overhead := 12 + len(keyword) // chunk framing plus the keyword
 	text := size - len(data) - overhead
 	if text < 1 {
 		text = 1
 	}
-	filler := bytes.Repeat([]byte("fake-upstream-padding "), text/22+1)[:text]
-	var chunk bytes.Buffer
-	writePNGChunk(&chunk, "tEXt", append([]byte("Comment\x00"), filler...))
-	out := make([]byte, 0, len(data)+chunk.Len())
+	out := make([]byte, 0, len(data)) // grows by append up to the bounded size
 	out = append(out, data[:len(data)-trailer]...)
-	out = append(out, chunk.Bytes()...)
+	out = binary.BigEndian.AppendUint32(out, uint32(len(keyword)+text))
+	start := len(out)
+	out = append(out, kind...)
+	out = append(out, keyword...)
+	out = newPaddingSource(filler).appendSegment(out, text)
+	out = binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(out[start:]))
 	return append(out, data[len(data)-trailer:]...)
 }
 
-// PadFile pads a fake picture to at least size bytes (JPEG and PNG only; other
-// formats are returned as they are).
-func PadFile(file File, size int) File {
+// PadFile pads a fake picture to at least size bytes with the text filler
+// (JPEG and PNG only; other formats are returned as they are).
+func PadFile(file File, size int) File { return PadFileWith(file, size, FillerText) }
+
+// PadFileWith pads a fake picture to at least size bytes with the given
+// filler (JPEG and PNG only; other formats are returned as they are).
+func PadFileWith(file File, size int, filler Filler) File {
 	switch file.MediaType {
 	case "image/jpeg":
-		file.Data = PadJPEG(file.Data, size)
+		file.Data = padJPEG(file.Data, size, filler)
 	case "image/png":
-		file.Data = PadPNG(file.Data, size)
+		file.Data = padPNG(file.Data, size, filler)
 	}
 	return file
+}
+
+// paddingText is the repeating text filler.
+const paddingText = "fake-upstream-padding "
+
+// paddingSource writes filler bytes. Text repeats paddingText from the start
+// of every segment, so a padded picture compresses to almost nothing (the
+// historical filler). Noise is a fixed xorshift stream that continues across
+// segments: deterministic, with no repeat inside one picture, so a general
+// compressor (gzip on the wire, a compressing store) cannot shrink it.
+type paddingSource struct {
+	filler Filler
+	state  uint64
+}
+
+func newPaddingSource(filler Filler) *paddingSource {
+	return &paddingSource{filler: filler, state: 0x9E3779B97F4A7C15}
+}
+
+// appendSegment appends n filler bytes to out.
+func (s *paddingSource) appendSegment(out []byte, n int) []byte {
+	start := len(out)
+	out = slices.Grow(out, n)[:start+n]
+	segment := out[start:]
+	if s.filler != FillerNoise {
+		for index := range segment {
+			segment[index] = paddingText[index%len(paddingText)]
+		}
+		return out
+	}
+	var word [8]byte
+	for index := 0; index < len(segment); index += len(word) {
+		s.state ^= s.state << 13
+		s.state ^= s.state >> 7
+		s.state ^= s.state << 17
+		binary.LittleEndian.PutUint64(word[:], s.state)
+		copy(segment[index:], word[:])
+	}
+	return out
 }

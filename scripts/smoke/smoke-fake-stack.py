@@ -320,9 +320,11 @@ FAKE_CONTROL = f"http://127.0.0.1:{FAKE_PORT}"
 CHAT_COMPLETIONS_PATH = "/openai/v1/chat/completions"
 
 
-def fake_control(method="GET", path="/fake/control/chat-requests"):
-    """Read or clear the fake's own control plane (never a real upstream)."""
-    request = urllib.request.Request(FAKE_CONTROL + path, method=method)
+def fake_control(method="GET", path="/fake/control/chat-requests", body=None):
+    """Read, set or clear the fake's own control plane (never a real upstream)."""
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    request = urllib.request.Request(FAKE_CONTROL + path, data=data, method=method, headers=headers)
     try:
         response = urllib.request.urlopen(request, timeout=10)
     except urllib.error.HTTPError as error:
@@ -2157,6 +2159,11 @@ def _send_chat(api, session, body, seconds=45):
 
 
 def scenario_three_view(work, api, offerings):
+    _three_view_budget_and_strict(work, api, offerings)
+    _three_view_heavy_front(work, api, offerings)
+
+
+def _three_view_budget_and_strict(work, api, offerings):
     """#243: an approved budget finishes front, left and back without a click,
     feeds the front output into the later views and submits a P2 multiview 3D
     step; manual mode starts only the front view until the person asks for the
@@ -2359,6 +2366,119 @@ def scenario_three_view(work, api, offerings):
     record("three-view strict: the frozen left input contains the front output",
            bool(front_asset) and bool(assets) and assets[0] == front_asset,
            f"front {front_asset or 'none'} left source {assets[:1]}")
+
+
+# #629: the PROD front view was a 3072x5504 Gemini picture over the 14,625,000-byte
+# reference limit of the Gemini image-to-image Offering, so starting the left view
+# re-encoded it (#276) before freezing. The fake's pictures are light by default; the
+# stack-wide picture weight (fakeupstream weight.go) makes every generated picture
+# heavier than that limit for this scenario only.
+HEAVY_FRONT_IMAGE = IMAGE_OFFERINGS["gemini"][1]
+HEAVY_FRONT_LIMIT = 14_625_000
+HEAVY_FRONT_BYTES = 20_000_000
+PICTURE_WEIGHT_PATH = "/fake/control/picture-weight"
+
+
+def _input_asset_derivation(work, stack, asset_id):
+    """(derived_from_asset_id, derivation_method, source_size_bytes) of an input asset, or None."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        row = db.execute("SELECT derived_from_asset_id, derivation_method, source_size_bytes "
+                         "FROM generation_input_assets WHERE id=?", (asset_id,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return None
+    return row
+
+
+def _three_view_heavy_front(work, api, offerings):
+    """#629: a generated front view heavier than the Offering's reference limit.
+    In manual mode the front starts by itself; the person then starts the left
+    view (the card's 「继续生成」), whose source must be re-encoded before it is
+    frozen. The start answers 200 (no three_view_conflict), the left input is
+    the re-encoded copy whose derivation names the front output, the back view
+    reuses the same copy and both finish. First, the prompt marker (the only
+    selector a deployed fake stack's chat reaches) makes one generated picture
+    heavy through Plinth's own prompt."""
+    marked = step(api, offerings, "three-view heavy front: a prompt-marked Gemini picture", IMAGE_OFFERINGS["gemini"][0],
+                  "text-to-image", {"prompt": f"a plain red cube [[fake:picture-bytes:{HEAVY_FRONT_BYTES}]]"},
+                  new_session(api))
+    sizes = [asset.get("size") or 0 for asset in (marked or {}).get("assets") or [] if asset.get("role") == "image"]
+    record("three-view heavy front: the prompt marker makes the generated picture heavier than the reference limit",
+           bool(sizes) and min(sizes) >= HEAVY_FRONT_BYTES > HEAVY_FRONT_LIMIT, f"image sizes {sizes}")
+    status, _ = fake_control("PUT", PICTURE_WEIGHT_PATH, {"bytes": HEAVY_FRONT_BYTES})
+    if status != 200:
+        record("three-view heavy front: set the fake picture weight", False, f"PUT {status}")
+        return
+    try:
+        picture = upload_asset(api, "heavy-reference.png",
+                               make_picture(96, 192, (255, 255, 255), [((32, 24, 64, 168), (52, 58, 70))]), "image/png")
+        if not picture:
+            record("three-view heavy front: upload the reference picture", False, "upload refused")
+            return
+        session = new_session(api)
+        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+        if status != 200:
+            record("three-view heavy front: manual approval mode", False, f"PUT {status}")
+            return
+        views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
+        status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                               "ai_model": HEAVY_FRONT_IMAGE,
+                                               "image_urls": [f"/api/v1/assets/{picture}"]})
+        if status not in (200, 201, 202):
+            record("three-view heavy front: start the front view", False, f"send {status}")
+            return
+        group, front = None, {}
+        end = time.time() + 120
+        while time.time() < end:
+            group = _three_view_group(api, session)
+            slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+            front = slots.get("front") or {}
+            if front.get("status") in ("succeeded", "failed", "rejected", "denied", "canceled"):
+                break
+            time.sleep(0.3)
+        front_asset = front.get("output_asset_id") or ""
+        record("three-view heavy front: the front view succeeds", front.get("status") == "succeeded" and bool(front_asset),
+               f"front {front.get('status')} asset {front_asset or 'none'}")
+        if not front_asset:
+            return
+        run_id = (group or {}).get("run_id") or ""
+        answers = {}
+        for key in ("left", "back"):
+            status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/three-views/{run_id}/views/{key}",
+                                    {"action": "start", "attempt": 0})
+            answers[key] = (status, next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
+                                          if slot.get("key") == key), ""))
+        record("three-view heavy front: starting left and back answers 200, not 409",
+               all(status == 200 and state in ("starting", "running", "succeeded")
+                   for status, state in answers.values()), f"answers {answers}")
+        end = time.time() + 120
+        while time.time() < end:
+            group = _three_view_group(api, session)
+            slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+            if all(slots.get(key, {}).get("status") in ("succeeded", "failed", "rejected", "denied", "canceled")
+                   for key in ("left", "back")):
+                break
+            time.sleep(0.3)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        record("three-view heavy front: left and back succeed",
+               slots.get("left", {}).get("status") == "succeeded" and slots.get("back", {}).get("status") == "succeeded",
+               f"left {slots.get('left', {}).get('status')}, back {slots.get('back', {}).get('status')}")
+        prepared = _prepared_inputs(work, "main", session)
+        frozen = {}
+        for needle, key in (("clean left view", "left"), ("clean back view", "back")):
+            match = next((item for item in prepared
+                          if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+            assets = _prepared_reference_assets(match) if match else []
+            frozen[key] = assets[0] if assets else ""
+        derivation = _input_asset_derivation(work, "main", frozen.get("left")) if frozen.get("left") else None
+        record("three-view heavy front: left and back freeze one re-encoded copy of the heavy front output",
+               bool(derivation) and derivation[0] == front_asset and (derivation[2] or 0) > HEAVY_FRONT_LIMIT
+               and frozen.get("left") != front_asset and frozen.get("back") == frozen.get("left"),
+               f"front {front_asset} frozen {frozen} derivation {derivation}")
+    finally:
+        fake_control("DELETE", PICTURE_WEIGHT_PATH)
 
 
 FOUR_VIEW_IMAGE = IMAGE_OFFERINGS["openai"][1]
