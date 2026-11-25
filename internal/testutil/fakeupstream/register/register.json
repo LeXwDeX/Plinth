@@ -2972,29 +2972,68 @@
       "provider": "meshy",
       "api": "openapi-v1",
       "endpoints": [
-        "GET /text-to-image/{id}",
-        "GET /image-to-image/{id}",
-        "GET /image-to-3d/{id}",
-        "GET /multi-image-to-3d/{id}",
-        "GET /remesh/{id}",
-        "GET /convert/{id}",
-        "GET /retexture/{id}",
-        "GET /rigging/{id}",
-        "GET /animations/{id}",
-        "GET /uv-unwrap/{id}",
-        "GET /resize/{id}",
-        "GET /print/analyze/{id}",
-        "GET /print/multi-color/{id}",
-        "GET /text-to-motion/{id}"
+        "GET /image-to-3d",
+        "GET /rigging",
+        "GET /image-to-3d/{id}/stream"
       ],
-      "category": "other",
-      "status": "gap",
-      "behavior": "官方各任务族另有列表端点（GET /<族>）与 SSE 流端点（GET /<族>/{id}/stream），fake 只实现单任务轮询（本条挂在轮询端点上）。",
-      "plan": "Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。",
-      "issues": [
-        579
+      "category": "response-shape",
+      "status": "real",
+      "behavior": "列表端点答裸 JSON 数组，每项与 GET /{id} 当前状态的任务对象同键（列表不算轮询），越过末页答 []；page_num 1–255（0 或缺省为 1，256 答 400 “page_num must be an integer between 1 and 255”），page_size 0 或缺省为 10、负数或非数字答 400 “page_size must be an integer between 1 and 100”、101 被接受；sort_by 首字符为方向、其余为列名，非 created_at 答 400 invalid column（“created” 得 “reated”）；无 key 答 401 “Missing API key”。流端点答 200 text/event-stream，每个任务状态一个 event:message 块（data 为 GET 任务对象），终态块后关闭，已结束任务只有一个块；不存在的 id 答 event:error {message:\"Task not found\",status_code:404}，格式错误的 id 答 {message:\"Invalid ID\",status_code:400}（后者 Content-Type 带 charset），HTTP 状态都是 200；块里冒号后无空格。",
+      "samples": [
+        {
+          "file": "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-list-stream-2026-11-25.candidate.json",
+          "captured_at": "2026-11-25",
+          "provenance": "captured",
+          "app_revision": "unknown",
+          "catalog_revision": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "meshy-openapi-v1/list-and-stream-other-kinds",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image",
+        "GET /image-to-image",
+        "GET /multi-image-to-3d",
+        "GET /remesh",
+        "GET /convert",
+        "GET /retexture",
+        "GET /animations",
+        "GET /uv-unwrap",
+        "GET /resize",
+        "GET /print/analyze",
+        "GET /print/multi-color",
+        "GET /text-to-motion",
+        "GET /text-to-image/{id}/stream",
+        "GET /image-to-image/{id}/stream",
+        "GET /multi-image-to-3d/{id}/stream",
+        "GET /remesh/{id}/stream",
+        "GET /convert/{id}/stream",
+        "GET /retexture/{id}/stream",
+        "GET /rigging/{id}/stream",
+        "GET /animations/{id}/stream",
+        "GET /uv-unwrap/{id}/stream",
+        "GET /resize/{id}/stream",
+        "GET /print/analyze/{id}/stream",
+        "GET /print/multi-color/{id}/stream",
+        "GET /text-to-motion/{id}/stream"
       ],
-      "checked_at": "2026-11-25"
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "其余任务族的列表与流端点与 image-to-3d / rigging 共用同一实现（core list.go），分页、排序、错误文案与 SSE 事件格式同上；运行中任务的流按 fake 每次轮询会答的状态各发一个 message 块（文档示例为 PENDING 后 SUCCEEDED）；page_size 超过 100 截到 100、负数 page_num 用 page_num 的观测文案拒绝。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/image-to-3d",
+          "section": "List Image to 3D Tasks；Stream an Image to 3D Task"
+        },
+        {
+          "source": "#608 真实一轮（meshy-openapi-v1-list-stream-2026-11-25.candidate.json）观测的 image-to-3d 与 rigging 列表、image-to-3d 流"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "本轮只对 image-to-3d 与 rigging 列表、image-to-3d 流各取一次免费真实样本；其余任务族文档写同一路由形态，未逐族请求。运行中任务的流需要正在运行的付费任务，本轮没有。"
     },
     {
       "id": "meshy-openapi-v1/image-to-3d-pbr-without-texture",

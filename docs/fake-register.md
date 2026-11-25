@@ -20,14 +20,14 @@
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
 | `openai/v1` | 4 | 10 | 1 | 15 | 2026-11-23 |
-| `meshy/openapi-v1` | 23 | 22 | 2 | 47 | 2026-11-25 |
+| `meshy/openapi-v1` | 24 | 23 | 1 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 3 | 5 | 1 | 9 | 2026-11-09 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 79 | 90 | 5 | 174 | 2026-11-25 |
+| 合计 | 80 | 91 | 4 | 175 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -956,13 +956,20 @@
 - 没有真实样本的原因：拒绝从未向真实 API 请求过，拒绝文案为构造
 - 备注：auto_size 只在为 true 时计入互斥（页面没说显式 false 如何处理）；真实 remesh 样本（300000 quad、5800/10000 triangle、六种格式）都被放行。
 
-#### `meshy-openapi-v1/list-and-stream` · other · gap
+#### `meshy-openapi-v1/list-and-stream` · response-shape · real
 
-- 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
-- 行为：官方各任务族另有列表端点（GET /<族>）与 SSE 流端点（GET /<族>/{id}/stream），fake 只实现单任务轮询（本条挂在轮询端点上）。
+- 端点：`GET /image-to-3d`、`GET /rigging`、`GET /image-to-3d/{id}/stream`
+- 行为：列表端点答裸 JSON 数组，每项与 GET /{id} 当前状态的任务对象同键（列表不算轮询），越过末页答 []；page_num 1–255（0 或缺省为 1，256 答 400 “page_num must be an integer between 1 and 255”），page_size 0 或缺省为 10、负数或非数字答 400 “page_size must be an integer between 1 and 100”、101 被接受；sort_by 首字符为方向、其余为列名，非 created_at 答 400 invalid column（“created” 得 “reated”）；无 key 答 401 “Missing API key”。流端点答 200 text/event-stream，每个任务状态一个 event:message 块（data 为 GET 任务对象），终态块后关闭，已结束任务只有一个块；不存在的 id 答 event:error {message:"Task not found",status_code:404}，格式错误的 id 答 {message:"Invalid ID",status_code:400}（后者 Content-Type 带 charset），HTTP 状态都是 200；块里冒号后无空格。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-list-stream-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v1/list-and-stream-other-kinds` · response-shape · constructed
+
+- 端点：`GET /text-to-image`、`GET /image-to-image`、`GET /multi-image-to-3d`、`GET /remesh`、`GET /convert`、`GET /retexture`、`GET /animations`、`GET /uv-unwrap`、`GET /resize`、`GET /print/analyze`、`GET /print/multi-color`、`GET /text-to-motion`、`GET /text-to-image/{id}/stream`、`GET /image-to-image/{id}/stream`、`GET /multi-image-to-3d/{id}/stream`、`GET /remesh/{id}/stream`、`GET /convert/{id}/stream`、`GET /retexture/{id}/stream`、`GET /rigging/{id}/stream`、`GET /animations/{id}/stream`、`GET /uv-unwrap/{id}/stream`、`GET /resize/{id}/stream`、`GET /print/analyze/{id}/stream`、`GET /print/multi-color/{id}/stream`、`GET /text-to-motion/{id}/stream`
+- 行为：其余任务族的列表与流端点与 image-to-3d / rigging 共用同一实现（core list.go），分页、排序、错误文案与 SSE 事件格式同上；运行中任务的流按 fake 每次轮询会答的状态各发一个 message 块（文档示例为 PENDING 后 SUCCEEDED）；page_size 超过 100 截到 100、负数 page_num 用 page_num 的观测文案拒绝。
+- 依据：https://docs.meshy.ai/en/api/image-to-3d（List Image to 3D Tasks；Stream an Image to 3D Task）
+- 依据：#608 真实一轮（meshy-openapi-v1-list-stream-2026-11-25.candidate.json）观测的 image-to-3d 与 rigging 列表、image-to-3d 流
 - 核对日期：2026-11-25
-- 计划：Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。
-- Issue：#579
+- 没有真实样本的原因：本轮只对 image-to-3d 与 rigging 列表、image-to-3d 流各取一次免费真实样本；其余任务族文档写同一路由形态，未逐族请求。运行中任务的流需要正在运行的付费任务，本轮没有。
 
 #### `meshy-openapi-v1/image-to-3d-pbr-without-texture` · request-validation · real
 

@@ -72,6 +72,21 @@ var sseTerminalEvents = map[string]bool{
 	"response.completed": true, "response.incomplete": true, "response.failed": true, "error": true,
 }
 
+// sseTaskFinalStates are the final task states of a task stream whose
+// "message" events each carry the whole task object (Meshy's GET
+// /<kind>/{id}/stream, #608): the message that reports one of them is the
+// stream's last block, and the server then closes the stream.
+var sseTaskFinalStates = map[string]bool{"SUCCEEDED": true, "FAILED": true, "CANCELED": true, "EXPIRED": true}
+
+// sseTerminal reports whether a named block ends its stream.
+func sseTerminal(name string, data map[string]any) bool {
+	if sseTerminalEvents[name] {
+		return true
+	}
+	status, _ := data["status"].(string)
+	return name == "message" && sseTaskFinalStates[status]
+}
+
 // sseEventNameRE bounds an event name to a protocol token; it is public text,
 // never a value of the person's.
 var sseEventNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
@@ -148,7 +163,7 @@ func parseSSEStream(raw []byte) (sseStream, error) {
 			bare = true
 		} else {
 			named = true
-			terminal = sseTerminalEvents[eventName]
+			terminal = sseTerminal(eventName, chunk)
 		}
 		if named && bare {
 			return fmt.Errorf("%w: SSE named and bare events", ErrUnsupportedBody)

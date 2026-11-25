@@ -142,6 +142,9 @@ type Config struct {
 	Prefix  string
 	Kinds   []Kind
 	Balance bool
+	// ListAndStream serves GET /<kind> and GET /<kind>/{id}/stream for every
+	// kind (list.go; observed on v1 only, #608).
+	ListAndStream bool
 	// ContentTypes are the content types the official asset CDN served in the
 	// version's alignment run, by file extension (".glb"). Each engine owns its
 	// table; there is no process-wide state.
@@ -285,6 +288,10 @@ func New(cfg Config) (http.Handler, error) {
 		}
 		e.mux.HandleFunc("POST "+kind.Path, e.create(kind))
 		e.mux.HandleFunc("GET "+kind.Path+"/{id}", e.get(kind))
+		if cfg.ListAndStream {
+			e.mux.HandleFunc("GET "+kind.Path, e.list(kind))
+			e.mux.HandleFunc("GET "+kind.Path+"/{id}/stream", e.stream(kind))
+		}
 		e.mux.HandleFunc("DELETE "+kind.Path+"/{id}", e.delete(kind))
 	}
 	if cfg.Balance {
@@ -298,6 +305,9 @@ func (e *engine) index(exchange wirefixture.Exchange) error {
 	apiPath := strings.TrimPrefix(exchange.Request.Path, e.cfg.SamplePrefix)
 	if apiPath == exchange.Request.Path {
 		return nil // another route version's exchange
+	}
+	if exchange.Request.Method == http.MethodGet && e.listOrStreamRoute(apiPath) {
+		return nil // built from the poll bodies (list.go)
 	}
 	if exchange.Response.Body.Encoding != wirefixture.PayloadJSON {
 		if exchange.Request.Method == http.MethodDelete && exchange.Response.Status == http.StatusOK {

@@ -357,9 +357,42 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			fakeupstream.Endpoint{Method: "DELETE", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
 				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same; deleting an IN_PROGRESS task answers 409 with the Text to 3D page's text \"Task is IN_PROGRESS and cannot be deleted.\" (read 2026-11-25, constructed)"},
+			listEndpoint(kind.Path, page),
+			streamEndpoint(kind.Path, page),
 		)
 	}
 	return out
+}
+
+// listStreamSample is the real list and stream round of #608 (2026-11-25):
+// GET /image-to-3d and GET /rigging, and the stream of a finished image-to-3d
+// task with its two error events.
+const listStreamSample = "2026-11-25"
+
+// listEndpoint is the GET /<kind> list route (core list.go); the kinds the
+// #608 round listed are real, the others share the code and the docs' shape.
+func listEndpoint(kindPath, page string) fakeupstream.Endpoint {
+	endpoint := fakeupstream.Endpoint{Method: "GET", Path: kindPath, DocURL: page,
+		Note: "a bare JSON array of task objects, each the GET /{id} body of the task's current state (listing is not a poll); page_num 1 to 255 (0 or absent is 1), page_size 1 to 100 (0 or absent is 10, negative or non-numeric answers 400), sort_by -created_at (default) or +created_at, any other column answers 400 invalid column with the value after its first character; the texts, the [] past the last page and page_size 101 being accepted were observed on 2026-11-25 (#608); the clamp of a page_size over 100 to 100 and the refusal of a negative page_num are constructed"}
+	switch kindPath {
+	case "/image-to-3d", "/rigging":
+		endpoint.Evidence, endpoint.Sample, endpoint.CheckedAt = fakeupstream.EvidenceReal, "GET "+samplePrefix+kindPath, listStreamSample
+	default:
+		endpoint.Evidence, endpoint.CheckedAt = fakeupstream.EvidenceConstructed, listStreamSample
+	}
+	return endpoint
+}
+
+// streamEndpoint is the GET /<kind>/{id}/stream SSE route (core list.go).
+func streamEndpoint(kindPath, page string) fakeupstream.Endpoint {
+	endpoint := fakeupstream.Endpoint{Method: "GET", Path: kindPath + "/{id}/stream", DocURL: page,
+		Note: "200 text/event-stream: one event:message block per task state, its data the GET /{id} body, closed after the block of a final state (a finished task yields one block, observed 2026-11-25, #608); an unknown id is an event:error block {message:\"Task not found\",status_code:404} and a malformed one {message:\"Invalid ID\",status_code:400}, both HTTP 200 (observed); a missing key is the 401 JSON (observed on the list and stream routes); the blocks of a task still running (one per poll state the fake would answer) are constructed from the page's PENDING-then-SUCCEEDED example"}
+	if kindPath == "/image-to-3d" {
+		endpoint.Evidence, endpoint.Sample, endpoint.CheckedAt = fakeupstream.EvidenceReal, "GET "+samplePrefix+kindPath+"/{id}/stream", listStreamSample
+	} else {
+		endpoint.Evidence, endpoint.CheckedAt = fakeupstream.EvidenceConstructed, listStreamSample
+	}
+	return endpoint
 }
 
 // Version is the Meshy OpenAPI v1 fake.
@@ -377,7 +410,7 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 	}
 	return core.New(core.Config{
 		Env: env, Samples: samples, SamplePrefix: samplePrefix, Prefix: Prefix,
-		Kinds: kinds, Balance: true, Store: core.SharedStore(env), ContentTypes: ContentTypes,
+		Kinds: kinds, Balance: true, ListAndStream: true, Store: core.SharedStore(env), ContentTypes: ContentTypes,
 	})
 }
 
