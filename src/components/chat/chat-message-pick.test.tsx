@@ -110,3 +110,27 @@ it('makes the picture click open the stage and keeps the detail behind a small i
   expect(html).not.toContain('data-testid="chat-result-credits"');
   expect(html).not.toContain('lucide-expand');
 });
+
+it('offers 选用, the stage and the canvas drag on an Agent crop that has no Task (#587), but never on an upload', () => {
+  const crop: ChatAttachment = { handle: '@img2', kind: 'image', role: 'crop', assetId: 'crop-1', imageSlot: 1 };
+  const picture = { url: '/api/v1/assets/crop-1', taskId: '' };
+  const html = renderToStaticMarkup(
+    <ChatMessage message={assistant([picture], [crop])} sessionId="s" pick={null} onPick={() => {}} />,
+  );
+  expect(pickButton(html)).not.toContain('disabled=""');
+  // The crop has the action row (detail, download) and drags like an upload; no "send to canvas unavailable" notice.
+  expect(html).toContain('data-testid="chat-result-detail"');
+  expect(html).toContain('draggable="true"');
+  expect(html).not.toContain(messages['ui.chat.image.send_to_canvas_unavailable']);
+  // Splat names a Task picture; a crop has none.
+  expect(html).not.toContain('data-testid="chat-result-to-splat"');
+  const picked = renderToStaticMarkup(
+    <ChatMessage message={assistant([picture], [crop])} sessionId="s" pick={{ handle: '@img2', kind: 'image', role: 'crop', assetId: 'crop-1' }} onPick={() => {}} />,
+  );
+  expect(picked).toContain('data-picked="true"');
+  // The person's own picture with the upload role stays unpickable.
+  const upload = renderToStaticMarkup(
+    <ChatMessage message={assistant([picture], [{ ...crop, role: 'upload' }])} sessionId="s" pick={null} onPick={() => {}} />,
+  );
+  expect(pickButton(upload)).toContain('disabled=""');
+});

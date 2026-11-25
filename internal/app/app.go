@@ -2031,6 +2031,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// The Agent's crops have no Task; the session's chat names them (#587).
+	lineageService.SetCrops(repository)
 	// Tool results name models by the version strip's numbers (#326 L).
 	toolExecutor.SetModelVersions(func(ctx context.Context, owner generation.OwnerID, session string) (map[generation.TaskID]int, error) {
 		return lineageService.SessionVersions(ctx, string(owner), session)

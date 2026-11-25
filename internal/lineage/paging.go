@@ -114,6 +114,18 @@ func (s *Service) SessionPage(ctx context.Context, owner, session, cursor string
 	for _, task := range full {
 		index.references = append(index.references, taskReferences(task)...)
 	}
+	// The session's crops (#587) have no Task and no keyset position, so the
+	// first page carries all of them (bounded like a Task read) and older pages
+	// none; the client merges pages by node ID. Their source edges may name a
+	// version of an older page, like any edge of this page.
+	index.crops = nil
+	if cursor == "" {
+		crops, err := s.sessionCrops(ctx, owner, session)
+		if err != nil {
+			return Graph{}, err
+		}
+		index.addCrops(crops)
+	}
 	inputs, err := s.loadInputs(ctx, owner, index.assetIDsToLoad())
 	if err != nil {
 		return Graph{}, err

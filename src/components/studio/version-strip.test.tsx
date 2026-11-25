@@ -8,7 +8,8 @@ const state = vi.hoisted(() => ({ tiles: [] as VersionTile[], pick: null as null
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: catalog.application }) }));
 vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles: state.tiles }), tileOfObject: () => null }));
 vi.mock('@/hooks/use-session-pick', () => ({ useSessionPick: () => ({ pick: state.pick }) }));
-vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ openOnStage: state.stage }) }));
+// #559: a strip click goes through viewOnStage (look, do not place); the record says which action ran.
+vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ openOnStage: state.stage, viewOnStage: (object: object) => state.stage({ ...object, via: 'view' }) }) }));
 vi.mock('@/hooks/use-stage-viewer', () => ({ useStageViewer: () => ({ toggleTileInCompare: state.toggle, slotOf: () => null }) }));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({ proxyAssetUrl: (url: string) => url, previewAssetUrl: (url: string) => url }) }));
 vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session', messagesBySession: { session: state.messages } }) }));
@@ -86,7 +87,23 @@ describe('output strip navigation and details', () => {
     expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'side', assetId: 'a' }));
     expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'side', assetId: 'a' }));
   });
-  it.each(['upload', 'merge', 'capture'] as const)('reserves aligned rows without request details for %s', (origin) => {
+  it('looks at the version on a click and never asks to place it on the board (#559)', () => {
+    renderToStaticMarkup(<VersionStrip />);
+    primary().props.onClick(click);
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'old', via: 'view' }));
+  });
+  it('gives an upload or an Agent crop a detail without a Task, by its stage object id (#587)', () => {
+    state.tiles = [tile({ key: 'u:crop-1', taskId: 'upload:crop-1', taskIds: ['upload:crop-1'], origin: 'upload', operation: 'crop',
+      assets: [{ id: 'crop-1', kind: 'image', url: '/api/v1/assets/crop-1', role: 'image', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).toContain('裁图');
+    detail().props.onClick(click);
+    expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: undefined, stageObjectId: 'upload:crop-1', assetId: 'crop-1', url: '/api/v1/assets/crop-1' }));
+    primary().props.onClick(click);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'upload:crop-1', via: 'view' }));
+  });
+  it.each(['merge', 'capture'] as const)('reserves aligned rows without request details for %s', (origin) => {
     state.tiles = [tile({ origin })];
     const html = renderToStaticMarkup(<VersionStrip />);
     expect(html).toContain('version-caption'); expect(html).toContain('version-detail-row');

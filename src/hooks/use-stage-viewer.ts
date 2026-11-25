@@ -29,7 +29,7 @@ import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 export function useStageViewer() {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage } = useObjectActions();
+  const { viewOnStage } = useObjectActions();
   const sessionId = useChatStore((state) => state.activeSessionId);
   const current = selectionForSession(useWorkspaceStore((state) => state.currentObject), sessionId);
   const versions = useSessionVersions();
@@ -105,8 +105,9 @@ export function useStageViewer() {
     if (!sessionId) return;
     const next = neighbourTile(versions.tiles, currentTile?.key ?? null, delta);
     const object = next ? objectOf(next) : null;
-    if (object) openOnStage(object);
-  }, [currentTile?.key, objectOf, openOnStage, sessionId, versions.tiles]);
+    // Stepping through versions looks at them, like clicking their tiles (#559).
+    if (object) viewOnStage(object);
+  }, [currentTile?.key, objectOf, viewOnStage, sessionId, versions.tiles]);
 
   /** A strip tile joins or leaves the comparison (a picture or a model). Returns false when it has no file to show. */
   const toggleTileInCompare = useCallback((tile: VersionTile): boolean => {

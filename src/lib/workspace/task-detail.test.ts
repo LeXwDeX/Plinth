@@ -224,6 +224,13 @@ describe('detailActions', () => {
     expect(detailActions({ ...base, hasTask: false, hasPrompt: false })).toEqual({ download: true, openOnCanvas: false, sendTo3D: false, sendTo2D: false, regenerate: false, copyPrompt: false });
   });
 
+  it('lets a session upload or Agent crop of the version strip be inserted into the canvas, and nothing more (#587)', () => {
+    const crop = { ...base, hasTask: false, hasPrompt: false, stageObject: true };
+    expect(detailActions(crop)).toEqual({ download: true, openOnCanvas: true, sendTo3D: false, sendTo2D: false, regenerate: false, copyPrompt: false });
+    expect(detailActions({ ...crop, inActiveSession: false }).openOnCanvas).toBe(false);
+    expect(detailActions({ ...crop, kind: 'model' }).openOnCanvas).toBe(false);
+  });
+
   it('keeps a result of another session off the stage', () => {
     expect(detailActions({ ...base, inActiveSession: false })).toMatchObject({ openOnCanvas: false, sendTo3D: false, regenerate: false });
   });

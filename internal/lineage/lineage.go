@@ -19,6 +19,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/capture"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -38,6 +39,25 @@ const (
 
 // OperationInpaint marks a task that edited only the masked part of its source.
 const OperationInpaint = "inpaint"
+
+// OperationCrop marks an upload node that is a picture the Agent cut out of a
+// session picture with crop_image_regions (#587). It has no Task.
+const OperationCrop = "crop"
+
+// SessionCrop is one crop a session's chat shows: an owned list_crop input
+// asset named by a crop attachment of one of the session's messages (#587).
+// SourceAssetID is the asset it was cut from, as its provenance records it
+// (a Task result or an input asset); empty when no provenance is stored.
+type SessionCrop struct {
+	Asset         generation.InputAsset
+	SourceAssetID string
+}
+
+// CropSource lists the newest crops of a session for its owner, at most limit,
+// newest first. It reads stored facts only; a crop is never made a Task.
+type CropSource interface {
+	SessionCrops(ctx context.Context, owner, session string, limit int) ([]SessionCrop, error)
+}
 
 // Edge kinds say how the child used its parent.
 const (
@@ -113,6 +133,8 @@ type Service struct {
 	inputs   InputAssets
 	config   Config
 	groups   GroupSource
+	// crops lists the Agent's crops of a session (#587). Nil lists none.
+	crops CropSource
 	// scope knows that a branch may read an ancestor Task. Nil keeps exact
 	// session filtering, so an old or foreign Task source never widens.
 	scope generation.SessionTaskScope
@@ -135,6 +157,31 @@ func (s *Service) taskInSession(ctx context.Context, owner, session string, task
 
 // SetGroups wires the source of task groups. Without one the graph lists none.
 func (s *Service) SetGroups(groups GroupSource) { s.groups = groups }
+
+// SetCrops wires the source of the session's crops (#587). Without one the
+// graph lists a crop only when a Task used it as an input.
+func (s *Service) SetCrops(crops CropSource) { s.crops = crops }
+
+// sessionCrops reads the session's crops, bounded by MaxTasks: a crop is not
+// a Task and does not count toward the Task bound or a page's limit, but one
+// projection never lists more crops than it may read Tasks. Another owner's
+// asset is dropped even if a sloppy source returned it.
+func (s *Service) sessionCrops(ctx context.Context, owner, session string) ([]SessionCrop, error) {
+	if s.crops == nil {
+		return nil, nil
+	}
+	crops, err := s.crops.SessionCrops(ctx, owner, session, s.config.MaxTasks)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]SessionCrop, 0, len(crops))
+	for _, crop := range crops {
+		if string(crop.Asset.OwnerID) == owner && crop.Asset.ID != "" && len(kept) < s.config.MaxTasks {
+			kept = append(kept, crop)
+		}
+	}
+	return kept, nil
+}
 
 // New builds the projection. Captures may be nil when the deployment records
 // none; then capture-based links are unknown.
@@ -270,6 +317,11 @@ func (s *Service) Session(ctx context.Context, owner, session string) (Graph, er
 	}
 	builder := newBuilder(tasks, records)
 	builder.conversions, builder.foldSince = s.config.Conversions, s.config.FoldConversionsSince
+	crops, err := s.sessionCrops(ctx, owner, session)
+	if err != nil {
+		return Graph{}, err
+	}
+	builder.addCrops(crops)
 	pending, err := s.loadInputs(ctx, owner, builder.assetIDsToLoad())
 	if err != nil {
 		return Graph{}, err
@@ -414,7 +466,9 @@ type builder struct {
 	captures        map[string]string // capture ID -> capture node ID
 	uploads         map[string]string // input asset ID -> upload node ID
 	records         []capture.Record
-	conversions     ConversionRule
+	// crops are the session's crops (#587); each becomes an upload node.
+	crops       []SessionCrop
+	conversions ConversionRule
 	// folded maps a format-conversion Task to the Task whose files it made
 	// (#330); it accumulates across builds of one projection. kept holds the
 	// conversions made before foldSince, which stay versions.
@@ -544,6 +598,21 @@ func (b *builder) assetIDsToLoad() []generation.AssetID {
 	return ids
 }
 
+// addCrops makes each crop a version of its own (#587) and claims its
+// recorded source as its parent, resolved like any frozen asset reference: a
+// Task result of the session, a screenshot, another upload or crop, or an
+// unknown parent. A crop never names a Task of its own.
+func (b *builder) addCrops(crops []SessionCrop) {
+	for _, crop := range crops {
+		b.crops = append(b.crops, crop)
+		source := crop.SourceAssetID
+		if source == "" || source == string(crop.Asset.ID) {
+			continue
+		}
+		b.references = append(b.references, reference{child: uploadNodeID(string(crop.Asset.ID)), kind: EdgeSourceAsset, assetID: source})
+	}
+}
+
 // foldConversions records each format-conversion Task whose source (its
 // source-task or source-asset parameter) is a Task of the session. A
 // conversion of an upload or of a Task outside the session stays a version.
@@ -627,6 +696,10 @@ func (b *builder) build(inputs map[generation.AssetID]generation.InputAsset) Gra
 			})
 		}
 		b.nodes = append(b.nodes, node)
+	}
+	// Crops first, so a crop a Task also used keeps its crop operation.
+	for _, crop := range b.crops {
+		b.cropNode(crop)
 	}
 	for _, reference := range b.references {
 		b.link(reference, inputs)
@@ -733,15 +806,36 @@ func (b *builder) uploadNode(input generation.InputAsset, role string) string {
 	if id, ok := b.uploads[key]; ok {
 		return id
 	}
-	id := "upload:" + key
+	id := uploadNodeID(key)
 	b.uploads[key] = id
 	createdAt := input.CreatedAt
-	b.nodes = append(b.nodes, Node{
+	node := Node{
 		ID: id, Kind: KindUpload, CreatedAt: &createdAt,
 		Assets: []Asset{{ID: key, Role: role, MediaType: input.MediaType}},
-	})
+	}
+	// A crop met through a Task's input (on any page) says it is a crop too
+	// (#587), so merged pages agree on the node.
+	if input.AssetType == listcrop.CropAssetType {
+		node.Operation = OperationCrop
+	}
+	b.nodes = append(b.nodes, node)
 	return id
 }
+
+// cropNode is the upload node of one of the session's crops (#587), marked
+// with the crop operation. Like any upload it has no public Task identity.
+func (b *builder) cropNode(crop SessionCrop) string {
+	id := b.uploadNode(crop.Asset, "image")
+	for i := range b.nodes {
+		if b.nodes[i].ID == id {
+			b.nodes[i].Operation = OperationCrop
+			break
+		}
+	}
+	return id
+}
+
+func uploadNodeID(assetID string) string { return "upload:" + assetID }
 
 // sortNodes keeps nodes oldest first; the unknown parents, which have no time,
 // stay behind them in the order they were met.

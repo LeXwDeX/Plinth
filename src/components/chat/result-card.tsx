@@ -18,7 +18,7 @@ import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
 import { activePicturePosition, pictureKey, type MessagePicture } from '@/lib/chat/message-pictures';
 import type { ChatModelResult } from '@/lib/chat/model-results';
 import { canvasDragItem, startCanvasDrag, uploadDragItem } from '@/lib/workspace/canvas-drag';
-import { candidateAttachment, isPickedCandidate, pickClaim } from '@/lib/chat/pick';
+import { candidateAttachment, cropAssetOf, isPickedCandidate, pickClaim } from '@/lib/chat/pick';
 import { safeAssetURL, safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
@@ -38,6 +38,10 @@ import { canCreateGaussianSplat, gaussianSplatAvailableCount, gaussianSplatTool 
 import type { ImageGroupPresentation } from '@/lib/workspace/image-result-group';
 import { RejectCandidateDialog } from '@/components/chat/reject-candidate-dialog';
 import { preferencesAvailable, preferenceReasonPresetIds } from '@/lib/chat/preferences';
+import { uploadObjectId } from '@/lib/workspace/versions';
+
+/** The stage object of an Agent crop (#587): no Task, addressed by its upload object id. */
+const cropObject = (object: CurrentObject): boolean => object.taskId.startsWith(uploadObjectId(''));
 
 export interface ImageResultCardProps {
   /** The message's 2D pictures. Each keeps its index in the message's images: attachments, handle tags, drags, picks and detail targets are all keyed by it. */
@@ -112,7 +116,17 @@ export function ImageResultCard({
 
   const objectAt = (entry: MessagePicture): CurrentObject | null => {
     const attachment = attachmentOf(entry);
-    if (!entry.image.taskId || !sessionId) return null;
+    if (!sessionId) return null;
+    // An Agent crop (#587) has no Task but is an asset of the session: it reaches the stage and the canvas by its
+    // upload object id, exactly like the version strip's crop tile. Any other picture without a Task stays a preview.
+    const crop = entry.image.taskId ? undefined : cropAssetOf(attachment);
+    if (crop) {
+      return {
+        sessionId, taskId: uploadObjectId(crop), kind: 'image', url: entry.image.url, assetId: crop,
+        ...(attachment?.handle ? { handle: attachment.handle } : {}),
+      };
+    }
+    if (!entry.image.taskId) return null;
     return {
       sessionId, taskId: entry.image.taskId, kind: 'image', url: entry.image.url,
       ...(attachment?.assetId ? { assetId: attachment.assetId } : {}),
@@ -123,9 +137,12 @@ export function ImageResultCard({
   const detailTarget = (entry: MessagePicture, withGroup = true): ResultTarget | null => {
     const object = objectAt(entry);
     const group = withGroup ? candidates.map((other) => detailTarget(other, false)).filter((item): item is ResultTarget => item !== null) : [];
+    const crop = object && cropObject(object);
     return object ? {
       ...(group.length > 1 ? { group } : {}),
-      taskId: object.taskId, sessionId: object.sessionId, kind: 'image', url: object.url, status: 'ready',
+      // A crop's detail is a file with no Task that still reaches the stage by its object id (#587).
+      ...(crop ? { stageObjectId: object.taskId } : { taskId: object.taskId }),
+      sessionId: object.sessionId, kind: 'image', url: object.url, status: 'ready',
       ...(object.assetId ? { assetId: object.assetId } : {}),
       ...(object.imageUrls ? { imageUrls: object.imageUrls } : {}),
       title: pictureLabel(entry),
@@ -179,7 +196,10 @@ export function ImageResultCard({
                 {...(() => {
                   // A finished picture can be dragged onto the canvas; the click (putting it on the stage) is untouched.
                   const object = objectAt(entry);
-                  const item = object?.assetId ? canvasDragItem({ taskId: object.taskId, assetId: object.assetId, url: url, label }) : null;
+                  // A picture with no task of its own (an Agent crop, #587) is dragged like an upload (SentImages).
+                  const item = object && cropObject(object) ? uploadDragItem({ url, assetId: object.assetId, label })
+                    : object?.assetId ? canvasDragItem({ taskId: object.taskId, assetId: object.assetId, url: url, label })
+                      : !object && attachment?.assetId ? uploadDragItem({ url, assetId: attachment.assetId, label }) : null;
                   return item ? { draggable: true, onDragStart: (event: DragEvent<HTMLElement>) => startCanvasDrag(event.dataTransfer, item, event.currentTarget.querySelector('img') ?? event.currentTarget) } : {};
                 })()}
               >
@@ -280,7 +300,7 @@ export function ImageResultCard({
           <Action type="button" variant="outline" size="xs" onClick={() => toThreeD(activeObject)} data-testid="chat-result-to3d">
             <Box />{schemaText(schema, 'ui.studio.result.to_3d')}
           </Action>
-          {splatTool ? (
+          {splatTool && !cropObject(activeObject) ? (
             <HintTooltip
               name={schemaText(schema, 'ui.studio.action.to_splat')}
               reason={splatOfferingsLoading ? schemaText(schema, 'ui.workspace.models.loading')

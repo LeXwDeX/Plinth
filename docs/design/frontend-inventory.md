@@ -482,11 +482,11 @@ Skill 文案统一用动态 key：`schemaText(schema, \`ui.workspace.skills.${ke
 | 图片序号 | `ui.chat.lightbox.image_alt` | 图片 {current} / {total} | 替代文字。 | 186 |
 | 跳到第几张 | `ui.chat.lightbox.jump` | 跳到第 {index} 张 | 跳转按钮。 | 205、359 |
 | 发送到画布 | `ui.chat.image.send_to_canvas` | 发送到画布 | 把图加入画布。不切换域（见第 6、9 节）。 | 256、276-286；按钮 396-407（PictureInPicture2） |
-| 仅结果可发送 | `ui.chat.image.send_to_canvas_unavailable` | 仅生成结果可发送到画布 | 禁用说明。 | 257 |
+| 仅结果可发送 | `ui.chat.image.send_to_canvas_unavailable` | 仅生成结果与裁图可发送到画布 | 禁用说明。 | 257 |
 | 选用 | `ui.chat.image.pick` | 选用 | 选这张图作为后续步骤的准绳。 | 258、373-395 |
 | 已选用 | `ui.chat.image.picked` | 已选用 | 选中后的状态。 | 259 |
 | 选用说明 | `ui.chat.image.pick_hint` | 选用这张：后续步骤默认以它为准 | 提示。 | 260 |
-| 仅结果可选用 | `ui.chat.image.pick_unavailable` | 仅生成结果可选用 | 禁用说明。 | 261 |
+| 仅结果可选用 | `ui.chat.image.pick_unavailable` | 仅生成结果与裁图可选用 | 禁用说明。 | 261 |
 | 在 3D 查看器中查看 | `ui.chat.model.open_in_viewer` | 在 3D 查看器中查看 | 选中模型，但不切换域（见第 6、9 节）。 | 428-438（437） |
 | 可用格式 | `ui.chat.model.formats` | 可用格式 | 格式面板标题。 | 439-441（440） |
 | 生成中 | `ui.chat.message.generating` | 正在生成 | 状态气泡。 | 566 |
@@ -1104,11 +1104,11 @@ Surface 阴影：none、sm、lg、xl。
 | components/chat/chat-message.tsx:254 | `ui.chat.lightbox.previous` | 上一张 |
 | components/chat/chat-message.tsx:255 | `ui.chat.lightbox.next` | 下一张 |
 | components/chat/chat-message.tsx:256 | `ui.chat.image.send_to_canvas` | 发送到画布 |
-| components/chat/chat-message.tsx:257 | `ui.chat.image.send_to_canvas_unavailable` | 仅生成结果可发送到画布 |
+| components/chat/chat-message.tsx:257 | `ui.chat.image.send_to_canvas_unavailable` | 仅生成结果与裁图可发送到画布 |
 | components/chat/chat-message.tsx:258 | `ui.chat.image.pick` | 选用 |
 | components/chat/chat-message.tsx:259 | `ui.chat.image.picked` | 已选用 |
 | components/chat/chat-message.tsx:260 | `ui.chat.image.pick_hint` | 选用这张：后续步骤默认以它为准 |
-| components/chat/chat-message.tsx:261 | `ui.chat.image.pick_unavailable` | 仅生成结果可选用 |
+| components/chat/chat-message.tsx:261 | `ui.chat.image.pick_unavailable` | 仅生成结果与裁图可选用 |
 | components/chat/chat-message.tsx:359 | `ui.chat.lightbox.jump` | 跳到第 {index} 张 |
 | components/chat/chat-message.tsx:437 | `ui.chat.model.open_in_viewer` | 在 3D 查看器中查看 |
 | components/chat/chat-message.tsx:440 | `ui.chat.model.formats` | 可用格式 |

@@ -11,10 +11,22 @@ export function candidateAttachment(message: Pick<ChatMessage, 'attachments'>, i
   return message.attachments?.find((attachment) => attachment.kind === 'image' && attachment.imageSlot === index + 1);
 }
 
-/** 选用该候选图时发给服务端的声明；不是生成结果（没有来源任务）的图片不能选用。 */
+/**
+ * Agent 裁出的图（附件角色 crop，#587）：没有来源任务，但它是本会话的资产，可以选用。
+ * 只认消息附件记录的角色，用户自己上传的图仍不能选用；服务端再核对 owner 与该会话确实展示过它。
+ */
+export function cropAssetOf(attachment?: ChatAttachment): string | undefined {
+  return attachment?.kind === 'image' && attachment.role === 'crop' && !attachment.taskId && !attachment.captureId
+    ? attachment.assetId || undefined : undefined;
+}
+
+/** 选用该候选图时发给服务端的声明；生成结果按来源任务，Agent 裁图按资产；其他没有来源任务的图片不能选用。 */
 export function pickClaim(candidate: ChatImage, attachment?: ChatAttachment): ChatAttachmentClaim | null {
   const taskId = attachment?.taskId || candidate.taskId;
-  if (!taskId) return null;
+  if (!taskId) {
+    const crop = cropAssetOf(attachment);
+    return crop ? { kind: 'image', assetId: crop } : null;
+  }
   if (attachment?.assetId) return { kind: 'image', taskId, assetId: attachment.assetId };
   return candidate.url ? { kind: 'image', taskId, url: candidate.url } : null;
 }
@@ -27,7 +39,11 @@ export function isPickedCandidate(
 ): boolean {
   if (!pick || pick.kind !== 'image') return false;
   const taskId = attachment?.taskId || candidate.taskId;
-  if (!taskId || pick.taskId !== taskId) return false;
+  if (!taskId) {
+    const crop = cropAssetOf(attachment);
+    return Boolean(crop) && !pick.taskId && pick.assetId === crop;
+  }
+  if (pick.taskId !== taskId) return false;
   if (attachment?.assetId && pick.assetId) return pick.assetId === attachment.assetId;
   return pick.url !== undefined && pick.url === candidate.url;
 }

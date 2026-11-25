@@ -56,13 +56,14 @@ export function previewKindOf(target: Pick<ResultTarget, 'kind' | 'mediaType' | 
 /**
  * 任务详情：所有入口（版本条、全部产出、对话结果卡、任务中心、我的资源）共用的一个面板。
  * 上方预览（2D 图 / 3D 模型，可全屏），中间是由 Schema 驱动的信息，下方按任务类型和
- * Agent 模式显示的动作。没有 taskId 的是上传的资源：只有预览、文件信息和下载。
+ * Agent 模式显示的动作。没有 taskId 的是上传的资源：只有预览、文件信息和下载；版本条里本会话的上传与
+ * Agent 裁图（#587）另有「插入到画布」。
  */
 export function ResultDetail({ target }: { target: ResultTarget }) {
   const { user } = useAuth();
   const { schema, text } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage, toThreeD, toGaussianSplat, captureToTwoD } = useObjectActions();
+  const { viewOnStage, insertOnCanvas, toThreeD, toGaussianSplat, captureToTwoD } = useObjectActions();
   const captureBlock = useModelCaptureBlock(target.taskId);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const tracked = useWorkspaceStore((state) => state.trackedTasks.find((task) => task.taskId === target.taskId));
@@ -91,6 +92,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
     kind: displayTarget.kind, status, hasTask,
     inActiveSession: Boolean(target.sessionId) && target.sessionId === activeSessionId,
     hasPrompt: prompt !== '', hasFile: Boolean(file),
+    stageObject: !hasTask && displayTarget.kind === 'image' && Boolean(target.stageObjectId),
   };
   const actions = detailActions(actionContext);
   const formatsRoute = target.taskId ? modelFormatsRoute(schema, target.taskId) : null;
@@ -114,6 +116,8 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   const position = groupPosition(target);
   const stepGroup = useStudioStore((state) => state.stepResultDetail);
   const object = objectOfTarget(displayTarget);
+  // A picture is inserted into the 2D canvas; a model opens on the 3D stage, as before (#559).
+  const openKey = displayTarget.kind === 'model' ? 'ui.result.detail.open_stage' : 'ui.result.detail.open_canvas';
   const splatTool = gaussianSplatTool(schema);
   const { data: splatOfferings, isLoading: splatOfferingsLoading, error: splatOfferingsError } = useSWR(
     splatTool ? ['gaussian-splat-offerings', schema.revision, splatTool.capability] : null,
@@ -295,7 +299,8 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
                         onClick={() => {
                           const parent = versions.tiles.find((tile) => tile.key === row.parentKey);
                           const parentObject = parent && target.sessionId ? objectOfTile(parent, target.sessionId) : null;
-                          if (parentObject) run(() => openOnStage(parentObject));
+                          // Jumping to the source looks at it; it does not put it on the board (#559).
+                          if (parentObject) run(() => viewOnStage(parentObject));
                           else if (parent && target.sessionId) useStudioStore.getState().openResultDetail(targetOfTile(parent, target.sessionId, source.label, {}, '', schema));
                         }}>{row.value}</button>
                     </HintTooltip>
@@ -372,12 +377,13 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             </HintTooltip>
           ) : null}
           {blockedReason ? (
-            <HintTooltip name={text('ui.result.detail.open_canvas')} reason={blockedShort}>
-              <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text('ui.result.detail.open_canvas')}: ${blockedText}`} data-testid="result-detail-open-canvas-blocked"><Eye />{text('ui.result.detail.open_canvas')}</Action>
+            <HintTooltip name={text(openKey)} reason={blockedShort}>
+              <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text(openKey)}: ${blockedText}`} data-testid="result-detail-open-canvas-blocked"><Eye />{text(openKey)}</Action>
             </HintTooltip>
           ) : null}
+          {/* #559: the only way back onto the board from a version: insert this picture (recorded as placed). */}
           {actions.openOnCanvas && object ? (
-            <Action type="button" variant="outline" size="sm" onClick={() => run(() => openOnStage(object))} data-testid="result-detail-open-canvas"><Eye />{text('ui.result.detail.open_canvas')}</Action>
+            <Action type="button" variant="outline" size="sm" onClick={() => run(() => insertOnCanvas(object))} data-testid="result-detail-open-canvas"><Eye />{text(openKey)}</Action>
           ) : null}
         </div>
 

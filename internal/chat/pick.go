@@ -5,15 +5,18 @@ import (
 	"errors"
 )
 
-// ErrPickRejected reports a candidate that cannot be picked: it is not a
+// ErrPickRejected reports a candidate that cannot be picked: it is neither a
 // generated 2D picture of the owner's session (a preview of a 3D model is not
-// one). The claimed IDs are not echoed.
+// one) nor a crop the session's messages show (#587). The claimed IDs are not
+// echoed.
 var ErrPickRejected = errors.New("chat: candidate cannot be picked")
 
 // PickCandidate makes one generated picture the session's current object. The
 // claim is verified for the owner and session exactly like a selected object,
 // and only a generated 2D picture (a candidate with a Task and an asset whose
-// Task is not a 3D model) can be picked. The returned attachment carries the
+// Task is not a 3D model) or an Agent crop of the session (#587: an owned crop
+// input asset that one of the session's messages shows with the crop role)
+// can be picked; any other upload cannot. The returned attachment carries the
 // handle the session already gave that picture, when it has one.
 func (service *Service) PickCandidate(
 	ctx context.Context,
@@ -21,6 +24,9 @@ func (service *Service) PickCandidate(
 	ref AttachmentRef,
 ) (Attachment, error) {
 	verified, err := service.verifyCandidate(ctx, ownerID, sessionID, ref)
+	if errors.Is(err, ErrCandidateRejected) {
+		verified, err = service.verifySessionCrop(ctx, ownerID, sessionID, ref)
+	}
 	if err != nil {
 		if errors.Is(err, ErrCandidateRejected) {
 			return Attachment{}, ErrPickRejected
@@ -36,8 +42,12 @@ func (service *Service) PickCandidate(
 	}
 	picked := service.withKnownHandle(ctx, ownerID, sessionID, verified)
 	// The pick is also the person's direction signal (#241). Recording it is
-	// best effort: a preference write must never make the pick fail.
-	service.recordSelection(ctx, ownerID, sessionID, picked)
+	// best effort: a preference write must never make the pick fail. Direction
+	// preferences name a generated Task's picture; a crop has no Task, so its
+	// pick records none.
+	if picked.TaskID != "" {
+		service.recordSelection(ctx, ownerID, sessionID, picked)
+	}
 	return picked, nil
 }
 
@@ -72,7 +82,8 @@ func (service *Service) SessionPick(ctx context.Context, ownerID, sessionID stri
 	verified, verifyErr := service.attachments.VerifyAttachment(ctx, ownerID, sessionID, AttachmentRef{
 		Kind: stored.Kind, AssetID: stored.AssetID, TaskID: stored.TaskID, CaptureID: stored.CaptureID,
 	})
-	if verifyErr != nil || service.isModelPreview(ctx, ownerID, sessionID, verified) {
+	if verifyErr != nil || service.isModelPreview(ctx, ownerID, sessionID, verified) ||
+		(verified.TaskID == "" && !service.sessionShowsCrop(ctx, ownerID, sessionID, verified)) {
 		return Attachment{}, false, nil
 	}
 	return service.withKnownHandle(ctx, ownerID, sessionID, verified), true, nil
@@ -109,4 +120,45 @@ func (service *Service) withKnownHandle(ctx context.Context, ownerID, sessionID 
 		}
 	}
 	return attachment
+}
+
+// verifySessionCrop proves a claimed Agent crop of the owner's session (#587):
+// the claim names only an input asset, the verifier gives it the crop role from
+// the stored crop provenance of the owner, and one of the session's messages
+// shows that asset with the crop role. A person's own upload, a crop of another
+// session or a picture claimed by URL is rejected.
+func (service *Service) verifySessionCrop(ctx context.Context, ownerID, sessionID string, ref AttachmentRef) (Attachment, error) {
+	if service.attachments == nil || ref.AssetID == "" || ref.TaskID != "" || ref.CaptureID != "" || ref.URL != "" {
+		return Attachment{}, ErrCandidateRejected
+	}
+	ref.Kind, ref.ImageSlot = AttachmentKindImage, 0
+	verified, err := service.attachments.VerifyAttachment(ctx, ownerID, sessionID, ref)
+	if err != nil || verified.AssetID != ref.AssetID || !service.sessionShowsCrop(ctx, ownerID, sessionID, verified) {
+		return Attachment{}, ErrCandidateRejected
+	}
+	return verified, nil
+}
+
+// sessionShowsCrop reports whether a verified picture is a crop with no Task
+// that the session's own messages show with the crop role. A branch session
+// carries the messages copied up to its branch point, and with them the crops
+// shown there. A read failure is a no.
+func (service *Service) sessionShowsCrop(ctx context.Context, ownerID, sessionID string, picture Attachment) bool {
+	if picture.Kind != AttachmentKindImage || picture.Role != AttachmentRoleCrop || picture.TaskID != "" ||
+		picture.CaptureID != "" || picture.AssetID == "" {
+		return false
+	}
+	history, err := service.repository.ListMessages(ctx, ownerID, sessionID)
+	if err != nil {
+		return false
+	}
+	for _, message := range history {
+		for _, attachment := range message.Attachments {
+			if attachment.Kind == AttachmentKindImage && attachment.Role == AttachmentRoleCrop &&
+				attachment.TaskID == "" && attachment.AssetID == picture.AssetID {
+				return true
+			}
+		}
+	}
+	return false
 }

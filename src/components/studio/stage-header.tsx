@@ -76,7 +76,7 @@ type ActionBinding = PlainBinding | PanelBinding;
 export function StageHeader({ object }: { object: CurrentObject | null }) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, captureToTwoD } = useObjectActions();
+  const { viewOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, captureToTwoD } = useObjectActions();
   const { offeringsByCapability: modelOfferings } = useWorkspaceOfferings(schema, 'model-3d');
   const pickedModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
   const captureBlock = useModelCaptureBlock(object?.taskId);
@@ -286,7 +286,7 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
           >
             <button
               type="button"
-              onClick={() => openOnStage(parentObject)}
+              onClick={() => viewOnStage(parentObject)}
               aria-label={text('ui.studio.stage.source_open')}
               data-testid="stage-source"
               className="flex min-w-0 items-center gap-1 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"

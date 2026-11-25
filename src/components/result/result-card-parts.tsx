@@ -24,8 +24,10 @@ export function openResultDetail(target: ResultTarget): void {
 /** A finished picture a card can be dragged onto the canvas with; null for anything else (generating, failed, 3D, no file). */
 export function dragItemOf(target: ResultTarget, proxy: (url: string, taskId?: string) => string, size?: { width: number; height: number } | null) {
   if (target.kind !== 'image' || target.status === 'pending' || target.status === 'running' || target.status === 'failed') return null;
+  // An upload or an Agent crop (#587) is dragged under its stage object id, like it is inserted.
+  const taskId = target.taskId || target.stageObjectId;
   return canvasDragItem({
-    taskId: target.taskId, assetId: target.assetId, url: target.url ? proxy(target.url, target.taskId) : '',
+    taskId, assetId: target.assetId, url: target.url ? proxy(target.url, taskId) : '',
     ...(size ?? {}), label: target.title,
   });
 }
@@ -70,13 +72,13 @@ export function CardDownload({ target, className, buttonClassName }: { target: R
 }
 
 /**
- * Right-click menu for a card: details, open on the canvas, download. `render` is the card's own
+ * Right-click menu for a card: details, insert into the canvas (a model: open on the stage), download. `render` is the card's own
  * element (a li) so the menu adds no wrapper to the layout.
  */
 export function ResultContextMenu({ target, render, children }: { target: ResultTarget; render: ReactElement<Record<string, unknown>>; children: ReactNode }) {
   const { text } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage } = useObjectActions();
+  const { insertOnCanvas } = useObjectActions();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const object = objectOfTarget(target);
   const canOpen = target.status === 'ready' && object !== null && target.sessionId === activeSessionId;
@@ -86,7 +88,8 @@ export function ResultContextMenu({ target, render, children }: { target: Result
       <ContextMenuTrigger render={render}>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={() => openResultDetail(target)} data-testid="card-menu-detail"><Info />{text('ui.result.card.detail')}</ContextMenuItem>
-        {canOpen && object ? <ContextMenuItem onClick={() => { openOnStage(object); }} data-testid="card-menu-open-canvas"><Eye />{text('ui.result.detail.open_canvas')}</ContextMenuItem> : null}
+        {/* #559: a picture is inserted into the board (and recorded as placed); a model opens on the 3D stage. */}
+        {canOpen && object ? <ContextMenuItem onClick={() => { insertOnCanvas(object); }} data-testid="card-menu-open-canvas"><Eye />{text(object.kind === 'model' ? 'ui.result.detail.open_stage' : 'ui.result.detail.open_canvas')}</ContextMenuItem> : null}
         {href ? (
           <ContextMenuItem render={<a href={href} download />} data-testid="card-menu-download"><Download />{text('ui.account.download')}</ContextMenuItem>
         ) : null}
