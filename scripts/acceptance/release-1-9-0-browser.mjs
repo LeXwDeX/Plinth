@@ -1022,14 +1022,40 @@ async function seedEdits(count) {
   await turn(sid, '画一个红色方块 [[fake:tool:refine_image {"prompt":"a red cube on a white background"}]]');
   if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the source picture did not succeed');
   const edits = async () => (await sessionTasks(sid)).filter((task) => task.capability === 'image-to-image');
-  for (let round = 0; round < 3 && (await edits()).length < count; round += 1) {
-    const missing = count - (await edits()).length;
+  // A turn registers its tasks one by one, so a count read right after it can be short. Wait until the count
+  // reaches the target or holds still for a while before topping up; topping up early made 12 edits for N=10.
+  const settled = async () => {
+    let last = -1;
+    let still = 0;
+    for (let index = 0; index < 90; index += 1) {
+      const now = (await edits()).length;
+      if (now >= count) return now;
+      still = now === last ? still + 1 : 0;
+      if (now > 0 && still >= 10) return now;
+      last = now;
+      await sleep(1000);
+    }
+    return last;
+  };
+  for (let round = 0; round < 3; round += 1) {
+    const have = round === 0 ? 0 : await settled();
+    if (have >= count) break;
+    const missing = count - have;
     const markers = Array.from({ length: missing }, (_, index) => `[[fake:tool:refine_image ${JSON.stringify({ prompt: `variant ${round}-${index + 1} of the red cube`, reference_handles: ['@img1'] })}]]`);
     await turn(sid, `同一张图出 ${missing} 个改法 ${markers.join(' ')}`);
+    console.log(`seed M1 N=${count} ${sid}: round ${round + 1} asked for ${missing} edits`);
   }
   const done = await waitTasks(sid, (tasks) => tasks.filter((task) => task.capability === 'image-to-image' && task.state === 'SUCCEEDED').length >= count, 240);
-  if (!done) throw new Error(`only ${(await edits()).length} of ${count} fake edits were made`);
-  return { sid, keys: (await edits()).map((task) => `n:${task.id}`) };
+  const made = await edits();
+  if (!done) throw new Error(`only ${made.length} of ${count} fake edits were made (session ${sid})`);
+  if (made.length !== count) throw new Error(`${made.length} fake edits were made for N=${count} (session ${sid})`);
+  // The same-source count the strip should show: lineage edges out of the source picture.
+  const [, lineage] = await api('GET', `/api/v1/chat/sessions/${sid}/lineage`);
+  const source = (await sessionTasks(sid)).find((task) => task.capability === 'text-to-image');
+  const sourceNode = (lineage?.nodes || []).find((node) => source && String(node.id).includes(source.id));
+  const fromSource = (lineage?.edges || []).filter((edge) => sourceNode && edge.from === sourceNode.id).length;
+  if (fromSource !== count) throw new Error(`lineage has ${fromSource} edges out of the source picture, not ${count} (session ${sid})`);
+  return { sid, keys: made.map((task) => `n:${task.id}`) };
 }
 
 async function itemM1() {
@@ -1179,11 +1205,18 @@ async function itemM1() {
 async function itemM2() {
   if (!await batch4Gate('M2', '连续多轮后分支按钮与历史结果')) return;
   const sid = await createSession(`${tag} 轮次收尾`);
+  // An empty session's composer is in free chat, where refine_image makes no task; seed @img1 first so the stage
+  // is an image stage and every round edits it.
+  await turn(sid, '画一个木头小玩具 [[fake:tool:refine_image {"prompt":"a small wooden toy, plain background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) {
+    record('FAIL', 'M2', '造 @img1', `fake 文生图没有成功（会话 ${sid}）`);
+    return;
+  }
   await openSession(sid);
   const input = page.locator('[data-testid=studio-composer] textarea').first();
   const running = async () => (await tid('composer-stop').count()) > 0;
   const sendRound = async (index) => {
-    await input.fill(`第 ${index} 轮 [[fake:tool:refine_image ${JSON.stringify({ prompt: `round ${index}: a small wooden toy, plain background` })}]]`);
+    await input.fill(`第 ${index} 轮 [[fake:tool:refine_image ${JSON.stringify({ prompt: `round ${index}: the wooden toy, another color`, reference_handles: ['@img1'] })}]]`);
     await input.press('Enter');
   };
   // Until the UI says the turn ended: the stop button showed and is gone again.
@@ -1194,9 +1227,18 @@ async function itemM2() {
     return Date.now();
   };
   const waitTask = async (index) => {
-    const tasks = await waitTasks(sid, (list) => list.filter((task) => task.state === 'SUCCEEDED').length >= index, 120);
+    // @img1 is one success already; round n makes the (n+1)th.
+    const tasks = await waitTasks(sid, (list) => list.filter((task) => task.state === 'SUCCEEDED').length >= index + 1, 120);
     if (!tasks) throw new Error(`round ${index}: its fake task did not succeed`);
   };
+  const count = async () => page.evaluate(() => {
+    const root = document.querySelector('[data-testid=chat-messages]');
+    return {
+      img: root ? root.querySelectorAll('img').length : 0,
+      cards: root ? root.querySelectorAll('[data-testid=chat-image-result]').length : 0,
+      handles: root ? [...root.querySelectorAll('[data-testid=chat-result-handle]')].map((node) => node.innerText.trim()) : [],
+    };
+  });
   const branchState = async () => {
     const message = tid('chat-message').last();
     await message.hover();
@@ -1219,20 +1261,41 @@ async function itemM2() {
     for (let index = 1; index <= 4; index += 1) {
       await sendRound(index);
       endedAt = await waitEnded(index);
-      // Round 4: read the branch item at once, before anything else waits (the server read comes after).
+      // Round 4: read the branch item at once and keep reading until it is usable (at most 6 s). The page rereads
+      // the newest messages 400 ms after `done` (#597, the server marks the turn ended just after it sends `done`),
+      // so the first read may still be disabled; the item must be usable before one second is over. Each read also
+      // notes the page's running-task cards (the branch is held while a tracked task is not terminal) and, at the
+      // first read, the server's own view, to tell which of the two holds it.
       if (index === 4) {
-        const elapsed = Date.now() - endedAt;
-        immediate = { elapsed, ...(await branchState()), file: await shot('M2', 'branch-immediate') };
+        const shown = await count();
+        const [, body] = await api('GET', `/api/chat/sessions/${sid}/messages`);
+        const reply = (Array.isArray(body) ? body : (body.messages || [])).filter((item) => item.role === 'assistant').slice(-1)[0] || {};
+        const serverTasks = await sessionTasks(sid);
+        const server = { at: Date.now() - endedAt, replyPending: Boolean(reply.isPending), unfinished: serverTasks.filter((task) => !['SUCCEEDED', 'FAILED', 'CANCELED', 'CANCELLED'].includes(task.state)).length };
+        const reads = [];
+        while (Date.now() - endedAt < 6000) {
+          const at = Date.now() - endedAt;
+          const state = await branchState();
+          const runningCards = await tid('chat-task-progress').count();
+          reads.push({ at, disabled: state.disabled, runningHint: state.runningHint, runningCards });
+          if (!state.disabled && !state.runningHint) break;
+        }
+        const usable = reads.find((read) => !read.disabled && !read.runningHint);
+        immediate = { shown, server, reads, usable, file: await shot('M2', 'branch-immediate') };
       }
       await waitTask(index);
     }
-    return { ok: true, detail: '4 轮都结束，任务都已成功' };
+    const tasks = await sessionTasks(sid);
+    return { ok: true, detail: `4 轮都结束，任务都已成功（会话 ${sid}：${tasks.filter((task) => task.capability === 'image-to-image').length} 个改图、${tasks.filter((task) => task.capability === 'text-to-image').length} 个文生图）` };
   });
-  await check('M2', '第 4 轮结束后立刻（<1 秒）：「分支到新对话」可用、无“回复或任务尚未结束”', async () => {
+  await check('M2', '第 4 轮结束后 1 秒内：「分支到新对话」变为可用、无“回复或任务尚未结束”', async () => {
     if (!immediate) return { ok: false, detail: '前 4 轮没有跑完，无法读第 4 轮结束时的状态' };
     return {
-      ok: !immediate.disabled && !immediate.runningHint && immediate.elapsed < 1000,
-      detail: `结束后 ${immediate.elapsed}ms 开始读：禁用=${immediate.disabled} 有“尚未结束”提示=${immediate.runningHint} 截图 ${immediate.file}`,
+      // A real read: the chat already shows earlier results; an empty chat would make this pass for nothing.
+      ok: immediate.shown.img > 0 && immediate.shown.cards > 0 && Boolean(immediate.usable) && immediate.usable.at < 1000,
+      detail: `结束时对话里 img=${immediate.shown.img} 卡=${immediate.shown.cards}；服务端（结束后 ${immediate.server.at}ms）回复进行中=${immediate.server.replyPending} 未结束任务=${immediate.server.unfinished}；`
+        + `读分支项：${immediate.reads.map((read) => `${read.at}ms 禁用=${read.disabled} 提示=${read.runningHint} 页面进行中任务卡=${read.runningCards}`).join('，')}；`
+        + `${immediate.usable ? `结束后 ${immediate.usable.at}ms 起可用` : '6 秒内一直不可用'} 截图 ${immediate.file}`,
     };
   });
   await check('M2', '第 4 轮结束 7 秒后：「分支到新对话」可用、无“回复或任务尚未结束”', async () => {
@@ -1243,14 +1306,6 @@ async function itemM2() {
     return { ok: !state.disabled && !state.runningHint, detail: `禁用=${state.disabled} 有“尚未结束”提示=${state.runningHint} 截图 ${file}` };
   });
   await check('M2', '第 5 轮进行中，前几轮的结果卡与图片一直显示（数量不减）', async () => {
-    const count = async () => page.evaluate(() => {
-      const root = document.querySelector('[data-testid=chat-messages]');
-      return {
-        img: root ? root.querySelectorAll('img').length : 0,
-        cards: root ? root.querySelectorAll('[data-testid=chat-image-result]').length : 0,
-        handles: root ? [...root.querySelectorAll('[data-testid=chat-result-handle]')].map((node) => node.innerText.trim()) : [],
-      };
-    });
     const before = await count();
     await sendRound(5);
     const samples = [];
@@ -1266,7 +1321,7 @@ async function itemM2() {
     const dropped = samples.filter((sample) => sample.img < before.img || sample.cards < before.cards || before.handles.some((handle) => !sample.handles.includes(handle)));
     const file = await shot('M2', 'round5');
     return {
-      ok: samples.length > 0 && dropped.length === 0,
+      ok: before.img > 0 && before.cards > 0 && samples.length > 0 && dropped.length === 0,
       detail: `发送前 img=${before.img} 卡=${before.cards} 句柄=${JSON.stringify(before.handles)}；进行中采样 ${samples.length} 次（约 ${(samples.length * 0.15).toFixed(1)}s 以上），`
         + `其中少于发送前的 ${dropped.length} 次${dropped[0] ? `（如 img=${dropped[0].img} 卡=${dropped[0].cards}）` : ''}；fake 没有可从产品侧触发的慢任务标记，进行中窗口是本轮对话与任务轮询的自然时长 截图 ${file}`,
     };
