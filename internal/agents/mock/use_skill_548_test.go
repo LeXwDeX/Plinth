@@ -52,6 +52,18 @@ func TestMockReadsTheSkillBeforeActing(t *testing.T) {
 			}
 		}
 	}
+	// #611: with four-view picked by hand the turn block carries its text, so
+	// a view request goes straight to create_three_view and reads no Skill.
+	picked := "\n\n【所选技能】用户本轮已选技能「四视图」（four-view），以它的做法为准。"
+	completion, err := newRoutingAdapter(t).Stream(context.Background(), agents.Request{
+		Messages: []agents.Message{{Role: "system", Content: "系统" + picked}, {Role: "user", Content: "用 @img2 生成四视图"}},
+		Tools:    tools}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Name != "create_three_view" {
+		t.Fatalf("with four-view picked the calls = %#v", completion.ToolCalls)
+	}
 	// Without use_skill offered the routing is unchanged.
 	name, _ := plan(t, []agents.Message{{Role: "user", Content: "用 @img2 生成三视图"}}, allTools)
 	if name != "create_three_view" {

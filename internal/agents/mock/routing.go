@@ -260,7 +260,9 @@ type plannedCall struct {
 // three-view or four-view request reads the matching Skill with use_skill
 // before create_three_view, in the same round. "读 Skill <name>" reads the
 // named Skill first; "skill=<name>" passes a style Skill on the 2D generation
-// call. Without use_skill offered the calls are unchanged.
+// call. Without use_skill offered the calls are unchanged. A view Skill the
+// person picked for the turn (#611) is already in the system context, so a
+// view request reads no Skill at all, as the turn block says.
 func (adapter *Adapter) withSkillCalls(request agents.Request, text string, calls []plannedCall) []plannedCall {
 	if !adapter.hasTool(request, toolUseSkill) {
 		return calls
@@ -275,7 +277,7 @@ func (adapter *Adapter) withSkillCalls(request agents.Request, text string, call
 	name := ""
 	if match := skillReadPattern.FindStringSubmatch(text); match != nil {
 		name = match[1]
-	} else if len(calls) > 0 && calls[0].name == toolCreateThreeView {
+	} else if len(calls) > 0 && calls[0].name == toolCreateThreeView && pickedSkill(request.Messages) == "" {
 		name = "three-view"
 		if strings.Contains(text, "四视图") {
 			name = "four-view"
@@ -410,6 +412,24 @@ func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text strin
 
 // functionFixed reports whether the system context says a function is fixed in
 // this turn (#374): the server puts the function's snapshot there.
+// pickedSkillPattern reads the turn block of a Skill the person picked
+// (#611), which names it by its standard name.
+var pickedSkillPattern = regexp.MustCompile(`(?:【所选技能】|\[Selected Skill\])[^\n]*?[（(]([a-z0-9][a-z0-9-]*)[）)]`)
+
+// pickedSkill is the standard name of the Skill the person picked for the
+// turn, read from the system context's turn block (#611); "" without one.
+func pickedSkill(messages []agents.Message) string {
+	for _, message := range messages {
+		if message.Role != "system" {
+			continue
+		}
+		if match := pickedSkillPattern.FindStringSubmatch(message.Content); match != nil {
+			return match[1]
+		}
+	}
+	return ""
+}
+
 func functionFixed(messages []agents.Message) bool {
 	for _, message := range messages {
 		if message.Role == "system" && strings.Contains(message.Content, functionSnapshotMarker) {
@@ -519,7 +539,10 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		handle := firstOr(imageHandle, firstOr(imageFromSelection, firstOr(upload, selectedAlias)))
 		return toolCreateMultiview, map[string]any{"reference_handles": []string{handle}}
 
-	case adapter.wants(request, toolCreateThreeView) && strings.Contains(text, "三视图"):
+	case adapter.wants(request, toolCreateThreeView) &&
+		(strings.Contains(text, "三视图") || (strings.Contains(text, "四视图") && pickedSkill(request.Messages) != "")):
+		// #611: with a view Skill picked by hand, a four-view request goes to
+		// the same tool; the picked Skill's text says how.
 		handle := firstOr(imageHandle, firstOr(imageFromSelection, selectedAlias))
 		return toolCreateThreeView, map[string]any{"reference_handles": []string{handle}}
 

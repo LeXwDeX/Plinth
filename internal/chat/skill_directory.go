@@ -19,8 +19,11 @@ import (
 // while a generation tool that takes the style argument is offered. Personal
 // Skills fill their own bounded part newest first, and the rest are counted in
 // one closing line. The Skill the person picked for this turn is left out: its
-// text is already in the turn. Published (shared) Skills carry no description
-// and are not listed.
+// text is already in the turn. So is every other Skill bound to the same tool
+// as a tool-binding pick (#611): the pick decides how the tool is used, and a
+// sibling such as three-view next to a picked four-view only invites the Agent
+// to read the wrong one. Published (shared) Skills carry no description and
+// are not listed.
 func (orchestrator *Orchestrator) skillDirectoryPrompt(ctx context.Context, registry *toolRegistry, scope string, options TurnOptions) string {
 	directory := orchestrator.schema.Skills.Directory
 	if !directory.Enabled() || registry == nil {
@@ -45,11 +48,15 @@ func (orchestrator *Orchestrator) skillDirectoryPrompt(ctx context.Context, regi
 	for _, skill := range orchestrator.schema.Skills.SystemSkills {
 		system[skill.ID] = true
 	}
+	pickedTool := ""
+	if picked, found := PickedToolSkill(skills, options.SkillID); found {
+		pickedTool = picked.Tool
+	}
 	var systemPart strings.Builder
 	systemUsed := 0
 	var personal []catalog.SkillSchema
 	for _, skill := range skills {
-		if skill.ID == options.SkillID {
+		if skill.ID == options.SkillID || (pickedTool != "" && skill.Tool == pickedTool) {
 			continue
 		}
 		switch {
@@ -152,6 +159,22 @@ const UsedSkillSummaryKey = "used_skill"
 func UsedSkillSummary(used UsedSkill) json.RawMessage {
 	encoded, _ := json.Marshal(map[string]any{UsedSkillSummaryKey: used})
 	return encoded
+}
+
+// PickedToolSkill is the Skill the person picked for the turn when it binds a
+// tool, read from the turn's frozen table (#611). Another Skill bound to the
+// same tool is neither listed in the directory nor read with use_skill, and the
+// tool's call records the pick as the Skill the reply used.
+func PickedToolSkill(skills []catalog.SkillSchema, skillID string) (catalog.SkillSchema, bool) {
+	if skillID == "" {
+		return catalog.SkillSchema{}, false
+	}
+	for _, skill := range skills {
+		if skill.ID == skillID {
+			return skill, skill.Tool != ""
+		}
+	}
+	return catalog.SkillSchema{}, false
 }
 
 // DirectorySkill finds a Skill of the turn's frozen table by its standard name.
