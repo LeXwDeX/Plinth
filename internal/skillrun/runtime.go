@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
 
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -111,10 +110,15 @@ func (r *Runtime) ResolveAgentStepAt(ctx context.Context, owner generation.Owner
 	if err != nil {
 		return Run{}, Execution{}, executiongrant.Grant{}, err
 	}
+	matches, err := MatchesFittedPreparedInput(step.Spec, execution.SourceAssetID, execution.SecondSourceAssetID,
+		prepared.NormalizedInput, r.fittedSource(ctx, owner))
+	if err != nil {
+		return Run{}, Execution{}, executiongrant.Grant{}, err
+	}
 	if prepared.ID != step.PreparedInputID || prepared.OwnerID != owner || prepared.SessionID != session ||
 		prepared.InputHash != step.PreparedInputHash || prepared.Capability != step.Spec.Capability ||
 		prepared.OfferingID != step.Spec.OfferingID || prepared.OfferingRevision != step.Spec.OfferingRevision ||
-		!MatchesPreparedInput(step.Spec, execution.SourceAssetID, execution.SecondSourceAssetID, prepared.NormalizedInput) ||
+		!matches ||
 		(grant.Status == executiongrant.Bound && grant.TaskID == "") ||
 		(step.TaskID != "" && (grant.Status != executiongrant.Bound || grant.TaskID != string(step.TaskID))) {
 		return Run{}, Execution{}, executiongrant.Grant{}, ErrConflict
@@ -238,39 +242,89 @@ func stepInput(spec StepSpec, source, second generation.AssetID) (json.RawMessag
 // normalization. Offering defaults may add fields, but no caller can replace
 // the prompt or the source assets while retaining the Skill checkpoint.
 func MatchesPreparedInput(spec StepSpec, source, second generation.AssetID, normalized json.RawMessage) bool {
+	matches, _ := MatchesFittedPreparedInput(spec, source, second, normalized, nil)
+	return matches
+}
+
+// FittedSource names the input asset an owner's re-encoded copy was made
+// from (#276); found is false for any asset that is not such a copy. It is
+// the owner-scoped derivation record, never a guess from the input.
+type FittedSource func(generation.AssetID) (source generation.AssetID, found bool, err error)
+
+// MatchesFittedPreparedInput is MatchesPreparedInput for a kernel that may
+// replace a source picture over its Offering's limits with a re-encoded copy
+// before freezing it (#629): a source position holds either the expected
+// asset or a copy the derivation record proves was made from it. Any other
+// asset is still a mismatch. A nil fitted accepts only the exact assets.
+func MatchesFittedPreparedInput(spec StepSpec, source, second generation.AssetID, normalized json.RawMessage,
+	fitted FittedSource,
+) (bool, error) {
 	if spec.PromptParameter == "" || spec.SourceParameter == "" {
-		return false
+		return false, nil
 	}
 	var input map[string]json.RawMessage
 	if err := json.Unmarshal(normalized, &input); err != nil {
-		return false
+		return false, nil
 	}
 	var prompt string
 	if err := json.Unmarshal(input[spec.PromptParameter], &prompt); err != nil ||
 		prompt != spec.PromptTemplate {
-		return false
+		return false, nil
 	}
 	var assets []generation.AssetID
 	if err := json.Unmarshal(input[spec.SourceParameter], &assets); err != nil {
-		return false
+		return false, nil
 	}
 	expected := make([]generation.AssetID, 0, 2)
 	expected = append(expected, source)
 	if second != "" {
 		expected = append(expected, second)
 	}
-	if !slices.Equal(assets, expected) {
-		return false
+	if len(assets) != len(expected) {
+		return false, nil
+	}
+	for index, asset := range assets {
+		if asset == expected[index] {
+			continue
+		}
+		if fitted == nil || asset == "" {
+			return false, nil
+		}
+		origin, found, err := fitted(asset)
+		if err != nil {
+			return false, err
+		}
+		if !found || origin != expected[index] {
+			return false, nil
+		}
 	}
 	for key, value := range spec.StaticInput {
 		var expected, actual any
 		if json.Unmarshal(value, &expected) != nil ||
 			json.Unmarshal(input[key], &actual) != nil ||
 			!reflect.DeepEqual(expected, actual) {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
+}
+
+// fittedInputs is the kernel's owner-scoped proof that a frozen input asset
+// is a re-encoded copy of another (generation.Module implements it).
+type fittedInputs interface {
+	InputAssetDerivationSource(context.Context, generation.OwnerID, generation.AssetID) (generation.AssetID, bool, error)
+}
+
+// fittedSource reads the derivation proof through the gateway when it offers
+// one; without it only the exact source assets match.
+func (r *Runtime) fittedSource(ctx context.Context, owner generation.OwnerID) FittedSource {
+	deriver, ok := r.Generation.(fittedInputs)
+	if !ok {
+		return nil
+	}
+	return func(id generation.AssetID) (generation.AssetID, bool, error) {
+		return deriver.InputAssetDerivationSource(ctx, owner, id)
+	}
 }
 
 // RequestGrant creates a pending, exact-input grant. Unless the session approval
