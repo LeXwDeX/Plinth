@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { KindBadge } from '@/components/studio/kind-badge';
+import { ObjectThumbImage } from '@/components/studio/object-thumb';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
@@ -122,9 +123,10 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
               : <span key={index} className="bg-muted" />
           ))}
         </span>
-      ) : src
-        ? <img src={src} alt={''} loading="lazy" decoding="async" className="size-full object-cover" />
-        : tile.domain === 'model' ? <Box aria-hidden className="size-5 text-muted-foreground" /> : null}
+      ) : src || tile.domain === 'model'
+        // #624: a 3D version without a preview (or whose preview does not load) shows the 3D placeholder.
+        ? <ObjectThumbImage kind={tile.domain} src={src} />
+        : null}
       {tile.status === 'pending' || tile.status === 'running'
         ? <ProgressRing progress={tile.progress} pending={tile.status === 'pending'} label={text(tile.status === 'pending' ? 'pending' : 'running')} />
         : null}

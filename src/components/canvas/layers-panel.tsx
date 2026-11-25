@@ -37,6 +37,7 @@ import { requestLayerFollow } from '@/lib/canvas/layer-follow';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 import { useNodeHandles } from '@/hooks/use-picture-handles';
+import { useNodeViews } from '@/hooks/use-three-views';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useMaskStore, type MaskDraft } from '@/store/mask-store';
 
@@ -209,6 +210,8 @@ export function CanvasLayersPanel({
   const nodes = useCanvasStore((state) => state.nodesBySession[sessionId] ?? EMPTY_NODES);
   // #87: a picture of the chat is listed by its chat handle ("img25"), not as one more "图片".
   const handles = useNodeHandles(sessionId, nodes);
+  // #618: a three-view picture without a handle is listed by its view ("正面").
+  const views = useNodeViews(sessionId, nodes);
   const selectedIds = useCanvasStore((state) => state.selectedNodeIds);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
   const toggleVisibility = useCanvasStore((state) => state.toggleNodeVisibility);
@@ -370,7 +373,7 @@ export function CanvasLayersPanel({
           }
           const node = row.node;
           const hidden = node.visible === false;
-          const label = layerName({ ...node, handle: handles.get(node.id) }, text, schema.localization?.persisted_default_texts);
+          const label = layerName({ ...node, handle: handles.get(node.id), view: views.get(node.id) }, text, schema.localization?.persisted_default_texts);
           const inpaint = node.type === 'image' && isInpaintSource(node.inpaint) ? node.inpaint : null;
           return (
             <li key={row.key} data-testid="layer-row" data-node={node.id}>

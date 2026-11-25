@@ -4,7 +4,7 @@ import type { OfferingWire } from '@/lib/agent-offerings';
 
 import {
   groupIsActive, groupMultiview, groupTileStatus, interleaveGroups, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
-  remainingSlots, slotAction, succeededCount, type ThreeViewGroup,
+  remainingSlots, slotAction, succeededCount, viewLabelOfTask, type ThreeViewGroup,
 } from './three-view';
 
 const wire = (statuses: Array<[string, Record<string, unknown>]>, extra: Record<string, unknown> = {}) => ({
@@ -76,6 +76,42 @@ describe('group state', () => {
     expect(groupTileStatus(parse([['awaiting_approval', {}], ['not_started', {}], ['not_started', {}]]))).toBe('pending');
     expect(groupTileStatus(parse([['failed', {}], ['not_started', {}], ['not_started', {}]]))).toBe('failed');
     expect(succeededCount(parse([['succeeded', {}], ['succeeded', {}], ['failed', {}]]))).toBe(2);
+  });
+
+  // #618: the optional right view is not part of "done of required"; counting it read 3 / 3 with left not started.
+  it('counts finished required views only', () => {
+    const group = parseThreeViews({ items: [{
+      ...wire([]),
+      slots: [
+        { key: 'front', label: '正面', status: 'succeeded', task_id: 't1' },
+        { key: 'left', label: '左侧', status: 'not_started', startable: true },
+        { key: 'back', label: '背面', status: 'succeeded', task_id: 't3' },
+        { key: 'right', label: '右侧', status: 'succeeded', task_id: 't4', optional: true },
+      ],
+    }] })[0];
+    expect(succeededCount(group)).toBe(2);
+  });
+});
+
+// #618: a picture of a three-view group goes by its view on the canvas, not as one more "图片".
+describe('viewLabelOfTask', () => {
+  const groups = parseThreeViews({ items: [{
+    ...wire([]),
+    slots: [
+      { key: 'front', label: '正面', status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { key: 'left', label: '左侧', status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+      { key: 'back', label: '背面', status: 'succeeded', output_asset_id: 'up3', replaced: true },
+      { key: 'right', label: '右侧', status: 'running', task_id: 't4', optional: true },
+    ],
+  }] });
+
+  it('names the view a Task made and nothing else', () => {
+    expect(viewLabelOfTask(groups, 't1')).toBe('正面');
+    expect(viewLabelOfTask(groups, 't2')).toBe('左侧');
+    expect(viewLabelOfTask(groups, 't4')).toBe('右侧');
+    expect(viewLabelOfTask(groups, 'other')).toBe('');
+    expect(viewLabelOfTask(groups, '')).toBe('');
+    expect(viewLabelOfTask([], 't1')).toBe('');
   });
 });
 
