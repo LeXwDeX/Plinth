@@ -203,6 +203,10 @@ type ChatSkillDirectoryMessages struct {
 	// NoStyleModel tells the Agent that no available model can apply a style
 	// Skill now (#620), so it says so instead of trying model after model.
 	NoStyleModel string `json:"no_style_model"`
+	// AgentRead goes with a Skill the Agent read on its own (#621): the person
+	// did not choose it, so the reply calls it the Skill used this turn, never
+	// the person's pick.
+	AgentRead string `json:"agent_read"`
 }
 
 // StyleModelsText is the line naming the models that can apply a style Skill
@@ -239,6 +243,7 @@ func validateSkillDirectory(skills ChatSkillsSchema, agentTools map[string]struc
 		"messages.unsupported": directory.Messages.Unsupported, "messages.user_choice_kept": directory.Messages.UserChoiceKept,
 		"messages.picked":       directory.Messages.Picked,
 		"style_models_template": directory.StyleModelsTemplate, "messages.no_style_model": directory.Messages.NoStyleModel,
+		"messages.agent_read": directory.Messages.AgentRead,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("skills.directory.%s 不能为空", field)

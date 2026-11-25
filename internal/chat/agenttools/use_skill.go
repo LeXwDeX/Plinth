@@ -70,11 +70,18 @@ func (e *Executor) useSkill(command chat.ToolCommand) chat.ToolResult {
 	} else if utf8.RuneCountInString(body) > directory.MaxInstructionCharacters {
 		body = string([]rune(body)[:directory.MaxInstructionCharacters])
 	}
-	content, err := json.Marshal(map[string]string{
+	fields := map[string]string{
 		"skill_id":     skill.ID,
 		"name":         slug,
 		"instructions": directory.InstructionPreamble + "\n\n" + body,
-	})
+	}
+	// #621: a Skill the Agent read on its own is not the person's pick; the
+	// note keeps the reply from calling it "你选的". The turn's own pick, read
+	// again, carries none.
+	if source == "agent" && skill.ID != command.Options.SkillID && directory.Messages.AgentRead != "" {
+		fields["note"] = directory.Messages.AgentRead
+	}
+	content, err := json.Marshal(fields)
 	if err != nil {
 		return chat.ToolResult{Error: "use_skill result unavailable", NoSubmission: true}
 	}

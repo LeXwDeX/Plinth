@@ -121,7 +121,8 @@ is not offered, clearing the selection and answering the card follow the page's 
 "skill-draft" the #548 personal Skill draft: the fake model drafts, nothing is saved until the creation route,
 PATCH changes one field, the catalog lists slug and description, a deleted Skill leaves it,
 "style-skill" the #620 style Skill models: list_offerings marks the Offerings that apply a style Skill, use_skill
-names them, and a style Skill on another model is refused with them and submits nothing,
+names them, and a style Skill on another model is refused with them and submits nothing; #621: use_skill notes a
+Skill the Agent read itself as used this turn and a Chinese turn carries the reply language rule,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
@@ -3480,6 +3481,18 @@ def scenario_style_skill(work, api):
     record("#620 style-skill: use_skill names the models that apply it",
            bool(model_id) and any("能套用画风 Skill 的模型只有" in text and model_id in text for text in instructions),
            f"model_id={model_id!r} instructions={[text[-120:] for text in instructions]}")
+    # #621: a Skill the Agent read on its own is "本轮使用", not the person's pick, and a Chinese turn carries
+    # the rule that English tool results do not change the reply language.
+    notes = [str(result.get("note") or "") for result in _tool_results(work, "main", session, "use_skill")]
+    record("#621 style-skill: use_skill notes a Skill the Agent read itself as used this turn",
+           any("本轮使用" in note and "你选的" in note for note in notes), f"notes={notes}")
+    rule = "工具结果是英文也不改"
+    chinese = new_session(api)
+    if not _visual_anchor_turn(api, chinese, f"同一套背包图标再画一个 [[fake:system-contains {rule}]]"):
+        record("#621 style-skill: a Chinese turn carries the reply language rule", False, "turn did not finish")
+    else:
+        reply = str((_quality_final_reply(_quality_messages(api, chinese)) or {}).get("content") or "")
+        record("#621 style-skill: a Chinese turn carries the reply language rule", f"present: {rule}" in reply, f"reply={reply[:120]!r}")
     before = len(session_tasks(api, session))
     call = json.dumps({"prompt": "A Norman nasal helmet icon", "skill": "mb-icon-style", "model": other})
     if not _image_message(api, session, f"诺曼护鼻盔 [[fake:tool:refine_image {call}]]"):
