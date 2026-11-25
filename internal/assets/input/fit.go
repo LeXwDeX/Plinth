@@ -347,6 +347,11 @@ func (s *Service) fitAsset(
 	if strings.HasPrefix(result.Method, imagefit.FlattenPrefix) {
 		id = flattenedID
 	}
+	// Re-encoding a large picture is the long part and cannot be undone by
+	// cancellation, so the copy is kept even when the request that asked for
+	// it has gone (#629): the next submission reuses it at once. Its ID only
+	// depends on the owner, the source and the limits, so keeping it is safe.
+	ctx = context.WithoutCancel(ctx)
 	blob, err := s.blobs.PutBlob(ctx, bytes.NewReader(result.Body), result.MediaType, int64(len(result.Body)))
 	if err != nil {
 		return "", &generation.Error{Code: generation.ErrUnavailable, Operation: "fit_input_assets",

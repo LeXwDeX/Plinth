@@ -661,6 +661,12 @@ func hasStep(run skillrun.Run, key string) bool {
 // is approved. It stops at a pending approval, a denial or a started task, so
 // calling it again at any point either continues or changes nothing.
 func (s *Service) drive(ctx context.Context, principal executiongrant.Principal, runID, viewKey string) error {
+	// The person asked for the view; the start outlives the request (#629).
+	// Freezing the input may re-encode a large source picture for a long
+	// time, and a client that stops waiting must not cancel it halfway: the
+	// step would stay unstarted and the work be lost. Every checkpoint below
+	// is idempotent, so a repeated start continues where this one stopped.
+	ctx = context.WithoutCancel(ctx)
 	owner := generation.OwnerID(principal.OwnerID)
 	for range 4 {
 		run, err := s.runtime.Get(ctx, owner, runID)

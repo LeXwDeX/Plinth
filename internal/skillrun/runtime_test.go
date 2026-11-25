@@ -71,3 +71,38 @@ func TestRecipeInputFreezesTheSourcePictureAsASecondReference(t *testing.T) {
 		t.Fatal("a step cannot take the same picture twice")
 	}
 }
+
+// #629: the kernel may freeze a re-encoded copy in place of a source picture
+// over the Offering's limits. A copy whose derivation names the expected
+// source at that position matches; a copy of another picture, a copy in the
+// wrong position, or any copy without a derivation reader does not.
+func TestRecipeInputAcceptsAFittedCopyOfItsSource(t *testing.T) {
+	spec := StepSpec{
+		PromptTemplate: "left view, keep the pose", PromptParameter: "prompt",
+		SourceParameter: "reference_assets", IncludeSourceAsset: true,
+	}
+	derivations := map[generation.AssetID]generation.AssetID{"front-fit": "front-view", "other-fit": "other"}
+	fitted := func(id generation.AssetID) (generation.AssetID, bool, error) {
+		source, found := derivations[id]
+		return source, found, nil
+	}
+	frozen := func(assets ...string) json.RawMessage {
+		encoded, _ := json.Marshal(map[string]any{"prompt": spec.PromptTemplate, "reference_assets": assets})
+		return encoded
+	}
+	if ok, err := MatchesFittedPreparedInput(spec, "front-view", "original", frozen("front-fit", "original"), fitted); err != nil || !ok {
+		t.Fatalf("fitted copy of the source refused: %v %v", ok, err)
+	}
+	for _, changed := range [][]string{
+		{"other-fit", "original"},
+		{"original", "front-fit"},
+		{"front-fit"},
+	} {
+		if ok, err := MatchesFittedPreparedInput(spec, "front-view", "original", frozen(changed...), fitted); err != nil || ok {
+			t.Fatalf("changed reference list accepted: %v (%v)", changed, err)
+		}
+	}
+	if MatchesPreparedInput(spec, "front-view", "original", frozen("front-fit", "original")) {
+		t.Fatal("a copy matched without a derivation record")
+	}
+}

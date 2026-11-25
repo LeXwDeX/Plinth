@@ -75,6 +75,45 @@ func preparedUsesAsset(prepared generation.PreparedInput, asset generation.Asset
 	return false
 }
 
+// fittedSkillSource reads, inside the step's write transaction, which input
+// asset an owner's re-encoded copy was made from (#276, #629). An ordinary
+// upload, a Task output or another owner's asset is not a copy.
+func fittedSkillSource(ctx context.Context, conn *sql.Conn, owner generation.OwnerID) skillrun.FittedSource {
+	return func(id generation.AssetID) (generation.AssetID, bool, error) {
+		var source sql.NullString
+		err := conn.QueryRowContext(ctx, `SELECT derived_from_asset_id FROM generation_input_assets
+			WHERE id=? AND owner_id=?`, id, owner).Scan(&source)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && (!source.Valid || source.String == "")) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return generation.AssetID(source.String), true, nil
+	}
+}
+
+// preparedUsesSkillSource reports whether a prepared input freezes the step's
+// source: the asset itself, or a copy the kernel re-encoded from it to fit
+// the Offering's limits (#629).
+func preparedUsesSkillSource(prepared generation.PreparedInput, asset generation.AssetID,
+	fitted skillrun.FittedSource,
+) (bool, error) {
+	if preparedUsesAsset(prepared, asset) {
+		return true, nil
+	}
+	for _, frozen := range prepared.Assets {
+		origin, found, err := fitted(frozen.ID)
+		if err != nil {
+			return false, err
+		}
+		if found && origin == asset {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func expectedSkillSource(run skillrun.Run, step skillrun.Step) (generation.AssetID, error) {
 	if step.Spec.SourceStepKey == "" {
 		return run.SourceAssetID, nil
@@ -150,16 +189,33 @@ func (r *Repository) AttachSkillPrepared(ctx context.Context, cmd skillrun.Prepa
 		if err = json.Unmarshal([]byte(payload), &prepared); err != nil {
 			return err
 		}
+		// The kernel may freeze a re-encoded copy in place of a source picture
+		// over the Offering's limits (#276); the derivation record proves it
+		// stands for the source (#629).
+		fitted := fittedSkillSource(ctx, conn, run.OwnerID)
+		usesSource, err := preparedUsesSkillSource(prepared, source, fitted)
+		if err != nil {
+			return err
+		}
+		usesSecond := true
+		if second != "" {
+			if usesSecond, err = preparedUsesSkillSource(prepared, second, fitted); err != nil {
+				return err
+			}
+		}
 		if storedHash != cmd.PreparedInputHash || prepared.InputHash != storedHash ||
 			prepared.ID != cmd.PreparedInputID || prepared.OwnerID != run.OwnerID ||
 			prepared.SessionID != run.SessionID || prepared.Capability != step.Spec.Capability ||
 			prepared.OfferingID != step.Spec.OfferingID ||
-			prepared.OfferingRevision != step.Spec.OfferingRevision || !preparedUsesAsset(prepared, source) ||
-			(second != "" && !preparedUsesAsset(prepared, second)) {
+			prepared.OfferingRevision != step.Spec.OfferingRevision || !usesSource || !usesSecond {
 			return skillrun.ErrConflict
 		}
 		if step.Spec.PromptParameter != "" || step.Spec.SourceParameter != "" {
-			if !skillrun.MatchesPreparedInput(step.Spec, source, second, prepared.NormalizedInput) {
+			matches, err := skillrun.MatchesFittedPreparedInput(step.Spec, source, second, prepared.NormalizedInput, fitted)
+			if err != nil {
+				return err
+			}
+			if !matches {
 				return skillrun.ErrConflict
 			}
 		}
