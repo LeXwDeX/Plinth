@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.27",
+    "revision": "2026-11-24.19.28",
     "terminology": {
       "user_facing": [
         {
@@ -5288,6 +5288,8 @@
         "ui.studio.composer.mention.source_version": "版本",
         "ui.studio.composer.mention.source_canvas": "画布",
         "ui.studio.composer.mention.token_board": "画布",
+        "ui.studio.composer.mention.group_canvas": "画布中",
+        "ui.studio.composer.mention.group_library": "素材库",
         "ui.studio.composer.drop_hint": "松开即可加入附件",
         "ui.studio.composer.attachment.preview": "预览附件 {index}",
         "ui.studio.composer.draft.local_dropped": "有 {count} 张本地图片没能随草稿保留，请重新添加。",
@@ -19902,6 +19904,8 @@
             "ui.studio.composer.mention.source_version": "Version",
             "ui.studio.composer.mention.source_canvas": "Canvas",
             "ui.studio.composer.mention.token_board": "Canvas",
+            "ui.studio.composer.mention.group_canvas": "On canvas",
+            "ui.studio.composer.mention.group_library": "Library",
             "ui.studio.composer.drop_hint": "Release to add as an attachment",
             "ui.studio.composer.attachment.preview": "Preview attachment {index}",
             "ui.studio.composer.draft.local_dropped": "{count} local images couldn't be kept with the draft. Please add them again.",

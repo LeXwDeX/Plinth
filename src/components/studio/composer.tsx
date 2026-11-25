@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type TextareaHTMLAttributes } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type TextareaHTMLAttributes } from 'react';
 import { Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Maximize2, Paintbrush, Send, Square, Zap } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
@@ -24,7 +24,7 @@ import { Field } from '@/components/ui/field';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { ATTACHMENT_PURPOSES, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { attachedIndex, insertReference, namesHandle } from '@/lib/chat/composer-reference';
-import { activeMention, filterMentions, insertMention, overridingHandle, type MentionCandidate } from '@/lib/chat/mentions';
+import { activeMention, filterMentions, insertMention, mentionSections, overridingHandle, type MentionCandidate } from '@/lib/chat/mentions';
 import { agentUnavailableReason, formatSchemaText, schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { CHAT_COMPOSER_ELEMENT_ID } from '@/lib/workspace/chat-composer';
@@ -239,6 +239,7 @@ export function Composer({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const previewFromPointer = useRef(false);
   const mentionListRef = useRef<HTMLUListElement>(null);
+  const mentionListId = useId();
   const [mentionPlacement, setMentionPlacement] = useState<{ side: 'above' | 'below'; offset: number; space: number } | null>(null);
   const pendingCaret = useRef<number | null>(null);
   const [flashUrl, setFlashUrl] = useState<string | null>(null);
@@ -433,7 +434,13 @@ export function Composer({
           setPreviewIndex(next);
           // Keyboard moves bring the new option into the scrolling list, wrap included. Pointer moves do not,
           // so the list never jumps under the mouse. The guard keeps jsdom (no scrollIntoView) harmless.
-          mentionListRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[next]?.scrollIntoView?.({ block: 'nearest' });
+          const option = mentionListRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[next];
+          // #560: the first option of a section brings its heading along, so the heading never stays scrolled off.
+          const section = option?.closest<HTMLElement>('[role="group"]');
+          if (section && section.querySelector('[role="option"]') === option) {
+            section.querySelector<HTMLElement>('[data-mention-heading]')?.scrollIntoView?.({ block: 'nearest' });
+          }
+          option?.scrollIntoView?.({ block: 'nearest' });
           return;
         }
         if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(matches[highlighted]); return; }
@@ -446,6 +453,25 @@ export function Composer({
     },
   };
 
+  const mentionOption = (candidate: ComposerMention, index: number) => (
+    <li key={candidate.handle} role="option" aria-selected={index === highlighted} data-testid="composer-mention-option" data-handle={candidate.handle}
+      onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => { previewFromPointer.current = true; setActiveIndex(index); setPreviewIndex(index); }} onMouseLeave={() => { if (previewFromPointer.current) setPreviewIndex((current) => current === index ? null : current); }} onClick={() => pickMention(candidate)}
+      className={cn('flex h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 text-xs', index === highlighted && 'bg-primary/15')}>
+      <HandlePreview handle={candidate.handle} url={candidate.kind === 'image' && !candidate.board ? candidate.url || candidate.thumbnail : ''} open={previewIndex === index} avoidRef={mentionListRef}>
+        <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
+          {candidate.thumbnail ? <img src={candidate.thumbnail} alt={candidate.handle} className="size-full object-cover" />
+            : candidate.kind === 'model' ? <Box aria-hidden className="size-3.5 text-muted-foreground" />
+              : candidate.board ? <Frame aria-hidden className="size-3.5 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}
+        </span>
+      </HandlePreview>
+      <span className="min-w-0 flex-1 truncate font-medium">{candidate.name ?? candidate.handle}</span>
+      {candidate.name ? <span className="shrink-0 text-muted-foreground">{candidate.handle}</span> : null}
+      <span className="shrink-0 rounded-sm bg-panel-raised px-1 text-[10px] leading-4 text-muted-foreground" data-testid="composer-mention-source">
+        {schemaText(schema, `ui.studio.composer.mention.source_${candidate.source ?? 'history'}`)}
+      </span>
+    </li>
+  );
+
   const mentionList = listOpen ? (
     <ul ref={mentionListRef} role="listbox" aria-label={schemaText(schema, 'ui.studio.composer.mention.title')} data-testid="composer-mention-list"
       className={cn('absolute inset-x-0 z-float max-h-52 overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-xl ring-1 ring-foreground/10', !expanded && 'bottom-full mb-1.5')}
@@ -453,24 +479,17 @@ export function Composer({
         [mentionPlacement.side === 'above' ? 'bottom' : 'top']: `calc(100% + ${mentionPlacement.offset}px)`,
         maxHeight: `min(13rem, ${mentionPlacement.space}px)`,
       } : { visibility: 'hidden' } : undefined}>
-      {matches.map((candidate, index) => (
-        <li key={candidate.handle} role="option" aria-selected={index === highlighted} data-testid="composer-mention-option" data-handle={candidate.handle}
-          onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => { previewFromPointer.current = true; setActiveIndex(index); setPreviewIndex(index); }} onMouseLeave={() => { if (previewFromPointer.current) setPreviewIndex((current) => current === index ? null : current); }} onClick={() => pickMention(candidate)}
-          className={cn('flex h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 text-xs', index === highlighted && 'bg-primary/15')}>
-          <HandlePreview handle={candidate.handle} url={candidate.kind === 'image' && !candidate.board ? candidate.url || candidate.thumbnail : ''} open={previewIndex === index} avoidRef={mentionListRef}>
-            <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
-              {candidate.thumbnail ? <img src={candidate.thumbnail} alt={candidate.handle} className="size-full object-cover" />
-                : candidate.kind === 'model' ? <Box aria-hidden className="size-3.5 text-muted-foreground" />
-                  : candidate.board ? <Frame aria-hidden className="size-3.5 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}
-            </span>
-          </HandlePreview>
-          <span className="min-w-0 flex-1 truncate font-medium">{candidate.name ?? candidate.handle}</span>
-          {candidate.name ? <span className="shrink-0 text-muted-foreground">{candidate.handle}</span> : null}
-          <span className="shrink-0 rounded-sm bg-panel-raised px-1 text-[10px] leading-4 text-muted-foreground" data-testid="composer-mention-source">
-            {schemaText(schema, `ui.studio.composer.mention.source_${candidate.source ?? 'history'}`)}
-          </span>
+      {mentionSections(matches).map((section, sectionIndex) => section.group ? (
+        // #560: a heading per section ("画布中", "素材库"). It is not an option: the keyboard moves through the flat
+        // matches, and the heading only labels the group for assistive technology.
+        <li key={`group:${sectionIndex}`} role="group" aria-labelledby={`${mentionListId}-${sectionIndex}`} data-testid="composer-mention-group" data-group={section.group}>
+          <div id={`${mentionListId}-${sectionIndex}`} role="presentation" data-mention-heading data-testid="composer-mention-group-heading"
+            className="px-1.5 pb-0.5 pt-1.5 text-[10px] font-medium leading-4 text-muted-foreground">
+            {schemaText(schema, `ui.studio.composer.mention.group_${section.group}`)}
+          </div>
+          <ul role="none">{section.entries.map(({ candidate, index }) => mentionOption(candidate, index))}</ul>
         </li>
-      ))}
+      ) : <Fragment key={`plain:${sectionIndex}`}>{section.entries.map(({ candidate, index }) => mentionOption(candidate, index))}</Fragment>)}
     </ul>
   ) : null;
 
