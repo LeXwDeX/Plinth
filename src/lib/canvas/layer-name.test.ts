@@ -19,6 +19,14 @@ describe('layerName', () => {
     expect(layerName({ type: 'shape', handle: '@img25' }, text)).toBe('形状');
   });
 
+  // #618: a picture of a three-view group without a chat handle goes by its view, not as "图片".
+  it('calls a three-view picture by its view, after a given name and a chat handle', () => {
+    expect(layerName({ type: 'image', view: '正面' }, text)).toBe('正面');
+    expect(layerName({ type: 'image', view: '背面', handle: '@img9' }, text)).toBe('img9');
+    expect(layerName({ type: 'image', view: '背面', name: '我的背面' }, text)).toBe('我的背面');
+    expect(layerName({ type: 'shape', view: '正面' }, text)).toBe('形状');
+  });
+
   it('calls a text layer by its first 12 characters', () => {
     expect(TEXT_LAYER_NAME_CHARACTERS).toBe(12);
     expect(layerName({ type: 'text', text: '一二三四五六七八九十甲乙丙丁' }, text)).toBe('一二三四五六七八九十甲乙');
@@ -53,5 +61,15 @@ describe('layerName', () => {
     expect(panel).toContain('persisted_default_texts');
     expect(bar).toContain('persisted_default_texts');
     expect(bar).not.toContain('ui.canvas.layers.type_');
+  });
+
+  it('gets the three-view view of a layer in both the panel and the floating bar (#618)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const panel = readFileSync(new URL('../../components/canvas/layers-panel.tsx', import.meta.url), 'utf8');
+    const board = readFileSync(new URL('../../components/workspace/workspace-canvas-board.tsx', import.meta.url), 'utf8');
+    expect(panel).toContain('useNodeViews(');
+    expect(panel).toMatch(/view: views\.get\(node\.id\)/);
+    expect(board).toContain('useNodeViews(');
+    expect(board).toMatch(/view: selectedView/);
   });
 });

@@ -146,8 +146,19 @@ export function groupTileStatus(group: ThreeViewGroup): ThreeViewTileStatus {
   return 'failed';
 }
 
+/** Finished required views: the optional view (the right one) is not a required place it could fill (#618). */
 export function succeededCount(group: ThreeViewGroup): number {
-  return group.slots.filter((slot) => slot.status === 'succeeded').length;
+  return group.slots.filter((slot) => !slot.optional && slot.status === 'succeeded').length;
+}
+
+/** The view ("正面") a Task made in one of the session's three-view groups; empty for any other Task (#618). */
+export function viewLabelOfTask(groups: readonly ThreeViewGroup[], taskId: string): string {
+  if (!taskId) return '';
+  for (const group of groups) {
+    const slot = group.slots.find((entry) => entry.taskId === taskId);
+    if (slot) return slot.label;
+  }
+  return '';
 }
 
 /** A view whose approval or Task is in flight cannot be replaced; any other view can (#65). */

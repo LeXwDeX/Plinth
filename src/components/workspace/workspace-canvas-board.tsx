@@ -16,6 +16,7 @@ import {
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
 import { useSessionMessages } from '@/hooks/use-picture-handles';
+import { useNodeViews } from '@/hooks/use-three-views';
 import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { Action } from '@/components/ui/button';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
@@ -718,6 +719,9 @@ export function WorkspaceCanvasBoard() {
   const selectedHandle = useMemo(() => (selectedImageNode
     ? handleOfPicture(sessionMessages, { url: selectedImageNode.imageUrl, ...(selectedImageNode.captureId ? { captureId: selectedImageNode.captureId } : {}) })
     : ''), [selectedImageNode, sessionMessages]);
+  // #618: a three-view picture without a handle is named by its view, as the layers panel does.
+  const nodeViews = useNodeViews(sessionID, nodes);
+  const selectedView = selectedImageNode ? nodeViews.get(selectedImageNode.id) ?? '' : '';
 
   // File name: the session title and the artboard ratio ("sunset-3x2.png"); the schema fallback when untitled.
   const sessionTitle = useChatStore((state) => state.sessions.find((item) => item.id === sessionID)?.title ?? '');
@@ -1240,7 +1244,7 @@ export function WorkspaceCanvasBoard() {
       />
       {selectedImageNode && layerBarShown(activeTool, selectedImageNode) ? (
         <CanvasImageActionBar
-          layer={{ ...selectedImageNode, ...(selectedHandle ? { handle: selectedHandle } : {}) }}
+          layer={{ ...selectedImageNode, ...(selectedHandle ? { handle: selectedHandle } : {}), ...(selectedView ? { view: selectedView } : {}) }}
           onDuplicate={() => useCanvasStore.getState().duplicateSelected(sessionID)}
           onDownload={() => downloadImage(selectedImageNode.imageUrl)}
           onDelete={() => removeNode(sessionID, selectedImageNode.id)}
