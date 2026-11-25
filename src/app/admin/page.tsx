@@ -31,9 +31,10 @@ import {
   type AdministrationUsageGroupAmount,
 } from '@/lib/administration/usage-browser-client';
 import { priceTotalsAmountsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
-import { schemaText } from '@/lib/product-schema';
+import { schemaMessage, schemaText } from '@/lib/product-schema';
 import { formatPriceTotal } from '@/lib/pricing';
 import { formatBalanceAmount } from '@/lib/i18n/format';
+import { useBalance, type ProviderBalanceAccountView } from '@/hooks/use-balance';
 import { activeLocale } from '@/lib/i18n/locale';
 
 interface DateRange {
@@ -101,14 +102,25 @@ export default function AdminPage() {
     }
     : { days };
   const usageKey = client.usageURL(usageQuery);
-  const {
-    data: balance,
-    isLoading: balanceLoading,
-  } = useSWR(
+  // The balance summary reads one configured account and is the only writer of
+  // the balance snapshots, so the page keeps asking it; the card itself lists
+  // every provider account in its own unit from the provider balance route (#623).
+  useSWR(
     balanceRoute,
     () => client.getBalance(),
     { revalidateOnFocus: false },
   );
+  const {
+    accounts: balanceAccounts,
+    isLoading: balanceLoading,
+  } = useBalance();
+  // A native account states its own unit; an account the route could not read
+  // keeps its row with the Schema placeholder instead of disappearing.
+  const balanceText = (account: ProviderBalanceAccountView): string => account.priceMode === 'native'
+    ? (account.nativeBalance ? formatPriceTotal(account.nativeBalance) : null) ?? schemaText(schema, 'ui.pricing.balance_unknown')
+    : typeof account.balance === 'number'
+      ? `${formatBalanceAmount(account.balance, activeLocale(schema))}${schemaText(schema, 'ui.workspace.balance.points')}`
+      : schemaText(schema, 'ui.workspace.balance.unavailable');
   const {
     data: usage,
     isLoading: usageLoading,
@@ -206,11 +218,13 @@ export default function AdminPage() {
                 {balanceLoading ? (
                   <Skeleton className="h-7 w-24 mt-0.5" />
                 ) : (
-                  <p className="text-2xl font-bold tabular-nums">
-                    {balance?.priceMode === 'native'
-                      ? balance.nativeBalance ? formatPriceTotal(balance.nativeBalance) : schemaText(schema, 'ui.pricing.balance_unknown')
-                      : typeof balance?.currentBalance === 'number' ? formatBalanceAmount(balance.currentBalance, activeLocale(schema)) : presentation.empty_placeholder}
-                  </p>
+                  <ul data-testid="admin-balance" className="mt-0.5 space-y-0.5 text-sm font-bold tabular-nums">
+                    {balanceAccounts.map((account) => (
+                      <li key={account.provider} className="break-words">
+                        {schemaMessage(schema, 'ui.common.label_value', { label: account.label, value: balanceText(account) })}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </div>

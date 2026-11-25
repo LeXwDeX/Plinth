@@ -2583,7 +2583,7 @@ SQLite migration 0041 继续保存不可覆盖的共享 Agent Configuration 版�
 
 任务托盘将当前会话的 SkillRun checkpoint 阶段与实际 Generation Task 分开显示。checkpoint 记录包括已请求同意或已关联 Task 的步骤；其阶段会在同意被拒绝或关联 Task 失败后保持原值，因此不代表实时活动状态。托盘的实时计数与进度只来自未终结的实际 Task 和当前 Agent 等待状态。已关联 Task 的 checkpoint 不重复显示。Agent 等待状态不合成为虚构 Task 或百分比。
 
-余额摘要在工作区顶栏独立显示。已知的数值余额含 0；悬停、键盘聚焦或触控可打开账户明细。浏览器余额缓存键包含用户 ID，避免账户切换复用旧数据。
+余额摘要在工作区顶栏独立显示。已知的数值余额含 0；悬停、键盘聚焦或触控可打开账户明细。浏览器余额缓存键包含用户 ID，避免账户切换复用旧数据。管理首页「API 当前余额」卡片（#623；本机 vitest 通过，未部署验收）也读这条 `legacy_provider_balance` 路由，按 `accounts` 顺序逐账户列出余额和各自的原生单位；读不到的账户保留一行，显示 Schema 占位文案（`ui.pricing.balance_unknown`，数值账户为 `ui.workspace.balance.unavailable`）。管理余额摘要路由 `admin_balance_summary` 仍按 `administration.usage.balance.account_id` 只读一个账户、没有单位，它是 `generation_balance_snapshots` 唯一的在线写入方（ETL 只导入旧快照），页面因此照常请求它，以保证快照继续记录，但卡片不再显示它的数字。Schema 与 Catalog 未改。
 
 Hyper3D（Rodin）账户余额（#91）：与 Meshy、Tripo 一样只由 Schema 声明——`provider_accounts.hyper3d` 走通用 `http-json` 读取器（`GET {hyper3d_base_url}/check_balance`，`Authorization: Bearer`，响应字段 `balance`，原生单位 `hyper3d.credit`），并在 `legacy_provider_balance.accounts` 登记，兼容接口、管理端汇总和前端顶栏不增加 Provider 分支。官方依据为 [Check Balance](https://docs.hyper3d.ai/en/api-specification/check-balance)（可选 `usage_page` 未使用）。该账户读取器构造需要非空 `hyper3d_base_url`（Schema 默认已给出）。本次只做了 httptest 与 mock 模式验证，未调用真实 Rodin 接口，未部署验收。
 
