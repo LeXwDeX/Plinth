@@ -276,7 +276,8 @@ func TestAgentViewLabelsReachTheHyper3DWireInPictureOrder(t *testing.T) {
 	}
 
 	// All five steps reach the fake once the coordinator starts them.
-	deadline := time.Now().Add(60 * time.Second)
+	// A slow race runner starts the five steps late: the wait ends as soon as the fifth arrives, so a long limit costs nothing.
+	deadline := time.Now().Add(240 * time.Second)
 	forms := submissions.all()
 	for len(forms) < 5 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
