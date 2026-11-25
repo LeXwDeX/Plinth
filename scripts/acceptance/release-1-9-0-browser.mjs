@@ -623,9 +623,11 @@ async function item548Skill() {
 
   const derivedName = `${tag}-derived`;
   await check('#548', '列表显示说明；没写说明的 Skill 标「自动生成，建议补写」', async () => {
-    const [status] = await api('POST', '/api/v1/chat/skills/personal', { name: derivedName, prompt: `${tag} 没有说明的旧式 Skill 正文` });
-    await openSkills();
+    const [status] = await api('POST', '/api/v1/chat/skills/personal', { name: derivedName, prompt: `${tag} 没有说明的旧式 Skill 正文`, recommended_size: '2048x2048' });
+    // The list is a cached read: an API-side create shows after a reload (the UI itself creates through the dialog).
     await closeSettings();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
     await openSkills();
     const own = (await rowOf(name).innerText()).replace(/\s+/g, ' ');
     const derived = (await rowOf(derivedName).innerText().catch(() => '')).replace(/\s+/g, ' ');
