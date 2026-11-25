@@ -58,6 +58,15 @@ func (e *Executor) useSkill(command chat.ToolCommand) chat.ToolResult {
 			"{argument}", directory.GenerationArgument,
 			"{slug}", slug,
 		).Replace(directory.StyleInstructionTemplate)
+		// #620: which models can apply it, so the call names one of them the
+		// first time (or says none can) instead of trying model after model.
+		var models []string
+		if e.styleSkillModels != nil {
+			models = e.styleSkillModels()
+		}
+		if line := directory.StyleModelsText(models); line != "" {
+			body += "\n" + line
+		}
 	} else if utf8.RuneCountInString(body) > directory.MaxInstructionCharacters {
 		body = string([]rune(body)[:directory.MaxInstructionCharacters])
 	}

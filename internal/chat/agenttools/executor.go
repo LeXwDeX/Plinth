@@ -96,6 +96,10 @@ type Config struct {
 	// Skills is the Schema's Skill declaration: use_skill reads its directory
 	// contract and its system Skill IDs (#548).
 	Skills catalog.ChatSkillsSchema
+	// StyleSkillModels lists the models that can apply a style Skill now
+	// (chat.StyleSkillModels, #620); use_skill names them after a style
+	// Skill's body. Nil names none.
+	StyleSkillModels func() []string
 	// Context carries the attachment handle syntax and its refusal wording;
 	// create_three_view accepts handles beside history indices.
 	Context  catalog.ChatContextSchema
@@ -232,6 +236,7 @@ type Config struct {
 
 type Executor struct {
 	skills                catalog.ChatSkillsSchema
+	styleSkillModels      func() []string
 	offerings             func() []generation.Offering
 	context               catalog.ChatContextSchema
 	skillRuntime          *skillrun.Runtime
@@ -370,6 +375,7 @@ func New(config Config) (*Executor, error) {
 	}
 	return &Executor{
 		skills:                 config.Skills,
+		styleSkillModels:       config.StyleSkillModels,
 		choiceKinds:            choiceKinds,
 		choiceOptionInvalid:    config.ChoiceOptionInvalid,
 		briefSavedMessage:      config.BriefSavedMessage,

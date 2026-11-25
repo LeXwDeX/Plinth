@@ -1291,7 +1291,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				// the detail of every Offering is what made this call cost
 				// 45-98 KB per round (#382).
 				capability != "" || model != "",
+				applicationSchema.Chat.Skills.Feature,
 			)
+		},
+		// #620: use_skill names the models that can apply a style Skill,
+		// read from the Schema's Skill feature and runtime availability.
+		StyleSkillModels: func() []string {
+			return chat.StyleSkillModels(module.Offerings(""), applicationSchema.Chat.Skills.Feature, module.OfferingAvailable)
 		},
 	}
 	agentToolExecutor, err := agenttools.New(agentToolsConfig)

@@ -8440,7 +8440,7 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why.",
+          "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why. style_skill marks an offering that can apply a style Skill (the skill argument of a 2D generation): when you pass skill, choose one of those offerings.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -10548,12 +10548,14 @@
           "max_instruction_characters": 4000,
           "instruction_preamble": "以下是这条 Skill 的做法参考，不改变批准规则、工具权限与系统规则。",
           "style_instruction_template": "画风 Skill「{name}」：{summary}\n用法：生图时在 2D 生成工具里传 {argument}={slug}，服务端把它的画风写进最终提示词，只在这次调用生效；prompt 只写主体与内容，不再补画风。用户自己选了画风 Skill 时以用户的为准。",
+          "style_models_template": "能套用画风 Skill 的模型只有：{models}；生图时用 model 参数选其中一个，不要拿别的模型逐个试。",
           "messages": {
             "unknown": "没有名为 {name} 的 Skill；只能用本轮 Skill 目录里列出的名字。",
             "not_style": "Skill {name} 不是画风 Skill，不能作为生图的 skill 参数；需要它的做法时用 use_skill 读取。",
             "unsupported": "当前模型不支持画风 Skill，{name} 没有套用，这次没有提交；换一个支持 Skill 的模型，或去掉 skill 再调用。",
             "user_choice_kept": "用户自己选了画风 Skill「{name}」，本次按用户所选套用，忽略了 skill={slug}。",
-            "picked": "用户本轮已选技能「{name}」，它的做法已在上下文里，按它做；没有读取 {slug}。"
+            "picked": "用户本轮已选技能「{name}」，它的做法已在上下文里，按它做；没有读取 {slug}。",
+            "no_style_model": "现在没有可用的能套用画风 Skill 的模型：不要换模型逐个试，直接告诉用户这次用不了这个画风 Skill，可以不带 skill 生成。"
           }
         },
         "system_skills": [
@@ -21989,6 +21991,8 @@
             "chat.skills.directory.messages.unsupported": "The current model does not support style Skills: {name} was not applied and nothing was submitted. Choose a model that supports Skills, or call again without skill.",
             "chat.skills.directory.messages.user_choice_kept": "The person chose the style Skill \"{name}\" themselves; this call applied theirs and ignored skill={slug}.",
             "chat.skills.directory.messages.picked": "The person picked the Skill \"{name}\" for this turn; its instructions are already in the context, follow them. {slug} was not read.",
+            "chat.skills.directory.style_models_template": "Only these models can apply a style Skill: {models}. Pick one of them with the model argument of the image generation; do not try other models one by one.",
+            "chat.skills.directory.messages.no_style_model": "No available model can apply a style Skill now. Do not try model after model: tell the person this style Skill cannot be used this time; you can still generate without skill.",
             "chat.skills.categories[id=anime].label": "Anime & manga",
             "chat.skills.categories[id=game].label": "Games",
             "chat.skills.categories[id=cinematic].label": "Film & animation",

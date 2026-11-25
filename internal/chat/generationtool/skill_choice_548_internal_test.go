@@ -206,7 +206,7 @@ func TestSkillArgumentRefusesUnknownAndNonStyleSkills(t *testing.T) {
 	}
 	// An Agent Skill on a model without the Skill feature gets a readable answer.
 	_, skill := executor.resolveCallSkill(skillCommand(refine, configuration, "", map[string]any{"prompt": "a cat", "skill": slugOf(t, configuration, inkID)}))
-	if refusal := executor.skillUnsupported(skill); !strings.Contains(refusal, "水墨") {
+	if refusal := executor.skillUnsupported(skill, generation.TextToImage); !strings.Contains(refusal, "水墨") {
 		t.Fatalf("unsupported refusal = %q", refusal)
 	}
 }

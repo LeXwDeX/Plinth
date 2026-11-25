@@ -797,7 +797,7 @@ func (executor *Executor) execute(
 	if command.Options.SkillID != "" {
 		if _, exists := skills[command.Options.SkillID]; !exists || !slices.Contains(offering.Features, executor.chat.Skills.Feature) {
 			skill := callSkillFrom(ctx)
-			if refusal := executor.skillUnsupported(*skill); refusal != "" {
+			if refusal := executor.skillUnsupported(*skill, capability); refusal != "" {
 				skill.Refusal = refusal
 				return executor.refusal(command, refusalSkill, refusal), nil
 			}
