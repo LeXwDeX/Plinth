@@ -296,7 +296,9 @@ type ChoiceOptionInput struct {
 // profile kind builds its options from model3d_usage.profiles; each option's
 // arguments are the target tool's declared argument filled with the profile
 // id, so the answer continuation calls exactly that tool. A recommended id
-// that names no option is ignored.
+// that names no option is ignored. One reply opens at most one card: while a
+// card another call of this reply opened is pending, a call that passes the
+// card's own checks is ErrChoiceOpenInReply and nothing is stored (#615).
 func (service *Service) AskChoice(
 	ctx context.Context,
 	command ToolCommand,
@@ -557,6 +559,13 @@ func (service *Service) AskChoice(
 	if question == "" {
 		question = kind.Question
 	}
+	// The card's own refusals above come first; a valid second card of the
+	// same reply is refused here, before it could supersede the first (#615).
+	if open, err := service.replyChoicePending(ctx, command); err != nil {
+		return ToolResult{}, err
+	} else if open {
+		return ToolResult{}, ErrChoiceOpenInReply
+	}
 	choice, err := service.choices.CreateChoice(ctx, Choice{
 		OwnerID:            command.OwnerID,
 		SessionID:          command.SessionID,
@@ -620,6 +629,28 @@ func (service *Service) AskChoice(
 
 // choiceOptionsInvalid refuses an Agent-supplied option list with the reason
 // the Agent needs to correct it (#374).
+// replyChoicePending reports whether another call of this Agent reply already
+// opened a card that is still pending (#615). Creating a card supersedes the
+// session's other pending cards, so only the newest card can be pending; the
+// same call replayed (a resumed reply) is not "another" card and gets its
+// stored card back from CreateChoice.
+func (service *Service) replyChoicePending(ctx context.Context, command ToolCommand) (bool, error) {
+	if command.AssistantMessageID == "" {
+		return false, nil
+	}
+	newest, err := service.choices.ListChoices(ctx, command.OwnerID, command.SessionID, 1)
+	if err != nil {
+		return false, err
+	}
+	for _, choice := range newest {
+		if choice.State == ChoicePending && choice.AssistantMessageID == command.AssistantMessageID &&
+			choice.CallID != command.Call.ID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func choiceOptionsInvalid(reason string) ToolResult {
 	return ToolResult{Error: "choice options invalid: " + reason, NoSubmission: true}
 }

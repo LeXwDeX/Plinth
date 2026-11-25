@@ -200,6 +200,10 @@ type Config struct {
 	// ChoiceOptionInvalid words a refused direction-card option list
 	// (chat.presentation.messages.choice_option_invalid, #239).
 	ChoiceOptionInvalid string
+	// ChoiceOpenInReply words the refusal of a second card while a card this
+	// reply opened is still pending
+	// (chat.presentation.messages.choice_open_in_reply, #615).
+	ChoiceOpenInReply string
 	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
 	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
 	// words its field refusals (model3d_usage.brief.messages).
@@ -274,6 +278,7 @@ type Executor struct {
 	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	choiceOptionInvalid    string
+	choiceOpenInReply      string
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
@@ -372,6 +377,7 @@ func New(config Config) (*Executor, error) {
 		skills:                 config.Skills,
 		choiceKinds:            choiceKinds,
 		choiceOptionInvalid:    config.ChoiceOptionInvalid,
+		choiceOpenInReply:      config.ChoiceOpenInReply,
 		briefSavedMessage:      config.BriefSavedMessage,
 		briefInvalidTemplate:   config.BriefInvalidTemplate,
 		briefMessages:          config.BriefMessages,
@@ -878,6 +884,13 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	if err != nil {
 		if errors.Is(err, chat.ErrSessionNotFound) {
 			return chat.ToolResult{Error: "session not found", NoSubmission: true}
+		}
+		if errors.Is(err, chat.ErrChoiceOpenInReply) {
+			message := e.choiceOpenInReply
+			if message == "" {
+				message = "choice card not opened: this reply already opened a card that is still pending; wait for the person's answer instead of calling ask_choice again"
+			}
+			return chat.ToolResult{Error: message, NoSubmission: true}
 		}
 		return chat.ToolResult{Error: "choice card not opened", NoSubmission: true}
 	}

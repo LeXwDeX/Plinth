@@ -6631,6 +6631,9 @@ type ChatMessageTexts struct {
 	// ChoiceOptionInvalid refuses a direction card whose Agent-supplied
 	// options are too few, too many, or not bounded tokens (#239).
 	ChoiceOptionInvalid string `json:"choice_option_invalid,omitempty"`
+	// ChoiceOpenInReply refuses a second choice card while a card the same
+	// Agent reply opened is still pending: one reply asks one card (#615).
+	ChoiceOpenInReply string `json:"choice_open_in_reply,omitempty"`
 	// OfferingChoiceUnavailable tells the Agent that the Offering named by a
 	// tool's offering_argument is not enabled or available ({choices} lists
 	// the ones that are); SourceOfferingUnpaired that the source Task of an
