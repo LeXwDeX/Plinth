@@ -16,9 +16,9 @@ import { stepIndex, type LightboxItem, type LightboxState } from '@/lib/workspac
  * 业务状态（当前对象、任务、模型选择）在 workspace-store。
  */
 
-export const CHAT_WIDTH_DEFAULT = 360;
-export const CHAT_WIDTH_MIN = 320;
-export const CHAT_WIDTH_MAX = 520;
+export const CHAT_WIDTH_DEFAULT = 440;
+export const CHAT_WIDTH_MIN = 440;
+export const CHAT_WIDTH_MAX = 640;
 /** 收起后的窄条宽度。 */
 export const CHAT_RAIL_WIDTH = 56;
 

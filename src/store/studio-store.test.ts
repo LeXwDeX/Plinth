@@ -27,19 +27,19 @@ beforeEach(() => {
 });
 
 describe('chat column width', () => {
-  it('stays within 320 to 520 pixels', () => {
+  it('stays within 440 to 640 pixels', () => {
     expect(clampChatWidth(100)).toBe(CHAT_WIDTH_MIN);
     expect(clampChatWidth(900)).toBe(CHAT_WIDTH_MAX);
-    expect(clampChatWidth(401.4)).toBe(401);
+    expect(clampChatWidth(501.4)).toBe(501);
     expect(clampChatWidth(Number.NaN)).toBe(CHAT_WIDTH_DEFAULT);
   });
 
   it('is remembered in local storage', () => {
     const data = stubStorage();
-    useStudioStore.getState().setChatWidth(444);
+    useStudioStore.getState().setChatWidth(544);
     useStudioStore.getState().setChatCollapsed(true);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toMatchObject({ chatWidth: 444, chatCollapsed: true });
-    expect(readStudioPrefs()).toMatchObject({ chatWidth: 444, chatCollapsed: true });
+    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toMatchObject({ chatWidth: 544, chatCollapsed: true });
+    expect(readStudioPrefs()).toMatchObject({ chatWidth: 544, chatCollapsed: true });
   });
 
   it('still works when storage throws', () => {
@@ -48,8 +48,8 @@ describe('chat column width', () => {
       setItem: () => { throw new Error('quota'); },
     });
     expect(readStudioPrefs().chatWidth).toBe(CHAT_WIDTH_DEFAULT);
-    expect(() => useStudioStore.getState().setChatWidth(480)).not.toThrow();
-    expect(useStudioStore.getState().chatWidth).toBe(480);
+    expect(() => useStudioStore.getState().setChatWidth(560)).not.toThrow();
+    expect(useStudioStore.getState().chatWidth).toBe(560);
   });
 
   it('ignores a damaged stored value', () => {
@@ -71,21 +71,21 @@ describe('stage rail expansion', () => {
 
   it('is remembered in the studio prefs, next to the chat column prefs', () => {
     const data = stubStorage();
-    useStudioStore.getState().setChatWidth(400);
+    useStudioStore.getState().setChatWidth(500);
     useStudioStore.getState().setRailExpanded(true);
     expect(useStudioStore.getState().railExpanded).toBe(true);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: true });
+    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 500, chatCollapsed: false, railExpanded: true });
     expect(readStudioPrefs().railExpanded).toBe(true);
     useStudioStore.getState().setRailExpanded(false);
-    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false });
+    expect(readStudioPrefs()).toEqual({ chatWidth: 500, chatCollapsed: false, railExpanded: false });
   });
 
   it('keeps the other prefs when only the rail changes, and the rail when only they change', () => {
     const data = stubStorage();
     useStudioStore.getState().setChatCollapsed(true);
     useStudioStore.getState().setRailExpanded(true);
-    useStudioStore.getState().setChatWidth(480);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 480, chatCollapsed: true, railExpanded: true });
+    useStudioStore.getState().setChatWidth(560);
+    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 560, chatCollapsed: true, railExpanded: true });
   });
 
   it('reads a stored true only, and treats anything else as collapsed', () => {
@@ -120,12 +120,12 @@ describe('right panel tab memory', () => {
 
   it('is kept for this visit only: nothing about it reaches local storage', () => {
     const data = stubStorage();
-    data.set(STUDIO_PREFS_KEY, '{"chatWidth":400,"inspector":"closed","panelTab2d":"history"}');
-    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false });
+    data.set(STUDIO_PREFS_KEY, '{"chatWidth":500,"inspector":"closed","panelTab2d":"history"}');
+    expect(readStudioPrefs()).toEqual({ chatWidth: 500, chatCollapsed: false, railExpanded: false });
     data.clear();
     useStudioStore.getState().setPanelTab('image', 'history');
     useStudioStore.getState().setPanelTab('model', 'parts');
-    useStudioStore.getState().setChatWidth(420);
+    useStudioStore.getState().setChatWidth(500);
     expect(data.get(STUDIO_PREFS_KEY)).not.toMatch(/panelTab|history|parts/);
   });
 
