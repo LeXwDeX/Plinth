@@ -63,6 +63,23 @@ type offeringChoice struct {
 	Reason   string
 	Refusal  string
 	Code     string
+	// card is the model card that asks the person instead of the Refusal, set
+	// only for a purpose recommendation that differs from the visible
+	// workspace pick (#612, #613). The executor opens it when it has a card
+	// store and the Schema declares its text; the Refusal stays the fallback.
+	card *modelCard
+}
+
+// modelCard is what the person chooses between when a purpose recommendation
+// and the workspace pick disagree: the models the call can run, the purpose's
+// recommendations first, then the workspace pick, then the rest in Catalog
+// order, and the names the card's text quotes.
+type modelCard struct {
+	Candidates  []generation.Offering
+	Recommended map[generation.OfferingID]bool
+	Workspace   string
+	Proposed    generation.Offering
+	Profile     string
 }
 
 // modelInput is the part of a call's input that decides whether an Offering
@@ -308,7 +325,12 @@ func (executor *Executor) chooseOffering(
 		Default:           executor.modelDefault(tool),
 	})
 	if resolution.Conflict != nil {
-		return executor.modelConflictChoice(command, capability, input, profile.Label, resolution.Conflict), nil
+		choice := executor.modelConflictChoice(command, capability, input, profile.Label, resolution.Conflict)
+		if resolution.Conflict.Kind == chat.ModelConflictWorkspace {
+			choice.card = workspaceModelCard(candidates, recommended, workspace, executor.modelFits(command, input),
+				resolution.Conflict.Offering, profile.Label)
+		}
+		return choice, nil
 	}
 	choice := offeringChoice{Offering: resolution.Offering, Source: resolution.ChoiceSource()}
 	if resolution.Source == chat.ModelSourcePurpose {
@@ -320,6 +342,35 @@ func (executor *Executor) chooseOffering(
 		choice.Source = "user"
 	}
 	return choice, nil
+}
+
+// workspaceModelCard orders the models a workspace confirmation offers: the
+// purpose's recommendations that can take the call, the visible workspace pick,
+// then every other candidate that can take it, each once. Recommendations come
+// first because the confirmation exists to offer them; the workspace pick is
+// always there because keeping it is the other answer.
+func workspaceModelCard(candidates []generation.Offering, recommended []string, workspace string,
+	fits func(generation.Offering) bool, proposed generation.Offering, profile string) *modelCard {
+	card := &modelCard{Recommended: map[generation.OfferingID]bool{}, Workspace: workspace, Proposed: proposed, Profile: profile}
+	add := func(offering generation.Offering) {
+		if !fits(offering) || slices.ContainsFunc(card.Candidates, func(seen generation.Offering) bool { return seen.ID == offering.ID }) {
+			return
+		}
+		card.Candidates = append(card.Candidates, offering)
+	}
+	for _, name := range recommended {
+		if offering, matched := chat.MatchModel(candidates, name); matched && fits(offering) {
+			card.Recommended[offering.ID] = true
+			add(offering)
+		}
+	}
+	if offering, matched := chat.MatchModel(candidates, workspace); matched {
+		add(offering)
+	}
+	for _, offering := range candidates {
+		add(offering)
+	}
+	return card
 }
 
 // ChooseThreeViewModel is the model choice of the three-view tool (#409): the
@@ -616,7 +667,19 @@ func (executor *Executor) modelWorkspaceConflictText(
 	recommended generation.Offering,
 	profileLabel string,
 ) string {
-	template := executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict
+	return executor.workspaceChoiceText(command, executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict,
+		workspace, recommended, profileLabel)
+}
+
+// workspaceChoiceText fills a workspace confirmation template: the plain
+// refusal or the model card's text.
+func (executor *Executor) workspaceChoiceText(
+	command chat.ToolCommand,
+	template string,
+	workspace string,
+	recommended generation.Offering,
+	profileLabel string,
+) string {
 	if template == "" {
 		return ""
 	}

@@ -173,6 +173,12 @@ type ChatSkillDirectorySchema struct {
 	// StyleInstructionTemplate is what use_skill returns for a style Skill,
 	// with {name}, {summary}, {slug} and {argument}.
 	StyleInstructionTemplate string `json:"style_instruction_template"`
+	// StyleModelsTemplate, with {models}, tells the Agent which available
+	// models can apply a style Skill (#620): the Offerings that declare the
+	// Skill feature. It follows a style Skill's use_skill body and the refusal
+	// of a model that cannot apply one; Messages.NoStyleModel stands in when
+	// none is available.
+	StyleModelsTemplate string `json:"style_models_template"`
 	// Messages are the Agent-facing refusals and notes.
 	Messages ChatSkillDirectoryMessages `json:"messages"`
 }
@@ -190,6 +196,27 @@ type ChatSkillDirectoryMessages struct {
 	// instead of the one the Agent named ({name} the person's, {slug} the
 	// ignored one).
 	UserChoiceKept string `json:"user_choice_kept"`
+	// Picked answers use_skill for another Skill bound to the same tool as the
+	// Skill the person picked for the turn (#611): the pick's text is already
+	// in the turn ({name} the pick, {slug} the Skill not read).
+	Picked string `json:"picked"`
+	// NoStyleModel tells the Agent that no available model can apply a style
+	// Skill now (#620), so it says so instead of trying model after model.
+	NoStyleModel string `json:"no_style_model"`
+	// AgentRead goes with a Skill the Agent read on its own (#621): the person
+	// did not choose it, so the reply calls it the Skill used this turn, never
+	// the person's pick.
+	AgentRead string `json:"agent_read"`
+}
+
+// StyleModelsText is the line naming the models that can apply a style Skill
+// (#620): StyleModelsTemplate with the model names joined, or NoStyleModel
+// when there is none.
+func (directory ChatSkillDirectorySchema) StyleModelsText(models []string) string {
+	if len(models) == 0 {
+		return directory.Messages.NoStyleModel
+	}
+	return strings.ReplaceAll(directory.StyleModelsTemplate, "{models}", strings.Join(models, "、"))
 }
 
 // Enabled reports whether the Schema declares a directory at all.
@@ -214,6 +241,9 @@ func validateSkillDirectory(skills ChatSkillsSchema, agentTools map[string]struc
 		"style_instruction_template": directory.StyleInstructionTemplate,
 		"messages.unknown":           directory.Messages.Unknown, "messages.not_style": directory.Messages.NotStyle,
 		"messages.unsupported": directory.Messages.Unsupported, "messages.user_choice_kept": directory.Messages.UserChoiceKept,
+		"messages.picked":       directory.Messages.Picked,
+		"style_models_template": directory.StyleModelsTemplate, "messages.no_style_model": directory.Messages.NoStyleModel,
+		"messages.agent_read": directory.Messages.AgentRead,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("skills.directory.%s 不能为空", field)
@@ -230,6 +260,9 @@ func validateSkillDirectory(skills ChatSkillsSchema, agentTools map[string]struc
 		{directory.DerivedDescriptionTemplate, "{summary}", "derived_description_template"},
 		{directory.StyleInstructionTemplate, "{slug}", "style_instruction_template"},
 		{directory.StyleInstructionTemplate, "{argument}", "style_instruction_template"},
+		{directory.Messages.Picked, "{name}", "messages.picked"},
+		{directory.Messages.Picked, "{slug}", "messages.picked"},
+		{directory.StyleModelsTemplate, "{models}", "style_models_template"},
 	} {
 		if !strings.Contains(check.text, check.placeholder) {
 			return fmt.Errorf("skills.directory.%s 必须包含 %s", check.field, check.placeholder)

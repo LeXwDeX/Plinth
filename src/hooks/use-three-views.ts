@@ -8,7 +8,8 @@ import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { schemaText } from '@/lib/product-schema';
 import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
-import { groupsAreActive, remainingSlots, slotAction, slotReplaceable, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
+import { groupsAreActive, remainingSlots, slotAction, slotReplaceable, viewLabelOfTask, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
+import type { CanvasNode } from '@/store/canvas-store';
 import { useChatStore } from '@/store/chat-store';
 
 const NONE: ThreeViewGroup[] = [];
@@ -121,4 +122,23 @@ export function useThreeViews() {
   }, [chat, mutate, schema, sessionId]);
 
   return { groups: data ?? NONE, busy, queued, advance, startRemaining, replace, refresh: () => mutate() };
+}
+
+/**
+ * #618: the three-view view ("正面") of every picture layer a three-view group made, by node id. Only the session in
+ * view has its groups loaded; layers of another session, and layers no group made, are absent.
+ */
+export function useNodeViews(sessionId: string | null | undefined, nodes: readonly CanvasNode[]): ReadonlyMap<string, string> {
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const { groups } = useThreeViews();
+  return useMemo(() => {
+    const result = new Map<string, string>();
+    if (!sessionId || sessionId !== activeSessionId || groups.length === 0) return result;
+    for (const node of nodes) {
+      if (node.type !== 'image' || !node.taskId) continue;
+      const view = viewLabelOfTask(groups, node.taskId);
+      if (view) result.set(node.id, view);
+    }
+    return result;
+  }, [activeSessionId, groups, nodes, sessionId]);
 }

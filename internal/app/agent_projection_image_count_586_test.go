@@ -24,7 +24,7 @@ func TestAgentOfferingProjectionListsTheImageCountForTheAgent(t *testing.T) {
 		{"jimeng/seedream-4-5/text-to-image", "max_images", 15},
 		{"jimeng/seedream-4-5/image-to-image", "sequential_image_generation", 0},
 	} {
-		raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
+		raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true, "")
 		var projection struct {
 			Capabilities []struct {
 				Offerings []struct {

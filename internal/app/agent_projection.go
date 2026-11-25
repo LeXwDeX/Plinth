@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -15,6 +16,10 @@ type agentOfferingView struct {
 	UpperNativeQuote   *schema.NativeQuote `json:"upper_native_quote,omitempty"`
 	OfferingID         string              `json:"offering_id"`
 	ModelID            string              `json:"model_id"`
+	// StyleSkill marks an Offering that can apply a style Skill: it declares
+	// the Schema's Skill feature (chat.skills.feature, #620). It is in the
+	// ids-only view too, so the Agent picks such a model the first time.
+	StyleSkill bool `json:"style_skill,omitempty"`
 	// Description is the Offering's Schema description: what the step keeps
 	// or changes (for example textures or size, #130). Absent when undeclared.
 	Description string `json:"description,omitempty"`
@@ -259,11 +264,14 @@ type agentOfferingsSource interface {
 // or price (#382). The chat tool asks for it when the model named neither a
 // capability nor a model, because it only needs the ids to ask for the one it
 // is choosing between; a caller that reads a chosen Offering asks for detail.
+// styleSkillFeature is chat.skills.feature: an Offering that declares it is
+// marked style_skill (#620); empty marks none.
 func buildAgentOfferingsProjection(
 	capabilities []catalog.CapabilityPresentation,
 	offerings agentOfferingsSource,
 	available func(generation.OfferingID) bool,
 	capability, model string, detail bool,
+	styleSkillFeature string,
 ) json.RawMessage {
 	capability = strings.TrimSpace(capability)
 	model = strings.ToLower(strings.TrimSpace(model))
@@ -288,6 +296,7 @@ func buildAgentOfferingsProjection(
 			offeringView := agentOfferingView{
 				OfferingID: string(offering.ID),
 				ModelID:    offering.ModelID,
+				StyleSkill: styleSkillFeature != "" && slices.Contains(offering.Features, styleSkillFeature),
 			}
 			if !detail {
 				view.Offerings = append(view.Offerings, offeringView)

@@ -27,6 +27,12 @@ import type { CurrentObject } from '@/store/workspace-store';
 
 const text = (schema: ProductSchema, key: string) => schemaText(schema, `ui.studio.three_view.${key}`);
 
+/**
+ * #618: a view's buttons fill their own column and wrap their words there. Buttons keep to one line by default, so
+ * a long 「继续生成（约 9 积分）」 in a narrow column ran over the next view's 「查看」.
+ */
+const SLOT_BUTTON = 'h-auto min-h-6 w-full min-w-0 whitespace-normal py-0.5 text-center leading-4';
+
 function SlotThumb({ src, status, label, onDropPicture }: {
   src: string;
   status: ThreeViewSlot['status'];
@@ -196,10 +202,12 @@ export function ThreeViewCardView({
                 <HintTooltip
                   name={text(schema, action)}
                   reason={native && nativeAmount === null ? schemaText(schema, 'ui.unavailable.reason.three_view.price_unknown') : undefined}
+                  className="w-full min-w-0"
                 >
                   <Action
                     type="button"
                     size="xs"
+                    className={SLOT_BUTTON}
                     variant={action === 'start' ? 'default' : 'outline'}
                     loading={isBusy}
                     disabled={busy !== null || isQueued || (native && nativeAmount === null)}
@@ -213,7 +221,7 @@ export function ThreeViewCardView({
                   </Action>
                 </HintTooltip>
               ) : slot.status === 'succeeded' ? (
-                <Action type="button" size="xs" variant="ghost" data-testid="three-view-open" onClick={() => onView(slot)}>
+                <Action type="button" size="xs" variant="ghost" className={SLOT_BUTTON} data-testid="three-view-open" onClick={() => onView(slot)}>
                   {text(schema, 'view')}
                 </Action>
               ) : slot.status === 'failed' ? (
@@ -225,6 +233,7 @@ export function ThreeViewCardView({
                   type="button"
                   size="xs"
                   variant="ghost"
+                  className={SLOT_BUTTON}
                   disabled={busy !== null || isQueued}
                   aria-description={text(schema, 'replace_hint')}
                   data-testid="three-view-replace"

@@ -263,6 +263,17 @@ describe('chat handle badge on a version tile (#87)', () => {
     expect(html).toMatch(/data-testid="version-handle-badge"[^>]*>img25</);
     expect(html).toContain('aria-label="对话里的句柄 @img25"');
   });
+  it('shows the handle on the result a 「更多」 group keeps outside, a compact tile (#617)', () => {
+    state.tiles = [0, 1, 2].map((index) => tile({ key: `n:${index}`, taskId: `t${index}`, taskIds: [`t${index}`],
+      assets: [{ id: `a${index}`, kind: 'image', url: `/api/v1/tasks/t${index}/assets/a${index}`, role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }],
+      parents: [{ key: 'parent', known: true, kind: 'source_task', evidence: 'recorded', link: 'edit', step: '' }] }));
+    state.messages = [{ attachments: [{ handle: '@img7', kind: 'image', taskId: 't0', assetId: 'a0' }] }];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    const strip = html.slice(0, html.indexOf('data-testid="version-fold-list"'));
+    expect(strip).toContain('h-[34px]');
+    expect(strip).toMatch(/data-testid="version-handle-badge"[^>]*>img7</);
+    expect(strip).toContain('aria-label="对话里的句柄 @img7"');
+  });
   it('shows no badge when no message names the picture', () => {
     state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
     state.messages = [{ attachments: [{ handle: '@img3', kind: 'image', taskId: 'old', assetId: 'other' }] }];

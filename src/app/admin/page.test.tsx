@@ -4,12 +4,24 @@ import { describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import AdminPage from './page';
 
-const state = vi.hoisted(() => ({ overview: undefined as unknown, balance: 100 as number }));
+const native = (unit: string, unitLabel: string, amount: string) => ({ unit, unit_label: unitLabel, amount });
+const state = vi.hoisted(() => ({
+  overview: undefined as unknown,
+  balance: 100 as number,
+  accounts: [] as unknown[],
+  keys: [] as unknown[],
+}));
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application }) }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'admin' } }) }));
 vi.mock('swr', () => ({
-  default: (key: string) => key.includes('balance')
-    ? { data: { currentBalance: state.balance, history: [] }, isLoading: false }
-    : { data: state.overview, isLoading: false },
+  default: (key: unknown) => {
+    state.keys.push(key);
+    // #623: the per-provider balances come from the provider balance route (an array key).
+    if (Array.isArray(key)) return { data: { accounts: state.accounts }, isLoading: false };
+    return String(key).includes('balance')
+      ? { data: { currentBalance: state.balance, history: [] }, isLoading: false }
+      : { data: state.overview, isLoading: false };
+  },
 }));
 
 const user = (id: string, extra: Record<string, unknown>) => ({
@@ -44,15 +56,65 @@ describe('administration home usage card', () => {
     expect(card).toContain('≈15');
   });
 
-  // #62 I18N-06: the overview groups digits like the top bar does, in the UI locale.
+  // #62 I18N-06: the overview groups digits like the top bar does.
   it('formats the balance with the locale digit grouping', () => {
     state.overview = { users: [], total: { estimatedCredits: 0 } };
-    state.balance = 10997;
+    state.accounts = [{ provider: 'meshy', price_mode: 'native', native_balance: native('meshy.credit', 'Meshy credits', '10997') }];
     try {
-      expect(renderToStaticMarkup(<AdminPage />)).toContain('10,997');
+      expect(balanceCard(renderToStaticMarkup(<AdminPage />))).toContain('10,997 Meshy credits');
     } finally {
-      state.balance = 100;
+      state.accounts = [];
     }
+  });
+});
+
+const balanceCard = (html: string) => html.split('data-testid="admin-balance"')[1].split('</ul>')[0];
+
+// #623: the card showed one unitless number, the Meshy account's (4,097), and no Tripo or Hyper3D.
+describe('administration home balance card', () => {
+  it('lists every provider account with its own unit', () => {
+    state.overview = { users: [], total: { estimatedCredits: 0 } };
+    state.accounts = [
+      { provider: 'meshy', price_mode: 'native', native_balance: native('meshy.credit', 'Meshy credits', '4097') },
+      { provider: 'tripo', price_mode: 'native', native_balance: native('tripo.credit', 'Tripo credits', '25040') },
+      { provider: 'hyper3d', price_mode: 'native', native_balance: native('hyper3d.credit', 'Hyper3D credits', '100') },
+    ];
+    try {
+      const card = balanceCard(renderToStaticMarkup(<AdminPage />));
+      expect(card).toContain('MeshyAI');
+      expect(card).toContain('4,097 Meshy credits');
+      expect(card).toContain('Tripo');
+      expect(card).toContain('25,040 Tripo credits');
+      expect(card).toContain('Hyper3D');
+      expect(card).toContain('100 Hyper3D credits');
+    } finally {
+      state.accounts = [];
+    }
+  });
+
+  it('keeps an account it could not read, with a placeholder instead of dropping it', () => {
+    state.overview = { users: [], total: { estimatedCredits: 0 } };
+    state.accounts = [
+      { provider: 'meshy', price_mode: 'native', native_balance: native('meshy.credit', 'Meshy credits', '4097') },
+      { provider: 'hyper3d', price_mode: 'native', native_balance: null },
+    ];
+    try {
+      const card = balanceCard(renderToStaticMarkup(<AdminPage />));
+      expect(card).toContain('4,097 Meshy credits');
+      expect(card.split('Tripo')[1]).toContain('精确余额未知');
+      expect(card.split('Hyper3D')[1]).toContain('精确余额未知');
+    } finally {
+      state.accounts = [];
+    }
+  });
+
+  // The balance summary route is the only writer of the 7-day balance snapshots;
+  // the page still asks it so the snapshots keep being recorded.
+  it('still asks the balance summary route', () => {
+    state.overview = { users: [], total: { estimatedCredits: 0 } };
+    state.keys = [];
+    renderToStaticMarkup(<AdminPage />);
+    expect(state.keys).toContain(defaultCatalog.application.runtime.http.legacy_routes.admin_balance_summary);
   });
 });
 

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { KindBadge } from '@/components/studio/kind-badge';
+import { ObjectThumbImage } from '@/components/studio/object-thumb';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
@@ -85,7 +86,31 @@ const VIEW_PIP: Record<string, string> = {
   canceled: 'bg-destructive',
 };
 
-function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' }) {
+/**
+ * #87: the chat handle of a tile that shows one picture (never a handle the messages do not give; a group or
+ * candidate grid shows several pictures, so none). #617: a compact tile, the one a 「更多」 group keeps outside,
+ * has it too.
+ */
+function useTileHandle(tile: VersionTile): string {
+  const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
+  const single = tile.domain === 'image' && tile.status === 'ready' && tile.slots.length === 0 && tile.views.length === 0
+    && tile.assets.length === 1 && Boolean(tile.assets[0].url);
+  return single ? handleOfPicture(messages, { url: tile.assets[0].url }) : '';
+}
+
+/** The handle badge: over the thumbnail of a regular tile, beside the version label of a compact one. */
+function HandleBadge({ handle, className }: { handle: string; className?: string }) {
+  const { schema } = useProductSchema();
+  return (
+    <span
+      aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
+      className={cn('pointer-events-none rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white', className)}
+      data-testid="version-handle-badge"
+    >{handleLabel(handle)}</span>
+  );
+}
+
+function Thumb({ tile, size, handle }: { tile: VersionTile; size: 'regular' | 'compact'; handle: string }) {
   const { schema } = useProductSchema();
   const { previewAssetUrl } = useAssetURLRewriter();
   // #290: a tile is 28–56 px; it shows the downscaled preview, not the 2K–4K original.
@@ -105,13 +130,6 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
   const text = (key: string) => schemaText(schema, `ui.studio.strip.${key}`);
   const dimension = size === 'regular' ? 'size-14' : 'size-7';
   const finished = tile.views.filter((view) => view.status === 'succeeded').length;
-  // #87: a tile of one picture carries that picture's chat handle in its top-right corner (never a handle
-  // the messages do not give; a group or candidate grid shows several pictures, so none).
-  const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
-  const handle = size === 'regular' && tile.domain === 'image' && tile.status === 'ready' && !grid
-    && tile.slots.length === 0 && tile.views.length === 0 && tile.assets.length === 1 && source
-    ? handleOfPicture(messages, { url: source })
-    : '';
   return (
     <span className={cn('relative flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted', dimension)} data-testid="version-thumb" data-grid={grid ? grid.length : undefined}>
       {grid ? (
@@ -122,9 +140,10 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
               : <span key={index} className="bg-muted" />
           ))}
         </span>
-      ) : src
-        ? <img src={src} alt={''} loading="lazy" decoding="async" className="size-full object-cover" />
-        : tile.domain === 'model' ? <Box aria-hidden className="size-5 text-muted-foreground" /> : null}
+      ) : src || tile.domain === 'model'
+        // #624: a 3D version without a preview (or whose preview does not load) shows the 3D placeholder.
+        ? <ObjectThumbImage kind={tile.domain} src={src} />
+        : null}
       {tile.status === 'pending' || tile.status === 'running'
         ? <ProgressRing progress={tile.progress} pending={tile.status === 'pending'} label={text(tile.status === 'pending' ? 'pending' : 'running')} />
         : null}
@@ -147,13 +166,8 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
       ) : size === 'regular' && tile.domain === 'image' && tile.assets.length > 1 ? (
         <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-panel/90 px-1 text-[9px] font-semibold leading-3" data-testid="version-candidate-count">{tile.assets.length}</span>
       ) : null}
-      {handle ? (
-        <span
-          aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
-          className="pointer-events-none absolute right-0.5 top-0.5 rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white"
-          data-testid="version-handle-badge"
-        >{handleLabel(handle)}</span>
-      ) : null}
+      {/* #87: a regular tile of one picture carries that picture's chat handle in its top-right corner. */}
+      {handle && size === 'regular' ? <HandleBadge handle={handle} className="absolute right-0.5 top-0.5" /> : null}
     </span>
   );
 }
@@ -376,6 +390,7 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
   const canDisplay = objectOfTile(tile, sessionId, selected) !== null;
   const dragged = useRef(false);
   const dragSource = useCanvasDragSource(target);
+  const handle = useTileHandle(tile);
   return (
     <ResultContextMenu
       target={target}
@@ -413,7 +428,7 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
             !inBranch && !current && 'opacity-60',
           )}
         >
-          <Thumb tile={tile} size={size} />
+          <Thumb tile={tile} size={size} handle={handle} />
           {inCompare ? (
             <span className="absolute left-1 top-1 rounded-sm bg-primary px-1 text-[9px] font-semibold leading-3 text-primary-foreground" data-testid="version-in-compare">{schemaText(schema, 'ui.studio.strip.in_compare')}</span>
           ) : null}
@@ -421,6 +436,8 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
             <span className="flex h-[18px] min-w-0 max-w-full items-center gap-1">
               <KindBadge kind={tile.domain} />
               <span className={cn('truncate font-medium leading-4', size === 'regular' ? 'text-xs' : 'text-[11px]')}>{versionLabel(schema, tile, tile.domain)}</span>
+              {/* #617: a 28px compact thumbnail has no room for the badge; it sits after the version label. */}
+              {handle && size === 'compact' ? <HandleBadge handle={handle} className="shrink-0" /> : null}
             </span>
             <span className={cn('h-3 max-w-full truncate text-[10px] leading-3', tile.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')} data-testid="version-caption">
               {status || caption || ' '}

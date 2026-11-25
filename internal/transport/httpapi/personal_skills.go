@@ -9,6 +9,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/skilldraft"
 )
 
@@ -140,7 +141,10 @@ func (s *Server) writePersonalSkillChange(w http.ResponseWriter, owner string, s
 
 // draftPersonalSkill drafts a Skill from a name and a requirement with one
 // chat model call (#548). Nothing is saved; the person reviews the draft and
-// saves it through the creation route. A failure is one readable message.
+// saves it through the creation route. A failure is one readable message. The
+// optional session_id names the owner's session the draft was opened from: the
+// call runs on that session's chat model (#619), and a used-up quota on it is
+// the Schema's own answer, so the person can switch the model and retry.
 func (s *Server) draftPersonalSkill(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.identity.Identify(r)
 	if err != nil {
@@ -151,6 +155,7 @@ func (s *Server) draftPersonalSkill(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name        string `json:"name"`
 		Requirement string `json:"requirement"`
+		SessionID   string `json:"session_id"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -169,6 +174,7 @@ func (s *Server) draftPersonalSkill(w http.ResponseWriter, r *http.Request) {
 	authoring.UserTemplate = s.textIn(locale, authoring.UserTemplate)
 	draft, err := s.skillDrafter.Draft(r.Context(), skilldraft.Request{
 		Name: input.Name, Requirement: input.Requirement, Authoring: authoring, Taken: taken,
+		OwnerID: principal.ID(), SessionID: input.SessionID,
 	})
 	switch {
 	case err == nil:
@@ -177,6 +183,11 @@ func (s *Server) draftPersonalSkill(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "invalid_skill_draft", s.application.Content.Messages["ui.workspace.skills.draft_invalid"], err)
 	case errors.Is(err, agents.ErrNotConfigured):
 		writeProblem(w, http.StatusServiceUnavailable, "agent_not_configured", s.application.Chat.Presentation.Messages.AgentNotConfigured, err)
+	case errors.Is(err, chat.ErrSessionNotFound):
+		writeProblem(w, http.StatusNotFound, "session_not_found", s.application.AgentConfiguration.UI["session_not_found"], err)
+	case errors.Is(err, agents.ErrQuotaExhausted):
+		s.logger.Warn("起草个人 Skill 失败：对话模型额度已用完", "owner_id", principal.ID(), "error", err)
+		writeProblem(w, http.StatusServiceUnavailable, "skill_draft_quota_exhausted", s.application.Content.Messages["ui.workspace.skills.draft_quota_exhausted"], err)
 	default:
 		s.logger.Warn("起草个人 Skill 失败", "owner_id", principal.ID(), "error", err)
 		writeProblem(w, http.StatusBadGateway, "skill_draft_failed", s.application.Content.Messages["ui.workspace.skills.draft_failed"], err)

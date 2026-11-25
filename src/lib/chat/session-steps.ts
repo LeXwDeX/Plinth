@@ -62,12 +62,13 @@ async function payloadOf(response: Response): Promise<unknown> {
 
 /**
  * Reads one session's standing. A session that is no owner's asset (a plain
- * session, another owner's session) is 404, which is "not shown" rather than
- * an error: the bar simply does not render.
+ * session, another owner's session) has no standing: the server answers 204
+ * with no body (#616; an older server answered 404). Both are "not shown"
+ * rather than an error: the bar simply does not render.
  */
 export async function readSessionSteps(url: string): Promise<SessionSteps | null> {
   const response = await fetch(url);
-  if (response.status === 404) return null;
+  if (response.status === 204 || response.status === 404) return null;
   const payload = await payloadOf(response);
   if (!response.ok) return null;
   return projectSessionSteps(payload);

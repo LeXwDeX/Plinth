@@ -1269,6 +1269,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Project:                   applicationSchema.Project,
 		ChoiceKinds:               applicationSchema.Chat.Choice.Kinds,
 		ChoiceOptionInvalid:       applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
+		ChoiceOpenInReply:         applicationSchema.Chat.Presentation.Messages.ChoiceOpenInReply,
 		BriefSavedMessage:         applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate:      applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
 		BriefMessages:             applicationSchema.Chat.Model3DUsage.Brief.Messages,
@@ -1291,7 +1292,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				// the detail of every Offering is what made this call cost
 				// 45-98 KB per round (#382).
 				capability != "" || model != "",
+				applicationSchema.Chat.Skills.Feature,
 			)
+		},
+		// #620: use_skill names the models that can apply a style Skill,
+		// read from the Schema's Skill feature and runtime availability.
+		StyleSkillModels: func() []string {
+			return chat.StyleSkillModels(module.Offerings(""), applicationSchema.Chat.Skills.Feature, module.OfferingAvailable)
 		},
 	}
 	agentToolExecutor, err := agenttools.New(agentToolsConfig)
@@ -1352,12 +1359,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	// #548: a personal Skill draft runs on the default chat model, resolved
-	// exactly as for a session that chose none.
+	// #548/#619: a personal Skill draft runs on the chat model of the session
+	// it was opened from, resolved exactly as that session's next turn; a
+	// draft without a session runs on the default.
 	skillDrafter, err := skilldraft.New(skilldraft.Config{
 		Chat:                applicationSchema.Chat,
 		Agent:               agentAdapter,
-		Model:               chatService.DefaultChatModel,
+		Model:               chatService.ChatModelFor,
 		MaxPromptCharacters: applicationSchema.AgentConfiguration.Limits.MaxSkillPromptCharacters,
 	})
 	if err != nil {

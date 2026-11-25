@@ -231,6 +231,9 @@ export function canvasSizeParameters(offering: OfferingWire): OfferingParameterW
   });
 }
 
+/** How a person's or the Agent's choice of a parameter is recorded for the session (#213, #246). */
+type ParameterStates = Record<string, { source: 'default' | 'agent' | 'user' } | undefined>;
+
 export interface CanvasTurnOutput {
   /** What the server sends for the output size ("2048x2048", "4:3"), after the Offering's forced values. */
   value: string;
@@ -246,16 +249,21 @@ export interface CanvasTurnOutput {
  * The output size a turn whose source is the artboard really sends (#272/#284): each output-size parameter the
  * person may choose is set to its canvasSizeChoice, then the Offering's forced_when applies (Seedream turns
  * 2048x2048 into 4096x4096). Like the server's size note, a larger size of the same shape still follows the
- * canvas; a smaller one or another shape is the nearest legal size. Null when the Offering has no such parameter.
+ * canvas; a smaller one or another shape is the nearest legal size. Null when the Offering has no such parameter,
+ * or (#614) when the Agent chose one of them with set_params: the server then carries out the Agent's size instead
+ * of the canvas's (applyCanvasOutputSize), so the canvas sets nothing. The person's own choice resizes the canvas
+ * (#246) and stays under it.
  */
 export function canvasTurnOutput(
   offering: OfferingWire | undefined,
   values: Record<string, unknown>,
   canvas: CanvasPixels,
   tables: RatioTables,
+  states?: ParameterStates,
 ): CanvasTurnOutput | null {
   if (!offering || canvas.width <= 0 || canvas.height <= 0) return null;
   const parameters = canvasSizeParameters(offering);
+  if (parameters.some((parameter) => states?.[parameter.name]?.source === 'agent')) return null;
   const input: Record<string, unknown> = { ...values };
   for (const parameter of parameters) {
     const choice = canvasSizeChoice(parameter, canvas);
@@ -285,9 +293,6 @@ export interface ReferenceTurnOutput extends CanvasTurnOutput {
   /** The size differs from what the remembered settings (here: the defaults) would send, so it is worth saying. */
   changed: boolean;
 }
-
-/** How a person's or the Agent's choice of a parameter is recorded for the session (#213, #246). */
-type ParameterStates = Record<string, { source: 'default' | 'agent' | 'user' } | undefined>;
 
 /**
  * #296: the output size a chat edit of one picture sends when nobody chose a size. Outside a canvas turn the server

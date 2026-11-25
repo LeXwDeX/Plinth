@@ -115,8 +115,11 @@ func TestConceptQuantityCardDrivesTheDirectionCard(t *testing.T) {
 		}
 	}
 
-	// A stale answer of another message never caps this reply.
+	// A stale answer of another message never caps this reply. The person's
+	// "继续" starts a new reply: the card turn-2 opened is still pending, and
+	// one reply opens at most one card (#615).
 	stale := direction
+	stale.AssistantMessageID = "turn-3"
 	stale.Call.ID = "call-d4"
 	stale.History = []chat.Message{{ID: "user-3", Role: "configured-user", Content: "继续"}}
 	stale.EarlierCalls = []chat.ToolCall{

@@ -48,7 +48,10 @@ func (s *Server) registerChatSessionStepsContract() {
 
 // getChatSessionSteps reads the session's live standing. A session that is not
 // an asset of the owner (a plain session, another owner's session or a Catalog
-// without a step entry) is 404, the same answer for every non-asset.
+// without a step entry) has no standing: 204 with no body, the same answer for
+// every non-asset. The studio reads this for every open session, so a plain
+// chat is an ordinary empty answer rather than a failed request (#616); the
+// write below still refuses a non-asset with 404.
 func (s *Server) getChatSessionSteps(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
 	if !principal.Can(access.PermissionTasksReadOwn) {
 		s.writeMessageProblem(writer, http.StatusForbidden, "forbidden", "error.forbidden")
@@ -56,6 +59,11 @@ func (s *Server) getChatSessionSteps(writer http.ResponseWriter, request *http.R
 	}
 	sessionID := request.PathValue("sessionID")
 	standing, err := s.executionGrants.StepStatus(request.Context(), principal.ID(), sessionID)
+	if errors.Is(err, executiongrant.ErrExtraStepsUnavailable) || errors.Is(err, executiongrant.ErrInvalid) {
+		writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err != nil {
 		s.writeChatSessionStepsError(writer, err, 0)
 		return

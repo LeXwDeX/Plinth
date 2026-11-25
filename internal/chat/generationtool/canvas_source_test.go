@@ -65,6 +65,31 @@ func TestCanvasTurnBindsTheSnapshotAheadOfAgentReferences(t *testing.T) {
 	}
 }
 
+// #610: a turn the person did not send as a canvas turn names its pictures
+// itself. With the board's snapshot only in the selection (no declared input
+// source), the Agent's reference_handles are the whole input: the picture it
+// named, alone, as image 1.
+func TestAgentHandlesAreTheWholeInputOfATurnThatIsNotACanvasTurn(t *testing.T) {
+	executor, schema := handleExecutor(t)
+	refine := schema.Tools[0]
+	history := historyWithHandles(schema)
+	handles := map[string]json.RawMessage{schema.Context.ReferenceHandlesArgument: json.RawMessage(`["@img2"]`)}
+	selection := []chat.Attachment{{Handle: "@img5", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleCanvas,
+		URL: "bow-snapshot", Canvas: &chat.CanvasLayout{Width: 1024, Height: 1024, Layers: 1}}}
+	command := chat.ToolCommand{History: history, Tool: refine, Options: chat.TurnOptions{Selection: selection}}
+	if got, err := executor.selectReferences(command, handles); err != nil || !reflect.DeepEqual(got, []string{"generated-url"}) {
+		t.Fatalf("references = %v, %v; want only the named picture", got, err)
+	}
+	if leading := executor.turnLeadingReferences(command, []string{"generated-url"}); len(leading) != 0 {
+		t.Fatalf("a snapshot outside a canvas turn leads the references: %v", leading)
+	}
+	// The same pictures on a canvas turn: the snapshot the person sent leads (#266).
+	command.Options.InputSource = schema.Context.CanvasInputSource
+	if got, err := executor.selectReferences(command, handles); err != nil || !reflect.DeepEqual(got, []string{"bow-snapshot", "generated-url"}) {
+		t.Fatalf("canvas turn references = %v, %v", got, err)
+	}
+}
+
 func TestCanvasRefusalNamesTheToolsThatBindTheSnapshot(t *testing.T) {
 	executor, schema := handleExecutor(t)
 	message := executor.canvasRefusal(chat.ToolCommand{})

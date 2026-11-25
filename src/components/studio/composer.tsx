@@ -13,6 +13,7 @@ import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
 import { CHIP_CARD_SQUARE_CLASS, ChipSquare, ContextChip, CutHint } from '@/components/studio/composer-chips';
 import { KindBadge } from '@/components/studio/kind-badge';
+import { ObjectThumbImage } from '@/components/studio/object-thumb';
 import { ComposerSettings } from '@/components/studio/composer-settings';
 import { GenerationModelNotice } from '@/components/studio/model-picker';
 import type { ParamsPanelProps } from '@/components/studio/params-popover';
@@ -645,7 +646,8 @@ export function Composer({
               card
               square={(
                 <ChipSquare className={CHIP_CARD_SQUARE_CLASS}>
-                  {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
+                  {/* #624: a 3D version with no preview shows the 3D placeholder, not an empty (black) square. */}
+                  <ObjectThumbImage kind={chip.kind} src={chip.thumbnail} />
                 </ChipSquare>
               )}
               // #546: the picture and its kind badge only; the name ("当前：画布", "当前：@img5") is the hover hint and the

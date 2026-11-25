@@ -23,8 +23,10 @@ var ErrInvalidRequest = errors.New("skill draft: invalid name or requirement")
 var ErrUnusableDraft = errors.New("skill draft: the model returned no usable draft")
 
 // ModelSource names the chat model a draft runs on: its connection (empty for
-// the deployment's own) and the upstream model.
-type ModelSource func(context.Context) (connection, model string, err error)
+// the deployment's own) and the upstream model. sessionID is the owner's
+// session the draft was opened from (#619): the draft runs on the chat model
+// that session's next turn would use; empty runs on the default model.
+type ModelSource func(ctx context.Context, ownerID, sessionID string) (connection, model string, err error)
 
 type Config struct {
 	Chat  catalog.ChatSchema
@@ -43,12 +45,15 @@ type Service struct {
 
 // Request is one draft. Authoring is the prompt in the reader's locale; an
 // empty one uses the Schema's. Taken lists the slugs the owner can no longer
-// use (system Skills and their own).
+// use (system Skills and their own). OwnerID and SessionID name the session
+// whose chat model the draft follows (#619); SessionID may be empty.
 type Request struct {
 	Name        string
 	Requirement string
 	Authoring   catalog.ChatSkillAuthoringSchema
 	Taken       map[string]bool
+	OwnerID     string
+	SessionID   string
 }
 
 // Draft is the proposed standard shape. An empty Slug means the model's slug
@@ -83,7 +88,7 @@ func (service *Service) Draft(ctx context.Context, request Request) (Draft, erro
 	if authoring.SystemPrompt == "" || authoring.UserTemplate == "" {
 		authoring = service.chat.Skills.Authoring
 	}
-	connection, model, err := service.model(ctx)
+	connection, model, err := service.model(ctx, request.OwnerID, request.SessionID)
 	if err != nil {
 		return Draft{}, fmt.Errorf("skill draft model: %w", err)
 	}

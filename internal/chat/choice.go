@@ -45,6 +45,9 @@ var (
 	ErrChoiceClosed = errors.New("chat: choice is no longer open")
 	// ErrChoiceRejected refuses an option the card does not offer.
 	ErrChoiceRejected = errors.New("chat: choice option rejected")
+	// ErrChoiceOpenInReply refuses a second card while a card this same Agent
+	// reply opened is still pending (#615): one reply asks one card.
+	ErrChoiceOpenInReply = errors.New("chat: this reply already opened a pending choice card")
 )
 
 // ChoiceOption is one option of a card: the exact Offering, the public names

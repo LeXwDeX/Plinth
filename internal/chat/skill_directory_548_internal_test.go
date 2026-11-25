@@ -43,9 +43,10 @@ func TestSkillDirectoryListsTheTurnsSkills(t *testing.T) {
 	if !strings.HasPrefix(block, strings.SplitN(directory.Template, "{entries}", 2)[0]) {
 		t.Errorf("the directory does not start with its Schema frame: %q", block)
 	}
-	// The person's own pick is already in the turn: it is not listed again.
+	// The person's own pick is already in the turn: it is not listed again,
+	// nor is another Skill bound to the same tool (#611).
 	picked := orchestrator.skillDirectoryPrompt(ctx, orchestrator.registry, "2d", TurnOptions{SkillID: "system-three-view"})
-	if strings.Contains(picked, "- three-view（") || !strings.Contains(picked, "- four-view（") {
+	if strings.Contains(picked, "- three-view（") || strings.Contains(picked, "- four-view（") || !strings.Contains(picked, "- my-howto（") {
 		t.Errorf("with three-view picked the directory = %q", picked)
 	}
 	// A 3D-only turn offers neither create_three_view nor a 2D generation

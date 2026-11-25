@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
-import { buildDetailRows, conversionAllowed, creditsText, detailActions, detailBlockedReason, detailPrompt, detailSource, detailStatus, formatDuration, parseTaskDetail, type ActionContext } from './task-detail';
+import { buildDetailRows, conversionAllowed, creditsText, detailActions, detailBlockedReason, detailPrompt, detailSource, detailStatus, formatDuration, parseTaskDetail, uploadDetailRows, type ActionContext } from './task-detail';
 import { buildVersionTiles } from './versions';
 import { parseLineage } from './lineage';
 
@@ -178,6 +178,45 @@ describe('buildDetailRows', () => {
     expect(keys).toContain('created');
     expect(keys).not.toContain('finished');
     expect(keys).not.toContain('duration');
+  });
+});
+
+describe('a version made from nothing earlier, and an Agent crop (#617)', () => {
+  const picture = (id: string) => ({ id: `${id}-a`, role: 'output', media_type: 'image/png', ordinal: 0, url: `/api/v1/tasks/${id}/assets/${id}-a` });
+  it('says a text-to-image result has no source version instead of an unknown one', () => {
+    const graph = parseLineage({ nodes: [
+      { id: 't1', task_id: 't1', kind: 'task', capability: 'text-to-image', created_at: '2026-10-08T10:00:00Z', assets: [picture('t1')] },
+    ], edges: [], next_cursor: '' });
+    const versions = buildVersionTiles({ schema, graph, tracked: [], sessionId: 's1' });
+    const source = detailSource(schema, 't1', versions);
+    expect(source).toEqual({ label: schemaText(schema, 'ui.result.detail.no_source'), parentKey: '' });
+    expect(source.label).not.toBe(schemaText(schema, 'ui.result.detail.unknown_source'));
+    // Not loaded yet (no tile): still unknown, never "none".
+    expect(detailSource(schema, 'missing', versions).label).toBe(schemaText(schema, 'ui.result.detail.unknown_source'));
+  });
+  it('lists what an Agent crop is, the picture it was cut from and its size', () => {
+    const graph = parseLineage({ nodes: [
+      { id: 'img1', task_id: 'img1', kind: 'task', capability: 'text-to-image', version: 9, created_at: '2026-01-01T00:01:00Z', assets: [picture('img1')] },
+      { id: 'upload:c1', kind: 'upload', operation: 'crop', created_at: '2026-01-01T00:02:00Z',
+        assets: [{ id: 'c1', role: 'image', media_type: 'image/png', ordinal: 0, url: '/api/v1/assets/c1' }] },
+      { id: 'upload:u1', kind: 'upload', created_at: '2026-01-01T00:03:00Z',
+        assets: [{ id: 'u1', role: 'image', media_type: 'image/png', ordinal: 0, url: '/api/v1/assets/u1' }] },
+    ], edges: [{ from: 'img1', to: 'upload:c1', kind: 'source_asset', evidence: 'recorded' }], next_cursor: '' });
+    const versions = buildVersionTiles({ schema, graph, tracked: [], sessionId: 's1' });
+    const parentKey = versions.byTask.get('img1');
+    const crop = labelsOf(uploadDetailRows(schema, 'upload:c1', versions, { width: 512, height: 384 }));
+    expect(crop).toEqual({
+      type: schemaText(schema, 'ui.studio.version.crop'),
+      source: '来自 2D v9',
+      size: '512x384',
+    });
+    expect(uploadDetailRows(schema, 'upload:c1', versions, null).find((row) => row.key === 'source')?.parentKey).toBe(parentKey);
+    // Before the picture loads the size is left out, not guessed.
+    expect(uploadDetailRows(schema, 'upload:c1', versions, null).map((row) => row.key)).toEqual(['type', 'source']);
+    // A person's own upload has no source version: no source row.
+    expect(uploadDetailRows(schema, 'upload:u1', versions, { width: 10, height: 20 }).map((row) => row.key)).toEqual(['type', 'size']);
+    // Not in the chain: nothing to say.
+    expect(uploadDetailRows(schema, 'upload:none', versions, null)).toEqual([]);
   });
 });
 

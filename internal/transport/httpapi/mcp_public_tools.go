@@ -693,7 +693,7 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two, signedRoute 
 	var downloadExpires any
 	for _, asset := range projected.Assets {
 		entry := mcpAssetView{
-			ID: string(asset.ID), Role: asset.Role, MediaType: asset.MediaType, Size: asset.Size,
+			ID: string(asset.ID), Role: asset.Role, MediaType: s.application.ModelDelivery.PublicMediaTypeOf(asset.Role, asset.Variant, asset.MediaType), Size: asset.Size,
 			SHA256: asset.SHA256, Required: asset.Required,
 		}
 		if signed {

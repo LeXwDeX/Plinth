@@ -101,9 +101,10 @@ func ratioOffering() generation.Offering {
 }
 
 // #272: what the artboard shows is what comes out. On a canvas turn the output
-// size follows the artboard over a size the Agent set earlier in the session;
-// a model that cannot produce it gets the nearest legal size, and the Agent is
-// told which.
+// size follows the artboard over a size remembered earlier in the session
+// whose author is not the Agent (#614 keeps the Agent's own choice, see
+// canvas_agent_size_614_test.go); a model that cannot produce it gets the
+// nearest legal size, and the Agent is told which.
 func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 	_, schema := handleExecutor(t)
 	agentSize := func(_, _, _ string) map[string]json.RawMessage {
@@ -162,8 +163,18 @@ func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 	// The note reports what was really submitted, after the Offering's own
 	// rules (a forced larger size of the same ratio still follows the canvas).
 	command := canvasCommand(schema, 2048, 2048)
-	if got := note(command, pixelSizeOffering(), map[string]any{"size": "4096x4096"}); got != followed("2048×2048", "4096x4096") {
+	forced := pixelSizeOffering()
+	forced.Parameters[1].ForcedWhen = []generation.ForcedValue{{
+		When:  generation.ParameterCondition{Parameter: "size", Operator: "equals", Value: json.RawMessage(`"2048x2048"`)},
+		Value: json.RawMessage(`"4096x4096"`),
+	}}
+	if got := note(command, forced, map[string]any{"size": "4096x4096"}); got != followed("2048×2048", "4096x4096") {
 		t.Fatalf("forced same-ratio size note = %q", got)
+	}
+	// #614: a submitted size the canvas rule did not pick (the Agent chose it)
+	// gets no canvas note.
+	if got := note(command, pixelSizeOffering(), map[string]any{"size": "4096x4096"}); got != "" {
+		t.Fatalf("size the canvas did not pick: note = %q", got)
 	}
 
 	// Outside a canvas turn, for a tool that does not bind the snapshot, or for

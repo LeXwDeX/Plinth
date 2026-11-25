@@ -627,7 +627,16 @@ func (executor *Executor) execute(
 			return result, err
 		}
 		if choice.Refusal != "" {
+			// #612, #613: a workspace confirmation is asked on a model card.
+			if result, asked, err := executor.askModelChoice(ctx, command, capability, choice.card); asked {
+				return result, err
+			}
 			return executor.modelChoiceFailure(command, choice.Code, choice.Refusal), nil
+		}
+		if choice.Source == "agent" {
+			// A typed reply to an open model card is the Agent naming the
+			// person's model; the card then shows that answer.
+			executor.settleChoice(ctx, command, capability, -1, choice.Offering.ID, false)
 		}
 		offering = choice.Offering
 	} else {
@@ -797,7 +806,7 @@ func (executor *Executor) execute(
 	if command.Options.SkillID != "" {
 		if _, exists := skills[command.Options.SkillID]; !exists || !slices.Contains(offering.Features, executor.chat.Skills.Feature) {
 			skill := callSkillFrom(ctx)
-			if refusal := executor.skillUnsupported(*skill); refusal != "" {
+			if refusal := executor.skillUnsupported(*skill, capability); refusal != "" {
 				skill.Refusal = refusal
 				return executor.refusal(command, refusalSkill, refusal), nil
 			}
@@ -1546,6 +1555,11 @@ func (executor *Executor) buildInput(
 		input[name] = value
 	}
 	parameters := make(map[string]json.RawMessage, len(command.Options.Parameters))
+	// #614: agentChosen are the parameters whose value is the Agent's own
+	// choice: a value it remembered for this Offering with set_params that no
+	// later layer replaced, or one its call passed. A canvas turn keeps such an
+	// output size instead of the artboard's (applyCanvasOutputSize).
+	agentChosen := map[string]bool{}
 	for name, value := range command.Options.Parameters {
 		parameter, declared := allowed[name]
 		if !declared || !turnParameterAllowed(offering, parameter) {
@@ -1585,6 +1599,7 @@ func (executor *Executor) buildInput(
 			}
 			if permitted {
 				parameters[name] = value
+				agentChosen[name] = states[name].Source == "agent"
 			}
 		}
 	}
@@ -1595,6 +1610,7 @@ func (executor *Executor) buildInput(
 	for name, value := range explicit {
 		if parameter, declared := allowed[name]; declared && turnParameterAllowed(offering, parameter) {
 			parameters[name] = value
+			delete(agentChosen, name)
 		}
 	}
 	// chosen are the parameters some layer set (the turn, the session, the
@@ -1604,6 +1620,7 @@ func (executor *Executor) buildInput(
 	for name, encoded := range parameters {
 		if string(encoded) == "null" {
 			delete(input, name)
+			delete(agentChosen, name)
 			continue
 		}
 		parameter, declared := allowed[name]
@@ -1691,6 +1708,7 @@ func (executor *Executor) buildInput(
 		if value := overrideValues[semantic]; value != "" {
 			input[parameter] = value
 			chosen[parameter] = true
+			delete(agentChosen, parameter)
 		}
 	}
 	for argument, semantic := range command.Tool.ArgumentMappings {
@@ -1757,6 +1775,7 @@ func (executor *Executor) buildInput(
 				}
 				input[parameter] = value
 				chosen[parameter] = true
+				agentChosen[parameter] = true
 			}
 		}
 	}
@@ -1780,6 +1799,7 @@ func (executor *Executor) buildInput(
 		}
 		input[parameter] = value
 		chosen[parameter] = true
+		delete(agentChosen, parameter)
 	}
 	// #139: the purpose's values were chosen before the later layers set the
 	// step's combination (Tripo's smart low poly or quad). A purpose value no
@@ -1794,8 +1814,9 @@ func (executor *Executor) buildInput(
 	// that nobody chose.
 	executor.applyReferenceOutputSize(ctx, command, offering, input, chosen, referenceAssets)
 	// #272: on a canvas turn the artboard is the output frame; it is applied
-	// last, over the turn's, the Agent's and a Skill's size settings.
-	executor.applyCanvasOutputSize(command, offering, input)
+	// last, over the turn's, the panel's and a Skill's size settings. #614: an
+	// output size the Agent chose is kept.
+	executor.applyCanvasOutputSize(command, offering, input, agentChosen)
 	// #244: the frozen selection mask is the person's input, written into the
 	// Offering's mask parameter after every other layer. An Agent-supplied
 	// mask that reached the input above wins.

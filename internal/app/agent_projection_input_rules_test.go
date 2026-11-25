@@ -36,7 +36,7 @@ func TestAgentOfferingProjectionCarriesTheInputRules(t *testing.T) {
 		} `json:"capabilities"`
 	}
 	var detail projection
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "retexture", "", true), &detail); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "retexture", "", true, ""), &detail); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -71,7 +71,7 @@ func TestAgentOfferingProjectionCarriesTheInputRules(t *testing.T) {
 		t.Fatal("Meshy retexture missing from list_offerings")
 	}
 	var ids projection
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "retexture", "", false), &ids); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "retexture", "", false, ""), &ids); err != nil {
 		t.Fatal(err)
 	}
 	for _, capability := range ids.Capabilities {

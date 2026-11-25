@@ -76,13 +76,17 @@ func (s *Server) lineageWire(locale string, graph lineage.Graph) lineageWire {
 		for _, asset := range node.Assets {
 			// A screenshot or an upload belongs to no task: it is read from the owner's asset route.
 			url := nativeTaskAssetURL(s.taskAssetRoute, generation.TaskID(node.TaskID), generation.AssetID(asset.ID))
+			// A task file lists the type its download answers with (#622);
+			// the owner's asset route serves a screenshot or upload as saved.
+			mediaType := s.application.ModelDelivery.PublicMediaTypeOf(asset.Role, asset.Variant, asset.MediaType)
 			if node.Kind == lineage.KindCapture || node.Kind == lineage.KindUpload {
 				url = s.assetItemRoute.Render(asset.ID)
+				mediaType = asset.MediaType
 			}
 			wire.Assets = append(wire.Assets, lineageAssetWire{
 				DeliveryProfile: asset.DeliveryProfile,
 				ID:              asset.ID, Role: asset.Role, Variant: asset.Variant,
-				MediaType: asset.MediaType, Ordinal: asset.Ordinal, Required: asset.Required, URL: url,
+				MediaType: mediaType, Ordinal: asset.Ordinal, Required: asset.Required, URL: url,
 			})
 		}
 		nodes = append(nodes, wire)

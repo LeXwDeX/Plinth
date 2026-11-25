@@ -11,14 +11,17 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // #272: what the artboard shows is what comes out. The artboard snapshot of a
 // canvas turn is rasterised at the canvas pixel size the person chose (#246),
 // so on that turn a tool that binds the snapshot takes its output size from
-// the canvas instead of any size remembered for the Offering (the Agent's
-// set_params, an older turn's choice). A model that cannot produce the canvas
-// size gets the nearest legal size, and the tool result says which.
+// the canvas instead of a size the person's panel remembered for the Offering
+// or a Skill set. #614: a size the Agent chose (set_params for the Offering,
+// or its call's own argument) is carried out instead; the artboard does not
+// silently replace it. A model that cannot produce the canvas size gets the
+// nearest legal size, and the tool result says which.
 
 // sameRatioTolerance is how close two aspect ratios must be (as a log ratio)
 // to count as the same shape.
@@ -216,22 +219,45 @@ func canvasSizeParameters(offering generation.Offering) []generation.Parameter {
 // applyCanvasOutputSize sets every output-size parameter the Offering lets a
 // person choose to the value closest to the canvas, on a canvas turn of a
 // tool that binds the snapshot. Anything else is left as it is.
-func (executor *Executor) applyCanvasOutputSize(command chat.ToolCommand, offering generation.Offering, input map[string]any) {
+//
+// #614: an output size the Agent chose (agentChosen: its set_params value
+// for the Offering or its call's own argument) is carried out, not replaced
+// by the artboard's: the canvas then sets none of the output-size parameters.
+// The person's panel choice resizes the canvas itself (#246), so it stays
+// under the artboard like before.
+func (executor *Executor) applyCanvasOutputSize(command chat.ToolCommand, offering generation.Offering, input map[string]any, agentChosen map[string]bool) {
 	layout := executor.canvasLayout(command)
 	if layout == nil {
 		return
 	}
-	for _, parameter := range canvasSizeParameters(offering) {
-		if value, ok := canvasSizeChoice(parameter, layout.Width, layout.Height); ok {
-			input[parameter.Name] = value
+	parameters := canvasSizeParameters(offering)
+	for _, parameter := range parameters {
+		if agentChosen[parameter.Name] {
+			return
 		}
 	}
+	for name, value := range canvasSizeValues(parameters, layout.Width, layout.Height) {
+		input[name] = value
+	}
+}
+
+// canvasSizeValues are the values the canvas rule picks for an artboard of
+// width×height, one per output-size parameter a person may choose.
+func canvasSizeValues(parameters []generation.Parameter, width, height int) map[string]string {
+	values := map[string]string{}
+	for _, parameter := range parameters {
+		if value, ok := canvasSizeChoice(parameter, width, height); ok {
+			values[parameter.Name] = value
+		}
+	}
+	return values
 }
 
 // canvasSizeNote is the Schema's note about the output size of a canvas turn,
 // read from the input that was really submitted (after the Offering's own
 // forced values): it followed the canvas, or which nearest legal size was
-// used. Empty when the canvas did not set the size.
+// used. Empty when the canvas did not set the size: the submitted size is not
+// the one the canvas rule picks (the Agent chose it, #614).
 func (executor *Executor) canvasSizeNote(command chat.ToolCommand, offering generation.Offering, submitted json.RawMessage) string {
 	layout := executor.canvasLayout(command)
 	if layout == nil || command.Tool.ResultFields.SizeNote == "" {
@@ -240,6 +266,20 @@ func (executor *Executor) canvasSizeNote(command chat.ToolCommand, offering gene
 	var input map[string]any
 	if json.Unmarshal(submitted, &input) != nil {
 		return ""
+	}
+	picked := canvasSizeValues(canvasSizeParameters(offering), layout.Width, layout.Height)
+	expected := make(map[string]any, len(input))
+	for name, value := range input {
+		expected[name] = value
+	}
+	for name, value := range picked {
+		expected[name] = value
+	}
+	schema.ApplyForcedValues(offering.Parameters, expected)
+	for name := range picked {
+		if fmt.Sprint(expected[name]) != fmt.Sprint(input[name]) {
+			return ""
+		}
 	}
 	canvas := fmt.Sprintf("%d×%d", layout.Width, layout.Height)
 	context := executor.chat.Context

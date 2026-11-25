@@ -219,6 +219,35 @@ describe('three-view card with a multiview model', () => {
     expect(html).toContain('accept="image/png,image/jpeg"');
   });
 
+  // #618: the header counts the required views; the optional right view does not fill a required place.
+  it('counts only the required views in the header', () => {
+    const html = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'not_started', startable: true },
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'succeeded', task_id: 't4', output_asset_id: 'x4' },
+    ]));
+    expect(html).toContain('已完成 2 / 3');
+    expect(html).not.toContain('已完成 3 / 3');
+  });
+
+  // #618: a long "继续生成（约 9 积分）" stays inside its own column instead of running over the next view's 查看.
+  it('keeps every view button inside its column', () => {
+    const html = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'not_started', startable: true, estimated_credits: 9, credits_metered: true } as SlotWire,
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'not_started', startable: true },
+    ]));
+    for (const [key, id] of [['left', 'three-view-start'], ['back', 'three-view-open'], ['front', 'three-view-replace']] as const) {
+      const tag = buttonTag(slotHtml(html, key), id);
+      expect(tag, `${key} ${id}`).toMatch(/class="[^"]*\bw-full\b/);
+      expect(tag, `${key} ${id}`).toMatch(/class="[^"]*\bwhitespace-normal\b/);
+      expect(tag, `${key} ${id}`).toMatch(/class="[^"]*\bmin-w-0\b/);
+    }
+    expect(slotHtml(html, 'left')).toContain('继续生成（约 9 积分）');
+  });
+
   it('hides the multiview button without a multiview model', () => {
     const html = renderToStaticMarkup(
       <ThreeViewCardView schema={schema} group={four([{ status: 'succeeded', task_id: 't1', output_asset_id: 'x1' }, { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' }, { status: 'not_started' }, { status: 'not_started' }])}

@@ -3331,9 +3331,10 @@ func (s *Server) newTaskResponse(locale string, task generation.Task) taskRespon
 			Required:        asset.Required,
 			Delivery:        s.generation.AssetDeliveryFor(task, asset.Role, asset.Variant),
 			Ordinal:         asset.Ordinal,
-			MediaType:       asset.MediaType,
-			Size:            asset.Size,
-			SHA256:          asset.SHA256,
+			// The type its download answers with (#622), not the CDN's label.
+			MediaType: s.application.ModelDelivery.PublicMediaTypeOf(asset.Role, asset.Variant, asset.MediaType),
+			Size:      asset.Size,
+			SHA256:    asset.SHA256,
 			URL: s.taskAssetRoute.Render(
 				string(task.ID),
 				string(asset.ID),

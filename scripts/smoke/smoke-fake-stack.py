@@ -120,6 +120,9 @@ the framed block surviving compaction, edit/delete effects, and a second owner's
 is not offered, clearing the selection and answering the card follow the page's order and give every tool back,
 "skill-draft" the #548 personal Skill draft: the fake model drafts, nothing is saved until the creation route,
 PATCH changes one field, the catalog lists slug and description, a deleted Skill leaves it,
+"style-skill" the #620 style Skill models: list_offerings marks the Offerings that apply a style Skill, use_skill
+names them, and a style Skill on another model is refused with them and submits nothing; #621: use_skill notes a
+Skill the Agent read itself as used this turn and a Chinese turn carries the reply language rule,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
@@ -2614,6 +2617,30 @@ def scenario_multiview_text(work, api, offerings):
     reply = str((_quality_final_reply(_quality_messages(api, picked)) or {}).get("content") or "") if answered else ""
     record("multiview-text: a hand-picked four-view Skill with no picture is sent and tells the Agent to draw a source first",
            answered and f"present: {rule}" in reply, f"send {status} reply={reply[:120]!r}")
+    # #611: with four-view picked the directory no longer lists three-view, the turn block names four-view, and
+    # use_skill("three-view") neither returns the three-view body nor marks the reply 三视图.
+    picked_skill = {"id": "system-four-view", "name": "四视图"}
+    for marker, want in (("- three-view（", "absent"), ("「四视图」（four-view）", "present")):
+        replies = _visual_anchor_reply_count(api, picked)
+        status, _ = api.json("POST", f"/api/chat/sessions/{picked}/messages", {
+            "content": f"我要一把剑的四视图 [[fake:system-contains {marker}]]", "creative_domain": "image",
+            "_skill": picked_skill})
+        answered = status in (200, 201, 202) and _visual_anchor_wait_reply(api, picked, replies)
+        reply = str((_quality_final_reply(_quality_messages(api, picked)) or {}).get("content") or "") if answered else ""
+        record(f"multiview-text: with four-view picked the system context reads {want}: {marker}",
+               answered and f"{want}: {marker}" in reply, f"send {status} reply={reply[:120]!r}")
+    replies = _visual_anchor_reply_count(api, picked)
+    status, _ = api.json("POST", f"/api/chat/sessions/{picked}/messages", {
+        "content": '我要一把剑的四视图 [[fake:tool:use_skill {"name":"three-view"}]]', "creative_domain": "image",
+        "_skill": picked_skill})
+    answered = status in (200, 201, 202) and _visual_anchor_wait_reply(api, picked, replies)
+    receipts = _tool_message_contents(work, "main", picked, "use_skill") if answered else []
+    used = ((_quality_final_reply(_quality_messages(api, picked)) or {}).get("used_skills") or []) if answered else []
+    record("multiview-text: with four-view picked use_skill(three-view) is answered with the pick, not marked 三视图",
+           answered and any("四视图" in text and "three-view" in text and "正面、左侧、背面各一张" not in text
+                            for text in receipts)
+           and not any(item.get("id") == "system-three-view" for item in used),
+           f"send {status} receipts={[text[:80] for text in receipts]} used_skills={used}")
     session = new_session(api)
     # #548: the resident craft keeps only the route; the four-view rule itself
     # lives in the system four-view Skill, which the Agent reads with use_skill.
@@ -3418,6 +3445,67 @@ def _next_step_turn(api, session, content, domain="3d", seconds=60, **fields):
     return False, f"no reply within {seconds}s"
 
 
+def scenario_style_skill(work, api):
+    """#620: which models can apply a style Skill is read from the Schema (the Offerings that declare the Skill
+    feature), not learnt by submitting. list_offerings marks them, use_skill on a personal style Skill names them,
+    and a refine_image that passes the Skill on a model without the feature is refused with the same list and
+    creates no Task. Fake LLM tool markers only; nothing is charged."""
+    base = "/api/v1/chat/skills/personal"
+    status, body = api.json("POST", base, {"name": "骑砍图标", "prompt": "骑砍风格的物品图标，金属与皮革质感。", "slug": "mb-icon-style",
+                                           "description": "骑砍风格物品图标：画游戏物品图标时使用。", "apply": "generation-prompt",
+                                           "recommended_size": "2048x2048"})
+    skill = (body or {}).get("skill") or {}
+    record("#620 style-skill: a personal style Skill is saved", status == 201 and skill.get("slug") == "mb-icon-style",
+           f"status={status} body={body}")
+    if not skill.get("id"):
+        return
+    supported = IMAGE_OFFERINGS["openai"][0]
+    other = IMAGE_OFFERINGS["meshy"][0]
+    session = new_session(api)
+    marks, model_id = {}, ""
+    if not _image_message(api, session, '看看文生图模型 [[fake:tool:list_offerings {"capability":"text-to-image"}]]'):
+        record("#620 style-skill: list_offerings marks the style Skill offerings", False, "turn did not finish")
+    else:
+        for result in _tool_results(work, "main", session, "list_offerings"):
+            for capability in result.get("capabilities") or []:
+                for offering in capability.get("offerings") or []:
+                    marks[offering.get("offering_id")] = bool(offering.get("style_skill"))
+                    if offering.get("offering_id") == supported:
+                        model_id = offering.get("model_id") or ""
+        record("#620 style-skill: list_offerings marks the style Skill offerings",
+               marks.get(supported) is True and marks.get(other) is False and bool(model_id), f"marks={marks} model_id={model_id!r}")
+    if not _image_message(api, session, '骑砍风格背包道具图标 [[fake:tool:use_skill {"name":"mb-icon-style"}]]'):
+        record("#620 style-skill: use_skill names the models that apply it", False, "turn did not finish")
+        return
+    instructions = [str(result.get("instructions") or "") for result in _tool_results(work, "main", session, "use_skill")]
+    record("#620 style-skill: use_skill names the models that apply it",
+           bool(model_id) and any("能套用画风 Skill 的模型只有" in text and model_id in text for text in instructions),
+           f"model_id={model_id!r} instructions={[text[-120:] for text in instructions]}")
+    # #621: a Skill the Agent read on its own is "本轮使用", not the person's pick, and a Chinese turn carries
+    # the rule that English tool results do not change the reply language.
+    notes = [str(result.get("note") or "") for result in _tool_results(work, "main", session, "use_skill")]
+    record("#621 style-skill: use_skill notes a Skill the Agent read itself as used this turn",
+           any("本轮使用" in note and "你选的" in note for note in notes), f"notes={notes}")
+    rule = "工具结果是英文也不改"
+    chinese = new_session(api)
+    if not _visual_anchor_turn(api, chinese, f"同一套背包图标再画一个 [[fake:system-contains {rule}]]"):
+        record("#621 style-skill: a Chinese turn carries the reply language rule", False, "turn did not finish")
+    else:
+        reply = str((_quality_final_reply(_quality_messages(api, chinese)) or {}).get("content") or "")
+        record("#621 style-skill: a Chinese turn carries the reply language rule", f"present: {rule}" in reply, f"reply={reply[:120]!r}")
+    before = len(session_tasks(api, session))
+    call = json.dumps({"prompt": "A Norman nasal helmet icon", "skill": "mb-icon-style", "model": other})
+    if not _image_message(api, session, f"诺曼护鼻盔 [[fake:tool:refine_image {call}]]"):
+        record("#620 style-skill: another model is refused with the models that apply it", False, "turn did not finish")
+        return
+    receipts = _tool_message_contents(work, "main", session, "refine_image")
+    record("#620 style-skill: another model is refused with the models that apply it",
+           bool(model_id) and any("不支持画风 Skill" in text and model_id in text for text in receipts)
+           and len(session_tasks(api, session)) == before,
+           f"tasks {before}->{len(session_tasks(api, session))} receipts={[text[:160] for text in receipts]}")
+    api.json("DELETE", base + "/" + skill["id"])
+
+
 def scenario_skill_draft(api):
     """#548: a personal Skill drafted from a name and a requirement. The draft route runs one call on the default
     chat model (the fake OpenAI-compatible LLM answers the authoring template's delimiters with a draft object)
@@ -3440,6 +3528,18 @@ def scenario_skill_draft(api):
     status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": '用水彩 [[fake:skill-draft {"prompt":""}]]'})
     record("#548 skill-draft: an unusable draft is one readable failure", status == 502 and (body or {}).get("detail"),
            f"status={status} body={body}")
+    # #619: a draft opened from a session runs on that session's chat model, and a used-up quota on it is the
+    # Schema's own answer (503 with its code), not the generic 502.
+    session = new_session(api)
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩", "session_id": session})
+    record("#619 skill-draft: a draft opened from a session drafts on that session's model", status == 200
+           and ((body or {}).get("draft") or {}).get("slug") == "fake-skill-draft", f"status={status} body={body}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩", "session_id": "session-not-mine"})
+    record("#619 skill-draft: another owner's session is not found", status == 404 and (body or {}).get("code") == "session_not_found",
+           f"status={status} body={body}")
+    status, body = api.json("POST", base + "/draft", {"name": "水彩", "requirement": "用水彩 [[fake:quota:insufficient_quota]]", "session_id": session})
+    record("#619 skill-draft: a used-up chat model quota is the Schema's answer, not a 502", status == 503
+           and (body or {}).get("code") == "skill_draft_quota_exhausted" and (body or {}).get("detail"), f"status={status} body={body}")
     status, body = api.json("POST", base, {"name": "水彩角色", "prompt": draft.get("prompt") or "柔和水彩。", "slug": draft.get("slug") or "",
                                            "description": draft.get("description") or "画角色时使用。", "apply": draft.get("apply") or "instruction",
                                            "recommended_size": "2048x2048"})
@@ -9034,7 +9134,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,skill-draft,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,tripo-endpoints,l5-direct")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,skill-draft,style-skill,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,tripo-endpoints,l5-direct")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -9044,7 +9144,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "skill-draft", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "skill-draft", "style-skill", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -9060,7 +9160,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "skill-draft", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "skill-draft", "style-skill", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -9119,6 +9219,8 @@ def main():
                 scenario_next_step(api)
             if "skill-draft" in selected:
                 scenario_skill_draft(api)
+            if "style-skill" in selected:
+                scenario_style_skill(work, api)
             if "work-ledger" in selected:
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:

@@ -173,8 +173,8 @@ func (service *Service) sessionModel(ctx context.Context, chosen string) (ChatMo
 	return option, ChatModelView{Selected: option.ID, Chosen: chosen, Default: set.DefaultID, Fallback: fellBack, Options: options}, nil
 }
 
-// DefaultChatModel is the model a request outside any session runs on (the
-// Skill draft, #548): the same resolution as a session that chose nothing,
+// DefaultChatModel is the model a request outside any session runs on (a
+// Skill draft opened without a session, #548): the same resolution as a session that chose nothing,
 // so the administrator's default model, else the first offered one, else the
 // deployment's model. It returns the connection and the upstream model.
 func (service *Service) DefaultChatModel(ctx context.Context) (connection, model string, err error) {
@@ -183,6 +183,25 @@ func (service *Service) DefaultChatModel(ctx context.Context) (connection, model
 		return "", "", err
 	}
 	option, _ := service.models.resolve(set, "")
+	return option.ID, option.Model, nil
+}
+
+// ChatModelFor is the model a request outside a turn runs on for the owner's
+// session (the Skill draft opened from it, #619): the model the session's next
+// turn would use, so the person's choice, or the default when they chose none
+// or their choice is no longer offered. An empty sessionID is
+// DefaultChatModel; a session the owner does not have is ErrSessionNotFound.
+func (service *Service) ChatModelFor(ctx context.Context, ownerID, sessionID string) (connection, model string, err error) {
+	if sessionID == "" {
+		return service.DefaultChatModel(ctx)
+	}
+	if err := service.requireSession(ctx, ownerID, sessionID); err != nil {
+		return "", "", err
+	}
+	option, _, err := service.TurnModel(ctx, ownerID, sessionID)
+	if err != nil {
+		return "", "", err
+	}
 	return option.ID, option.Model, nil
 }
 

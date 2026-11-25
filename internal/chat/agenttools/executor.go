@@ -96,6 +96,10 @@ type Config struct {
 	// Skills is the Schema's Skill declaration: use_skill reads its directory
 	// contract and its system Skill IDs (#548).
 	Skills catalog.ChatSkillsSchema
+	// StyleSkillModels lists the models that can apply a style Skill now
+	// (chat.StyleSkillModels, #620); use_skill names them after a style
+	// Skill's body. Nil names none.
+	StyleSkillModels func() []string
 	// Context carries the attachment handle syntax and its refusal wording;
 	// create_three_view accepts handles beside history indices.
 	Context  catalog.ChatContextSchema
@@ -200,6 +204,10 @@ type Config struct {
 	// ChoiceOptionInvalid words a refused direction-card option list
 	// (chat.presentation.messages.choice_option_invalid, #239).
 	ChoiceOptionInvalid string
+	// ChoiceOpenInReply words the refusal of a second card while a card this
+	// reply opened is still pending
+	// (chat.presentation.messages.choice_open_in_reply, #615).
+	ChoiceOpenInReply string
 	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
 	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
 	// words its field refusals (model3d_usage.brief.messages).
@@ -232,6 +240,7 @@ type Config struct {
 
 type Executor struct {
 	skills                catalog.ChatSkillsSchema
+	styleSkillModels      func() []string
 	offerings             func() []generation.Offering
 	context               catalog.ChatContextSchema
 	skillRuntime          *skillrun.Runtime
@@ -274,6 +283,7 @@ type Executor struct {
 	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	choiceOptionInvalid    string
+	choiceOpenInReply      string
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
@@ -370,8 +380,10 @@ func New(config Config) (*Executor, error) {
 	}
 	return &Executor{
 		skills:                 config.Skills,
+		styleSkillModels:       config.StyleSkillModels,
 		choiceKinds:            choiceKinds,
 		choiceOptionInvalid:    config.ChoiceOptionInvalid,
+		choiceOpenInReply:      config.ChoiceOpenInReply,
 		briefSavedMessage:      config.BriefSavedMessage,
 		briefInvalidTemplate:   config.BriefInvalidTemplate,
 		briefMessages:          config.BriefMessages,
@@ -533,7 +545,9 @@ func (e *Executor) Execute(
 		}
 		return e.recordSelfCheck(ctx, command)
 	case ToolCreateThreeView:
-		return e.createThreeView(ctx, command, observe)
+		result, err := e.createThreeView(ctx, command, observe)
+		e.recordPickedSkill(command, &result)
+		return result, err
 	case ToolUseSkill:
 		return e.useSkill(command), nil
 	default:
@@ -878,6 +892,13 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	if err != nil {
 		if errors.Is(err, chat.ErrSessionNotFound) {
 			return chat.ToolResult{Error: "session not found", NoSubmission: true}
+		}
+		if errors.Is(err, chat.ErrChoiceOpenInReply) {
+			message := e.choiceOpenInReply
+			if message == "" {
+				message = "choice card not opened: this reply already opened a card that is still pending; wait for the person's answer instead of calling ask_choice again"
+			}
+			return chat.ToolResult{Error: message, NoSubmission: true}
 		}
 		return chat.ToolResult{Error: "choice card not opened", NoSubmission: true}
 	}
