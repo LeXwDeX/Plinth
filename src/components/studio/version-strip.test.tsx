@@ -6,7 +6,7 @@ import { blankTile, type VersionTile } from '@/lib/workspace/versions';
 
 const state = vi.hoisted(() => ({ tiles: [] as VersionTile[], pick: null as null | { kind: string; taskId: string; assetId: string }, compare: null as object | null, object: null as null | { taskId: string; assetId: string; kind: string; url: string; sessionId: string }, stage: vi.fn(), detail: vi.fn(), toggle: vi.fn(() => true), buttons: [] as ReactElement<Record<string, any>>[], targets: [] as any[], messages: [] as any[] }));
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: catalog.application }) }));
-vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles: state.tiles }), tileOfObject: () => null }));
+vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles: state.tiles }), tileOfObject: (_versions: unknown, object: { taskId?: string } | null) => (object ? state.tiles.find((entry) => entry.taskId === object.taskId) ?? null : null) }));
 vi.mock('@/hooks/use-session-pick', () => ({ useSessionPick: () => ({ pick: state.pick }) }));
 // #559: a strip click goes through viewOnStage (look, do not place); the record says which action ran.
 // #593: a double click goes through insertOnCanvas, the same call as 「插入到画布」 in the detail.
@@ -16,6 +16,12 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({
 vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session', messagesBySession: { session: state.messages } }) }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (selector: any) => selector({ currentObject: state.object }) }));
 vi.mock('@/store/studio-store', () => ({ useStudioStore: (selector: any) => selector({ compare: state.compare, setAllOutputsOpen: vi.fn() }) }));
+// The popovers render in place, so a static render shows what an open 「全部」 lists.
+vi.mock('@base-ui/react/popover', () => {
+  const pass = ({ children }: { children?: ReactNode }) => children;
+  const element = (tag: string) => ({ children, positionMethod: _p, side: _s, align: _a, sideOffset: _o, collisionPadding: _c, ...props }: Record<string, any>) => React.createElement(tag, props, children);
+  return { Popover: { Root: pass, Portal: pass, Positioner: pass, Popup: element('div'), Title: element('h2'), Trigger: element('button') } };
+});
 vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ children }: { children: ReactNode }) => children }));
 vi.mock('@/components/result/result-card-parts', () => ({
   openResultDetail: state.detail,
@@ -131,17 +137,60 @@ describe('output strip navigation and details', () => {
     expect(state.toggle).toHaveBeenCalledWith(state.tiles[0]); expect(state.stage).not.toHaveBeenCalled();
     detail().props.onClick(click); expect(state.detail).toHaveBeenCalledTimes(1);
   });
-  it.each([3, 4, 8])('folds a %i-sibling branch into one compact tile and an accessible expansion', (count) => {
-    state.tiles = Array.from({ length: count }, (_, index) => tile({
-      key: `n:${index}`, taskId: `t${index}`, taskIds: [`t${index}`],
-      parents: [{ key: 'parent', known: true, kind: 'source_task', evidence: 'recorded', link: 'edit', step: '' }],
-    }));
+  const siblings = (count: number) => Array.from({ length: count }, (_, index) => tile({
+    key: `n:${index}`, taskId: `t${index}`, taskIds: [`t${index}`],
+    assets: [{ id: `a${index}`, kind: 'image', url: `/a${index}`, role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }],
+    parents: [{ key: 'parent', known: true, kind: 'source_task', evidence: 'recorded', link: 'edit', step: '' }],
+  }));
+  const keysIn = (html: string) => [...html.matchAll(/data-testid="version-tile" data-key="([^"]+)"/g)].map((match) => match[1]);
+  const foldList = (html: string) => html.slice(html.indexOf('data-testid="version-fold-list"'));
+  const primaries = () => state.buttons.filter((button) => button.props['data-shortcut-arrows']);
+  const details = () => state.buttons.filter((button) => button.props['data-testid'] === 'version-detail');
+  it.each([3, 4, 8])('folds %i results of one step into the first one and 「全部」, which lists every one of them in order (#596)', (count) => {
+    state.tiles = siblings(count);
     const html = renderToStaticMarkup(<VersionStrip />);
-    // One 50px compact result plus a 32px expansion remains inside the strip.
-    expect(html.match(/data-testid="version-tile"/g)).toHaveLength(1);
-    expect(html).toContain('data-testid="version-fold-trigger"');
-    expect(html).toContain(`+${count - 1}`);
+    const strip = html.slice(0, html.indexOf('data-testid="version-fold-list"'));
+    // One 50px compact result plus a 32px 「全部」 remains inside the strip; no "+N" count.
+    expect(keysIn(strip)).toEqual(['n:0']);
+    expect(html).toMatch(/data-testid="version-fold-trigger"[^>]*>全部<\/button>/);
+    expect(html).not.toMatch(/>\+\d+</);
+    expect(html).not.toContain('同一来源的其他结果');
     expect(html).toContain('h-[34px]'); expect(html).toContain('h-5'); expect(html).toContain('h-8');
+    // The list is everything this step made, the one outside included, in the order they were made.
+    expect(foldList(html)).toContain('这一步生成的全部内容');
+    expect(keysIn(foldList(html))).toEqual(Array.from({ length: count }, (_, index) => `n:${index}`));
+  });
+  it('references a folded result on a click without swapping the one outside or reordering the list (#596)', () => {
+    state.tiles = siblings(4);
+    const before = renderToStaticMarkup(<VersionStrip />);
+    // The list is [n:0 outside, then n:0..n:3 inside 「全部」]: a click on n:2 references it, stage only.
+    primaries()[3].props.onClick(click);
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't2', assetId: 'a2', via: 'view' }));
+    // It is now the current object (what the input's reference chip carries); the strip keeps its order and its first.
+    state.object = { kind: 'image', taskId: 't2', assetId: 'a2', url: '/a2', sessionId: 'session' };
+    state.buttons = [];
+    const after = renderToStaticMarkup(<VersionStrip />);
+    expect(keysIn(after)).toEqual(keysIn(before));
+    expect(keysIn(after.slice(0, after.indexOf('data-testid="version-fold-list"')))).toEqual(['n:0']);
+    expect(after).toMatch(/aria-current="true" data-testid="version-fold-trigger"/);
+    expect(foldList(after)).toMatch(/data-key="n:2" data-status="ready" data-current="true"/);
+    expect(after).toMatch(/data-key="n:0" data-status="ready" data-current="false"/);
+  });
+  it('inserts a folded result on a double click and opens its own detail from 「详情」 (#596)', () => {
+    state.tiles = siblings(4);
+    renderToStaticMarkup(<VersionStrip />);
+    primaries()[4].props.onDoubleClick();
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't3', assetId: 'a3', via: 'insert' }));
+    details()[2].props.onClick(click);
+    expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't1', assetId: 'a1' }));
+  });
+  it('shows both of two results of one step, with no 「全部」', () => {
+    state.tiles = siblings(2);
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(keysIn(html)).toEqual(['n:0', 'n:1']);
+    expect(html).not.toContain('version-fold-trigger');
   });
   it('keeps the tallest card and its detail row above a horizontal scrollbar', () => {
     const html = renderToStaticMarkup(<VersionStrip />);

@@ -537,7 +537,7 @@ function linksOf(tile: VersionTile): VersionParent[] {
   return link ? [link] : [];
 }
 
-/** At most this many results of one source show in its column; the rest fold into "+N". */
+/** At most this many results of one source show in its column; the rest fold behind 「全部」. */
 export const COLUMN_VISIBLE_LIMIT = 3;
 
 export interface FoldedColumn {
@@ -546,31 +546,14 @@ export interface FoldedColumn {
 }
 
 /**
- * A column of siblings that is too tall keeps its first results and folds the rest.
- * When it folds, one place goes to the "+N" control, and the places go first to
- * the tiles of the current branch (the current one before its relatives), so the
- * branch in use is never hidden. Order within the column is unchanged.
+ * A column of siblings that is too tall keeps its first results and folds the rest behind 「全部」, which takes one
+ * place. Which results stay is fixed by the order they were made, never by what is selected: clicking a folded one
+ * only selects it, it does not swap the result that stands for the group (#596).
  */
-export function foldColumn(
-  tiles: readonly VersionTile[],
-  branch: ReadonlySet<string>,
-  currentKey: string | null,
-  limit: number = COLUMN_VISIBLE_LIMIT,
-): FoldedColumn {
+export function foldColumn(tiles: readonly VersionTile[], limit: number = COLUMN_VISIBLE_LIMIT): FoldedColumn {
   if (tiles.length <= limit) return { visible: [...tiles], hidden: [] };
   const room = Math.max(1, limit - 1);
-  const rank = (tile: VersionTile) => (tile.key === currentKey ? 0 : branch.has(tile.key) ? 1 : 2);
-  const chosen = new Set(
-    tiles
-      .map((tile, index) => ({ tile, index }))
-      .sort((left, right) => rank(left.tile) - rank(right.tile) || left.index - right.index)
-      .slice(0, room)
-      .map((entry) => entry.tile.key),
-  );
-  return {
-    visible: tiles.filter((tile) => chosen.has(tile.key)),
-    hidden: tiles.filter((tile) => !chosen.has(tile.key)),
-  };
+  return { visible: tiles.slice(0, room), hidden: tiles.slice(room) };
 }
 
 /**
