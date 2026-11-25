@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.26",
+    "revision": "2026-11-24.19.27",
     "terminology": {
       "user_facing": [
         {
@@ -28374,7 +28374,7 @@
     },
     {
       "id": "meshy/meshy-7/image-to-3d",
-      "revision": "2026-08-25.2",
+      "revision": "2026-11-25.581.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -28625,7 +28625,24 @@
           "presentation": {
             "surface": "provider",
             "control": "boolean"
-          }
+          },
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "should_texture",
+                "operator": "equals",
+                "value": false
+              },
+              "value": false
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "should_texture",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         },
         {
           "name": "auto_size",
@@ -28689,7 +28706,7 @@
     },
     {
       "id": "meshy/meshy-7.1/image-to-3d",
-      "revision": "2026-11-05.129.1",
+      "revision": "2026-11-25.581.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -28991,7 +29008,24 @@
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "should_texture",
+                "operator": "equals",
+                "value": false
+              },
+              "value": false
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "should_texture",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         },
         {
           "name": "texture_resolution",
@@ -29137,7 +29171,7 @@
     },
     {
       "id": "meshy/meshy-t2.5/image-to-3d",
-      "revision": "2026-10-22.329.2",
+      "revision": "2026-11-25.581.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -29363,7 +29397,24 @@
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "should_texture",
+                "operator": "equals",
+                "value": false
+              },
+              "value": false
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "should_texture",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         },
         {
           "name": "texture_resolution",
