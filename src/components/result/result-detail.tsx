@@ -28,7 +28,7 @@ import { useModelFormatCoverage } from '@/hooks/use-model-format-coverage';
 import { useSessionVersions } from '@/hooks/use-session-versions';
 import { objectOfTile } from '@/lib/workspace/version-object';
 import { modelFormatsRoute } from '@/lib/workspace/model-formats';
-import { buildDetailRows, conversionAllowed, detailActions, detailBlockedReason, detailPrompt, detailSource, detailStatus, type DetailStatus } from '@/lib/workspace/task-detail';
+import { buildDetailRows, conversionAllowed, detailActions, detailBlockedReason, detailPrompt, detailSource, detailStatus, uploadDetailRows, type DetailStatus } from '@/lib/workspace/task-detail';
 import { groupPosition, objectOfTarget, targetOfTaskAssets, targetOfTile, type ResultTarget } from '@/lib/workspace/result-target';
 import { formatSchemaText, schemaCountMessage } from '@/lib/product-schema';
 import { findTaskState, isDownloadableAsset, resolveErrorText, viewableModelAsset } from '@/lib/workspace/task-projection';
@@ -82,6 +82,12 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
     [schema, task, offering, source, prompt, measured, target.capability, tracked?.capability],
   );
   const hasTask = Boolean(target.taskId);
+  // #617: an upload or an Agent crop has no Task, but the chain still says what it is, where it was cut from and its size.
+  const uploadRows = useMemo(
+    () => (!hasTask && target.stageObjectId ? uploadDetailRows(schema, target.stageObjectId, versions, measured) : []),
+    [hasTask, schema, target.stageObjectId, versions.tiles, versions.byTask, measured],
+  );
+  const shownRows = hasTask ? rows : uploadRows;
   // Fill task-only entries after loading; never replace the file the person selected.
   const availableAssets = target.assetId ? task?.assets.filter((asset) => asset.id === target.assetId) : task?.assets;
   const resolvedTarget = !target.url && availableAssets?.length ? targetOfTaskAssets(target, availableAssets) : target;
@@ -302,9 +308,9 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
         {loadFailed ? <p className="text-xs text-muted-foreground" role="status">{text('ui.result.detail.load_failed')}</p> : null}
         {displayTarget.kind === 'splat' ? <p className="text-xs text-muted-foreground" role="note" data-testid="result-detail-splat-scope">{text('ui.result.detail.splat_scope')}</p> : null}
 
-        {hasTask ? (
+        {hasTask || shownRows.length > 0 ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs" data-testid="result-detail-rows">
-            {rows.map((row) => (
+            {shownRows.map((row) => (
               <div key={row.key} className="contents" data-testid="result-detail-row" data-key={row.key}>
                 <dt className="text-muted-foreground">{row.label}</dt>
                 <dd className="min-w-0 break-words">
@@ -323,14 +329,15 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
                 </dd>
               </div>
             ))}
-            {prompt ? (
+            {hasTask && prompt ? (
               <div className="contents" data-testid="result-detail-row" data-key="prompt">
                 <dt className="text-muted-foreground">{text('ui.result.detail.field.prompt')}</dt>
                 <dd className="max-h-24 min-w-0 overflow-y-auto whitespace-pre-wrap break-words">{prompt}</dd>
               </div>
             ) : null}
           </dl>
-        ) : target.detail ? (
+        ) : null}
+        {!hasTask && target.detail ? (
           <p className="text-xs text-muted-foreground" data-testid="result-detail-asset-info">{target.detail}</p>
         ) : null}
 

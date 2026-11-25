@@ -164,14 +164,16 @@ func TestChatSessionExtraStepsRaiseAnMCPAssetGrantAndAreAudited(t *testing.T) {
 		t.Fatalf("credential header write = %d %s", refused.Code, refused.Body.String())
 	}
 
-	// A plain session and an unknown session are both 404: no asset to extend.
+	// A plain session and an unknown session have no asset to extend: the
+	// write is 404, and the read is 204 with no body (#616), so the studio's
+	// read on every ordinary chat is not a failed request in the console.
 	plain := chatSessionStepsPath("session-not-an-asset")
 	if response := grantTestRequest(t, harness.handler, harness.cookie, http.MethodPut, plain,
 		`{"extra_steps":1}`, ""); response.Code != http.StatusNotFound {
 		t.Fatalf("plain session grant = %d %s", response.Code, response.Body.String())
 	}
-	if response := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet, plain, "", ""); response.Code != http.StatusNotFound {
-		t.Fatalf("plain session read = %d %s", response.Code, response.Body.String())
+	if response := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet, plain, "", ""); response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+		t.Fatalf("plain session read = %d %q; want 204 with no body", response.Code, response.Body.String())
 	}
 
 	events, err := harness.repository.ListAdministrationAuditEvents(context.Background())
@@ -199,8 +201,9 @@ func TestChatSessionExtraStepsRaiseAnMCPAssetGrantAndAreAudited(t *testing.T) {
 	}
 }
 
-// A session that is not an asset of this owner is 404, never 403, and the
-// asset list item sessions keep their own route.
+// A session that is not an asset of this owner is never 403: the write is 404
+// and the read is the same 204 as a plain session (#616), and the asset list
+// item sessions keep their own route.
 func TestChatSessionStepsRejectsAnotherOwnersAsset(t *testing.T) {
 	t.Parallel()
 	harness := newAssetListHTTPHarness(t)
@@ -214,8 +217,12 @@ func TestChatSessionStepsRejectsAnotherOwnersAsset(t *testing.T) {
 		if method == http.MethodPut {
 			body = `{"extra_steps":1}`
 		}
+		want := http.StatusNotFound
+		if method == http.MethodGet {
+			want = http.StatusNoContent
+		}
 		response := grantTestRequest(t, harness.handler, harness.cookie, method, path, body, "")
-		if response.Code != http.StatusNotFound {
+		if response.Code != want {
 			t.Fatalf("%s another owner's asset = %d %s", method, response.Code, response.Body.String())
 		}
 	}

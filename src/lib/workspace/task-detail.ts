@@ -104,14 +104,45 @@ export interface DetailFacts {
 
 export interface DetailSource { label: string; parentKey: string }
 
-/** Same recorded parent used by the stage header, also retained for file-only tasks. Unloaded and unknown parents stay unknown. */
+/**
+ * Same recorded parent used by the stage header, also retained for file-only tasks. Unloaded and unknown parents
+ * stay unknown. A version of the chain that records no parent at all (a text-to-image result) was made from no
+ * earlier version: it says so instead of "unknown" (#617).
+ */
 export function detailSource(schema: ProductSchema, taskId: string, versions: VersionTiles): DetailSource {
   const key = versions.byTask.get(taskId);
   const tile = key ? versions.tiles.find((entry) => entry.key === key) : undefined;
-  const parent = primaryParent(tile ?? { parents: versions.fileTaskParents.get(taskId) ?? [] });
+  const parents = tile?.parents ?? versions.fileTaskParents.get(taskId);
+  if (parents && parents.length === 0) return { label: schemaText(schema, 'ui.result.detail.no_source'), parentKey: '' };
+  const parent = primaryParent({ parents: parents ?? [] });
   const source = parent?.known ? versions.tiles.find((entry) => entry.key === parent.key && entry.status === 'ready') : undefined;
   return source ? { label: formatSchemaText(schemaText(schema, 'ui.result.detail.made_from'), { parent: versionLabel(schema, source, source.domain) }), parentKey: source.key }
     : { label: schemaText(schema, 'ui.result.detail.unknown_source'), parentKey: '' };
+}
+
+/**
+ * Rows of a picture with no Task, an upload or an Agent crop of the version strip (#587, #617): what it is
+ * ("裁图" / "上传"), the version a crop was cut from (with its jump target) and its size, the server's pixel
+ * size or else the measured one. An upload records no source, so it has no source row; a picture the chain
+ * does not list yet has no rows.
+ */
+export function uploadDetailRows(
+  schema: ProductSchema,
+  objectId: string,
+  versions: VersionTiles,
+  measured: { width: number; height: number } | null,
+): DetailRow[] {
+  const key = versions.byTask.get(objectId);
+  const tile = key ? versions.tiles.find((entry) => entry.key === key) : undefined;
+  if (!tile) return [];
+  const rows: DetailRow[] = [{ key: 'type', label: field(schema, 'type'), value: versionLabel(schema, tile, tile.domain) }];
+  if (tile.parents.length > 0) {
+    const source = detailSource(schema, objectId, versions);
+    rows.push({ key: 'source', label: field(schema, 'source'), value: source.label, ...(source.parentKey ? { parentKey: source.parentKey } : {}) });
+  }
+  const size = tile.size ?? measured;
+  if (size && size.width > 0 && size.height > 0) rows.push({ key: 'size', label: field(schema, 'size'), value: `${size.width}x${size.height}` });
+  return rows;
 }
 
 const field = (schema: ProductSchema, name: string): string => schemaText(schema, `ui.result.detail.field.${name}`);

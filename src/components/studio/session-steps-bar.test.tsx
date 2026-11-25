@@ -105,6 +105,14 @@ describe('SessionStepsBar (#330 §6)', () => {
     await waitFor(() => expect(screen.queryByTestId('session-steps-bar')).toBeNull());
   });
 
+  it('stays hidden for a plain chat the server answers with 204 and no body (#616)', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderBar();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('session-steps-bar')).toBeNull());
+  });
+
   it('makes no request when the deployment declares no session route', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

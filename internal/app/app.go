@@ -1269,6 +1269,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Project:                   applicationSchema.Project,
 		ChoiceKinds:               applicationSchema.Chat.Choice.Kinds,
 		ChoiceOptionInvalid:       applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
+		ChoiceOpenInReply:         applicationSchema.Chat.Presentation.Messages.ChoiceOpenInReply,
 		BriefSavedMessage:         applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate:      applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
 		BriefMessages:             applicationSchema.Chat.Model3DUsage.Brief.Messages,
