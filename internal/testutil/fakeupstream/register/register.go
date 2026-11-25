@@ -17,9 +17,11 @@
 // The register sits beside the wire coverage matrix
 // (internal/testutil/wirefixture, TestWireCoverageMatrix), which reports per
 // Catalog Offering whether a real sample exists for an endpoint. The matrix
-// keys units by endpoint, so an Offering that shares an endpoint with a sampled
-// model inherits that unit's evidence; the register records such behaviors per
-// model and names the matrix unit it corrects (Entry.Correction). The matrix
+// keys units by endpoint, so a unit lists every Offering that shares its
+// endpoint with a sampled model; the Offering rows take only the samples that
+// requested their own model in the Provider's model field (#575). The register
+// records such behaviors per model and names the matrix unit it corrects
+// (Entry.Correction). The matrix
 // generation itself is not changed by the register.
 package register
 
@@ -216,7 +218,7 @@ func (r Register) Markdown() []byte {
 	w("- `real`：fake 的该行为与仓库内已提交的脱敏真实样本一致；列出样本文件、真实调用日期（样本 meta 的 `captured_at_utc`）、`app_revision` 与 `catalog_revision`（meta 未记录时写 `unknown`）。\n")
 	w("- `constructed`：没有真实样本，按所列官方文档或未入库的观测构造，写明核对日期与没有真实样本的原因。`constructed` 不等于已对齐。\n")
 	w("- `gap`：已知缺口或差异，写明计划与 Issue。\n\n")
-	w("登记表与 wire coverage 矩阵（`internal/testutil/wirefixture/testdata/wire-coverage.generated.json`）并存：矩阵按端点记 Offering 有无真实样本，共享端点的 Offering 会继承该单元的证据；登记表按行为与模型记录，并在「按行为纠正 wire coverage」一节列出被共享端点误带成 real 的行为。矩阵的生成规则不因登记表改变。\n\n")
+	w("登记表与 wire coverage 矩阵（`internal/testutil/wirefixture/testdata/wire-coverage.generated.json`）并存：矩阵按端点记 Offering 有无真实样本，单元的证据由共享端点的 Offering 共用；样本请求体在 Provider 声明的模型字段（`model`、Meshy 的 `ai_model` 等）里写了模型时，Offering 行只取请求了自身模型的样本（#575），但单元本身仍列出这些 Offering 并显示全部样本的最高证据。登记表按行为与模型记录，并在「按行为纠正 wire coverage」一节列出单元因共享端点显示为 real、而该 Offering 自己的行为没有真实样本的条目。矩阵的生成规则不因登记表改变。\n\n")
 	w("测试（`internal/testutil/fakeupstream/register`）保证：每个 fake 版本的每个端点至少一条记录；`real` 条目引用的样本存在、能被 wirefixture 读取、日期与来源同样本 meta 一致，并且样本里确有该端点的交换；`constructed` 条目有依据与核对日期；`gap` 条目有计划与 Issue；本文件与数据一致。\n\n")
 
 	w("## 汇总\n\n")
