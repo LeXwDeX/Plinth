@@ -627,7 +627,16 @@ func (executor *Executor) execute(
 			return result, err
 		}
 		if choice.Refusal != "" {
+			// #612, #613: a workspace confirmation is asked on a model card.
+			if result, asked, err := executor.askModelChoice(ctx, command, capability, choice.card); asked {
+				return result, err
+			}
 			return executor.modelChoiceFailure(command, choice.Code, choice.Refusal), nil
+		}
+		if choice.Source == "agent" {
+			// A typed reply to an open model card is the Agent naming the
+			// person's model; the card then shows that answer.
+			executor.settleChoice(ctx, command, capability, -1, choice.Offering.ID, false)
 		}
 		offering = choice.Offering
 	} else {
