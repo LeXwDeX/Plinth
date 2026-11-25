@@ -173,6 +173,18 @@ describe('the output size a canvas-sourced turn sends (#272/#284)', () => {
     expect(turn).toEqual({ value: '4:3', pixels: tiers.image_size?.['4K']?.['4:3'], ratioOnly: true, nearest: false });
   });
 
+  it('says nothing once the Agent chose the size: the server carries out the Agent\'s size (#614)', () => {
+    const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
+    const agentSize = effectiveOfferingValues(gptImage, { size: '3840x2160' });
+    const square = { width: 1024, height: 1024 };
+    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'agent' } })).toBeNull();
+    // The person's panel choice resizes the canvas itself (#246): the canvas still sets the size.
+    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'user' } }))
+      .toMatchObject({ value: '1024x1024', nearest: false });
+    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'default' } }))
+      .toMatchObject({ value: '1024x1024', nearest: false });
+  });
+
   it('sets only the size a person may choose, and nothing without an Offering or a size setting', () => {
     const gemini = schemaOffering('gemini/gemini-3-pro-image/image-to-image');
     // Gemini's image_size is read-only (the 4K tier is the Offering's own), so only aspect_ratio follows the canvas.
