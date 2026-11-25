@@ -19,7 +19,7 @@
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
-| `openai/v1` | 4 | 10 | 1 | 15 | 2026-11-23 |
+| `openai/v1` | 5 | 10 | 0 | 15 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 81 | 91 | 3 | 175 | 2026-11-25 |
+| 合计 | 82 | 91 | 2 | 175 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -522,20 +522,18 @@
 #### `openai-v1/chat-model-constraints` · request-validation · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：gpt-astra / gpt-6.2-astra 按模型规则拒绝 tools、temperature 与 reasoning_effort none（400 invalid_request_error，#401）。
+- 行为：gpt-astra / gpt-6.2-astra 按模型规则拒绝 tools、temperature 与 reasoning_effort none（400 invalid_request_error，#401）。none 的文案按 #608 真实观测的 minimal 拒绝同格式构造（含 Chat 列出的档位）；所有模型拒绝在 param 与 code 之间带网关的 requestid（#608 的 HTTP 应答观测到，2026-11-20 的日志正文是上游侧、没有该键）。
 - 依据：网关 2026-11-20 的日志观测（tools、temperature 拒绝）
 - 依据：https://developers.openai.com/api/docs/guides/latest-model.md（Latest model guide）
 - 依据：https://developers.openai.com/api/docs/models/gpt-6.2-astra.md（gpt-6.2-astra）
-- 核对日期：2026-11-20
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝只在网关日志里看到，没有入库样本；reasoning_effort none 按文档构造
 
-#### `openai-v1/chat-reasoning-minimal` · request-validation · gap
+#### `openai-v1/chat-reasoning-minimal` · request-validation · real
 
 - 端点：`POST /chat/completions`
-- 行为：gpt-astra / gpt-6.2-astra 在 Chat Completions 上放行 reasoning_effort=minimal（constraints.go noEffortMinimal 只用于 /v1/responses）。latest-model 文档暗示不支持 minimal（use low instead），未验证；行为不变（2026-11-25）。
-- 核对日期：2026-11-25
-- 计划：真实一轮对 Chat Completions 发一次 minimal，按结果决定拒绝或保留放行。
-- Issue：#579
+- 行为：网关上 gpt-astra（解析为 gpt-6.2-astra）在 Chat Completions 上拒绝 reasoning_effort=minimal：HTTP 400 invalid_request_error，param reasoning_effort，code unsupported_value，文案 “Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.”（Chat 列出的档位没有 max，/v1/responses 的同类拒绝列出 max）；网关在 param 与 code 之间加 requestid。fake 按此拒绝（constraints.go noEffortMinimal 不再只用于 /v1/responses）。
+- 样本：`internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-astra-minimal-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 #### `openai-v1/chat-vendor-forms` · response-shape · constructed
 

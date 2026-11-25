@@ -39,7 +39,13 @@ func newestSamples(samples *fakeupstream.Samples) []wirefixture.Exchange {
 		case exchange.Request.Path == "/v1/models":
 			return "GET /v1/models"
 		case exchange.Response.Status != http.StatusOK:
-			return exchange.Request.Method + " " + exchange.Request.Path + " " + strconv.Itoa(exchange.Response.Status)
+			// A model's own reasoning_effort refusal (#608) is its own kind,
+			// apart from the request-shape 400.
+			refusal := ""
+			if strings.Contains(string(exchange.Response.Body.JSON), `"reasoning_effort"`) {
+				refusal = " model-refusal"
+			}
+			return exchange.Request.Method + " " + exchange.Request.Path + " " + strconv.Itoa(exchange.Response.Status) + refusal
 		case exchange.Response.Body.Encoding == wirefixture.PayloadSSE:
 			return "POST /v1/chat/completions sse tool=" + strconv.FormatBool(hasToolCalls(exchange))
 		default:
@@ -148,6 +154,15 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			continue
 		}
 		if exchange.Response.Status == http.StatusBadRequest {
+			// The #608 probe is a model's refusal: the fake must answer the
+			// same request with the same structure.
+			if strings.Contains(string(exchange.Response.Body.JSON), `"reasoning_effort"`) {
+				_, raw := f.send("POST", "/chat/completions", "k", map[string]any{"model": AstraModel,
+					"messages": user("Reply with the single word ok."), "reasoning_effort": "minimal"})
+				compareJSON("reasoning_effort refusal", exchange, raw)
+				checked["model refusal"] = true
+				continue
+			}
 			_, raw := f.send("POST", "/chat/completions", "k", map[string]any{})
 			compareJSON("error", exchange, raw)
 			checked["error"] = true
@@ -181,7 +196,7 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			checked["sse"+map[bool]string{true: "-tool", false: ""}[hasTool]] = true
 		}
 	}
-	for _, want := range []string{"error", "json", "json-tool", "sse", "sse-tool"} {
+	for _, want := range []string{"error", "model refusal", "json", "json-tool", "sse", "sse-tool"} {
 		if !checked[want] {
 			t.Errorf("the sample has no %s exchange to compare", want)
 		}

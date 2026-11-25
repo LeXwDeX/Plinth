@@ -52,6 +52,7 @@
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-2026-11-23.candidate.json",
+    "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-astra-minimal-2026-11-25.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
@@ -151,6 +152,7 @@
       "evidence_files": [
         "internal/app/testdata/agent-flow/agent-flow.candidate.json",
         "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-2026-11-23.candidate.json",
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-astra-minimal-2026-11-25.candidate.json",
         "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json"
       ],
       "offerings": []
