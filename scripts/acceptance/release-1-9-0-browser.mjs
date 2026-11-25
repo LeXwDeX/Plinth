@@ -202,8 +202,9 @@ async function closeSettings() {
 async function check(item, name, body) {
   try {
     const outcome = await body();
-    const { ok, detail = '', skip = false } = typeof outcome === 'object' && outcome !== null ? outcome : { ok: Boolean(outcome) };
-    record(skip ? 'SKIP' : ok ? 'PASS' : 'FAIL', item, name, detail);
+    const { ok, detail = '', skip = false, info = false } = typeof outcome === 'object' && outcome !== null ? outcome : { ok: Boolean(outcome) };
+    // INFO: an observation recorded beside the results, not counted as PASS, FAIL or SKIP.
+    record(info ? 'INFO' : skip ? 'SKIP' : ok ? 'PASS' : 'FAIL', item, name, detail);
   } catch (error) {
     const file = await shot(item, 'error');
     record('FAIL', item, name, `${error.message.split('\n')[0]} (screenshot ${file})`);
@@ -1599,11 +1600,16 @@ async function itemP2() {
     const same = (left, right) => Object.keys({ ...left, ...right }).every((unit) => close(left[unit] || 0, right[unit] || 0));
     return { ok: same(a, mine[0].amounts) && same(b, mine[1].amounts), detail: `${groupText(usage, p599.groups.a)}，A ${amountsText(mine[0].amounts)}；${groupText(usage, p599.groups.b)}，B ${amountsText(mine[1].amounts)}` };
   });
-  await check('P2', '分母为 0（无任何用量）时占比为 null', async () => {
+  await check('P2', '分母为 0（无任何用量）时占比为 null（INFO，不计数）', async () => {
     const [status, empty] = await adminApi('GET', `${ADMIN_USAGE}?startDate=2020-01-01&endDate=2020-01-07`);
     const shares = (empty.byGroup || []).flatMap((group) => (group.amounts || []).map((item) => item.share_basis_points));
     if (status === 200 && shares.length === 0) {
-      return { skip: true, detail: `没有用量的范围（2020-01-01～2020-01-07）返回 byGroup=${JSON.stringify(empty.byGroup)}、total=${JSON.stringify(empty.total)}：没有组行也就没有占比字段；产品侧造不出“单位总额为 0 而仍有组行”的数据，null 分支只能由服务端单测覆盖（有数据时的 null⇔总额 0 已在上一项逐行核对）` };
+      return {
+        info: true,
+        detail: `产品侧造不出单位总额为 0 仍有组行的数据：没有用量的范围（2020-01-01～2020-01-07）返回 byGroup=${JSON.stringify(empty.byGroup)}、`
+          + `total=${JSON.stringify(empty.total)}，没有组行也就没有占比字段。null 分支由服务端单测 TestUsageGroupsLeaveShareNullWhenUnitTotalIsZero599`
+          + `（internal/administration/usage_project_group_test.go）覆盖；运行中每次读取用量都逐行核对了“null 当且仅当单位总额为 0”（见上方一致性一项）`,
+      };
     }
     return { ok: status === 200 && shares.every((share) => share === null), detail: `${status} 占比=${JSON.stringify(shares)}` };
   });
