@@ -219,16 +219,40 @@ describe('three-view card with a multiview model', () => {
     expect(html).toContain('accept="image/png,image/jpeg"');
   });
 
-  // #618: the header counts the required views; the optional right view does not fill a required place.
-  it('counts only the required views in the header', () => {
+  // #618: the optional right view does not fill a required place, so a missing left view never reads 3 / 3.
+  // #633: once the right view was asked for (a four-view request) it is part of the count: 3 / 4.
+  it('counts the asked-for views in the header', () => {
     const html = renderFour(four([
       { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
       { status: 'not_started', startable: true },
       { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
       { status: 'succeeded', task_id: 't4', output_asset_id: 'x4' },
     ]));
-    expect(html).toContain('已完成 2 / 3');
+    expect(html).toContain('已完成 3 / 4');
     expect(html).not.toContain('已完成 3 / 3');
+  });
+
+  // #633: a three-view group (right view never started) is done at 3 / 3 and keeps 可选 on the right view; a
+  // four-view request (right view started) counts four, drops 可选 and is not 「必需视图都已完成」 until it is done.
+  it('matches the denominator and the 可选 mark to what was asked for', () => {
+    const three = renderFour({ ...four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'not_started', startable: true },
+    ]), complete: true });
+    expect(three).toContain(messages['ui.studio.three_view.complete']);
+    expect(slotHtml(three, 'right')).toContain('data-testid="three-view-optional"');
+
+    const fourViews = renderFour({ ...four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'running', task_id: 't4' },
+    ]), complete: true });
+    expect(fourViews).toContain('已完成 3 / 4');
+    expect(fourViews).not.toContain(messages['ui.studio.three_view.complete']);
+    expect(slotHtml(fourViews, 'right')).not.toContain('data-testid="three-view-optional"');
   });
 
   // #618: a long "继续生成（约 9 积分）" stays inside its own column instead of running over the next view's 查看.
