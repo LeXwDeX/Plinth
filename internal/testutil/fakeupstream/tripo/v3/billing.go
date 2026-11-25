@@ -17,8 +17,11 @@ import (
 //     size 4096, texture format JPEG, the rest off). 10 is observed, with PNG
 //     textures of 2048 pixels; fbx_preset and bake are not among the options
 //     that raise it.
-//   - A decimation costs 35 credits, 40 for a quad mesh on v3.0 (the page; 35
-//     observed for a triangle mesh).
+//   - A decimation is priced by model (the decimate and pricing pages, re-read
+//     2026-11-25, #579): v3.0 costs 35 credits for a triangle mesh and 40 for a
+//     quad mesh, v2.0 (the default when model is omitted) 30 and v1.0 10. 35 is
+//     observed for a v3.0 triangle mesh (2026-11-24, #577); the other figures are
+//     the pages'.
 //
 // Every poll of a task reports the whole price as credits_consumed: the credits are
 // frozen when the task is created, and the poll shows the frozen amount from the
@@ -33,6 +36,8 @@ const (
 	creditsConvertAdvanced = 10
 	creditsDecimate        = 35
 	creditsDecimateQuad    = 40
+	creditsDecimateV2      = 30
+	creditsDecimateV1      = 10
 )
 
 // Defaults of the convert page whose change makes a conversion advanced.
@@ -181,10 +186,16 @@ func (t *task) price() (float64, bool) {
 		}
 		return creditsConvertBasic, true
 	case "highpoly_to_lowpoly":
-		if t.decimatesToQuad() && stringOr(t.request["model"], "") == "v3.0" {
-			return creditsDecimateQuad, true
+		switch stringOr(t.request["model"], "v2.0") {
+		case "v3.0":
+			if t.decimatesToQuad() {
+				return creditsDecimateQuad, true
+			}
+			return creditsDecimate, true
+		case "v1.0":
+			return creditsDecimateV1, true
 		}
-		return creditsDecimate, true
+		return creditsDecimateV2, true
 	}
 	return 0, false
 }

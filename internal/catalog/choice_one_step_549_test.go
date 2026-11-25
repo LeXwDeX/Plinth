@@ -19,8 +19,8 @@ func TestShippedNextStepOptionDoesOneThing(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := loaded.Application()
-	if app.Revision != "2026-11-24.19.23" {
-		t.Fatalf("revision = %q, want 2026-11-24.19.23", app.Revision)
+	if app.Revision != "2026-11-24.19.25" {
+		t.Fatalf("revision = %q, want 2026-11-24.19.25", app.Revision)
 	}
 	kind := nextStepKind(&app)
 	if kind.Step == nil || !strings.Contains(kind.Step.OneStepRefusal, "一件事") ||

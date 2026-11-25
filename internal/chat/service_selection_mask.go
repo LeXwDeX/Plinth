@@ -12,6 +12,13 @@ import (
 // whole-image redraw. The mask must ride a canvas turn, belong to the owner,
 // be readable, select at least one pixel and have exactly the artboard
 // snapshot's pixel size; its measured facts are stored with the turn options.
+//
+// Not checked here: that the mask and the snapshot are of the same image
+// format. OpenAI's image edit requires it (#582) and the MCP path refuses a
+// mismatch before submitting (mask_format_mismatch), but a canvas turn gets it
+// only by coincidence: the artboard export (catalog output_media_type) and the
+// frontend mask export are both PNG. Changing either to another format would
+// fail upstream instead of here. How to guarantee it is undecided (#583).
 func (service *Service) freezeSelectionMask(ctx context.Context, command StartTurn, options *TurnOptions) error {
 	if command.SelectionMask == nil {
 		return nil

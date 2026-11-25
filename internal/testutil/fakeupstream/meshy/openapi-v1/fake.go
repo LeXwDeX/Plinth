@@ -4,6 +4,8 @@ import (
 	"embed"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"path"
 	"slices"
 	"strings"
 
@@ -93,15 +95,16 @@ var kinds = []core.Kind{
 		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(false), EchoResolution: true},
 	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"},
 		SourceTypes: imageSources, Real: true, Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(true), EchoResolution: true},
-	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
+	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
+		Validate: core.RemeshRequestError},
 	{Path: "/convert", Type: "convert", Need: [][]string{{"input_task_id", "model_url"}, {"target_formats"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}, {"text_style_prompt", "image_style_url", "multiview_image_urls"}},
 		Sources: []string{"input_task_id"}, Real: true, Textured: func(map[string]any) bool { return true },
 		Validate: pictureRequestError(core.RetextureRequestError)},
 	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true,
-		Validate: riggingRequestError, ValidateSource: riggingSourceError},
+		Validate: riggingRequestError, ValidateSource: riggingSourceError, ForbiddenMessage: processingForbiddenMessage},
 	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true,
-		Validate: core.AnimationRequestError},
+		Validate: core.AnimationRequestError, ValidateSourceRequest: core.AnimationSourceError, ForbiddenMessage: processingForbiddenMessage},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Validate: resizeRequestError},
@@ -111,6 +114,12 @@ var kinds = []core.Kind{
 	{Path: "/text-to-motion", Type: "text-to-motion", Need: [][]string{{"prompt"}, {"duration"}}, Fidelity: "animation", Real: true,
 		Validate: core.TextToMotionRequestError},
 }
+
+// processingForbiddenMessage is the 403 text the Rigging and Animation pages
+// give (read 2026-11-25): "This model type does not support this operation",
+// for a bas-relief input. No real 403 was captured; the other routes keep the
+// Errors page's generic text.
+const processingForbiddenMessage = "This model type does not support this operation"
 
 // rigSkeletonTemplates are the skeleton_template values of the Rigging page
 // (https://docs.meshy.ai/en/api/rigging-and-animation, read 2026-11-12); meshyrig is
@@ -135,6 +144,18 @@ func resizeRequestError(request map[string]any) string {
 	}
 	if modes != 1 {
 		return "send exactly one of resize_height, resize_longest_side or auto_size"
+	}
+	// "The model's new height in meters, greater than 0" and the same for the
+	// longest side; the page names a negative value as a 400 cause, and 0 is
+	// not greater than 0 (read 2026-11-25; constructed refusal text).
+	for _, field := range []string{"resize_height", "resize_longest_side"} {
+		if value, present := request[field]; present {
+			number, isNumber := value.(json.Number)
+			size, err := number.Float64()
+			if !isNumber || err != nil || size <= 0 {
+				return field + " must be a number greater than 0"
+			}
+		}
 	}
 	return ""
 }
@@ -172,7 +193,60 @@ func riggingRequestError(request map[string]any) string {
 			return "include_fingers cannot be combined with texture_image_url"
 		}
 	}
+	// The page read on 2026-11-25: animation_type is biped (the default) or
+	// quadruped and "Any other value returns 400"; with a quadruped rig,
+	// "Sending skeleton_template, or include_fingers set to true, returns 400";
+	// texture_image_url "must be a PNG file ... Another image format returns
+	// 400". The fake judges the format from a data URI's media type or a URL
+	// path's extension and lets a URL without one pass. Constructed refusal
+	// texts.
+	if message := rigAnimationTypeError(request); message != "" {
+		return message
+	}
+	if texture, _ := request["texture_image_url"].(string); strings.TrimSpace(texture) != "" && !pngLocator(texture) {
+		return "The texture_image_url image isn't a PNG file."
+	}
 	return ""
+}
+
+// rigAnimationTypeError checks animation_type and the options a quadruped rig
+// refuses.
+func rigAnimationTypeError(request map[string]any) string {
+	value, present := request["animation_type"]
+	if !present {
+		return ""
+	}
+	kind, _ := value.(string)
+	switch kind {
+	case "biped":
+		return ""
+	case "quadruped":
+		if _, sent := request["skeleton_template"]; sent {
+			return "skeleton_template works only with a biped rig"
+		}
+		if request["include_fingers"] == true {
+			return "include_fingers works only with a biped rig"
+		}
+		return ""
+	}
+	return "animation_type must be biped or quadruped"
+}
+
+// pngLocator reports whether a texture locator can be a PNG: a data URI of
+// image/png, or a URL whose path has no extension or the .png one.
+func pngLocator(locator string) bool {
+	locator = strings.TrimSpace(locator)
+	if rest, isData := strings.CutPrefix(locator, "data:"); isData {
+		mediaType, _, _ := strings.Cut(rest, ";")
+		mediaType, _, _ = strings.Cut(mediaType, ",")
+		return strings.EqualFold(strings.TrimSpace(mediaType), "image/png")
+	}
+	parsed, err := url.Parse(locator)
+	if err != nil {
+		return true
+	}
+	extension := strings.ToLower(path.Ext(parsed.Path))
+	return extension == "" || extension == ".png"
 }
 
 // riggingFingersQuadMessage is the beginning of the real refusal of include_fingers
@@ -250,6 +324,19 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		case "/animations", "/text-to-motion":
 			parts = append(parts, "the create is checked as the page read on 2026-11-24 documents it (#542): animations take exactly one of action_id, action_ids (at most ten, no repeats) or motion_task_id, text-to-motion a prompt of at most 400 characters, mode prime or swift and a duration of 2 to 10 seconds in half steps (constructed refusal texts)")
 		}
+		// #579: the rules of the pages read on 2026-11-25, all constructed.
+		switch kind.Path {
+		case "/image-to-3d", "/multi-image-to-3d":
+			parts = append(parts, "the texture-option conflicts of the pages read on 2026-11-25 answer 400 (#579, core textureOptionError): image_enhancement with meshy-6-lite (single image also with Smart Topology), texture_prompt, remove_lighting true or a remeshed quad topology with texture_model meshy-n1, and remove_lighting with meshy-6-lite's default texture model (single image also with Smart Topology); single-image surface_mode is organic or hard. enable_pbr true with should_texture false (documented 400) is not checked because the Catalog sends its enable_pbr default either way (register gap)")
+		case "/rigging":
+			parts = append(parts, "the page read on 2026-11-25 adds (#579): animation_type biped or quadruped, a quadruped rig refuses skeleton_template and include_fingers true, and a texture_image_url that is not a PNG (data URI media type or URL extension) answers 400; the forbidden scenario answers the page's 403 text")
+		case "/animations":
+			parts = append(parts, "the page read on 2026-11-25 adds (#579): post_process.fps is 24, 25, 30 or 60, and motion_task_id on a quadruped rig (the rig request's animation_type) answers 400; whether an action matches the rig's rig_type is not modelled; the forbidden scenario answers the page's 403 text")
+		case "/remesh":
+			parts = append(parts, "the create is checked as the page read on 2026-11-25 documents it (#579, core.RemeshRequestError): target_formats from seven formats (blend included), topology quad or triangle, target_polycount 100 to 300000, at most one of resize_height, resize_longest_side and auto_size true, and convert_format_only true with an empty or null target_formats answer 400 (constructed refusal texts)")
+		case "/resize":
+			parts = append(parts, "resize_height and resize_longest_side must be numbers greater than 0 (page read 2026-11-25, #579; constructed refusal text)")
+		}
 		parts = append(parts,
 			"consumed_credits follows the request from the Pricing page read on 2026-11-24 (#542, core.Credits): the price is reported from the first poll, a failed task reports 0, and the prices a real capture of 2026-11-20 to 2026-11-23 showed are asserted as such")
 		// The newest multi-image-to-3d sample (2026-11-24) repeats
@@ -269,7 +356,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 				Note: "IN_PROGRESS and SUCCEEDED polls are real (the engine templates from the newest capture of the type: 2026-11-24 for image-to-3d, multi-image-to-3d and retexture, 2026-11-20 or earlier for the others, whose 2026-11-24 polls matched them in structure and were not committed again); PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
 			fakeupstream.Endpoint{Method: "DELETE", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
-				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"},
+				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same; deleting an IN_PROGRESS task answers 409 with the Text to 3D page's text \"Task is IN_PROGRESS and cannot be deleted.\" (read 2026-11-25, constructed)"},
 		)
 	}
 	return out

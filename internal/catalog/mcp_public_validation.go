@@ -216,7 +216,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
 		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
 		"mask_invalid": messages.MaskInvalid, "mask_size_mismatch": messages.MaskSizeMismatch,
-		"mask_not_supported":          messages.MaskNotSupported,
+		"mask_not_supported": messages.MaskNotSupported, "mask_format_mismatch": messages.MaskFormatMismatch,
 		"signed_download_unavailable": messages.SignedDownloadUnavailable, "model_unavailable": messages.ModelUnavailable,
 		"image_not_ready": messages.ImageNotReady, "image_unreadable": messages.ImageUnreadable,
 		"image_too_large": messages.ImageTooLarge, "image_unavailable": messages.ImageUnavailable,
@@ -252,6 +252,11 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	for _, holder := range []string{"{mask_width}", "{mask_height}", "{image_width}", "{image_height}"} {
 		if !strings.Contains(messages.MaskSizeMismatch, holder) {
 			return fmt.Errorf("mcp_public.messages.mask_size_mismatch 必须含 %s", holder)
+		}
+	}
+	for _, holder := range []string{"{mask_format}", "{image_format}"} {
+		if !strings.Contains(messages.MaskFormatMismatch, holder) {
+			return fmt.Errorf("mcp_public.messages.mask_format_mismatch 必须含 %s", holder)
 		}
 	}
 	if !strings.Contains(messages.ImageTooLarge, "{bytes}") || !strings.Contains(messages.ImageTooLarge, "{pixels}") {

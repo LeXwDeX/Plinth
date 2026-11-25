@@ -149,7 +149,10 @@ func TestConversionIsBasicOrAdvancedLikeThePricingPage(t *testing.T) {
 	}
 }
 
-// A decimation costs 35 credits, 40 for a quad mesh on v3.0.
+// A decimation is priced by model (the decimate and pricing pages, re-read
+// 2026-11-25, #579): v3.0 35 credits for a triangle mesh (observed 2026-11-24,
+// #577) and 40 for a quad mesh, v2.0 30 (also the omitted model, the page's
+// default) and v1.0 10. Before #579 the fake charged 35 for every model.
 func TestDecimationIsBilledLikeThePricingPage(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	gen := f.create("/generation/text-to-model", textBody(), key)
@@ -160,8 +163,10 @@ func TestDecimationIsBilledLikeThePricingPage(t *testing.T) {
 	}{
 		"triangles":     {map[string]any{"input": gen, "model": "v3.0"}, 35},
 		"quad on v3.0":  {map[string]any{"input": gen, "model": "v3.0", "quad": true}, 40},
-		"quad on v2.0":  {map[string]any{"input": gen, "model": "v2.0", "quad": true}, 35},
-		"no model":      {map[string]any{"input": gen}, 35},
+		"quad on v2.0":  {map[string]any{"input": gen, "model": "v2.0", "quad": true}, 30},
+		"v2.0":          {map[string]any{"input": gen, "model": "v2.0"}, 30},
+		"no model":      {map[string]any{"input": gen}, 30},
+		"v1.0":          {map[string]any{"input": gen, "model": "v1.0", "face_limit": 1000}, 10},
 		"a face limit":  {map[string]any{"input": gen, "model": "v3.0", "face_limit": 5000}, 35},
 		"baked and uvs": {map[string]any{"input": gen, "model": "v3.0", "bake": true, "smart_uv": true}, 35},
 	} {

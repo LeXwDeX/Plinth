@@ -33,7 +33,9 @@
 // The chat forms and refusals #536 added are constructed too, from the
 // vendors' documents and the Plinth Schema (no committed sample has them): the
 // DashScope stream whose usage rides on a last chunk of empty choices
-// (constraints.go, streamUsageTrailing), the refusals of a request's pictures
+// (constraints.go, streamUsageTrailing; that is also the official
+// include_usage shape, while the default shape, usage on the finish_reason
+// chunk, is the observed gateway form and differs from it), the refusals of a request's pictures
 // (image_refusal.go; the 1-pixel refusal of a qwen model and the
 // "no image input" refusal are the observed wordings the #497 and #253 tests
 // hold, the other kinds are in the vendor's style), the DSML tool-call reply,
@@ -64,11 +66,14 @@
 // refused SSE with event: lines then; since #536 it records such a stream, so
 // the next real one is recorded instead of hand-sanitized), so the endpoint is
 // declared constructed and says what the sample does not cover (response.incomplete and
-// response.failed, the in-stream error event, response.refusal.delta, the
-// reasoning summary events, a stream line over the bound, the 400 for a
+// response.failed, the in-stream error event, response.refusal.delta and
+// response.refusal.done, the reasoning summary events, the 400 for a
 // reasoning item without its following item): those parts are built from the
-// OpenAI documents. A Responses request is also read as a Chat Completions
-// one (responsesRequest.chatView), so the fake-only request conventions work on
-// both wires, and the Responses ones are ReasoningMarker, IncompleteMarker,
-// FailedMarker and UnknownEventMarker.
+// OpenAI documents. The fake never sends a stream line over a client's line
+// bound: the bound is the Adapter's own setting, not an upstream contract, and
+// the Adapter's tests serve such a line from a scripted handler. A Responses
+// request is also read as a Chat Completions one (responsesRequest.chatView),
+// so the fake-only request conventions work on both wires, and the Responses
+// ones are ReasoningMarker, IncompleteMarker, FailedMarker, UnknownEventMarker
+// and RefusalMarker.
 package openaiv1

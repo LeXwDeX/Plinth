@@ -103,8 +103,8 @@ func TestFaultScenarios(t *testing.T) {
 		"key-quota":            {http.StatusPaymentRequired, "insufficient_quota"},
 		"rate-limit":           {http.StatusTooManyRequests, "rate_limit_exceeded"},
 		"server-error":         {http.StatusInternalServerError, "api_error"},
-		"task-failed":          {http.StatusBadRequest, "content_policy_violation"},
-		"forbidden":            {http.StatusForbidden, "forbidden"},
+		"task-failed":          {http.StatusBadRequest, "prohibited_content"},
+		"forbidden":            {http.StatusForbidden, "permission_denied"},
 		"permission-denied":    {http.StatusForbidden, "permission_denied"},
 		"model-not-found":      {http.StatusNotFound, "model_not_found"},
 		"service-unavailable":  {http.StatusServiceUnavailable, "service_unavailable"},
@@ -197,8 +197,8 @@ func TestFaultScenarios(t *testing.T) {
 
 // TestDocumentedErrorCodeOverride covers the documented request-level codes a
 // scenario does not name, and the statuses the class must not depend on. The
-// codes and statuses follow https://ai.google.dev/gemini-api/docs/api-errors
-// (checked 2026-11-08); the answers are constructed, not observed.
+// codes and statuses follow https://aistudio.google.com/docs/api-errors
+// (checked 2026-11-25); the answers are constructed, not observed.
 func TestDocumentedErrorCodeOverride(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	answers := []struct {
@@ -206,6 +206,10 @@ func TestDocumentedErrorCodeOverride(t *testing.T) {
 		status int
 	}{
 		{"payment_required", http.StatusPaymentRequired},
+		{"invalid_request", http.StatusBadRequest},
+		{"parameter_unknown", http.StatusBadRequest},
+		{"permission_denied", http.StatusForbidden},
+		{"too_many_requests", http.StatusTooManyRequests},
 		{"failed_precondition", http.StatusBadRequest},
 		{"out_of_range", http.StatusRequestedRangeNotSatisfiable},
 		{"not_found", http.StatusNotFound},
