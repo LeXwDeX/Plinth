@@ -26,27 +26,25 @@ type Consistency struct {
 // Names are stable wire values; Fix names the stable repair code.
 func Compare(reference, candidate Report, limits Consistency) []Check {
 	checks := make([]Check, 0, 4)
-	checks = append(checks, Check{Name: "nonblank", Status: status(candidate.SubjectRatio > 0.01),
-		Actual:   fmt.Sprintf("subject %.1f%%", candidate.SubjectRatio*100),
-		Expected: "a visible subject", Fix: "regenerate"})
+	checks = append(checks, nonblankCheck(candidate, "regenerate"))
 	if limits.MaxBackgroundSpread > 0 {
 		ok := candidate.HasAlpha || candidate.BackgroundSpread <= limits.MaxBackgroundSpread
-		expected := fmt.Sprintf("transparency or border spread <= %.0f", limits.MaxBackgroundSpread)
 		checks = append(checks, Check{Name: "background", Status: status(ok),
-			Actual:   fmt.Sprintf("alpha=%t, border spread %.1f", candidate.HasAlpha, candidate.BackgroundSpread),
-			Expected: expected, Fix: "regenerate"})
+			Actual: backgroundActual(candidate), Expected: plainBackgroundExpected(limits.MaxBackgroundSpread),
+			Fix: "regenerate"})
 	}
+	// Deltas are in percentage points (pp) of the picture.
 	if limits.MaxSubjectRatioDelta > 0 {
 		delta := absolute(candidate.SubjectRatio - reference.SubjectRatio)
 		checks = append(checks, Check{Name: "subject_size_delta", Status: status(delta <= limits.MaxSubjectRatioDelta),
-			Actual:   fmt.Sprintf("%.1f percentage points (reference %.1f%%)", delta*100, reference.SubjectRatio*100),
-			Expected: fmt.Sprintf("within %.1f percentage points", limits.MaxSubjectRatioDelta*100), Fix: "regenerate"})
+			Actual:   fmt.Sprintf("delta=%.1fpp, reference_subject_ratio=%.1f%%", delta*100, reference.SubjectRatio*100),
+			Expected: fmt.Sprintf("delta<=%.1fpp", limits.MaxSubjectRatioDelta*100), Fix: "regenerate"})
 	}
 	if limits.MaxBBoxHeightDelta > 0 {
 		delta := absolute(silhouetteHeight(candidate) - silhouetteHeight(reference))
 		checks = append(checks, Check{Name: "silhouette_height_delta", Status: status(delta <= limits.MaxBBoxHeightDelta),
-			Actual:   fmt.Sprintf("%.1f percentage points", delta*100),
-			Expected: fmt.Sprintf("within %.1f percentage points", limits.MaxBBoxHeightDelta*100), Fix: "regenerate"})
+			Actual:   fmt.Sprintf("delta=%.1fpp", delta*100),
+			Expected: fmt.Sprintf("delta<=%.1fpp", limits.MaxBBoxHeightDelta*100), Fix: "regenerate"})
 	}
 	return checks
 }

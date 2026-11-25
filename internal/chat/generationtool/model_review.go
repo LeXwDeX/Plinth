@@ -734,13 +734,15 @@ func (executor *Executor) resolveReviewedModel(
 	review catalog.ChatModelReviewSchema,
 	taskToken, assetToken string,
 ) (reviewedModel, *chat.ToolResult, error) {
+	// The templates are translated before the source rules fill them: a filled
+	// {asset} template no longer matches its Schema text (#632).
 	task, assetID, rejection, err := executor.resolveModelSource(ctx, command, taskToken, assetToken,
 		modelSourceContract{
 			VariantPreference: executor.sourcePreference(),
-			SourceRequired:    review.Source.SourceRequired,
-			SourceNotFound:    review.Source.SourceNotFound,
-			SourceNotReady:    review.Source.SourceNotReady,
-			SourceNotModel:    review.Source.SourceNotModel,
+			SourceRequired:    executor.localized(command, review.Source.SourceRequired),
+			SourceNotFound:    executor.localized(command, review.Source.SourceNotFound),
+			SourceNotReady:    executor.localized(command, review.Source.SourceNotReady),
+			SourceNotModel:    executor.localized(command, review.Source.SourceNotModel),
 		})
 	if err != nil {
 		return reviewedModel{}, nil, err

@@ -43,20 +43,33 @@ func TestNotGLBRefusalsNameTheFormatFactAndBothOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := product.Application().Chat.ModelReview.Source
+	english := product.Application().Localization.Bundles["en"].Fields
+	// #632: the default-locale copy is Chinese; the en bundle keeps the
+	// English wording, and both state the same fact and options.
 	for name, text := range map[string]string{
 		"source_not_glb":       source.SourceNotGLB,
 		"source_bytes_not_glb": source.SourceBytesNotGLB,
 	} {
-		if strings.Contains(text, "convert the model to GLB first") {
-			t.Errorf("%s still orders the Agent to convert the model: %q", name, text)
+		for _, want := range []string{
+			"{asset}", "{media}", "不是二进制 glTF（GLB）",
+			"list_session_models", "需要用户同意付费转换为 GLB",
+			"record_self_check 的 not_inspectable",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q: %q", name, want, text)
+			}
+		}
+		translated := english["chat.model_review.source."+name]
+		if strings.Contains(translated, "convert the model to GLB first") {
+			t.Errorf("%s still orders the Agent to convert the model: %q", name, translated)
 		}
 		for _, want := range []string{
 			"{asset}", "{media}", "not binary glTF (GLB)",
 			"list_session_models", "the person has to agree to a paid conversion to GLB",
 			"record_self_check status not_inspectable",
 		} {
-			if !strings.Contains(text, want) {
-				t.Errorf("%s lacks %q: %q", name, want, text)
+			if !strings.Contains(translated, want) {
+				t.Errorf("en %s lacks %q: %q", name, want, translated)
 			}
 		}
 	}
@@ -70,15 +83,20 @@ func TestSelfCheckTextsNameTheUnreadableFormatCase(t *testing.T) {
 		t.Fatal(err)
 	}
 	texts := product.Application().Chat.SelfCheck.Texts
-	if !strings.Contains(texts.RecordUncheckableUnproven, "the saved format cannot be read") {
-		t.Errorf("record_uncheckable_unproven omits the unreadable format: %q", texts.RecordUncheckableUnproven)
-	}
-	if !strings.Contains(texts.RecordUncheckableUnproven, "Inspect the model first") {
-		t.Errorf("record_uncheckable_unproven no longer requires a real inspection first: %q",
-			texts.RecordUncheckableUnproven)
+	app := product.Application()
+	translated := app.Localization.Bundles["en"].Fields["chat.self_check.texts.record_uncheckable_unproven"]
+	for text, wants := range map[string][2]string{
+		texts.RecordUncheckableUnproven: {"保存格式无法读取", "先检查模型"},
+		translated:                      {"the saved format cannot be read", "Inspect the model first"},
+	} {
+		if !strings.Contains(text, wants[0]) {
+			t.Errorf("record_uncheckable_unproven omits the unreadable format: %q", text)
+		}
+		if !strings.Contains(text, wants[1]) {
+			t.Errorf("record_uncheckable_unproven no longer requires a real inspection first: %q", text)
+		}
 	}
 	// The status enum itself tells the Agent which refusals qualify.
-	app := product.Application()
 	for _, tool := range app.Chat.AgentTools {
 		if tool.Name != "record_self_check" {
 			continue

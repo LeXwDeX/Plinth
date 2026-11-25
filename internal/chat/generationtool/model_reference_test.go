@@ -294,7 +294,7 @@ func TestCompareModelReferenceAcceptsAnExplicitPictureAndRefusesBadPairs(t *test
 	plainExecutor := referenceExecutor(t, plainGateway, plainAssets, pictures, store, nil)
 	refused, err := plainExecutor.CompareModelReference(context.Background(),
 		reviewCommand("compare_model_reference", `{"model":"task-b"}`))
-	if err != nil || refused.Error == "" || !strings.Contains(refused.Error, "no frozen reference picture") {
+	if err != nil || refused.Error == "" || !strings.Contains(refused.Error, "没有冻结的参考图") {
 		t.Fatalf("missing reference = %+v err=%v", refused, err)
 	}
 }
@@ -330,7 +330,7 @@ func TestSelfCheckLimitsRefuseMoreRoundsAndRendersButAllowTheConclusion(t *testi
 		t.Fatalf("inspect = %+v err=%v", inspect, err)
 	}
 	second, err := executor.InspectModel(ctx, inspectCommand)
-	if err != nil || second.Error == "" || !strings.Contains(second.Error, "limit") {
+	if err != nil || second.Error == "" || !strings.Contains(second.Error, "自检上限") {
 		t.Fatalf("second round = %+v err=%v", second, err)
 	}
 	render, err := executor.RenderModelViews(ctx, reviewCommand("render_model_views",
