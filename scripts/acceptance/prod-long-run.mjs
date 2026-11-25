@@ -15,6 +15,8 @@
 //       [--reload-at S] [--switch-at S]  进行到 S 秒时刷新页面 / 切到别的会话再回来，记录前后历史消息与图片数
 //       [--max-new-tasks N]        本轮新任务超过 N 个就点停止并记 ALERT（防失控，缺省 12）
 //       [--timeout S] [--sample S] [--no-wait-tasks]
+//   choose --option 文本 [say 的采样参数]  在最新的选择卡（ask_choice）上点含该文本的选项并「确认」，然后像 say 一样观察这一轮
+//   click --button 文本 [say 的采样参数]  点对话栏里最后一个名字含该文本的按钮（如三视图卡片的「继续生成」），然后像 say 一样观察
 //   approve --max-credits N        批准页面上的待批准卡（报价超过上限的卡改为拒绝）；deny 拒绝全部待批准卡
 //   watch [--reload-at S]          只观察：按采样间隔记录本会话未结束任务的进度，直到全部结束
 //   strip                          读版本条（瓦片、类型、句柄、「更多」分组）
@@ -24,8 +26,11 @@
 //   branch [--message I] [--go]    读某条消息的「分支到新对话」是否可用；--go 时点它，并核对新会话的历史
 //   reload-check / switch-check    刷新页面 / 切走再切回，比较前后历史消息、图片与结果卡
 //   skill-create --name N --requirement R [--save]  设置 → Skills 新建：只填名称和要求，点「生成」读草稿；--save 保存
+//       [--manual --slug S --description D --prompt P]  改点「我自己写」，手填标识、说明、正文
 //   pick-model --name N [--domain image|model-3d]  设置 → 模型页手选工作区模型（存在浏览器本地，像用户自己选的一样）
+//   pick-chat-model [--name N]     设置 → 对话模型页：列出本会话可选的对话模型；给 --name 时选中它（会话级，记入 log）
 //   task --id T                    只读：打印一个任务的公开投影（输入、参数、产物；URL 只留路径）
+//   asset-check --id T             只读：逐个下载任务产物，核对字节数与 sha256
 //   observe                        截图并记下会话积分、任务与消息数
 //   admin                          只读看管理端：概览/用量、用户、Agent 配置页（含 Skills），截图并读用量分组表
 //   balances --label L             读 /api/meshy/balance（各家原生余额），记入 state.json
@@ -39,6 +44,7 @@
 //   都要 --live 与 ART_AI_LIVE_ACK=1 同时给出，缺一个就以退出码 2 拒绝，不发请求。每次真实运行前须取得用户当次同意。
 // 输出：OUT（环境变量或 --out，缺省系统临时目录 plinth-prod-long-*）下的截图（时间戳命名）、log.jsonl、state.json。
 // 不打印口令、Cookie 或签名 URL；资产 URL 只记路径。退出码：0 正常，1 本步出现 FAIL/ALERT，2 被拒绝或用法错误。
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,9 +65,9 @@ function parseArgs(argv) {
 }
 const args = parseArgs(process.argv.slice(2));
 const command = args['dry-run'] ? 'dry-run' : args._[0];
-const COMMANDS = new Set(['init', 'say', 'approve', 'deny', 'watch', 'strip', 'tile', 'detail', 'more', 'branch', 'reload-check',
-  'switch-check', 'skill-create', 'pick-model', 'task', 'observe', 'admin', 'balances', 'coverage', 'report', 'dry-run']);
-const READ_ONLY = new Set(['task', 'strip', 'observe', 'admin', 'balances', 'coverage', 'report']);
+const COMMANDS = new Set(['init', 'asset-check', 'say', 'choose', 'click', 'approve', 'deny', 'watch', 'strip', 'tile', 'detail', 'more', 'branch', 'reload-check',
+  'switch-check', 'skill-create', 'pick-model', 'pick-chat-model', 'task', 'observe', 'admin', 'balances', 'coverage', 'report', 'dry-run']);
+const READ_ONLY = new Set(['task', 'asset-check', 'strip', 'observe', 'admin', 'balances', 'coverage', 'report']);
 const refuse = (message) => { console.error(`refusing: ${message}`); process.exit(2); };
 if (!COMMANDS.has(command)) refuse(`unknown command "${command || ''}"; see the header of ${path.basename(new URL(import.meta.url).pathname)}`);
 
@@ -521,12 +527,24 @@ async function cmdSay(sid, content, options = {}) {
   const beforeMessages = await messagesOf(sid);
   const known = new Set((await sessionTasks(sid)).map((task) => task.id));
   await shot('before');
-  await composer().fill(content);
-  const posted = page.waitForResponse((response) => response.url().includes(`/api/chat/sessions/${sid}/messages`) && response.request().method() === 'POST', { timeout: 30000 }).catch(() => null);
-  await tid('composer-send').first().click();
+  const posted = page.waitForResponse((response) => response.url().includes(`/api/chat/sessions/${sid}/`) && response.request().method() === 'POST', { timeout: 30000 }).catch(() => null);
+  if (options.clickButton) {
+    const button = tid('studio-chat-column').first().getByRole('button', { name: String(options.clickButton) }).last();
+    await button.scrollIntoViewIfNeeded().catch(() => {});
+    await button.click();
+  } else if (options.choose) {
+    const card = tid('chat-choice-card').last();
+    await card.scrollIntoViewIfNeeded().catch(() => {});
+    await card.locator('[data-testid=chat-choice-option]', { hasText: String(options.choose) }).first().click();
+    await page.waitForTimeout(500);
+    await card.locator('[data-testid=chat-choice-confirm]').first().click();
+  } else {
+    await composer().fill(content);
+    await tid('composer-send').first().click();
+  }
   const response = await posted;
   const startedAt = Date.now();
-  if (!response || ![200, 201, 202].includes(response.status())) note('FAIL', 'message accepted', `POST ${response ? response.status() : 'no request'}`);
+  if (!response || ![200, 201, 202].includes(response.status())) note(options.choose || options.clickButton ? 'INFO' : 'FAIL', 'message accepted', `POST ${response ? `${response.status()} ${pathOnly(response.url())}` : 'no request'}`);
   const timeout = num(options.timeout, 900) * 1000;
   const sampleEvery = num(options.sample, 10) * 1000;
   const maxNew = num(options['max-new-tasks'], 12);
@@ -782,8 +800,17 @@ async function cmdSkillCreate(sid, name, requirement, save) {
   await page.locator('#personal-skill-name').fill(name);
   await page.locator('#personal-skill-requirement').fill(requirement);
   const startedAt = Date.now();
-  await tid('skill-generate').click();
-  await page.locator('#personal-skill-slug').waitFor({ timeout: num(args.timeout, 240) * 1000 });
+  if (args.manual) {
+    // The user writes the Skill without the draft (the button the form offers when drafting failed or is not wanted).
+    await creator.getByRole('button', { name: await text('ui.workspace.skills.write_myself') }).click();
+    await page.locator('#personal-skill-slug').waitFor({ timeout: 15000 });
+    if (args.slug) await page.locator('#personal-skill-slug').fill(String(args.slug));
+    if (args.description) await page.locator('#personal-skill-description').fill(String(args.description));
+    await page.locator('#personal-skill-prompt').fill(String(args.prompt || requirement));
+  } else {
+    await tid('skill-generate').click();
+    await page.locator('#personal-skill-slug').waitFor({ timeout: num(args.timeout, 240) * 1000 });
+  }
   const draft = {
     seconds: Math.round((Date.now() - startedAt) / 1000),
     slug: await page.locator('#personal-skill-slug').inputValue(),
@@ -821,6 +848,27 @@ async function cmdPickModel(sid, name, domain) {
   record({ input: `pick-model ${domain} ${name}`, summary: `checked=${checked.replace(/\s+/g, ' ').slice(0, 80)}`, options: names });
 }
 
+async function cmdPickChatModel(sid, name) {
+  await openSession(sid);
+  await openSettings('chat');
+  const panel = tid('workspace-chat-model-picker-panel').first();
+  const rows = panel.locator('[role=menuitemradio]');
+  const names = await rows.evaluateAll((items) => items.map((item) => `${item.getAttribute('aria-checked') === 'true' ? '*' : ''}${item.innerText.replace(/\s+/g, ' ').trim().slice(0, 80)}`));
+  const before = names.find((item) => item.startsWith('*')) || '';
+  let after = before;
+  if (name) {
+    await rows.filter({ hasText: name }).first().click();
+    await page.waitForTimeout(2000);
+    after = await panel.locator('[role=menuitemradio][aria-checked=true]').first().innerText().catch(() => '');
+  }
+  const notice = (await tid('workspace-chat-model-notice').first().innerText().catch(() => '')).trim();
+  await shot('chat-model');
+  await closeSettings();
+  if (name) note(after.includes(name) ? 'PASS' : 'FAIL', `对话模型选为「${name}」`, `之前「${before}」 之后「${after.replace(/\s+/g, ' ').slice(0, 80)}」`);
+  console.log(`chat models: ${JSON.stringify(names)} notice="${notice}"`);
+  record({ input: `pick-chat-model ${name || '(list)'}`, summary: `before=${before} after=${after.replace(/\s+/g, ' ').slice(0, 80)}`, options: names, notice });
+}
+
 async function cmdObserve(sid) {
   await openSession(sid);
   const counts = await chatCounts();
@@ -854,6 +902,17 @@ async function cmdAdmin() {
     await page.waitForTimeout(2000);
     visited.push({ route: '/admin/agent-configuration#skills', head: (await page.locator('main').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 600), file: await shot('agent-config-skills', true) });
   }
+  // Without a tab: list the page's section headings and the text of every section whose heading names Skill.
+  const sections = await page.locator('main h2, main h3').evaluateAll((nodes) => nodes.map((node) => {
+    const box = node.closest('section') || node.parentElement;
+    return { heading: node.innerText.trim(), text: (box?.innerText || '').replace(/\s+/g, ' ').slice(0, 900) };
+  })).catch(() => []);
+  for (const section of sections.filter((item) => /skill/i.test(item.heading))) {
+    await page.getByRole('heading', { name: section.heading }).first().scrollIntoViewIfNeeded().catch(() => {});
+    section.file = await shot(`agent-config-${section.heading.replace(/\W+/g, '-').slice(0, 20)}`);
+    note('INFO', `Agent 管理「${section.heading}」`, section.text.slice(0, 400));
+  }
+  visited.push({ route: '/admin/agent-configuration#sections', head: sections.map((item) => item.heading).join(' | ').slice(0, 600), sections: sections.filter((item) => /skill/i.test(item.heading)) });
   const [usageStatus, usage] = await api('GET', '/api/admin/usage');
   console.log(`admin usage HTTP ${usageStatus}: ${JSON.stringify(usage).slice(0, 1500)}`);
   record({ input: 'admin (read only)', summary: visited.map((item) => `${item.route}:${item.chars ?? ''}`).join(' '), visited, usage: { status: usageStatus, body: JSON.stringify(usage).slice(0, 4000) } });
@@ -942,6 +1001,8 @@ try {
   switch (command) {
     case 'init': await cmdInit(String(args.title || `prod-long ${stamp()}`)); break;
     case 'say': await cmdSay(await currentSession(), String(args.text || refuse('say needs --text')), args); break;
+    case 'click': await cmdSay(await currentSession(), `[点按钮] ${args.button}`, { ...args, clickButton: String(args.button || refuse('click needs --button')) }); break;
+    case 'choose': await cmdSay(await currentSession(), `[选择卡] ${args.option}`, { ...args, choose: String(args.option || refuse('choose needs --option')) }); break;
     case 'approve': await cmdApprove(await currentSession(), 'approve'); break;
     case 'deny': await cmdApprove(await currentSession(), 'deny'); break;
     case 'watch': await cmdWatch(await currentSession()); break;
@@ -954,9 +1015,24 @@ try {
     case 'switch-check': await cmdBounce(await currentSession(), 'switch'); break;
     case 'skill-create': await cmdSkillCreate(await currentSession(), String(args.name), String(args.requirement), Boolean(args.save)); break;
     case 'pick-model': await cmdPickModel(await currentSession(), String(args.name), String(args.domain || 'image')); break;
+    case 'pick-chat-model': await cmdPickChatModel(await currentSession(), args.name ? String(args.name) : ''); break;
     case 'task': {
       const [status, body] = await api('GET', `/api/v1/tasks/${args.id}`);
       console.log(`task HTTP ${status}: ${redactText(JSON.stringify(body), 6000)}`);
+      break;
+    }
+    case 'asset-check': {
+      // 只读：逐个下载任务产物，核对字节数与 sha256 是否与任务投影一致。
+      const [status, body] = await api('GET', `/api/v1/tasks/${args.id}`);
+      if (status !== 200) { note('FAIL', `读取任务 ${args.id}`, `HTTP ${status}`); break; }
+      for (const asset of body.assets || []) {
+        const response = await ctx.request.fetch(base + asset.url, { method: 'GET', headers: ORIGIN });
+        const bytes = response.status() === 200 ? await response.body() : Buffer.alloc(0);
+        const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+        const ok = response.status() === 200 && bytes.length === asset.size && digest === asset.sha256;
+        note(ok ? 'PASS' : 'FAIL', `产物 ${asset.variant || asset.role} 下载`, `HTTP ${response.status()} ${bytes.length}/${asset.size} B sha256 ${ok ? '一致' : `不一致 ${digest.slice(0, 12)}`} ${response.headers()['content-type'] || ''}`);
+      }
+      record({ input: `asset-check ${args.id}`, summary: `${body.state} ${body.offering_id} assets=${(body.assets || []).length}` });
       break;
     }
     case 'observe': await cmdObserve(await currentSession()); break;
