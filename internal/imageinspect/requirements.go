@@ -94,7 +94,7 @@ func (r Report) ReviewRequirements(requirements Requirements) []Check {
 		checks = append(checks, Check{Name: "short_edge",
 			Status:   status(r.ShortEdge >= requirements.MinShortEdge),
 			Actual:   fmt.Sprintf("%d px (%d x %d)", r.ShortEdge, r.Width, r.Height),
-			Expected: fmt.Sprintf("short edge >= %d px", requirements.MinShortEdge),
+			Expected: fmt.Sprintf("short_edge>=%d px", requirements.MinShortEdge),
 			Fix:      "raise_resolution"})
 	}
 	if requirements.Tileable {
@@ -116,35 +116,40 @@ func (r Report) usesAlpha(limits AlphaLimits) bool {
 }
 
 func (r Report) alphaCheck(requirements Requirements, usesAlpha bool) Check {
+	// A real alpha channel is has_alpha=true with enough fully transparent
+	// pixels (transparent_ratio); " | " reads "or" (#632).
 	check := Check{Name: "alpha", Fix: "remove_background",
-		Actual: fmt.Sprintf("alpha=%t, %.1f%% fully transparent, border spread %.1f",
+		Actual: fmt.Sprintf("has_alpha=%t, transparent_ratio=%.1f%%, background_spread=%.1f",
 			r.HasAlpha, r.TransparentRatio*100, r.BackgroundSpread)}
 	switch requirements.Transparency {
 	case TransparencyRequired:
-		check.Expected = fmt.Sprintf("a real alpha channel (>= %.1f%% fully transparent pixels)",
+		check.Expected = fmt.Sprintf("has_alpha=true, transparent_ratio>=%.1f%%",
 			requirements.Alpha.MinTransparentRatio*100)
 		check.Status = status(usesAlpha)
 	default:
-		check.Expected = fmt.Sprintf("a real alpha channel, or a plain background (border spread <= %.0f)",
-			requirements.Alpha.MaxBackgroundSpread)
+		check.Expected = fmt.Sprintf("has_alpha=true, transparent_ratio>=%.1f%% | has_alpha=false, background_spread<=%.0f",
+			requirements.Alpha.MinTransparentRatio*100, requirements.Alpha.MaxBackgroundSpread)
 		check.Status = status(usesAlpha || (!r.HasAlpha && r.BackgroundSpread <= requirements.Alpha.MaxBackgroundSpread))
 	}
 	return check
 }
 
 func (r Report) fringeCheck(limits FringeLimits, usesAlpha bool) Check {
+	// fringe_ratio is the light rim's share of the transparent edge; unknown
+	// says why nothing was measured: no real alpha channel, or no edge wide
+	// enough (#632: measurements, not English phrases).
 	check := Check{Name: "edge_fringe", Fix: "clean_edges",
-		Expected: fmt.Sprintf("light rim on <= %.1f%% of the edge", limits.MaxRatio*100)}
+		Expected: fmt.Sprintf("fringe_ratio<=%.1f%%", limits.MaxRatio*100)}
 	switch {
 	case !usesAlpha:
 		check.Status = StatusUnknown
-		check.Actual = "no real alpha channel, so there is no transparent edge to measure"
+		check.Actual = "uses_alpha=false"
 	case r.EdgeFringe == nil || !r.EdgeFringe.Measured:
 		check.Status = StatusUnknown
-		check.Actual = "the subject has no edge wide enough to measure"
+		check.Actual = "measured=false"
 	default:
 		check.Status = status(r.EdgeFringe.FringeRatio <= limits.MaxRatio)
-		check.Actual = fmt.Sprintf("light rim on %.1f%% of %d edge pixels (band %d px)",
+		check.Actual = fmt.Sprintf("fringe_ratio=%.1f%%, edge_pixels=%d, band_pixels=%d",
 			r.EdgeFringe.FringeRatio*100, r.EdgeFringe.EdgePixels, r.EdgeFringe.BandPixels)
 	}
 	return check
@@ -154,33 +159,36 @@ func (r Report) fringeCheck(limits FringeLimits, usesAlpha bool) Check {
 // as a pixel range, merged where segments touch, so the Agent can look at that
 // part of the picture.
 func (r Report) seamlessCheck(limits TilingLimits) Check {
+	// seam_ratio is a seam's edge difference over the difference between
+	// neighbouring pixels inside it, seam_delta the edge difference itself; a
+	// seam passes below either bound. A failure names the broken pixel ranges
+	// of each seam (left_right along y, top_bottom along x) (#632).
 	check := Check{Name: "seamless", Fix: "regenerate_tileable",
-		Expected: fmt.Sprintf("edge difference <= %.1fx the difference between neighbouring pixels (or < %.0f)",
-			limits.MaxSeamRatio, limits.MinSeamDelta)}
+		Expected: fmt.Sprintf("seam_ratio<=%.1fx | seam_delta<%.0f", limits.MaxSeamRatio, limits.MinSeamDelta)}
 	if r.Tiling == nil {
 		check.Status = StatusUnknown
-		check.Actual = "seams were not measured"
+		check.Actual = "measured=false"
 		return check
 	}
 	if len(r.Tiling.LeftRight) == 0 && len(r.Tiling.TopBottom) == 0 {
 		check.Status = StatusUnknown
-		check.Actual = "the picture is too small to compare opposite edges"
+		check.Actual = "segments=0"
 		return check
 	}
 	var broken []string
 	if ranges := brokenRanges(r.Tiling.LeftRight, limits); len(ranges) > 0 {
-		broken = append(broken, "left/right seam at y "+strings.Join(ranges, ", "))
+		broken = append(broken, "left_right y="+strings.Join(ranges, ","))
 	}
 	if ranges := brokenRanges(r.Tiling.TopBottom, limits); len(ranges) > 0 {
-		broken = append(broken, "top/bottom seam at x "+strings.Join(ranges, ", "))
+		broken = append(broken, "top_bottom x="+strings.Join(ranges, ","))
 	}
 	if len(broken) > 0 {
 		check.Status = StatusFail
-		check.Actual = strings.Join(broken, "; ") + fmt.Sprintf(" (worst %.1fx)", worstBrokenRatio(r.Tiling, limits))
+		check.Actual = strings.Join(broken, "; ") + fmt.Sprintf("; worst_seam_ratio=%.1fx", worstBrokenRatio(r.Tiling, limits))
 		return check
 	}
 	check.Status = StatusPass
-	check.Actual = "opposite edges continue into each other"
+	check.Actual = "broken_segments=0"
 	return check
 }
 

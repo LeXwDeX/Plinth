@@ -33,9 +33,9 @@
       "checklist_text": "delivery checklist",
       "checks": [
         {
-          "actual": "subject 16.0%",
+          "actual": "subject_ratio=16.0%",
           "check": "nonblank",
-          "expected": "a visible subject",
+          "expected": "subject_ratio\u003e1%",
           "fix": "regenerate",
           "status": "pass"
         },

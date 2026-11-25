@@ -49,19 +49,16 @@ const (
 // Review judges the report against a checklist.
 func (r Report) Review(checklist Checklist) []Check {
 	checks := make([]Check, 0, 5)
-	nonblank := r.SubjectRatio > 0.01
-	checks = append(checks, Check{Name: "nonblank", Status: status(nonblank),
-		Actual: fmt.Sprintf("subject %.1f%%", r.SubjectRatio*100), Expected: "a visible subject", Fix: "regenerate"})
+	checks = append(checks, nonblankCheck(r, "regenerate"))
 	if checklist.RequireAlpha || checklist.RequirePlainBackground {
 		ok := r.HasAlpha
-		expected := "a transparent background"
+		expected := "has_alpha=true"
 		if !checklist.RequireAlpha {
 			ok = r.HasAlpha || r.BackgroundSpread <= checklist.MaxBackgroundSpread
-			expected = fmt.Sprintf("transparency or border spread <= %.0f", checklist.MaxBackgroundSpread)
+			expected = plainBackgroundExpected(checklist.MaxBackgroundSpread)
 		}
 		checks = append(checks, Check{Name: "background", Status: status(ok),
-			Actual:   fmt.Sprintf("alpha=%t, border spread %.1f", r.HasAlpha, r.BackgroundSpread),
-			Expected: expected, Fix: "remove_background"})
+			Actual: backgroundActual(r), Expected: expected, Fix: "remove_background"})
 	}
 	if checklist.MinSubjectRatio > 0 || checklist.MaxSubjectRatio > 0 {
 		ok := (checklist.MinSubjectRatio == 0 || r.SubjectRatio >= checklist.MinSubjectRatio) &&
@@ -76,8 +73,8 @@ func (r Report) Review(checklist Checklist) []Check {
 	}
 	if checklist.MaxComponents > 0 {
 		checks = append(checks, Check{Name: "components", Status: status(r.ComponentCount <= checklist.MaxComponents),
-			Actual:   fmt.Sprintf("%d component(s)", r.ComponentCount),
-			Expected: fmt.Sprintf("<= %d", checklist.MaxComponents), Fix: "single_subject"})
+			Actual:   fmt.Sprintf("component_count=%d", r.ComponentCount),
+			Expected: fmt.Sprintf("component_count<=%d", checklist.MaxComponents), Fix: "single_subject"})
 	}
 	if checklist.MinMainComponentRatio > 0 {
 		checks = append(checks, MainComponentCheck(r, checklist.MinMainComponentRatio))
@@ -89,8 +86,29 @@ func (r Report) Review(checklist Checklist) []Check {
 // already runs its own checks and needs the edge item alone.
 func EdgeCheck(report Report) Check {
 	return Check{Name: "edge", Status: status(!report.TouchesEdge),
-		Actual:   fmt.Sprintf("touches edge=%t", report.TouchesEdge),
-		Expected: "the subject stays inside the frame", Fix: "crop_subject"}
+		Actual:   fmt.Sprintf("touches_edge=%t", report.TouchesEdge),
+		Expected: "touches_edge=false", Fix: "crop_subject"}
+}
+
+// The actual and expected values below reach the Agent verbatim (#632): they
+// are measurements in the report's own field names, numbers and operators,
+// never an English phrase a reply could copy. Schema hints word them.
+
+// nonblankCheck is the "a subject is visible" verdict shared by the checklist
+// and the view comparison; fix is the caller's repair code.
+func nonblankCheck(report Report, fix string) Check {
+	return Check{Name: "nonblank", Status: status(report.SubjectRatio > 0.01),
+		Actual: fmt.Sprintf("subject_ratio=%.1f%%", report.SubjectRatio*100), Expected: "subject_ratio>1%", Fix: fix}
+}
+
+func backgroundActual(report Report) string {
+	return fmt.Sprintf("has_alpha=%t, background_spread=%.1f", report.HasAlpha, report.BackgroundSpread)
+}
+
+// plainBackgroundExpected accepts transparency or a border whose colour spread
+// stays within the limit; " | " reads "or".
+func plainBackgroundExpected(maxSpread float64) string {
+	return fmt.Sprintf("has_alpha=true | background_spread<=%.0f", maxSpread)
 }
 
 func status(ok bool) string {

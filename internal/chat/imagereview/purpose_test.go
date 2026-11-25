@@ -274,7 +274,7 @@ func TestTexturePurposeJudgesSeamlessTiling(t *testing.T) {
 	}))
 	payload, summary, _ := inspectWith(t, seamed, `{"image":"@img1"}`, brief)
 	status, actual, hint, fix := payload.check(t, "seamless")
-	if status != "fail" || fix != "regenerate_tileable" || !strings.Contains(actual, "left/right seam at y 256-767") {
+	if status != "fail" || fix != "regenerate_tileable" || !strings.Contains(actual, "left_right y=256-767") {
 		t.Fatalf("seamless = %s %q fix=%s", status, actual, fix)
 	}
 	for _, want := range []string{"seamless tileable texture", "region", actual} {
@@ -322,7 +322,7 @@ func TestIconPurposeJudgesAlphaAndEdge(t *testing.T) {
 		t.Fatalf("a real cut-out failed the alpha check: %s", status)
 	}
 	status, actual, hint, fix := payload.check(t, "edge_fringe")
-	if status != "fail" || fix != "clean_edges" || !strings.Contains(actual, "light rim") ||
+	if status != "fail" || fix != "clean_edges" || !strings.Contains(actual, "fringe_ratio=") ||
 		!strings.Contains(hint, "remove_background") {
 		t.Fatalf("edge_fringe = %s %q hint=%q fix=%s", status, actual, hint, fix)
 	}
