@@ -25,11 +25,19 @@
 //         双击第 4 张插入画布；「详情」打开详情。
 //     M2  #597：经输入框连发 4 轮 fake refine_image，第 4 轮结束 <1 秒与 7 秒时「分支到新对话」可用、无“尚未结束”；
 //         第 5 轮进行中，前几轮的结果卡与图片一直显示。
+//   #599 项目组 KEY 与支出占比（要管理员账号：ADMIN_USERNAME/ADMIN_PASSWORD，release-env.py smoke 注入；缺少时 SKIP）
+//     P1  管理 API 建 3 个 r190- 用户，A、B 各设一个项目组、C 未分组；非法 KEY（大写、空格、超长、连字符开头）400 带
+//         Schema 文案；空串、null、首尾空格与不带该字段的写入只记录（INFO，不计数）。
+//     P2  三个用户各自登录做不同张数的 fake 文生图；管理端用量 byGroup 有两组加一行未分组（key=null），每组金额 = 组内
+//         用户之和、各组合计 = total、占比与金额一致（±1 bp）；账户用量接口不含分组字段。
+//     P3  A 改到 B 的组后，A 的历史金额随当前组归集。
+//     P4  管理端用户页设组保存、刷新仍在；用量页组表（未分组文案、两位小数百分比、用户表带组列）截图；普通用户访问
+//         管理接口 401/403。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,559,587,560,548-skill,548-chip,n1,…,n6,m1,m2  只跑其中几项（默认全部）
+//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4  只跑其中几项（默认全部）
 //   R190_REQUIRE_BATCH4=1  目标环境缺批次 4（PR #598）时 M1/M2 记 FAIL 而不是 SKIP
 //   R190_M1_COUNTS=4,6,8,10  M1 每组的结果张数；R190_M1_WIDTHS=1440,1280  M1 看弹层的窗口宽度
 //   R190_REQUIRE_BATCH2=1  目标环境缺批次 2 能力时记 FAIL 而不是 SKIP（批次 2 部署后用）
@@ -39,13 +47,16 @@
 // 造数（都在 Agent 专用账号下，每次新建，标题带 r190-<时间戳>）：
 //   会话 A：两轮 fake refine_image 出两张 2D、一轮 fake create_model_3d 出一个 3D（若出批准卡就批准，fake 不计费）。
 //   会话 B：上传一张 256x192 的双色 PNG，一轮 fake crop_image_regions 从中裁出左右两块（Agent 裁图）。
-//   会话 C：空会话，只用来看设置弹窗（会在该会话上选一次 2D 模型）。
+//   会话 C：空会话，只用来看设置弹窗（会选一次 2D 模型；工作区的模型选择存在浏览器本地，项目结束时放回原值）。
 //   会话 D（批次 2）：一轮 fake use_skill 三视图。个人 Skill r190-*（结束时删除）。
 //   N6：两个空会话，各手选一个系统 Skill 后发一条文字（fake 对话模型只回文字）。N4/N5 会拖动聊天栏宽度，结束时拖回最窄。
 //   M1：每个 N 一个会话：一张 fake 文生图（@img1）加 N 个以 @img1 为参考的 fake refine_image（一轮里 N 个工具标记）。
-//   M2：一个会话，经输入框发 5 轮 fake refine_image。
+//   M2：一个会话，先经 API 出一张 fake 文生图（@img1），再经输入框发 5 轮以 @img1 为参考的 fake refine_image。
+//   P1–P4：用户 r190-<时间戳>-a/b/c（随机口令只在内存里），各一个会话做 1/2/3 张 fake 文生图；结束时经管理 API 逐个
+//   删除（产品是软删除，这些用户的历史用量仍按原组留在 dev-test 的统计里，dev-test 下次发布即清空）。
 // 目标环境不是 fake 上游形态（ART_AI_UPSTREAM_SHAPE!=fake）时拒绝运行（退出码 2），不会发起真实生成。
 // 不打印口令、Cookie 或签名 URL。最后一行输出 `PASS=n FAIL=n SKIP=n`；有 FAIL 时退出码 1。
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +74,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -156,11 +167,12 @@ async function text(key) {
 
 // ---------------------------------------------------------------- browser helpers
 let shotIndex = 0;
-async function shot(item, name) {
+async function shotOf(target, item, name, fullPage = false) {
   const file = path.join(OUT, `${String(++shotIndex).padStart(2, '0')}-${item}-${name}.png`);
-  try { await page.screenshot({ path: file }); } catch {}
+  try { await target.screenshot({ path: file, fullPage }); } catch {}
   return path.basename(file);
 }
+const shot = (item, name) => shotOf(page, item, name);
 const tid = (id, scope = page) => scope.locator(`[data-testid="${id}"]`);
 async function openSession(sid) {
   await page.goto(`${base}/?session=${sid}`, { waitUntil: 'load' });
@@ -300,6 +312,12 @@ async function item586() {
     return found;
   });
   const readonly = async () => body.locator('[data-testid=params-readonly]').evaluateAll((items) => items.map((item) => [item.dataset.parameter, item.innerText.trim()]));
+  // The 2D model picked here is the workspace's choice for later turns too (kept in this browser's local storage,
+  // `art-ai-workspace-prefs`); later items send through the box with fake markers that name no model, and the product
+  // refuses such a tool call while another model is the workspace choice (model_choice_workspace_conflict). So the
+  // stored preference from before this item is put back at the end and the page reloaded.
+  const PREFS_KEY = 'art-ai-workspace-prefs';
+  const savedPrefs = await page.evaluate((key) => { try { return localStorage.getItem(key); } catch { return null; } }, PREFS_KEY);
 
   await check('#586', 'GPT Image：生成参数页没有张数加减控件，n 只读显示', async () => {
     await choose('GPT Image');
@@ -326,6 +344,13 @@ async function item586() {
     };
   });
   await closeSettings();
+  await page.evaluate(([key, value]) => {
+    try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch {}
+  }, [PREFS_KEY, savedPrefs]);
+  await page.reload({ waitUntil: 'load' });
+  await tid('composer-send').first().waitFor({ timeout: 30000 });
+  const now = await page.evaluate((key) => { try { return localStorage.getItem(key); } catch { return 'unreadable'; } }, PREFS_KEY);
+  console.log(`#586: workspace model choice put back to ${savedPrefs === null ? 'none' : savedPrefs} (now ${now === null ? 'none' : now})`);
 }
 
 // ---------------------------------------------------------------- #559
@@ -1328,10 +1353,400 @@ async function itemM2() {
   });
 }
 
+// ---------------------------------------------------------------- #599 项目组 KEY 与支出占比（P1–P4）
+// The administrator's credentials come from the environment `release-env.py smoke` sets up; never printed. Test users
+// are named <tag>-a/-b/-c with a random password kept only in memory, and are deleted by name at the end. Group KEYs
+// are new for each run (<tag>-ga/gb/gc): a deleted user keeps its group (#599), so a fixed KEY would also carry the
+// spending of earlier runs' users.
+const p599 = { admin: null, users: [], strays: [], groups: { a: `${tag}-ga`, b: `${tag}-gb`, c: `${tag}-gc` }, counts: { a: 1, b: 2, c: 3 } };
+const ADMIN_READY = Boolean(process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD);
+const ADMIN_USERS = '/api/admin/users';
+const ADMIN_USAGE = '/api/admin/usage';
+const ACCOUNT_USAGE = '/api/v1/account/usage';
+
+/** A request through a given browser context (its own cookies), the same way `api` uses the main one. */
+async function callAs(context, method, route, data) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await context.request.fetch(base + route, { method, data, headers: ORIGIN });
+    if (response.status() === 429) { await sleep(10000); continue; }
+    let body = {};
+    try { body = await response.json(); } catch {}
+    return [response.status(), body];
+  }
+  return [429, {}];
+}
+/** A fresh signed-in browser context; the password is only passed to the login request. */
+async function signedInContext(username, password) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', serviceWorkers: 'block' });
+  const response = await context.request.post(`${base}/api/auth/login`, { data: { username, password }, headers: ORIGIN });
+  if (response.status() !== 200) {
+    await context.close();
+    throw new Error(`login as ${username} returned ${response.status()}`);
+  }
+  return context;
+}
+async function adminContext() {
+  if (!p599.admin) p599.admin = await signedInContext(process.env.ADMIN_USERNAME, process.env.ADMIN_PASSWORD);
+  return p599.admin;
+}
+const adminApi = async (method, route, data) => callAs(await adminContext(), method, route, data);
+const p599User = (suffix) => p599.users.find((user) => user.suffix === suffix);
+async function adminUserList() {
+  const [status, body] = await adminApi('GET', ADMIN_USERS);
+  if (status !== 200) throw new Error(`admin user list ${status}`);
+  return body.data || [];
+}
+async function storedGroup(user) {
+  const row = (await adminUserList()).find((item) => item.id === user.id);
+  return row ? row.projectGroupKey : undefined;
+}
+const patchGroup = async (user, value) => adminApi('PATCH', `${ADMIN_USERS}/${encodeURIComponent(user.id)}`, { projectGroupKey: value });
+
+/** The per-unit amounts of a usage row (a user row or the total): one credit estimate, or Provider-native totals. */
+function unitAmounts(row) {
+  if (Array.isArray(row?.price_totals)) return Object.fromEntries(row.price_totals.map((item) => [item.unit, Number(item.amount)]));
+  if (row && row.estimatedCredits !== undefined) return { 'legacy.credits': Number(row.estimatedCredits) };
+  return {};
+}
+const close = (left, right) => Math.abs(left - right) < 1e-6;
+const amountsText = (amounts) => Object.entries(amounts).map(([unit, amount]) => `${unit}=${amount}`).join(' ') || '无金额';
+
+/**
+ * Checks one administration usage response: every group's amount per unit equals the sum of its users' rows, the
+ * groups add up to the total, and each share matches amount/total in basis points (±1 for rounding; null only when
+ * the unit's total is 0). Returns the problems found, empty when it holds.
+ */
+function usageProblems(usage) {
+  const problems = [];
+  const users = usage.data || [];
+  const groups = usage.byGroup || [];
+  const total = unitAmounts(usage.total);
+  for (const group of groups) {
+    const key = group.projectGroupKey ?? null;
+    const members = users.filter((user) => (user.projectGroupKey ?? null) === key);
+    const expected = {};
+    for (const member of members) for (const [unit, amount] of Object.entries(unitAmounts(member))) expected[unit] = (expected[unit] || 0) + amount;
+    const actual = Object.fromEntries((group.amounts || []).map((item) => [item.unit, Number(item.amount)]));
+    for (const unit of new Set([...Object.keys(expected), ...Object.keys(actual)])) {
+      if (!close(expected[unit] || 0, actual[unit] || 0)) problems.push(`组 ${key ?? '未分组'} ${unit}=${actual[unit] ?? '无'}，组内用户合计 ${expected[unit] || 0}`);
+    }
+    const tasks = members.reduce((sum, member) => sum + Number(member.totalTasks || 0), 0);
+    if (tasks !== Number(group.totalTasks)) problems.push(`组 ${key ?? '未分组'} 任务数 ${group.totalTasks}，组内用户合计 ${tasks}`);
+    for (const item of group.amounts || []) {
+      const denominator = total[item.unit] || 0;
+      const share = item.share_basis_points;
+      if (denominator === 0) {
+        if (share !== null) problems.push(`组 ${key ?? '未分组'} ${item.unit} 单位总额为 0，占比却是 ${share}`);
+      } else if (share === null || Math.abs(share - (Number(item.amount) / denominator) * 10000) > 1) {
+        problems.push(`组 ${key ?? '未分组'} ${item.unit} 占比 ${share}，按金额应约为 ${((Number(item.amount) / denominator) * 10000).toFixed(1)}`);
+      }
+    }
+  }
+  const sums = {};
+  for (const group of groups) for (const item of group.amounts || []) sums[item.unit] = (sums[item.unit] || 0) + Number(item.amount);
+  for (const unit of new Set([...Object.keys(total), ...Object.keys(sums)])) {
+    if (!close(total[unit] || 0, sums[unit] || 0)) problems.push(`${unit} 各组合计 ${sums[unit] || 0}，total ${total[unit] || 0}`);
+  }
+  return problems;
+}
+/**
+ * Reads the administration usage until it is self-consistent (at most 3 reads): other accounts on the environment
+ * may finish tasks between the user rows and the group rows of one read.
+ */
+async function consistentUsage() {
+  let last = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const [status, usage] = await adminApi('GET', `${ADMIN_USAGE}?days=7`);
+    if (status !== 200) throw new Error(`admin usage ${status}`);
+    last = { usage, problems: usageProblems(usage), attempt };
+    if (!last.problems.length) return last;
+    await sleep(3000);
+  }
+  return last;
+}
+const groupRow = (usage, key) => (usage.byGroup || []).find((group) => (group.projectGroupKey ?? null) === key);
+const groupText = (usage, key) => {
+  const row = groupRow(usage, key);
+  if (!row) return `${key ?? '未分组'}：无此行`;
+  return `${key ?? '未分组'}：任务 ${row.totalTasks}，${(row.amounts || []).map((item) => `${item.unit}=${item.amount}（${item.share_basis_points ?? 'null'} bp）`).join(' ') || '无金额'}`;
+};
+/** Keys anywhere in a JSON value, to look for group fields in the account usage. */
+function jsonKeys(value, keys = []) {
+  if (Array.isArray(value)) value.forEach((item) => jsonKeys(item, keys));
+  else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) { keys.push(key); jsonKeys(item, keys); }
+  return keys;
+}
+
+async function itemP1() {
+  if (!ADMIN_READY) {
+    record('SKIP', 'P1', '#599 管理端项目组 KEY', '没有 ADMIN_USERNAME/ADMIN_PASSWORD：经 release-env.py smoke 运行才会注入');
+    return;
+  }
+  const messages = (await publicSchema())?.administration?.users?.messages || {};
+  const invalidText = messages.invalid_project_group || '';
+  await check('P1', '建 3 个测试用户（r190- 前缀，初始未分组）', async () => {
+    for (const suffix of ['a', 'b', 'c']) {
+      const username = `${tag}-${suffix}`;
+      const password = randomBytes(18).toString('base64url');
+      const [status, body] = await adminApi('POST', ADMIN_USERS, { username, password, name: `${tag} ${suffix}`, email: `${username}@example.test`, isAdmin: false });
+      if (status !== 201 || !body.data?.id) return { ok: false, detail: `建 ${username} 返回 ${status} ${body.error || ''}` };
+      p599.users.push({ suffix, username, password, id: body.data.id });
+    }
+    const groups = await Promise.all(p599.users.map((user) => storedGroup(user)));
+    return { ok: groups.every((group) => group === null), detail: p599.users.map((user, index) => `${user.username}（${user.id}）组=${JSON.stringify(groups[index])}`).join('；') };
+  });
+  if (p599.users.length !== 3) return;
+  const [a, b, c] = ['a', 'b', 'c'].map(p599User);
+  await check('P1', `合法 KEY 的 PATCH 成功：A→${p599.groups.a}、B→${p599.groups.b}，C 不设（未分组）`, async () => {
+    const replies = [await patchGroup(a, p599.groups.a), await patchGroup(b, p599.groups.b)];
+    const stored = [await storedGroup(a), await storedGroup(b), await storedGroup(c)];
+    return {
+      ok: replies.every(([status]) => status === 200) && replies[0][1].data?.projectGroupKey === p599.groups.a && replies[1][1].data?.projectGroupKey === p599.groups.b
+        && stored[0] === p599.groups.a && stored[1] === p599.groups.b && stored[2] === null,
+      detail: `PATCH ${replies.map(([status, body]) => `${status}→${JSON.stringify(body.data?.projectGroupKey)}`).join('，')}；列表里 A=${JSON.stringify(stored[0])} B=${JSON.stringify(stored[1])} C=${JSON.stringify(stored[2])}`,
+    };
+  });
+  const invalid = { 大写: 'R190-GRP', 空格: 'r190 grp', 超长33位: `r${'1'.repeat(32)}`, 连字符开头: '-r190-grp' };
+  for (const [kind, value] of Object.entries(invalid)) {
+    await check('P1', `非法 KEY（${kind} ${JSON.stringify(value)}）PATCH 被拒 400 并有文案，值不变`, async () => {
+      const [status, body] = await patchGroup(c, value);
+      const after = await storedGroup(c);
+      const textOk = invalidText ? body.error === invalidText : Boolean(body.error);
+      return {
+        ok: status === 400 && textOk && after === null,
+        detail: `${status} 文案=${JSON.stringify(body.error || '')}${invalidText ? `（Schema：${JSON.stringify(invalidText)}）` : '（公开 Schema 没有该文案，只核对非空）'}；之后 C=${JSON.stringify(after)}`,
+      };
+    });
+  }
+  await check('P1', '建用户时带非法 KEY 也被拒 400，不建出用户', async () => {
+    const username = `${tag}-x`;
+    const [status, body] = await adminApi('POST', ADMIN_USERS, { username, password: randomBytes(18).toString('base64url'), name: `${tag} x`, email: `${username}@example.test`, isAdmin: false, projectGroupKey: 'Bad Key' });
+    const made = (await adminUserList()).find((user) => user.username === username);
+    if (made) p599.strays.push({ username, id: made.id });
+    return { ok: status === 400 && Boolean(body.error) && !made, detail: `${status} 文案=${JSON.stringify(body.error || '')}；用户被建出=${Boolean(made)}` };
+  });
+  // Observed only, not judged: what an empty string and null write.
+  const observe = async (label, payload) => {
+    await patchGroup(c, 'r190-tmp');
+    const [status, body] = await adminApi('PATCH', `${ADMIN_USERS}/${encodeURIComponent(c.id)}`, payload);
+    const returned = body.data && 'projectGroupKey' in body.data ? JSON.stringify(body.data.projectGroupKey) : `（无该字段）${body.error ? ` 错误=${JSON.stringify(body.error)}` : ''}`;
+    return `${label}：${status}，返回 ${returned}，列表里存为 ${JSON.stringify(await storedGroup(c))}`;
+  };
+  const observed = [
+    await observe('""', { projectGroupKey: '' }),
+    await observe('null', { projectGroupKey: null }),
+    await observe('"  r190-trim  "', { projectGroupKey: '  r190-trim  ' }),
+    await observe('不带该字段（只改 name）', { name: `${tag} c` }),
+  ];
+  record('INFO', 'P1', '空串、null、首尾空格与不带字段的写入（只记录，不判）', `先设 r190-tmp 再 PATCH ${observed.join('；')}`);
+  if (await storedGroup(c) !== null) await patchGroup(c, '');
+  if (await storedGroup(c) !== null) record('FAIL', 'P1', 'C 回到未分组', `清空后 C 仍是 ${JSON.stringify(await storedGroup(c))}，P2 的未分组核对不可信`);
+}
+
+async function itemP2() {
+  if (p599.users.length !== 3) { record('SKIP', 'P2', '#599 项目组支出占比', '需要先跑 P1 建出 3 个用户'); return; }
+  await check('P2', `三个用户各自登录做 fake 文生图（A ${p599.counts.a} 张、B ${p599.counts.b} 张、C ${p599.counts.c} 张）`, async () => {
+    const lines = [];
+    for (const user of p599.users) {
+      const context = await signedInContext(user.username, user.password);
+      try {
+        const count = p599.counts[user.suffix];
+        const [created, session] = await callAs(context, 'POST', '/api/chat/sessions', { title: `${tag} 项目组 ${user.suffix}` });
+        if (![200, 201].includes(created) || !session.id) throw new Error(`${user.username} create session ${created}`);
+        const markers = Array.from({ length: count }, (_, index) => `[[fake:tool:refine_image ${JSON.stringify({ prompt: `group test ${user.suffix} ${index + 1}: a small clay cup` })}]]`);
+        const [sent] = await callAs(context, 'POST', `/api/chat/sessions/${session.id}/messages`, { content: `出 ${count} 张图 ${markers.join(' ')}`, creative_domain: 'image' });
+        if (![200, 201, 202].includes(sent)) throw new Error(`${user.username} send ${sent}`);
+        const done = await waitFor(async () => {
+          const [, pending] = await callAs(context, 'GET', `/api/v1/chat/sessions/${session.id}/pending-approvals`);
+          for (const card of (pending.items || []).filter((item) => item.status === 'pending')) {
+            await callAs(context, 'PUT', `/api/v1/tasks/grants/${card.request_id}`, { decision: 'approve' });
+          }
+          const [, body] = await callAs(context, 'GET', `/api/v1/tasks?session_id=${session.id}&limit=50`);
+          const tasks = body.tasks || body.data || [];
+          return tasks.filter((task) => task.state === 'SUCCEEDED').length >= count && tasks.every((task) => ['SUCCEEDED', 'FAILED', 'CANCELED', 'CANCELLED'].includes(task.state)) ? tasks : null;
+        }, 180, 2000);
+        if (!done) throw new Error(`${user.username}: ${count} fake tasks did not succeed in 180 s`);
+        user.tasks = done.length;
+        lines.push(`${user.username} 会话 ${session.id}：${done.length} 个任务（${done.map((task) => `${task.capability}:${task.state}`).join(',')}）`);
+      } finally {
+        await context.close();
+      }
+    }
+    return { ok: true, detail: lines.join('；') };
+  });
+  const read = await consistentUsage();
+  const usage = read.usage;
+  const rowOf = (user) => (usage.data || []).find((row) => row.userId === user.id);
+  const mine = p599.users.map((user) => ({ user, row: rowOf(user), amounts: unitAmounts(rowOf(user)) }));
+  p599.before = mine;
+  await check('P2', '三个用户的金额都大于 0 且各不相同', async () => {
+    const texts = mine.map(({ amounts }) => amountsText(amounts));
+    const positive = mine.every(({ amounts }) => Object.values(amounts).some((amount) => amount > 0));
+    return { ok: positive && new Set(texts).size === 3, detail: mine.map(({ user, row }, index) => `${user.suffix}（组 ${JSON.stringify(row?.projectGroupKey ?? null)}，任务 ${row?.totalTasks ?? '无行'}）${texts[index]}`).join('；') };
+  });
+  await check('P2', `byGroup 里有 ${p599.groups.a}、${p599.groups.b} 和一行未分组（key 为 null）`, async () => {
+    const keys = (usage.byGroup || []).map((group) => group.projectGroupKey ?? null);
+    const nullRows = keys.filter((key) => key === null).length;
+    return { ok: keys.includes(p599.groups.a) && keys.includes(p599.groups.b) && nullRows === 1, detail: `byGroup 的 key=${JSON.stringify(keys)}` };
+  });
+  await check('P2', '每组金额 = 组内用户金额之和，各组合计 = total；各行占比与金额占比一致（±1 bp）', async () => ({
+    ok: read.problems.length === 0,
+    detail: `第 ${read.attempt} 次读取；${read.problems.length ? `不一致：${read.problems.join('；')}` : '全部一致'}；${(usage.byGroup || []).map((group) => groupText(usage, group.projectGroupKey ?? null)).join('；')}；total ${amountsText(unitAmounts(usage.total))}`,
+  }));
+  await check('P2', `${p599.groups.a} 组的金额就是 A 的金额、${p599.groups.b} 组就是 B 的金额`, async () => {
+    const a = unitAmounts({ price_totals: (groupRow(usage, p599.groups.a)?.amounts || []) });
+    const b = unitAmounts({ price_totals: (groupRow(usage, p599.groups.b)?.amounts || []) });
+    const same = (left, right) => Object.keys({ ...left, ...right }).every((unit) => close(left[unit] || 0, right[unit] || 0));
+    return { ok: same(a, mine[0].amounts) && same(b, mine[1].amounts), detail: `${groupText(usage, p599.groups.a)}，A ${amountsText(mine[0].amounts)}；${groupText(usage, p599.groups.b)}，B ${amountsText(mine[1].amounts)}` };
+  });
+  await check('P2', '分母为 0（无任何用量）时占比为 null', async () => {
+    const [status, empty] = await adminApi('GET', `${ADMIN_USAGE}?startDate=2020-01-01&endDate=2020-01-07`);
+    const shares = (empty.byGroup || []).flatMap((group) => (group.amounts || []).map((item) => item.share_basis_points));
+    if (status === 200 && shares.length === 0) {
+      return { skip: true, detail: `没有用量的范围（2020-01-01～2020-01-07）返回 byGroup=${JSON.stringify(empty.byGroup)}、total=${JSON.stringify(empty.total)}：没有组行也就没有占比字段；产品侧造不出“单位总额为 0 而仍有组行”的数据，null 分支只能由服务端单测覆盖（有数据时的 null⇔总额 0 已在上一项逐行核对）` };
+    }
+    return { ok: status === 200 && shares.every((share) => share === null), detail: `${status} 占比=${JSON.stringify(shares)}` };
+  });
+  await check('P2', '账户用量接口（各用户读自己的）不含任何分组字段', async () => {
+    const lines = [];
+    let ok = true;
+    for (const user of p599.users) {
+      const context = await signedInContext(user.username, user.password);
+      try {
+        const [status, body] = await callAs(context, 'GET', ACCOUNT_USAGE);
+        const keys = jsonKeys(body);
+        const leaks = keys.filter((key) => /group/i.test(key));
+        const valueLeak = Object.values(p599.groups).some((key) => JSON.stringify(body).includes(key));
+        ok &&= status === 200 && !leaks.length && !valueLeak;
+        lines.push(`${user.suffix}：${status} 字段=${JSON.stringify([...new Set(keys)])}${leaks.length || valueLeak ? ` 含分组：${JSON.stringify(leaks)} 值含 KEY=${valueLeak}` : ''}`);
+      } finally {
+        await context.close();
+      }
+    }
+    return { ok, detail: lines.join('；') };
+  });
+}
+
+async function itemP3() {
+  if (!p599.before) { record('SKIP', 'P3', '#599 改组后归集', '需要先跑 P1、P2'); return; }
+  const [a, b] = [p599User('a'), p599User('b')];
+  await check('P3', `A 从 ${p599.groups.a} 改到 ${p599.groups.b} 后，A 的历史金额随当前组归到 ${p599.groups.b}，${p599.groups.a} 为空或消失`, async () => {
+    const [status] = await patchGroup(a, p599.groups.b);
+    const read = await consistentUsage();
+    const usage = read.usage;
+    const amountsOf = (key) => unitAmounts({ price_totals: (groupRow(usage, key)?.amounts || []) });
+    const rowA = (usage.data || []).find((row) => row.userId === a.id);
+    const rowB = (usage.data || []).find((row) => row.userId === b.id);
+    const expected = {};
+    for (const amounts of [unitAmounts(rowA), unitAmounts(rowB)]) for (const [unit, amount] of Object.entries(amounts)) expected[unit] = (expected[unit] || 0) + amount;
+    const groupB = amountsOf(p599.groups.b);
+    const sumOk = Object.keys({ ...expected, ...groupB }).every((unit) => close(expected[unit] || 0, groupB[unit] || 0));
+    const rowGroupA = groupRow(usage, p599.groups.a);
+    const goneA = !rowGroupA || (Number(rowGroupA.totalTasks) === 0 && (rowGroupA.amounts || []).every((item) => Number(item.amount) === 0));
+    const unchangedA = close(Object.values(unitAmounts(rowA)).reduce((sum, value) => sum + value, 0), Object.values(p599.before[0].amounts).reduce((sum, value) => sum + value, 0));
+    return {
+      ok: status === 200 && rowA?.projectGroupKey === p599.groups.b && sumOk && goneA && unchangedA && read.problems.length === 0,
+      detail: `PATCH ${status}；A 行的组=${JSON.stringify(rowA?.projectGroupKey)}，A 金额 ${amountsText(unitAmounts(rowA))}（改组前 ${amountsText(p599.before[0].amounts)}）；`
+        + `${groupText(usage, p599.groups.b)}，应为 A+B ${amountsText(expected)}；${groupText(usage, p599.groups.a)}；整体一致性：${read.problems.length ? read.problems.join('；') : '一致'}`,
+    };
+  });
+}
+
+async function itemP4() {
+  if (p599.users.length !== 3) { record('SKIP', 'P4', '#599 管理页', '需要先跑 P1 建出 3 个用户'); return; }
+  const c = p599User('c');
+  const adminPage = await (await adminContext()).newPage();
+  adminPage.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
+  const adminText = async (pathKeys) => adminPage.evaluate((keys) => keys.reduce((node, key) => node?.[key], window.__ART_AI_PRODUCT_SCHEMA__) ?? '', pathKeys);
+  try {
+    await check('P4', `管理端用户页给 C 设项目组 ${p599.groups.c} 并保存，刷新后仍在`, async () => {
+      await adminPage.goto(`${base}/admin/users`, { waitUntil: 'load' });
+      const row = adminPage.locator('tbody tr').filter({ hasText: c.username }).first();
+      await row.waitFor({ timeout: 30000 });
+      const editLabel = await adminText(['administration', 'users', 'presentation', 'text', 'edit']);
+      const saveLabel = await adminText(['administration', 'users', 'presentation', 'text', 'save']);
+      await row.getByRole('button', { name: editLabel, exact: true }).click();
+      const input = adminPage.locator('#dlg-project-group');
+      await input.waitFor({ timeout: 10000 });
+      await input.fill(p599.groups.c);
+      const dialog = adminPage.getByRole('dialog');
+      await dialog.getByRole('button', { name: saveLabel, exact: true }).click();
+      await dialog.waitFor({ state: 'hidden', timeout: 15000 });
+      await adminPage.waitForTimeout(1000);
+      const cell = async () => (await adminPage.locator('tbody tr').filter({ hasText: c.username }).first().innerText()).includes(p599.groups.c);
+      const shownBefore = await cell();
+      await adminPage.reload({ waitUntil: 'load' });
+      await adminPage.locator('tbody tr').filter({ hasText: c.username }).first().waitFor({ timeout: 30000 });
+      const shownAfter = await cell();
+      const stored = await storedGroup(c);
+      const file = await shotOf(adminPage, 'P4', 'admin-users');
+      return { ok: shownBefore && shownAfter && stored === p599.groups.c, detail: `保存后行内显示=${shownBefore}，刷新后=${shownAfter}，接口存为 ${JSON.stringify(stored)} 截图 ${file}` };
+    });
+    await check('P4', '用量页有「项目组支出占比」表：组行、未分组行用 Schema 文案、百分比两位小数且与接口一致；用户表带项目组列', async () => {
+      await adminPage.goto(`${base}/admin`, { waitUntil: 'load' });
+      const card = adminPage.locator('[data-testid=admin-usage-groups]');
+      await card.locator('tbody tr').first().waitFor({ timeout: 30000 });
+      await adminPage.waitForTimeout(1500);
+      const usageText = ['administration', 'usage', 'presentation', 'text'];
+      const title = await adminText([...usageText, 'group_title']);
+      const ungrouped = await adminText([...usageText, 'group_ungrouped']);
+      const rows = await card.locator('tbody tr').evaluateAll((items) => items.map((item) => [...item.querySelectorAll('td')].map((cell) => cell.innerText.trim())));
+      const [, usage] = await adminApi('GET', `${ADMIN_USAGE}?days=7`);
+      const problems = [];
+      const cardTitle = (await card.innerText()).includes(title);
+      for (const key of [p599.groups.b, p599.groups.c, null]) {
+        const label = key ?? ungrouped;
+        const shown = rows.find((cells) => cells[0] === label);
+        const apiRow = groupRow(usage, key);
+        if (!shown) { problems.push(`没有「${label}」行`); continue; }
+        const percents = shown[4].match(/\d+(?:\.\d+)?%/g) || [];
+        if (!percents.length || percents.some((percent) => !/^\d+\.\d{2}%$/.test(percent))) problems.push(`「${label}」的占比不是两位小数：${shown[4]}`);
+        const expected = (apiRow?.amounts || []).map((item) => (item.share_basis_points === null ? null : `${(item.share_basis_points / 100).toFixed(2)}%`)).filter(Boolean);
+        if (JSON.stringify(percents) !== JSON.stringify(expected)) problems.push(`「${label}」页面 ${JSON.stringify(percents)}，接口 ${JSON.stringify(expected)}`);
+      }
+      // The users table further down carries each user's group.
+      const userRows = await adminPage.locator('tbody tr').evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ')));
+      for (const user of p599.users) {
+        const expectedGroup = { a: p599.groups.b, b: p599.groups.b, c: p599.groups.c }[user.suffix];
+        if (!userRows.some((line) => line.includes(user.username) && line.includes(expectedGroup)) && !userRows.some((line) => line.includes(`${tag} ${user.suffix}`) && line.includes(expectedGroup))) {
+          problems.push(`用户表没有 ${user.username} 带组 ${expectedGroup} 的行`);
+        }
+      }
+      const file = await shotOf(adminPage, 'P4', 'admin-usage-groups', true);
+      return { ok: cardTitle && !problems.length, detail: `标题「${title}」出现=${cardTitle}；组表 ${JSON.stringify(rows)}；${problems.length ? problems.join('；') : '组行、未分组文案、两位小数与接口一致'} 截图 ${file}` };
+    });
+  } finally {
+    await adminPage.close();
+  }
+  await check('P4', '普通用户（Agent 测试账号）访问管理接口得到 401/403，改不了别人的组', async () => {
+    const replies = [
+      ['GET 用户列表', await api('GET', ADMIN_USERS)],
+      ['GET 用量', await api('GET', `${ADMIN_USAGE}?days=7`)],
+      ['PATCH 用户组', await api('PATCH', `${ADMIN_USERS}/${encodeURIComponent(c.id)}`, { projectGroupKey: 'r190-hijack' })],
+    ];
+    const stored = await storedGroup(c);
+    return {
+      ok: replies.every(([, [status]]) => [401, 403].includes(status)) && stored === p599.groups.c,
+      detail: `${replies.map(([name, [status, body]]) => `${name} ${status}${body.data ? '（有数据返回）' : ''}`).join('，')}；之后 C=${JSON.stringify(stored)}`,
+    };
+  });
+}
+
+/** Deletes the users this run made, one by one by id (the users page's delete; the product keeps them soft-deleted). */
+async function cleanupP599() {
+  if (!p599.admin) return;
+  for (const user of [...p599.users, ...p599.strays]) {
+    const [status] = await adminApi('DELETE', `${ADMIN_USERS}/${encodeURIComponent(user.id)}`);
+    console.log(`cleanup: delete ${user.username} ${status}`);
+  }
+  await p599.admin.close().catch(() => {});
+}
+
 // ---------------------------------------------------------------- run
 const runners = {
   586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
   n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5, n6: itemN6, m1: itemM1, m2: itemM2,
+  p1: itemP1, p2: itemP2, p3: itemP3, p4: itemP4,
 };
 try {
   for (const item of ITEMS) {
@@ -1345,7 +1760,8 @@ try {
     }
   }
 } finally {
-  // Remove this run's personal Skills even when a check failed half-way.
+  // Remove this run's test users and personal Skills even when a check failed half-way.
+  try { await cleanupP599(); } catch (error) { console.log(`cleanup: test users ${error.message.split('\n')[0]}`); }
   const [, mine] = await api('GET', '/api/v1/chat/skills/personal');
   for (const skill of mine.skills || []) {
     if (String(skill.name || '').startsWith(tag)) await api('DELETE', `/api/v1/chat/skills/personal/${encodeURIComponent(skill.id)}`);
