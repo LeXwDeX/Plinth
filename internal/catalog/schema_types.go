@@ -6628,6 +6628,13 @@ type ChatMessageTexts struct {
 	// review C1). A Catalog that declares no text runs the recommendation
 	// instead, as it always has.
 	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
+	// ModelChoiceCard is what the Agent reads when that confirmation is asked
+	// on an in-chat model card instead (#612, #613): the card lists the
+	// models the call can run, each option replays the call with its model,
+	// and nothing was submitted ({workspace}, {recommended}, {profile}). A
+	// Catalog that declares no text, or an executor with no card store, keeps
+	// the plain ModelChoiceWorkspaceConflict refusal.
+	ModelChoiceCard string `json:"model_choice_card,omitempty"`
 	// ChoiceOptionInvalid refuses a direction card whose Agent-supplied
 	// options are too few, too many, or not bounded tokens (#239).
 	ChoiceOptionInvalid string `json:"choice_option_invalid,omitempty"`

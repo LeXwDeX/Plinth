@@ -10433,8 +10433,9 @@
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Draw one low-cost 2D concept sketch for an open request. Call it several times in the same reply (the Product Schema declares how many) to offer visibly different directions, each with its own prompt (in English unless the model's prompt guidance names another language) that names the style, medium and key visual differences. Without references it draws from text; with reference_handles it keeps the referenced subject. After drawing, open an ask_choice card of the concept_direction kind whose options carry each sketch's handle and the exact refine_image arguments that continue it. The Product Schema may override cheap parameters per Offering; a model that declares none of them is used as is.",
-          "require_user_model": true,
           "cross_domain_model_fallback": true,
+          "model_argument": "model",
+          "model_choices": {"from": "available_offerings"},
           "model_required_message": "请先在工作区选择生成模型。",
           "capability": "image-to-image",
           "fallback_capability": "text-to-image",
@@ -10445,6 +10446,10 @@
               "prompt": {
                 "type": "string",
                 "description": "A concise English description of this concept direction, naming its style, medium and what makes it different from the other directions."
+              },
+              "model": {
+                "type": "string",
+                "description": "Optional image model to run, by model id or Offering id, chosen by the same layers as refine_image. The session's explicit 2D pick wins over it; omit it when the person has not asked for a particular model and let the 2D purpose recommend one."
               },
               "reference_handles": {
                 "type": "array",
@@ -10761,6 +10766,7 @@
           "model_choice_conflict": "这次调用指定的模型与用户在本会话明确选定的模型（{locked}）不一致，没有提交任务。用户明确选择的模型优先；要改用 {requested}，请先让用户在本会话里重新选择模型。",
           "choice_option_invalid": "选择卡的选项无效：需要 2 到 8 个选项（下一步卡 2 到 4 个），每个 id 是简短的字母数字标记，每个 label 非空。请重新调用 ask_choice 并提供有效选项。",
           "model_choice_workspace_conflict": "工作区当前选择的模型是 {workspace}，但用途「{profile}」推荐 {recommended}。请先与用户确认保留哪个模型，再继续准备，不要静默替换用户的选择。",
+          "model_choice_card": "工作区当前选择的模型是 {workspace}，但用途「{profile}」推荐 {recommended}。对话里已打开模型选择卡，没有提交任务，也没有扣费。请用一句话请用户在卡片上选一个模型，按供应商和模型名称称呼，不要写内部 ID；不要替用户选择，也不要再用 ask_choice 问同一件事。用户选好后，用所选模型重做本次回复里被这张卡停下的每一次调用。",
           "production_brief_conflict": "制作简报已被其他修改更新，请重新读取后再保存。",
           "style_lock_text_too_long": "风格锁定说明没有保存：当前 {length} 个字符，上限 {maximum} 个字符。",
           "style_lock_reference_limit": "风格锁定参考图没有保存：最多允许 {maximum} 张。",
@@ -21668,6 +21674,7 @@
             "chat.presentation.messages.retired_model_fallback": "The {from} model the user picked is no longer offered, so this step used {to}. Tell the user so, and that they can pick another model in the model menu.",
             "chat.presentation.messages.model_choice_conflict": "This call named a model that differs from the model the user explicitly picked in this session ({locked}), so nothing was submitted. The user's explicit choice wins; to use {requested}, first have the user pick the model again in this session.",
             "chat.presentation.messages.model_choice_workspace_conflict": "The workspace currently uses model {workspace}, but purpose “{profile}” recommends {recommended}. Confirm with the user which model to keep before continuing; do not silently replace their choice.",
+            "chat.presentation.messages.model_choice_card": "The workspace currently uses model {workspace}, but purpose “{profile}” recommends {recommended}. A model choice card is now shown in the chat; nothing was submitted and nothing was charged. Ask the person in one sentence to choose a model on the card, naming models by provider and model name, never by an internal id; do not choose for them and do not open ask_choice for the same question. After they choose, redo every call of this reply that the card stopped, with the chosen model.",
             "chat.presentation.messages.production_brief_conflict": "The production brief was changed by another writer. Read it again and retry the save.",
           "chat.presentation.messages.style_lock_text_too_long": "The style lock text was not saved: it has {length} characters, the maximum is {maximum}.",
           "chat.presentation.messages.style_lock_reference_limit": "The style lock references were not saved: at most {maximum} images are allowed.",
