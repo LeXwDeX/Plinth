@@ -48,3 +48,24 @@ export async function readUntilSettled<Page extends { messages: { isPending?: bo
   }
   return 'running';
 }
+
+/**
+ * #605: after `done`, the turn's tasks as the page tracks them. The server ends them with the turn, but the page read
+ * them last at its previous task poll, so they stayed running (the branch stayed disabled, the running task line
+ * stayed up) until the next poll, up to a polling interval later. `refresh` reads the session's tasks still tracked as
+ * running and says whether one still runs; it is called at once and then at the given delays (those of the reply
+ * rereads) until none runs or the session is no longer the one shown. The task poller goes on as before.
+ */
+export async function refreshTasksAfterDone(options: {
+  refresh: () => Promise<boolean>;
+  isCurrent: () => boolean;
+  delays: readonly number[];
+  wait?: (milliseconds: number) => Promise<void>;
+}): Promise<void> {
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => { setTimeout(resolve, milliseconds); }));
+  for (const delay of [0, ...options.delays]) {
+    if (delay > 0) await wait(delay);
+    if (!options.isCurrent()) return;
+    if (!(await options.refresh())) return;
+  }
+}
