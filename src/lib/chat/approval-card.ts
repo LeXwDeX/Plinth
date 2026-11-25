@@ -1,5 +1,5 @@
 import { offeringShowsCredits, type OfferingWire } from '@/lib/agent-offerings';
-import { parseModelChoice, parseParameterAdjustments, type ModelChoice, type ParameterAdjustment, type PendingApproval, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
+import { parseModelChoice, parseParameterAdjustments, parseSkillChoice, type ModelChoice, type ParameterAdjustment, type PendingApproval, type PendingApprovalInput, type SkillChoice } from '@/lib/chat/pending-approvals';
 import { parseNativeQuote, type NativeQuote, type PriceTotal } from '@/lib/pricing';
 
 /**
@@ -47,6 +47,8 @@ export interface ApprovalCardModel {
   parameterAdjustments?: ParameterAdjustment[];
   /** #239: who chose the model and why; absent when the server did not report it. */
   modelChoice?: ModelChoice;
+  /** #548: the style Skill the step applies and who chose it; absent when it applies none. */
+  skillChoice?: SkillChoice;
   prompt: string;
   /** The earlier same-kind task that was charged but whose result was not stored (#294); the card says approving charges again. */
   rechargeTaskId?: string;
@@ -78,6 +80,7 @@ export function cardFromPending(
       : null,
     parameterAdjustments: item.parameterAdjustments,
     ...(item.modelChoice ? { modelChoice: item.modelChoice } : {}),
+    ...(item.skillChoice ? { skillChoice: item.skillChoice } : {}),
     prompt: item.prompt,
     ...(item.rechargeTaskId ? { rechargeTaskId: item.rechargeTaskId } : {}),
     ...(item.referenceNote ? { referenceNote: item.referenceNote } : {}),
@@ -98,6 +101,7 @@ export function cardFromConsent(pending: Record<string, unknown> | null, request
   if (!pending || !requestId) return null;
   const refs = Array.isArray(pending.reference_assets) ? pending.reference_assets : [];
   const modelChoice = parseModelChoice(pending.model_choice);
+  const skillChoice = parseSkillChoice(pending.skill_choice);
   return {
     requestId, source: 'turn', status: 'pending',
     capability: str(pending.capability), model: str(pending.model), provider: str(pending.provider), providerId: '',
@@ -114,6 +118,7 @@ export function cardFromConsent(pending: Record<string, unknown> | null, request
       : null,
     parameterAdjustments: parseParameterAdjustments(pending.parameter_adjustments),
     ...(modelChoice ? { modelChoice } : {}),
+    ...(skillChoice ? { skillChoice } : {}),
     prompt: str(pending.prompt),
     ...(str(pending.reference_note) ? { referenceNote: str(pending.reference_note) } : {}),
     ...(str(pending.mask_note) ? { maskNote: str(pending.mask_note) } : {}),

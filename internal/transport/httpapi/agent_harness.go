@@ -179,6 +179,11 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 			choice.Reason = s.textIn(requestLocale(request), choice.Reason)
 			pending["model_choice"] = choice
 		}
+		if prepared.SkillChoice != nil {
+			choice := *prepared.SkillChoice
+			choice.Name = s.textIn(requestLocale(request), choice.Name)
+			pending["skill_choice"] = choice
+		}
 		var input struct {
 			Prompt         string `json:"prompt"`
 			NegativePrompt string `json:"negative_prompt"`

@@ -429,7 +429,7 @@ Start 的文件上传和 PreparationResumer 的转换提交各自申请一个派
 
 个人 Skill 是独立数据域，不进入共享 Product Schema 内容或管理员配置版本。认证 Principal 提供 owner ID；客户端不能指定 owner。SQLite migration 0042 将文本 Skill JSON 与 owner ID 存入 `personal_skills`，并按 owner/创建顺序建立索引。读写都按当前 Principal 的 owner 查询。新 Chat turn 将共享配置与本人的 Skill 合并后冻结到 checkpoint；个人 Skill 集合摘要进入本次配置 revision。其他用户无法读取该记录，历史版本与既有 checkpoint 不被改写。
 
-PC 创建界面只填写名称和提示词，选择界面不提供类别筛选或类别标签。创建请求省略 `category`；服务端生成 Skill ID，保存空分类，并按 Schema 校验名称/提示词限制和推荐尺寸。旧请求仍可提供已声明的类别；未知非空类别继续拒绝。`SkillSchema.category` 保留为兼容元数据，未改写历史记录或 checkpoint，也未新增迁移。当前界面从 Schema 读取固定默认推荐尺寸，不展示尺寸选择。该接口不处理图片上传，也没有资源 URL 字段。个人 Skill 不是 Provider Offering，不声明或改变生成能力、运行接线、费用和授权规则。
+PC 创建界面只填写名称和提示词，选择界面不提供类别筛选或类别标签。创建请求省略 `category`；服务端生成 Skill ID，保存空分类，并按 Schema 校验名称/提示词限制和推荐尺寸。旧请求仍可提供已声明的类别；未知非空类别继续拒绝。`SkillSchema.category` 保留为兼容元数据，未改写历史记录或 checkpoint，也未新增迁移。当前界面从 Schema 读取固定默认推荐尺寸，不展示尺寸选择。该接口不处理图片上传，也没有资源 URL 字段。个人 Skill 不是 Provider Offering，不声明或改变生成能力、运行接线、费用和授权规则。#548 起 `SkillSchema` 另有可选 `slug`（标准名）、`description`（一句说明）与 `apply`（`generation-prompt`/`instruction`，缺省按风格型读），旧记录不迁移、缺失时派生；Agent 的 Skill 目录与 `use_skill` 由 `chat.skills.directory` 声明，2D 生成工具的 `skill` 参数只在 Offering 声明 Skill feature 时可用，Agent 选用的 Skill ID 计入该步 Grant 指纹，不改变 Offering、费用与授权规则（细节见架构总览「Agent 配置、Skill 与 MCP」）。
 
 ### 最新 API 与最高质量（#213 参数策略）
 

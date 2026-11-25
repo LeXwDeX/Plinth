@@ -58,6 +58,7 @@ var shippedToolScopes = map[string]string{
 	"mcp_list_offerings":         "utility",
 	"mcp_list_session_tasks":     "utility",
 	"mcp_get_task_assets":        "utility",
+	"use_skill":                  "utility",
 }
 
 func TestEveryShippedAgentToolDeclaresItsScopeClass(t *testing.T) {

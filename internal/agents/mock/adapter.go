@@ -176,6 +176,9 @@ func (adapter *Adapter) stream(
 		if len(calls) == 0 {
 			calls = []plannedCall{{name: adapter.toolName, arguments: map[string]any{adapter.promptArgument: prompt}}}
 		}
+		if !answered {
+			calls = adapter.withSkillCalls(request, prompt, calls)
+		}
 		for index, call := range calls {
 			calls[index] = adapter.harnessCall(request, call, prompt)
 		}

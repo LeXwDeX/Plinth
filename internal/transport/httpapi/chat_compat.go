@@ -1049,6 +1049,16 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		fields.ToolCalls:   string(toolJSON),
 		fields.CreatedAt:   message.CreatedAt,
 	}
+	// #548: the Skills this reply used, read from its persisted calls. A system Skill's name is Schema
+	// text in the reader's locale; a personal Skill's name stays as written.
+	if fields.UsedSkills != "" {
+		if used := chat.UsedSkills(message.ToolCalls); len(used) > 0 {
+			for index := range used {
+				used[index].DisplayName = s.textIn(locale, used[index].DisplayName)
+			}
+			wire[fields.UsedSkills] = used
+		}
+	}
 	// #65: the structured multiview request, so regenerating the reply binds the same pictures and views.
 	if message.Multiview != nil && fields.Multiview != "" {
 		wire[fields.Multiview] = message.Multiview

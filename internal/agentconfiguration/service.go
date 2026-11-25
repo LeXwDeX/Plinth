@@ -332,10 +332,29 @@ func (s *Service) Validate(c Configuration) error {
 		allowedResources[preset.ThumbnailPath] = true
 	}
 	systemSkillIDs := map[string]bool{}
+	slugs := map[string]bool{}
 	for _, skill := range s.schema.Chat.Skills.SystemSkills {
 		systemSkillIDs[skill.ID] = true
+		slugs[skill.Slug] = true
 	}
 	for _, skill := range c.Skills {
+		// #548: the standard name, description and kind of a published or
+		// personal Skill keep the Agent Skills rules; a slug is unique and
+		// never takes a system Skill's.
+		if skill.Apply != "" && skill.Apply != catalog.SkillApplyGenerationPrompt && skill.Apply != catalog.SkillApplyInstruction {
+			return errors.New("skill apply must be generation-prompt or instruction")
+		}
+		if skill.Slug != "" {
+			if !catalog.ValidSkillSlug(skill.Slug) || slugs[skill.Slug] {
+				return errors.New("skill slug is invalid or already used")
+			}
+			slugs[skill.Slug] = true
+		}
+		if skill.Description != "" {
+			if err := catalog.ValidateSkillDescription(skill.Description); err != nil {
+				return fmt.Errorf("invalid skill description: %w", err)
+			}
+		}
 		// Tool-binding Skills are declared by the Product Schema only; a
 		// published or personal Skill can neither bind a tool nor reuse the ID.
 		if skill.Tool != "" || skill.RequiresImage || skill.DefaultMessage != "" || skill.OneShot || systemSkillIDs[skill.ID] {

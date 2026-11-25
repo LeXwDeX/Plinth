@@ -173,6 +173,13 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       },
     )
     : '';
+  // #548: the style Skill the step applies, with who chose it.
+  const skillChoiceText = model.skillChoice
+    ? formatSchemaText(schemaText(schema, 'ui.studio.approval.card.skill_line'), {
+      name: model.skillChoice.name,
+      source: schemaText(schema, `ui.studio.approval.card.skill_source_${model.skillChoice.source}`),
+    })
+    : '';
   // What the extra credits pay for ("附加导出格式：FBX、USDZ，约 N 积分"), all from the Schema's words.
   const extraLine = extra
     ? schemaCountMessage(
@@ -235,6 +242,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.parameter_source')}</dt>
             <dd className="text-muted-foreground" data-testid="studio-approval-model-choice">{modelChoiceText}</dd>
+          </>
+        ) : null}
+        {skillChoiceText ? (
+          <>
+            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.skill')}</dt>
+            <dd className="text-muted-foreground" data-testid="studio-approval-skill-choice">{skillChoiceText}</dd>
           </>
         ) : null}
         {model.nativeQuote ? (

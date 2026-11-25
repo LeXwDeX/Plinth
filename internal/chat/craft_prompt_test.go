@@ -140,8 +140,9 @@ func TestThreeViewCraftIsInjectedOnAModel3DTurn(t *testing.T) {
 	}
 }
 
-// #550: the three-view brief carries the "one picture per view" rule, so an
-// image-workspace turn (where a person types "四视图") must include it too.
+// #550, #548: an image-workspace turn (where a person types "四视图") carries
+// the three-view routing sentence and lists the three-view and four-view
+// Skills in the Skill directory; the rule itself is in the Skills' bodies.
 func TestThreeViewCraftIsInjectedOnAnImageTurn(t *testing.T) {
 	for _, scope := range []string{"2d", "auto"} {
 		rig := newScopeRig(t, agents.Completion{Content: "ok"})
@@ -156,8 +157,13 @@ func TestThreeViewCraftIsInjectedOnAnImageTurn(t *testing.T) {
 			if !strings.Contains(system, renderedCraftText(prompt)) {
 				t.Fatalf("%s image turn omits the three-view craft brief", scope)
 			}
-			if !strings.Contains(system, "四视图再加右侧") {
-				t.Fatalf("%s image turn lacks the one-picture-per-view rule", scope)
+			for _, want := range []string{"每个视角一张独立图", "- three-view（三视图）：", "- four-view（四视图）："} {
+				if !strings.Contains(system, want) {
+					t.Fatalf("%s image turn lacks %q", scope, want)
+				}
+			}
+			if strings.Contains(system, "四视图再加右侧") {
+				t.Fatalf("%s image turn still carries the three-view body without use_skill", scope)
 			}
 		}
 		if !found {

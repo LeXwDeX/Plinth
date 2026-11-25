@@ -61,6 +61,21 @@ export function parseModelChoice(raw: unknown): ModelChoice | undefined {
   };
 }
 
+/** #548: the style Skill a step applies and who chose it. */
+export interface SkillChoice {
+  name: string;
+  source: 'user' | 'agent';
+}
+
+/** A frozen style-Skill record; one without a name or a known source is left out. */
+export function parseSkillChoice(raw: unknown): SkillChoice | undefined {
+  const value = record(raw);
+  const name = text(value.name);
+  const source = text(value.source);
+  if (!name || (source !== 'user' && source !== 'agent')) return undefined;
+  return { name, source };
+}
+
 export interface PendingApproval {
   requestId: string;
   status: PendingApprovalStatus;
@@ -104,6 +119,8 @@ export interface PendingApproval {
   parameterAdjustments?: ParameterAdjustment[];
   /** #239: who chose the model and why; absent when the server did not report it. */
   modelChoice?: ModelChoice;
+  /** #548: the style Skill the step applies; absent when it applies none. */
+  skillChoice?: SkillChoice;
   messageId: string;
   createdAt: string;
   expiresAt: string;
@@ -154,6 +171,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       };
     });
     const modelChoice = parseModelChoice(item.model_choice);
+    const skillChoice = parseSkillChoice(item.skill_choice);
     result.push({
       requestId, status, kind, plan,
       budgets: kind === 'plan' ? parsePriceTotals(item.budgets) ?? [] : [],
@@ -169,6 +187,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       extraItems: (Array.isArray(item.extra_items) ? item.extra_items : []).filter((value): value is string => typeof value === 'string' && value !== ''),
       ...(Array.isArray(item.parameter_adjustments) ? { parameterAdjustments: parseParameterAdjustments(item.parameter_adjustments) } : {}),
       ...(modelChoice ? { modelChoice } : {}),
+      ...(skillChoice ? { skillChoice } : {}),
       prompt: text(item.prompt), inputs, messageId: text(item.message_id),
       ...(text(item.recharge_task_id) ? { rechargeTaskId: text(item.recharge_task_id) } : {}),
       ...(text(item.reference_note) ? { referenceNote: text(item.reference_note) } : {}),

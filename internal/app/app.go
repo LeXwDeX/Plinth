@@ -1235,6 +1235,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	agentToolsConfig := agenttools.Config{
 		Offerings:             func() []generation.Offering { return module.Offerings("") },
 		Context:               applicationSchema.Chat.Context,
+		Skills:                applicationSchema.Chat.Skills,
 		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
 		Params:                paramsStore,
 		Generate:              toolExecutor,

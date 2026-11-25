@@ -778,6 +778,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
+	if err := validateSkillDirectory(schema.Skills, toolNames); err != nil {
+		return err
+	}
 	if err := validateModelReview(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -1041,6 +1044,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"propose_asset_list":      {"assetlist.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"submit_asset_list_item":  {"assetlist.submit_item", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"get_asset_list":          {"assetlist.read", "READ", []string{"image", "model-3d"}},
+		"use_skill":               {"skill.use", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string

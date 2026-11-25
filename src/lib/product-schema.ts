@@ -1726,6 +1726,8 @@ export interface ChatProductSchema {
       tool_arguments: string;
       /** #103: 只读工具结果的紧凑摘要（工具调用上的成员）。 */
       tool_summary?: string;
+      /** #548: the Skills an assistant message used, read from its persisted tool calls. */
+      used_skills?: string;
       message_id: string;
       session_id: string;
       error: string;

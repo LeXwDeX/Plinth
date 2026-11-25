@@ -2298,6 +2298,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
 		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain, options.ProductionBrief))
+		sections.add("skill_directory", orchestrator.skillDirectoryPrompt(ctx, registry, scope, options))
 		sections.add("concept_directions", orchestrator.conceptDirectionsPrompt(registry, scope))
 		sections.add("image_count", orchestrator.imageCountPrompt(registry, ownerID, sessionID))
 		sections.add("session_parameters", orchestrator.sessionParametersPrompt(ownerID, sessionID))

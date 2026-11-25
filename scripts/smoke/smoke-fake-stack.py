@@ -2592,7 +2592,8 @@ def running_replies(api, session):
 
 def scenario_multiview_text(work, api, offerings):
     """#550: "生成一个圣母玛丽亚的4视图" with no picture. The Agent is told the
-    one-picture-per-view rule, draws one front source with refine_image, starts
+    one-picture-per-view rule (since #548 a resident route
+    plus the four-view Skill it reads with use_skill), draws one front source with refine_image, starts
     create_three_view from it, and the four views end as four separate pictures:
     no second refine_image draws the views into one composite. Auto approval (the
     default) submits only the front view; the person starts left, back and right
@@ -2600,13 +2601,29 @@ def scenario_multiview_text(work, api, offerings):
     the source, so the purpose recommendation chooses it and no model conflict
     card opens."""
     session = new_session(api)
-    ask = "生成一个圣母玛丽亚的4视图 [[fake:system-contains 四视图再加右侧]]"
+    # #548: the resident craft keeps only the route; the four-view rule itself
+    # lives in the system four-view Skill, which the Agent reads with use_skill.
+    route = "先 use_skill 读对应 Skill"
+    ask = f"生成一个圣母玛丽亚的4视图 [[fake:system-contains {route}]]"
     if not _visual_anchor_turn(api, session, ask, domain="image"):
-        record("multiview-text: the four-view rule reaches the Agent", False, "turn did not finish")
+        record("multiview-text: the four-view route reaches the Agent", False, "turn did not finish")
         return
     reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
-    record("multiview-text: the four-view rule reaches the Agent", "present: 四视图再加右侧" in reply,
+    record("multiview-text: the four-view route reaches the Agent", f"present: {route}" in reply,
            f"reply={reply[:120]!r}")
+    read = '[[fake:tool:use_skill {"name":"four-view"}]]'
+    if not _image_message(api, session, "生成一个圣母玛丽亚的4视图 " + read):
+        record("multiview-text: use_skill reads the four-view rule", False, "turn did not finish")
+        return
+    instructions = [str(result.get("instructions") or "")
+                    for result in _tool_results(work, "main", session, "use_skill")]
+    record("multiview-text: use_skill reads the four-view rule",
+           any("四视图再加右侧" in text for text in instructions),
+           f"results={len(instructions)} head={(instructions[-1] if instructions else '')[:80]!r}")
+    used = (_quality_final_reply(_quality_messages(api, session)) or {}).get("used_skills") or []
+    record("multiview-text: the reply records the four-view Skill as used by the Agent",
+           any(item.get("id") == "system-four-view" and item.get("source") == "agent" for item in used),
+           f"used_skills={used}")
 
     # The front source: one refine_image, no picture of several views.
     source = ('[[fake:tool:refine_image {"prompt":"Full-body front view of the Virgin Mary, one subject, '

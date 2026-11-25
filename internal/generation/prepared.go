@@ -115,6 +115,7 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 		NativeQuote:          quote,
 		ParameterAdjustments: adjustments,
 		ModelChoice:          cmd.ModelChoice,
+		SkillChoice:          cmd.SkillChoice,
 		ID:                   PreparedInputID("prepared_" + m.ids.Token()), OwnerID: cmd.OwnerID,
 		SessionID: cmd.SessionID, Capability: cmd.Capability, OfferingID: offering.ID,
 		OfferingRevision: offering.Revision, SchemaVersion: m.schemaVersion,

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.27",
+    "revision": "2026-11-24.19.28",
     "terminology": {
       "user_facing": [
         {
@@ -3650,6 +3650,8 @@
         "ui.chat.review.check_names.checkpoint_failed": "检查点未通过",
         "ui.chat.review.used_tool": "执行了 {capability}",
         "ui.chat.message.expand_full": "展开全文",
+        "ui.chat.message.used_skills": "本轮使用 Skill：{names}",
+        "ui.chat.message.used_skills_separator": "、",
         "ui.chat.message.collapse_full": "收起",
         "ui.chat.history.load_earlier": "加载更早的消息",
         "ui.chat.history.loading_earlier": "正在加载更早的消息…",
@@ -4774,6 +4776,10 @@
         "ui.studio.approval.card.model": "模型",
         "ui.studio.approval.card.model_choice_line": "{model} · 来源：{source}；理由：{reason}",
         "ui.studio.approval.card.model_choice_line_no_reason": "{model} · 来源：{source}",
+        "ui.studio.approval.card.skill": "风格 Skill",
+        "ui.studio.approval.card.skill_line": "{name}（{source}）",
+        "ui.studio.approval.card.skill_source_agent": "Agent 选用",
+        "ui.studio.approval.card.skill_source_user": "你选的",
         "ui.studio.approval.card.model_source_user": "用户在本会话的明确选择",
         "ui.studio.approval.card.model_source_agent": "Agent 带理由的选择",
         "ui.studio.approval.card.model_source_profile": "用途「{profile}」推荐",
@@ -6543,6 +6549,7 @@
           "tool_name": "name",
           "tool_arguments": "arguments",
           "tool_summary": "summary",
+          "used_skills": "used_skills",
           "message_id": "messageId",
           "session_id": "sessionId",
           "error": "error",
@@ -7165,11 +7172,9 @@
           {
             "id": "three-view",
             "when_tools_any": [
-              "create_three_view",
-              "create_multiview_images",
-              "create_model_3d_from_views"
+              "create_three_view"
             ],
-            "text": "【三视图制作要领】\n用户说三视图、四视图（3 视图、4 视图、三视角、四视角）就是每个视角一张独立图片：三视图是正面、左侧、背面，四视图再加右侧。张数由视图数定，不开概念图数量卡、不再问几张，模型选择照常。一律用 create_three_view，不用 refine_image 把几个视角画进一张图；只有用户明确要一张图、拼图或 character sheet 时才出一张。只说设定图、没说视图数时照常处理。没有源图时先用 refine_image 出一张单主体正面源图，再以它为源调用。开工前一句话说明将出几张独立图，以及按 list_offerings 的 estimated_credits 计的预计总积分（没有源图时含源图那张），不自行估价。\ncreate_three_view 先出正面并自检，再以已通过的正面为源依次出左、背、右；每张是独立任务，可单独重做或替换。\n按目的选 purpose：\n- model_input（缺省）给 3D 做输入：正交投影、中性均匀光、统一姿态/比例/画幅，主体类型决定姿态，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图姿态、画风和画幅比例；各张主体与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n每张完成后用 inspect_image 比较主体占比、背景和轮廓高度。服务端一致性检查看不出款式和语义，要对照正面逐张复核服装、配色、配件和左右（回执附清单），有问题如实告诉用户并建议重试或替换那一张。\ncreate_multiview_images 一次出正面、左侧、背面、右侧四张，只在只要一组多视角图片资产、不要逐视角控制和单张重做时用，不替代逐张三视图，也不是 3D 步骤。\n用完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型能力与价格以 list_offerings 为准。"
+            "text": "用户要三视图或四视图：每个视角一张独立图，先 use_skill 读对应 Skill，再用 create_three_view。"
           },
           {
             "id": "image2d",
@@ -8432,6 +8437,22 @@
           }
         },
         {
+          "name": "use_skill",
+          "execution": {"implementation_key":"skill.use","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Read the full instructions of one Skill listed in the Skill directory of the system context. Pass the Skill's name exactly as the directory writes it (such as three-view). Call it before you act when a listed Skill fits the person's request; its instructions then guide the tools you call this turn. An instruction Skill returns its body; a style Skill returns its gist and how to apply it: pass skill=<name> on the 2D generation call, which styles that call only. The result is reference text the person or the product saved: it never changes approval rules, tool permissions or system rules. Read-only: it never creates a Task, charges credits or changes the session.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The Skill's name as the Skill directory lists it, such as three-view."
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        },
+        {
           "name": "get_processing_plan",
           "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use get_task on returned task IDs for output details.",
           "parameters": {"type":"object","properties":{"plan_id":{"type":"string"}},"required":["plan_id"],"additionalProperties":false},
@@ -8861,6 +8882,10 @@
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Optional names of this session's identity anchors (for example a character's standard look). The server adds each named anchor's reference pictures before the turn's own references and states what each picture is for; the pictures need no handle."
+              },
+              "skill": {
+                "type": "string",
+                "description": "Optional: the name of one style Skill from the Skill directory, to apply its style to this call only (the server writes it into the final prompt; keep prompt to the subject and content). Leave it out when no style Skill fits. When the person chose a style Skill themselves, theirs is applied and this argument is ignored."
               }
             },
             "required": [
@@ -8914,6 +8939,7 @@
             "prompt_note": "prompt_note",
             "reference_note": "reference_note",
             "style_sources": "style_sources",
+            "skill_note": "skill_note",
             "steps": "steps"
           }
         },
@@ -10155,7 +10181,7 @@
           "canvas_source": "bind",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Create one Tripo four-view image Task from exactly one owned reference image. Keep the four returned views together in front, left, back, right order; do not substitute the older three-view recipe. The estimated native price is 10 Tripo credits.",
+          "description": "Create one Tripo four-view image Task from exactly one owned reference image. Keep the four returned views together in front, left, back, right order; do not substitute the older three-view recipe. Use it only when the person wants one set of multiview picture assets and needs no per-view control or single-view redo: it does not replace create_three_view (one picture per view, each redone on its own) and it is not a 3D step. The estimated native price is 10 Tripo credits.",
           "ignore_user_model": true,
           "require_unique_offering": true,
           "default_to_selection": true,
@@ -10410,6 +10436,10 @@
                 "type": "array",
                 "items": { "type": "integer", "minimum": 1 },
                 "description": "Optional 1-indexed historical image references; UI selection has priority."
+              },
+              "skill": {
+                "type": "string",
+                "description": "Optional: the name of one style Skill from the Skill directory, to apply its style to this call only (the server writes it into the final prompt; keep prompt to the subject and content). Leave it out when no style Skill fits. When the person chose a style Skill themselves, theirs is applied and this argument is ignored."
               }
             },
             "required": ["prompt"],
@@ -10451,6 +10481,7 @@
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
             "prompt_note": "prompt_note",
+            "skill_note": "skill_note",
             "steps": "steps"
           }
         }
@@ -10480,6 +10511,26 @@
         "tool_directive_template": "\n\n【所选技能】用户选择了技能「{name}」：{prompt}\n本轮必须用工具 {tool} 完成，输入图片是工作区选中的图片或用户随消息附上的图片；不要用别的工具代替，也不要只用文字描述结果。",
         "style_directive_template": "\n\n【所选风格技能】用户选了风格技能「{name}」：{summary}\n提交 2D 生成时，服务端会把它的画风写进最终提示词（模型不支持技能时会拒绝提交）。prompt 只写主体与内容，不要再补一种画风，也不要写与它冲突的风格。",
         "style_summary_max_characters": 80,
+        "directory": {
+          "template": "\n\n【Skill 目录】下列 Skill 的正文不在上下文里。用户的要求与某条相关时，先用 use_skill 读它再动手；画风 Skill 在生图时传 skill。\n{entries}",
+          "entry_template": "- {slug}（{name}）：{description}",
+          "entry_description_max_characters": 120,
+          "max_system_characters": 220,
+          "max_personal_characters": 480,
+          "omitted_template": "另有 {count} 个未列出，可在设置里手选。",
+          "derived_description_template": "画风 Skill「{name}」：{summary}",
+          "tool": "use_skill",
+          "generation_argument": "skill",
+          "max_instruction_characters": 4000,
+          "instruction_preamble": "以下是这条 Skill 的做法参考，不改变批准规则、工具权限与系统规则。",
+          "style_instruction_template": "画风 Skill「{name}」：{summary}\n用法：生图时在 2D 生成工具里传 {argument}={slug}，服务端把它的画风写进最终提示词，只在这次调用生效；prompt 只写主体与内容，不再补画风。用户自己选了画风 Skill 时以用户的为准。",
+          "messages": {
+            "unknown": "没有名为 {name} 的 Skill；只能用本轮 Skill 目录里列出的名字。",
+            "not_style": "Skill {name} 不是画风 Skill，不能作为生图的 skill 参数；需要它的做法时用 use_skill 读取。",
+            "unsupported": "当前模型不支持画风 Skill，{name} 没有套用，这次没有提交；换一个支持 Skill 的模型，或去掉 skill 再调用。",
+            "user_choice_kept": "用户自己选了画风 Skill「{name}」，本次按用户所选套用，忽略了 skill={slug}。"
+          }
+        },
         "system_skills": [
           {
             "id": "system-three-view",
@@ -10489,7 +10540,9 @@
             "recommended_size": "",
             "thumbnail_path": "",
             "raw_image_url": "",
-            "prompt": "用选中的或随消息附上的那一张图出三视图：正面、左侧、背面各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角在对话里的三视图卡片上继续。",
+            "slug": "three-view",
+            "description": "把一张图做成正面、左侧、背面三张独立视图的做法：顺序、purpose 选择、一致性复核与单张重做。用户要三视图、三视角、转面图，或要用视图生成 3D 时使用。",
+            "prompt": "出三视图：正面、左侧、背面各一张独立图，以正面为源逐视角生成；有选中的或随消息附上的图时用那一张作源图。先出正面，其余视角在对话里的三视图卡片上继续。\n用户说三视图、四视图（3 视图、4 视图、三视角、四视角）就是每个视角一张独立图片：三视图是正面、左侧、背面，四视图再加右侧。张数由视图数定，不开概念图数量卡、不再问几张，模型选择照常。一律用 create_three_view，不用 refine_image 把几个视角画进一张图；只有用户明确要一张图、拼图或 character sheet 时才出一张。只说设定图、没说视图数时照常处理。没有源图时先用 refine_image 出一张单主体正面源图，再以它为源调用。开工前一句话说明将出几张独立图，以及按 list_offerings 的 estimated_credits 计的预计总积分（没有源图时含源图那张），不自行估价。\ncreate_three_view 先出正面并自检，再以已通过的正面为源依次出左、背、右；每张是独立任务，可单独重做或替换。\n按目的选 purpose：\n- model_input（缺省）给 3D 做输入：正交投影、中性均匀光、统一姿态/比例/画幅，主体类型决定姿态，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图姿态、画风和画幅比例；各张主体与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n每张完成后用 inspect_image 比较主体占比、背景和轮廓高度。服务端一致性检查看不出款式和语义，要对照正面逐张复核服装、配色、配件和左右（回执附清单），有问题如实告诉用户并建议重试或替换那一张。\ncreate_multiview_images 一次出正面、左侧、背面、右侧四张，只在只要一组多视角图片资产、不要逐视角控制和单张重做时用，不替代逐张三视图，也不是 3D 步骤。\n用完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型能力与价格以 list_offerings 为准。",
             "tool": "create_three_view",
             "requires_image": true,
             "default_message": "用这张图生成三视图",
@@ -10503,7 +10556,9 @@
             "recommended_size": "",
             "thumbnail_path": "",
             "raw_image_url": "",
-            "prompt": "用选中的或随消息附上的那一张图出四视图：正面、左侧、背面、右侧各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角（含右侧）在对话里的三视图卡片上继续。",
+            "slug": "four-view",
+            "description": "把一张图做成正面、左侧、背面、右侧四张独立视图的做法：顺序、purpose 选择、一致性复核与单张重做。用户要四视图、四视角，或要用视图生成 3D 时使用。",
+            "prompt": "出四视图：正面、左侧、背面、右侧各一张独立图，以正面为源逐视角生成；有选中的或随消息附上的图时用那一张作源图。先出正面，其余视角（含右侧）在对话里的三视图卡片上继续。\n用户说三视图、四视图（3 视图、4 视图、三视角、四视角）就是每个视角一张独立图片：三视图是正面、左侧、背面，四视图再加右侧。张数由视图数定，不开概念图数量卡、不再问几张，模型选择照常。一律用 create_three_view，不用 refine_image 把几个视角画进一张图；只有用户明确要一张图、拼图或 character sheet 时才出一张。只说设定图、没说视图数时照常处理。没有源图时先用 refine_image 出一张单主体正面源图，再以它为源调用。开工前一句话说明将出几张独立图，以及按 list_offerings 的 estimated_credits 计的预计总积分（没有源图时含源图那张），不自行估价。\ncreate_three_view 先出正面并自检，再以已通过的正面为源依次出左、背、右；每张是独立任务，可单独重做或替换。\n按目的选 purpose：\n- model_input（缺省）给 3D 做输入：正交投影、中性均匀光、统一姿态/比例/画幅，主体类型决定姿态，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图姿态、画风和画幅比例；各张主体与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n每张完成后用 inspect_image 比较主体占比、背景和轮廓高度。服务端一致性检查看不出款式和语义，要对照正面逐张复核服装、配色、配件和左右（回执附清单），有问题如实告诉用户并建议重试或替换那一张。\ncreate_multiview_images 一次出正面、左侧、背面、右侧四张，只在只要一组多视角图片资产、不要逐视角控制和单张重做时用，不替代逐张三视图，也不是 3D 步骤。\n用完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型能力与价格以 list_offerings 为准。",
             "tool": "create_three_view",
             "requires_image": true,
             "default_message": "用这张图生成四视图",
@@ -18260,6 +18315,8 @@
             "ui.chat.review.check_names.checkpoint_failed": "Checkpoint failed",
             "ui.chat.review.used_tool": "Ran {capability}",
             "ui.chat.message.expand_full": "Show full reply",
+            "ui.chat.message.used_skills": "Skills used this turn: {names}",
+            "ui.chat.message.used_skills_separator": ", ",
             "ui.chat.message.collapse_full": "Show less",
             "ui.chat.history.load_earlier": "Load earlier messages",
             "ui.chat.history.loading_earlier": "Loading earlier messages…",
@@ -19388,6 +19445,10 @@
             "ui.studio.approval.card.model": "Model",
             "ui.studio.approval.card.model_choice_line": "{model} · source: {source}; reason: {reason}",
             "ui.studio.approval.card.model_choice_line_no_reason": "{model} · source: {source}",
+            "ui.studio.approval.card.skill": "Style Skill",
+            "ui.studio.approval.card.skill_line": "{name} ({source})",
+            "ui.studio.approval.card.skill_source_agent": "chosen by the Agent",
+            "ui.studio.approval.card.skill_source_user": "your choice",
             "ui.studio.approval.card.model_source_user": "the person's explicit pick in this session",
             "ui.studio.approval.card.model_source_agent": "the Agent's reasoned choice",
             "ui.studio.approval.card.model_source_profile": "recommended by purpose “{profile}”",
@@ -21844,11 +21905,23 @@
             "chat.skills.tool_directive_template": "\n\n[Selected Skill] The user selected the Skill \"{name}\": {prompt}\nThis turn must be completed with the tool {tool}. The input image is the image selected in the workspace or the image the user attached to the message. Do not substitute another tool, and do not just describe the result in text.",
             "chat.skills.style_directive_template": "\n\n[Selected style Skill] The person selected the style Skill \"{name}\": {summary}\nWhen a 2D generation is submitted, the server writes its style into the final prompt (a model that does not support Skills refuses the submission). Write only the subject and content in prompt; do not add another style or one that conflicts with it.",
             "chat.skills.system_skills[id=system-three-view].name_zh": "Three views",
-            "chat.skills.system_skills[id=system-three-view].prompt": "Make three views from the single selected image or the image attached to the message: the front, left and back views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views continue from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-three-view].prompt": "Make three views: the front, left and back views, one separate picture each, generated view by view from the front view; when a picture is selected or attached to the message, it is the source. The front view comes first; the other views continue from the three-view card in the chat.\nA three-view or four-view request (3 views, 4 views, three angles, four angles) means one separate picture per view: a three-view is the front, left and back views, a four-view adds the right view. The number of pictures follows the number of views: open no concept-count card, do not ask how many, and choose the model as usual. Always use create_three_view; never use refine_image to draw several views into one picture. Make a single picture only when the person explicitly asks for one picture, a collage or a character sheet. A plain design-sheet request that names no number of views is handled as usual. Without a source picture, first draw one front source picture of a single subject with refine_image, then call it with that picture as the source. Before you start, say in one sentence how many separate pictures you will make and the estimated total credits from the estimated_credits of list_offerings (including the source picture when there is none yet); do not estimate prices yourself.\ncreate_three_view makes the front view first and checks it, then makes the left, back and right views in turn from the approved front view; each view is its own Task that can be redone or replaced alone.\nChoose purpose by what the views are for:\n- model_input (the default) is input for 3D: orthographic projection, neutral even lighting, the same pose, scale and framing; the subject type decides the pose, a humanoid uses an A-pose or a T-pose.\n- design_sheet is for a design sheet: keep the original pose, art style and aspect ratio; the subject and style wording is the same word for word in every view and only the view sentence changes, writing the facing as a direction in the picture and what the view can and cannot see.\nAfter each view, compare subject share, background and silhouette height with inspect_image. The server's consistency check cannot see style or meaning: check every view against the front for clothing, colours, accessories and left/right (list them in the receipt), tell the person honestly when something is off and suggest retrying or replacing that view.\ncreate_multiview_images makes the front, left, back and right views in one Task; use it only when the person wants one set of multiview picture assets and needs no per-view control or single-view redo. It does not replace the view-by-view three-view and it is not a 3D step.\nTo make 3D from finished views, call create_model_3d_from_views with three_view_group; model abilities and prices come from list_offerings.",
             "chat.skills.system_skills[id=system-three-view].default_message": "Generate three views from this image",
             "chat.skills.system_skills[id=system-four-view].name_zh": "Four views",
-            "chat.skills.system_skills[id=system-four-view].prompt": "Make four views from the single selected image or the image attached to the message: the front, left, back and right views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views, the right view included, continue from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-four-view].prompt": "Make four views: the front, left, back and right views, one separate picture each, generated view by view from the front view; when a picture is selected or attached to the message, it is the source. The front view comes first; the other views, the right view included, continue from the three-view card in the chat.\nA three-view or four-view request (3 views, 4 views, three angles, four angles) means one separate picture per view: a three-view is the front, left and back views, a four-view adds the right view. The number of pictures follows the number of views: open no concept-count card, do not ask how many, and choose the model as usual. Always use create_three_view; never use refine_image to draw several views into one picture. Make a single picture only when the person explicitly asks for one picture, a collage or a character sheet. A plain design-sheet request that names no number of views is handled as usual. Without a source picture, first draw one front source picture of a single subject with refine_image, then call it with that picture as the source. Before you start, say in one sentence how many separate pictures you will make and the estimated total credits from the estimated_credits of list_offerings (including the source picture when there is none yet); do not estimate prices yourself.\ncreate_three_view makes the front view first and checks it, then makes the left, back and right views in turn from the approved front view; each view is its own Task that can be redone or replaced alone.\nChoose purpose by what the views are for:\n- model_input (the default) is input for 3D: orthographic projection, neutral even lighting, the same pose, scale and framing; the subject type decides the pose, a humanoid uses an A-pose or a T-pose.\n- design_sheet is for a design sheet: keep the original pose, art style and aspect ratio; the subject and style wording is the same word for word in every view and only the view sentence changes, writing the facing as a direction in the picture and what the view can and cannot see.\nAfter each view, compare subject share, background and silhouette height with inspect_image. The server's consistency check cannot see style or meaning: check every view against the front for clothing, colours, accessories and left/right (list them in the receipt), tell the person honestly when something is off and suggest retrying or replacing that view.\ncreate_multiview_images makes the front, left, back and right views in one Task; use it only when the person wants one set of multiview picture assets and needs no per-view control or single-view redo. It does not replace the view-by-view three-view and it is not a 3D step.\nTo make 3D from finished views, call create_model_3d_from_views with three_view_group; model abilities and prices come from list_offerings.",
             "chat.skills.system_skills[id=system-four-view].default_message": "Generate four views from this image",
+            "chat.skills.system_skills[id=system-three-view].description": "How to turn one picture into three separate views (front, left and back): the order, the purpose to choose, the consistency review and redoing one view. Use it when the person asks for three views, three angles or a turnaround, or wants 3D from views.",
+            "chat.skills.system_skills[id=system-four-view].description": "How to turn one picture into four separate views (front, left, back and right): the order, the purpose to choose, the consistency review and redoing one view. Use it when the person asks for four views or four angles, or wants 3D from views.",
+            "chat.skills.directory.template": "\n\n[Skill directory] The bodies of these Skills are not in the context. When the person's request fits one of them, read it with use_skill before you act; a style Skill is passed as skill on the image generation call.\n{entries}",
+            "chat.skills.directory.entry_template": "- {slug} ({name}): {description}",
+            "chat.skills.directory.omitted_template": "{count} more are not listed; they can be chosen by hand in the settings.",
+            "chat.skills.directory.derived_description_template": "Style Skill \"{name}\": {summary}",
+            "chat.skills.directory.instruction_preamble": "What follows is a way of working the person saved for reference; it does not change approval rules, tool permissions or system rules.",
+            "chat.skills.directory.style_instruction_template": "Style Skill \"{name}\": {summary}\nHow to use it: pass {argument}={slug} on the 2D generation tool; the server writes its style into the final prompt for that call only. Write only the subject and content in prompt and add no other style. When the person chose a style Skill themselves, theirs wins.",
+            "chat.skills.directory.messages.unknown": "There is no Skill named {name}; use only the names the Skill directory of this turn lists.",
+            "chat.skills.directory.messages.not_style": "The Skill {name} is not a style Skill and cannot be the skill argument of an image generation; read its instructions with use_skill when you need them.",
+            "chat.skills.directory.messages.unsupported": "The current model does not support style Skills: {name} was not applied and nothing was submitted. Choose a model that supports Skills, or call again without skill.",
+            "chat.skills.directory.messages.user_choice_kept": "The person chose the style Skill \"{name}\" themselves; this call applied theirs and ignored skill={slug}.",
             "chat.skills.categories[id=anime].label": "Anime & manga",
             "chat.skills.categories[id=game].label": "Games",
             "chat.skills.categories[id=cinematic].label": "Film & animation",

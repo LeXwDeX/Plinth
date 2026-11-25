@@ -19,6 +19,7 @@ import type {
   ChatPaidStep,
   ChatSession,
   ChatToolCall,
+  ChatUsedSkill,
 } from '@/store/chat-store';
 import { parseProductionBrief, type ProductionBrief } from '@/lib/chat/production-brief';
 import { parsePreferences, type ChatPreference, type PreferenceSignal } from '@/lib/chat/preferences';
@@ -642,6 +643,19 @@ function array(value: unknown): unknown[] {
   }
 }
 
+/** #548: the Skills an assistant reply used; an entry without an ID, a name or a known source is left out. */
+export function parseUsedSkills(value: unknown): ChatUsedSkill[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): ChatUsedSkill[] => {
+    const item = record(raw);
+    const id = typeof item.id === 'string' ? item.id : '';
+    const displayName = typeof item.display_name === 'string' ? item.display_name : '';
+    const source = item.source === 'user' || item.source === 'agent' ? item.source : null;
+    if (!id || !displayName || !source) return [];
+    return [{ id, displayName, source, applied: item.applied === true }];
+  });
+}
+
 function normalizeMessage(
   schema: ProductSchema,
   value: unknown,
@@ -688,6 +702,7 @@ function normalizeMessage(
       ...(usesNativePricing ? { nativeQuote } : {}),
     }];
   });
+  const usedSkills = fields.used_skills ? parseUsedSkills(source[fields.used_skills]) : [];
   const attachments = decodeAttachments(schema, source[fields.attachments]);
   const multiview = fields.multiview ? parseMultiviewRequest(source[fields.multiview]) : null;
   // One message can hold the pictures of several tasks, so a picture's task is the one its attachment
@@ -725,6 +740,7 @@ function normalizeMessage(
     ...(paidSteps.length > 0 ? { paidSteps } : {}),
     ...(wireRole !== schema.chat.roles.user && chatToolCalls.length > 0 ? { toolCalls: chatToolCalls } : {}),
     ...(wireRole !== schema.chat.roles.user ? { toolCallCount: toolCalls.length } : {}),
+    ...(wireRole !== schema.chat.roles.user && usedSkills.length > 0 ? { usedSkills } : {}),
     isPending: pending,
     ...(pendingTaskTypes && pendingTaskTypes.length > 0
       ? { pendingTaskTypes }
