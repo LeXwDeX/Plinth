@@ -175,6 +175,11 @@ func smartsegmentRequestError(body map[string]any) string {
 	return ""
 }
 
+// editMultiviewFailureMessage is the error_message of the one real failed
+// edit_multiview task (2026-11-25, #625, error_code 1001); the task-failed scenario
+// ends an edit with it.
+const editMultiviewFailureMessage = "Failed to generate image"
+
 // editMultiviewPromptsError checks the prompts of POST /generation/edit-multiview.
 func editMultiviewPromptsError(body map[string]any) string {
 	prompts, ok := body["prompts"].([]any)

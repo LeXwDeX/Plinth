@@ -634,6 +634,35 @@
       "why_not_real": "P 系列从未在多视图端点真实请求过；唯一的样本 evidence-386 用 v3.1-20260211"
     },
     {
+      "id": "tripo-v3/p-series-face-limit",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model"
+      ],
+      "category": "artifact-shape",
+      "status": "gap",
+      "behavior": "fake 对 P 系列生成交付固定模型，三角面数不随 face_limit 变化，也不复现真实服务超出 face_limit 的情况。",
+      "basis": [
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p",
+          "section": "Text to model（P Series）：face_limit 为 Maximum polycount for the output mesh，P2-20260801 三角面 48–50000，未写容差（2026-11-25 复核）"
+        },
+        {
+          "source": "2026-11-25 正式测试环境 L5 Tripo 端点链的三个 P2 任务（#625）",
+          "section": "P2-20260801、纹理关、face_limit 3000：文生 3168 三角面（单 mesh 单 primitive，超出 5.6%），图生 2894，多视图 2922；三个 GLB 都是一个无贴图材质、带 UV"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "plan": "再有 P 系列真实样本时，让 fake 的 P 系列 GLB 按 face_limit 交付无贴图低模，并按真实上浮比例给出一个超出 face_limit 的场景；在此之前 L5 只在真实上游上核对面数。",
+      "issues": [
+        625
+      ],
+      "note": "官方页把 face_limit 写成上限，但真实服务会略超；同一 L5 链里 v3.1 文生（face_limit 3000）为 2849 三角面，降面的 face_limit 是目标值（见 tripo-v3/decimate-request-echo）。"
+    },
+    {
       "id": "tripo-v3/image-to-splat",
       "provider": "tripo",
       "api": "v3",
@@ -720,6 +749,39 @@
           "catalog_revision": "unknown"
         }
       ]
+    },
+    {
+      "id": "tripo-v3/edit-multiview-failed",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/edit-multiview",
+        "GET /tasks/{task_id}"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "task-failed 场景下的编辑多视图任务被受理后以 failed 结束，error_code 1001、error_message 为 Failed to generate image，credits_consumed 为 0；失败轮询体的其余字段沿用 fake 的通用失败模板（取自 animate_retarget 的真实失败轮询，input 也是那一类的，fake.go pollTemplate）。",
+      "basis": [
+        {
+          "source": "2026-11-25 正式测试环境 L5 Tripo 端点链 edit_mv 的服务端日志摘录（#625）",
+          "section": "对一个成功的 image_to_multiview 任务编辑正面（一条提示词）：任务被受理，约 35 秒后 failed，error_code 1001、error_message Failed to generate image，余额未动；同一来源、同一视图与提示词随后再发一次成功（5 积分，只交付正面）"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/task-query",
+          "section": "Task query：error_code 与 error_message 是任务级字段，与请求级 code 不同"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/error-handling",
+          "section": "Error handling：请求级 1001 为 Fatal server error，只在安全时重试"
+        },
+        {
+          "source": "https://developers.tripo3d.ai/en/docs/generation-edit-multiview",
+          "section": "Edit multiview：请求体 input 与 prompts（view、prompt），2026-11-25 复核与 Adapter 发送形状一致"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "该环境没有开上游录制，失败只留下日志里的错误码与错误文本；完整的失败轮询体（progress、output、credits_consumed 等字段）没有样本",
+      "note": "一次失败、一次成功，不能区分上游偶发故障与容量问题；失败没有扣费只来自余额前后读数（面板有缓存），不是 credits_consumed 的直接读数。"
     },
     {
       "id": "tripo-v3/rig-check",

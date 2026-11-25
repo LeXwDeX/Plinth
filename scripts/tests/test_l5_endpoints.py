@@ -255,6 +255,16 @@ class PlanTest(unittest.TestCase):
         self.assertIn("unknown step", engine.plan_problems(self.steps, ["nope"], {})[0])
         self.assertIn("unknown step", engine.plan_problems(self.steps, [], {"nope": "t"})[0])
 
+    def test_a_run_with_seeds_continues_in_their_session(self):
+        # #625: Tripo edit-multiview only takes an image-to-multiview task of its own session, so a run seeded
+        # with i2mv must send edit_mv in i2mv's session instead of a new one.
+        self.assertEqual(engine.seed_session(["sess_1"]), "sess_1")
+        self.assertEqual(engine.seed_session(["sess_1", "sess_1"]), "sess_1")
+        self.assertIsNone(engine.seed_session([]))
+        self.assertIsNone(engine.seed_session(["sess_1", "sess_2"]))
+        self.assertIsNone(engine.seed_session([None]))
+        self.assertIsNone(engine.seed_session(["sess_1", None]))
+
     def test_selected_steps_keep_chain_order(self):
         self.assertEqual([s.name for s in engine.selected_steps(self.steps, ["resize", "remesh"])], ["remesh", "resize"])
         self.assertEqual(len(engine.selected_steps(self.steps, [])), len(self.steps))
