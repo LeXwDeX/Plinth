@@ -257,7 +257,7 @@ func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 		}
 	}
 	// No kind is served that the table does not declare.
-	if want := 2 + 3*len(kinds); len(endpoints) != want {
+	if want := 2 + 5*len(kinds); len(endpoints) != want {
 		t.Errorf("endpoint table has %d rows, want %d", len(endpoints), want)
 	}
 }

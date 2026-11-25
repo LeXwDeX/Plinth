@@ -3,6 +3,7 @@ package openaiimagesv1
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -135,18 +136,37 @@ func TestGenerationRefusesUnknownEnumValues(t *testing.T) {
 	}
 }
 
-// B2 (matrix): the official page limits quality xhigh and max to the 2.5
-// snapshots, but the gateway answered 200 for both on 2.6-sunburst and the
-// Catalog defaults to max. The fake must not refuse max until a paid real
-// answer settles the conflict; this test pins that decision so a stricter fake
-// cannot slip in unnoticed.
-func TestQualityMaxIsNotRefusedUntilTheRealGatewayDecides(t *testing.T) {
+// B2 (matrix), settled by the paid real answer of 2026-11-25 (#608): the
+// gateway accepts quality max on gpt-image-2.6-sunburst and repeats it, and the
+// fake's answer has the structure of that sample.
+func TestQualityMaxIsAcceptedAsTheRealGatewayAccepts(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	for _, model := range []string{Model, "gpt-image-2.5-sunburst"} {
 		status, body := generate(f, map[string]any{"model": model, "prompt": "x", "quality": "max"})
 		if status != http.StatusOK || body["quality"] != "max" {
 			t.Fatalf("%s quality=max: %d %v", model, status, body)
 		}
+	}
+	samples, err := fakeupstream.LoadSamples(sampleFS, "testdata/openai-images-v1-quality-max-2026-11-25.candidate.json")
+	if err != nil || len(samples.Exchanges) != 1 {
+		t.Fatalf("quality=max sample: %v", err)
+	}
+	real := samples.Exchanges[0]
+	var request, answer map[string]any
+	if json.Unmarshal(real.Request.Body.JSON, &request) != nil || json.Unmarshal(real.Response.Body.JSON, &answer) != nil {
+		t.Fatal("quality=max sample does not decode")
+	}
+	if real.Response.Status != http.StatusOK || request["quality"] != "max" || answer["quality"] != "max" || request["model"] != Model {
+		t.Fatalf("quality=max sample: %d %v %v", real.Response.Status, request["quality"], answer["quality"])
+	}
+	status, _, raw := f.Raw("POST", Prefix+"/images/generations", "test-key", request)
+	if status != http.StatusOK {
+		t.Fatalf("the sampled request: %d", status)
+	}
+	realShape, _ := fakeupstream.ShapeOf(real.Response.Body.JSON)
+	fakeShape, _ := fakeupstream.ShapeOf(raw)
+	if diff := fakeupstream.DiffShape(realShape, fakeShape); !diff.Empty() {
+		t.Errorf("quality=max answer drifted from the real sample: %s", diff)
 	}
 }
 

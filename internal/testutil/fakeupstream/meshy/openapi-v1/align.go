@@ -18,6 +18,10 @@ var OmittedKeys = []string{"_version"}
 // missingTask is a well-formed id that belongs to no task.
 const missingTask = "01a18514-059e-73f7-a0ce-0f88a12c9300"
 
+// quadrupedAction is the first quadruped action of the animation library
+// (GET /animations/library, read 2026-11-25): a biped rig refuses it.
+const quadrupedAction = 1055
+
 func taskPoll() *align.Poll {
 	return &align.Poll{
 		StatusPath: "status", ProgressPath: "progress",
@@ -130,6 +134,26 @@ func Profile() align.Profile {
 			}, ""),
 			pollStep("text-to-motion-poll", "/text-to-motion", "motion", "result.*"),
 
+			// #608: the list and stream routes and the rig_type refusal of
+			// Animation. Opt-in; the list and stream reads are free, the two
+			// animation creates are refused (400) and not billed, so they name the
+			// newest rig task of the account instead of one this run would pay for.
+			{Name: "list-image-to-3d", Method: "GET", Path: "/image-to-3d?page_num=1&page_size=1&sort_by=-created_at",
+				OptIn: true, Capture: map[string]string{"listed": "0.id"}},
+			{Name: "list-page-num-out-of-range", Method: "GET", Path: "/image-to-3d?page_num=256", OptIn: true},
+			{Name: "list-page-size-out-of-range", Method: "GET", Path: "/image-to-3d?page_size=101", OptIn: true},
+			{Name: "list-sort-by-invalid", Method: "GET", Path: "/image-to-3d?sort_by=created", OptIn: true},
+			{Name: "list-no-auth", Method: "GET", Path: "/image-to-3d?page_size=1", NoAuth: true, OptIn: true},
+			{Name: "stream-image-to-3d", Method: "GET", Path: "/image-to-3d/{listed}/stream", RequireVar: "listed", OptIn: true},
+			{Name: "stream-not-found", Method: "GET", Path: "/image-to-3d/" + missingTask + "/stream", OptIn: true},
+			{Name: "stream-bad-id", Method: "GET", Path: "/image-to-3d/not-an-id/stream", OptIn: true},
+			{Name: "list-rigging", Method: "GET", Path: "/rigging?page_size=1", OptIn: true,
+				Capture: map[string]string{"listedrig": "0.id"}},
+			{Name: "animation-rig-type-mismatch", Method: "POST", Path: "/animations", Paid: true, OptIn: true,
+				Body: map[string]any{"rig_task_id": "{listedrig}", "action_id": quadrupedAction}, RequireVar: "listedrig"},
+			{Name: "animation-rig-type-mismatch-ids", Method: "POST", Path: "/animations", Paid: true, OptIn: true,
+				Body: map[string]any{"rig_task_id": "{listedrig}", "action_ids": []int{0, quadrupedAction}}, RequireVar: "listedrig"},
+
 			{Name: "delete-text-to-image", Method: "DELETE", Path: "/text-to-image/{t2i}", RequireVar: "t2i"},
 			{Name: "delete-image-to-image", Method: "DELETE", Path: "/image-to-image/{i2i}", RequireVar: "i2i"},
 			{Name: "delete-image-to-3d", Method: "DELETE", Path: "/image-to-3d/{i23d}", RequireVar: "i23d"},
@@ -151,6 +175,7 @@ func Profile() align.Profile {
 			Connection: "meshy", Scenario: "meshy-openapi-v1-alignment", APIVersion: "v1",
 			PublicHosts: []string{"api.meshy.ai", "assets.meshy.ai", "cdn.meshy.ai"},
 			OmitKeys:    OmittedKeys,
+			QueryKeys:   []string{"page_num", "page_size", "sort_by"},
 			Projection: map[string]string{
 				"created_at": "timestamp", "started_at": "timestamp", "finished_at": "timestamp", "expires_at": "timestamp",
 				"consumed_credits": "number", "seed": "number", "preceding_tasks": "number",

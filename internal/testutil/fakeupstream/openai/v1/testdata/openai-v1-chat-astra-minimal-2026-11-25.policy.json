@@ -1,0 +1,38 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "content": true,
+    "error": true,
+    "file": true,
+    "max_completion_tokens": true,
+    "message": true,
+    "messages": true,
+    "model": true,
+    "param": true,
+    "reasoning_effort": true,
+    "requestid": true,
+    "role": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "Reply with the single word ok.": true,
+    "Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.": true,
+    "application/json": true,
+    "chat": true,
+    "completions": true,
+    "gpt-astra": true,
+    "invalid_request_error": true,
+    "minimal": true,
+    "ok": true,
+    "reasoning_effort": true,
+    "unsupported_value": true,
+    "user": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {},
+  "Projection": null,
+  "QueryKeys": {}
+}

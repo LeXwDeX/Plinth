@@ -501,8 +501,13 @@ func TestEndpointDocURLsNameTheRoutePages(t *testing.T) {
 			if endpoint.Path != path && !strings.HasPrefix(endpoint.Path, path+"/") {
 				continue
 			}
-			if endpoint.DocURL != url || endpoint.CheckedAt != docsChecked {
-				t.Errorf("%s: DocURL %q checked %q, want %q at %s", endpoint.Key(), endpoint.DocURL, endpoint.CheckedAt, url, docsChecked)
+			// The list and stream routes were checked with their #608 round.
+			checked := docsChecked
+			if endpoint.Method == "GET" && endpoint.Path == path || strings.HasSuffix(endpoint.Path, "/stream") {
+				checked = listStreamSample
+			}
+			if endpoint.DocURL != url || endpoint.CheckedAt != checked {
+				t.Errorf("%s: DocURL %q checked %q, want %q at %s", endpoint.Key(), endpoint.DocURL, endpoint.CheckedAt, url, checked)
 			}
 		}
 	}

@@ -195,9 +195,11 @@
 //
 // Not modelled: the real running poll of a conversion sometimes has no output, and
 // sometimes output.model_url before the task succeeds (the fake's running poll has an
-// empty output); the real progress values (the fake answers 0, 50 and 100, and the real
-// Smart Segmentation went 50, 10, 25, 75); and the real first poll is usually already
-// running (the fake answers one queued poll first). Not run in that round, so still
+// empty output); the real progress values of the other task types (the fake answers
+// 0, 50 and 100, and the real Smart Segmentation went 50, 10, 25, 75); and the real
+// first poll of those is usually already running (the fake answers one queued poll
+// first). The running polls of a text to model task follow the real round of
+// 2026-11-25 (#608, poll.go). Not run in that round, so still
 // constructed: the P2 Offerings (text, image, multiview), Smart Segmentation of a
 // picture, the 2000 concurrency refusal and the 1007 rate limit.
 //

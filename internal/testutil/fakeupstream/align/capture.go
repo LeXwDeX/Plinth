@@ -52,6 +52,9 @@ type CaptureConfig struct {
 	// credential ("input_tokens_details" contains "token"), so the keys below
 	// it must be named here. Their values are still sanitized as usual.
 	ExtraKeys []string
+	// QueryKeys are request query parameter names the run sends (a list
+	// route's page_num); the sample keeps the names, not the values.
+	QueryKeys []string
 }
 
 // Capture records the official run through a deferred wirefixture recorder.
@@ -248,6 +251,9 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 	for _, key := range c.cfg.ExtraKeys {
 		policy.Keys[key] = true
 	}
+	for _, key := range c.cfg.QueryKeys {
+		policy.QueryKeys[key] = true
+	}
 	for _, host := range c.cfg.PublicHosts {
 		policy.PublicHosts[host] = true
 	}
@@ -328,6 +334,20 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 		}
 	}
 	for _, obs := range bundle.Obs {
+		// The step's own route is public protocol text: its fixed segments
+		// ("rigging", "stream") are allowed; an id written into the route (a
+		// not-found probe's) is aliased like any other id, {var} segments are
+		// aliased where their values are captured.
+		route, _, _ := strings.Cut(obs.Path, "?")
+		for _, part := range strings.Split(route, "/") {
+			switch {
+			case part == "" || strings.Contains(part, "{"):
+			case dynamicString(part):
+				placeholder(part)
+			default:
+				policy.Allowed[part] = true
+			}
+		}
 		scan(obs.Request)
 		scan(obs.Body)
 		for _, body := range obs.PollBodies {

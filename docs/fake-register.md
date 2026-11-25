@@ -18,16 +18,16 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
-| `openai/v1` | 4 | 10 | 1 | 15 | 2026-11-23 |
-| `meshy/openapi-v1` | 23 | 22 | 2 | 47 | 2026-11-25 |
+| `tripo/v3` | 27 | 22 | 1 | 50 | 2026-11-25 |
+| `openai/v1` | 5 | 10 | 0 | 15 | 2026-11-25 |
+| `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
-| `openai/images-v1` | 3 | 5 | 1 | 9 | 2026-11-09 |
+| `openai/images-v1` | 4 | 6 | 0 | 10 | 2026-11-25 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 79 | 90 | 5 | 174 | 2026-11-25 |
+| 合计 | 84 | 92 | 1 | 177 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -90,16 +90,22 @@
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json`（2026-11-23，derived，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
-- 备注：queued 轮询带报价见 evidence-577-real-round 里转换任务的 queued 轮询（progress 0，credits_consumed 10）。真实 progress 并不单调（智能分割依次为 50、10、25、75），首个轮询通常已是 running：这两点只在运行记录里，样本每个任务只留首末两次轮询，fake 不复现（见 tripo-v3/poll-progress-not-modelled）。
+- 备注：queued 轮询带报价见 evidence-577-real-round 里转换任务的 queued 轮询（progress 0，credits_consumed 10）。真实 progress 并不单调（智能分割依次为 50、10、25、75），首个轮询通常已是 running：这两点只在运行记录里，样本每个任务只留首末两次轮询，fake 不复现（见 tripo-v3/poll-progress-not-modelled）；文生模型的完整轮询序列见 tripo-v3/text-poll-progress（#608）。
+
+#### `tripo-v3/text-poll-progress` · state-machine · real
+
+- 端点：`POST /generation/text-to-model`、`GET /tasks/{task_id}`
+- 行为：一次 v3.0-20250812 纯几何文生模型（2 秒一轮询，10 积分）：首个轮询 queued、progress 0、无 output 键；随后七次 running，progress 依次为 15、23、30、38、46、58、65，第一次 running 的 output 为 {}，第二次起已带 output.generated_image_url；success 为 100，同时出现 model_url、rendered_image_url 与 completed_at。轮询的 input 还显示请求未发送的 delight:false 与 texture_version:v3.5-20260815（2026-10-29 的 v3.1 模板同样请求未显示，是模型还是日期决定未知，fake 只对 v3.0-20250812 补）。fake 的文生模型任务按此序列答复（running 次数多于 7 时重复 65），queued 轮询取 running 模板去掉 output。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-608-progress.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 #### `tripo-v3/poll-progress-not-modelled` · state-machine · gap
 
 - 端点：`GET /tasks/{task_id}`、`POST /models/convert`
-- 行为：未建模：真实 progress 不单调（50、10、25、75）、首个轮询通常已是 running、转换任务的 running 轮询有时没有 output 有时已带 output.model_url；fake 依次答 queued、0/50/100，running 的 output 为空。
+- 行为：未建模：文生模型以外任务类型的 running 进度（#577 运行记录每个任务只留一个值，智能分割依次为 50、10、25、75，不单调；首个轮询通常已是 running）与转换任务 running 轮询的 output（有时没有，有时已带 output.model_url）；fake 对这些类型依次答 queued、0/50/100，running 的 output 为空。文生模型的轮询序列已由 tripo-v3/text-poll-progress 覆盖。
 - 依据：smoke-l5-tripo-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制，只入库最小集 evidence-577-real-round）（#577，2026-11-24）
-- 核对日期：2026-11-24
-- 计划：Adapter 不依赖这些细节，暂不建模；若某个 Plinth 行为开始依赖，再用运行记录补样本并建模。
-- Issue：#577
+- 核对日期：2026-11-25
+- 计划：Adapter 不依赖这些细节，暂不建模；#608 只付费跑了一次文生模型（单调、首个轮询为 queued）。若某个 Plinth 行为开始依赖其他类型的进度或转换 running 的 output，再用运行记录补样本并建模。
+- Issue：#577、#608
 
 #### `tripo-v3/task-cancelled-unknown` · state-machine · constructed
 
@@ -522,20 +528,18 @@
 #### `openai-v1/chat-model-constraints` · request-validation · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：gpt-astra / gpt-6.2-astra 按模型规则拒绝 tools、temperature 与 reasoning_effort none（400 invalid_request_error，#401）。
+- 行为：gpt-astra / gpt-6.2-astra 按模型规则拒绝 tools、temperature 与 reasoning_effort none（400 invalid_request_error，#401）。none 的文案按 #608 真实观测的 minimal 拒绝同格式构造（含 Chat 列出的档位）；所有模型拒绝在 param 与 code 之间带网关的 requestid（#608 的 HTTP 应答观测到，2026-11-20 的日志正文是上游侧、没有该键）。
 - 依据：网关 2026-11-20 的日志观测（tools、temperature 拒绝）
 - 依据：https://developers.openai.com/api/docs/guides/latest-model.md（Latest model guide）
 - 依据：https://developers.openai.com/api/docs/models/gpt-6.2-astra.md（gpt-6.2-astra）
-- 核对日期：2026-11-20
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝只在网关日志里看到，没有入库样本；reasoning_effort none 按文档构造
 
-#### `openai-v1/chat-reasoning-minimal` · request-validation · gap
+#### `openai-v1/chat-reasoning-minimal` · request-validation · real
 
 - 端点：`POST /chat/completions`
-- 行为：gpt-astra / gpt-6.2-astra 在 Chat Completions 上放行 reasoning_effort=minimal（constraints.go noEffortMinimal 只用于 /v1/responses）。latest-model 文档暗示不支持 minimal（use low instead），未验证；行为不变（2026-11-25）。
-- 核对日期：2026-11-25
-- 计划：真实一轮对 Chat Completions 发一次 minimal，按结果决定拒绝或保留放行。
-- Issue：#579
+- 行为：网关上 gpt-astra（解析为 gpt-6.2-astra）在 Chat Completions 上拒绝 reasoning_effort=minimal：HTTP 400 invalid_request_error，param reasoning_effort，code unsupported_value，文案 “Unsupported value: 'reasoning_effort' does not support 'minimal' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.”（Chat 列出的档位没有 max，/v1/responses 的同类拒绝列出 max）；网关在 param 与 code 之间加 requestid。fake 按此拒绝（constraints.go noEffortMinimal 不再只用于 /v1/responses）。
+- 样本：`internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-chat-astra-minimal-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 #### `openai-v1/chat-vendor-forms` · response-shape · constructed
 
@@ -956,13 +960,20 @@
 - 没有真实样本的原因：拒绝从未向真实 API 请求过，拒绝文案为构造
 - 备注：auto_size 只在为 true 时计入互斥（页面没说显式 false 如何处理）；真实 remesh 样本（300000 quad、5800/10000 triangle、六种格式）都被放行。
 
-#### `meshy-openapi-v1/list-and-stream` · other · gap
+#### `meshy-openapi-v1/list-and-stream` · response-shape · real
 
-- 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
-- 行为：官方各任务族另有列表端点（GET /<族>）与 SSE 流端点（GET /<族>/{id}/stream），fake 只实现单任务轮询（本条挂在轮询端点上）。
+- 端点：`GET /image-to-3d`、`GET /rigging`、`GET /image-to-3d/{id}/stream`
+- 行为：列表端点答裸 JSON 数组，每项与 GET /{id} 当前状态的任务对象同键（列表不算轮询），越过末页答 []；page_num 1–255（0 或缺省为 1，256 答 400 “page_num must be an integer between 1 and 255”），page_size 0 或缺省为 10、负数或非数字答 400 “page_size must be an integer between 1 and 100”、101 被接受；sort_by 首字符为方向、其余为列名，非 created_at 答 400 invalid column（“created” 得 “reated”）；无 key 答 401 “Missing API key”。流端点答 200 text/event-stream，每个任务状态一个 event:message 块（data 为 GET 任务对象），终态块后关闭，已结束任务只有一个块；不存在的 id 答 event:error {message:"Task not found",status_code:404}，格式错误的 id 答 {message:"Invalid ID",status_code:400}（后者 Content-Type 带 charset），HTTP 状态都是 200；块里冒号后无空格。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-list-stream-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v1/list-and-stream-other-kinds` · response-shape · constructed
+
+- 端点：`GET /text-to-image`、`GET /image-to-image`、`GET /multi-image-to-3d`、`GET /remesh`、`GET /convert`、`GET /retexture`、`GET /animations`、`GET /uv-unwrap`、`GET /resize`、`GET /print/analyze`、`GET /print/multi-color`、`GET /text-to-motion`、`GET /text-to-image/{id}/stream`、`GET /image-to-image/{id}/stream`、`GET /multi-image-to-3d/{id}/stream`、`GET /remesh/{id}/stream`、`GET /convert/{id}/stream`、`GET /retexture/{id}/stream`、`GET /rigging/{id}/stream`、`GET /animations/{id}/stream`、`GET /uv-unwrap/{id}/stream`、`GET /resize/{id}/stream`、`GET /print/analyze/{id}/stream`、`GET /print/multi-color/{id}/stream`、`GET /text-to-motion/{id}/stream`
+- 行为：其余任务族的列表与流端点与 image-to-3d / rigging 共用同一实现（core list.go），分页、排序、错误文案与 SSE 事件格式同上；运行中任务的流按 fake 每次轮询会答的状态各发一个 message 块（文档示例为 PENDING 后 SUCCEEDED）；page_size 超过 100 截到 100、负数 page_num 用 page_num 的观测文案拒绝。
+- 依据：https://docs.meshy.ai/en/api/image-to-3d（List Image to 3D Tasks；Stream an Image to 3D Task）
+- 依据：#608 真实一轮（meshy-openapi-v1-list-stream-2026-11-25.candidate.json）观测的 image-to-3d 与 rigging 列表、image-to-3d 流
 - 核对日期：2026-11-25
-- 计划：Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。
-- Issue：#579
+- 没有真实样本的原因：本轮只对 image-to-3d 与 rigging 列表、image-to-3d 流各取一次免费真实样本；其余任务族文档写同一路由形态，未逐族请求。运行中任务的流需要正在运行的付费任务，本轮没有。
 
 #### `meshy-openapi-v1/image-to-3d-pbr-without-texture` · request-validation · real
 
@@ -972,13 +983,11 @@
 - 核对日期：2026-11-25
 - 备注：#581 的一次真实探针（2026-11-25，经 Plinth 的 meshy-t2.5 图生 3D，显式 should_texture false 加 enable_pbr true）：上游答 400、未扣积分。录制器因内联图片超限没留请求体，样本里的请求是当天 Catalog 为该输入构造的请求体（image_url 为占位），provenance 记为 derived；响应状态与正文是真实原文。Catalog 自 #581 起在 should_texture 为 false 时把 enable_pbr 规范为 false 并不上线，平台不再发这对组合；此前这条由 #579 登记为 gap。
 
-#### `meshy-openapi-v1/animation-rig-type` · request-validation · gap
+#### `meshy-openapi-v1/animation-rig-type` · request-validation · real
 
 - 端点：`POST /animations`
-- 行为：Animation 页写 action_id / action_ids 的 rig_type 与骨骼不符答 400，fake 不判断（没有动作库的 rig_type）。
-- 核对日期：2026-11-25
-- 计划：需要时把动作库的 rig_type 表放进 fake 再校验；Catalog 当前只给人形动作。
-- Issue：#579
+- 行为：fake 持有 2026-11-25 官方动作库（GET /animations/library）的 rig_type 表（678 个 biped、127 个 quadruped）；action_id 或 action_ids 中有动作的 rig_type 与骨骼（rigging 请求的 animation_type，缺省 biped）不符时答 400，点名第一个不符的动作。quadruped 动作用在 biped 骨骼上的文案为真实观测：“Animation 1055 is a quadruped animal animation and cannot be applied to this character. Pick an animation made for this character's rig.”（单个 action_id 与 action_ids [0, 1055] 同文）。biped 动作用在 quadruped 骨骼上的文案按同一格式构造，未观测；动作库未列出的 id 不拒绝（未建模）。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 ### `meshy/openapi-v2`
 
@@ -1307,13 +1316,20 @@
 - 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
-#### `openai-images-v1/quality-max` · request-validation · gap
+#### `openai-images-v1/quality-max` · request-validation · real
 
-- 端点：`POST /images/generations`、`POST /images/edits`
-- 行为：quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。 2026-11-25 复核：官方两页说法仍冲突，行为不变。
+- 端点：`POST /images/generations`
+- 行为：quality=max 被接受：2026-11-25 网关对 gpt-image-2.6-sunburst 的 1024x1024、quality=max 文生图答 200，响应回显 quality max，usage 为 14 个输入文本 token、7024 个输出图像 token（按官方 30 美元/百万输出 token 约 0.21 美元），响应结构与 low 的样本相同。官方图像生成指南（2026-11-25）也写明 2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max，此前“两页冲突”的说法不再成立。xhigh 未实发，按同一读法接受；edits 见下一条。
+- 样本：`internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-quality-max-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `openai-images-v1/quality-max-edits` · request-validation · constructed
+
+- 端点：`POST /images/edits`
+- 行为：图像编辑同样接受 quality=max 与 xhigh（与 generations 同一参数校验）。
+- 依据：https://developers.openai.com/api/docs/guides/image-generation.md（quality（2026-11-25：2.6 与 2.5 的 Sunburst、Flare 支持 xhigh 与 max））
+- 依据：#608 generations 的真实观测（openai-images-v1-quality-max-2026-11-25.candidate.json）
 - 核对日期：2026-11-25
-- 计划：在 2D 真实一轮里对账一次，按结果决定接受或拒绝。
-- Issue：#540
+- 没有真实样本的原因：本轮只实发了一次 generations（用户同意的范围）；edits 的 quality=max 没有真实样本。
 
 #### `openai-images-v1/edits-shape` · response-shape · real
 

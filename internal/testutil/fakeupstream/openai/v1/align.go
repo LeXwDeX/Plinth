@@ -13,6 +13,10 @@ const OfficialBase = "dev-test OpenAI-compatible LLM gateway /v1"
 // "测试栈大模型接线").
 const Model = "deepseek"
 
+// AstraModel is the gateway alias of the second chat connection (it resolves
+// to gpt-6.2-astra, see constraints.go).
+const AstraModel = "gpt-astra"
+
 func lookupTool() []map[string]any {
 	return []map[string]any{{
 		"type": "function",
@@ -64,10 +68,20 @@ func Profile() align.Profile {
 				Body: chatBody("Call the lookup_note tool with the topic cube. Do not answer in text.", false, true)},
 			{Name: "chat-tool-call-stream", Method: "POST", Path: "/chat/completions", Paid: true,
 				Body: chatBody("Call the lookup_note tool with the topic cube. Do not answer in text.", true, true)},
+			// #608: whether the gateway's gpt-astra takes reasoning_effort
+			// minimal on Chat Completions (the latest-model guide says to use
+			// low instead; /v1/responses refuses it). Opt-in; one short request.
+			{Name: "chat-astra-effort-minimal", Method: "POST", Path: "/chat/completions", Paid: true, OptIn: true,
+				Body: map[string]any{
+					"model":                 AstraModel,
+					"messages":              []map[string]any{{"role": "user", "content": "Reply with the single word ok."}},
+					"reasoning_effort":      "minimal",
+					"max_completion_tokens": 200,
+				}},
 		},
 		Capture: align.CaptureConfig{
 			Connection: "LLM", Scenario: "openai-v1-alignment", APIVersion: "v1", AliasBaseHost: true,
-			Projection: map[string]string{"owned_by": "text", "created": "timestamp"},
+			Projection: map[string]string{"owned_by": "text", "created": "timestamp", "max_completion_tokens": "number", "requestid": "opaque"},
 		},
 		FakeBodyHook: markToolCall,
 		RequestNotes: []string{

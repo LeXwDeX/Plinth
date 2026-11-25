@@ -57,8 +57,8 @@ type modelConstraint struct {
 	// /v1/responses (responses_constraints.go); the Chat Completions answer is
 	// constructed.
 	noEffortNone bool
-	// noEffortMinimal refuses "minimal" as well. Observed on /v1/responses only:
-	// it is not a rule of the Chat Completions wire here.
+	// noEffortMinimal refuses "minimal" as well: observed on /v1/responses
+	// (2026-11-20) and on /v1/chat/completions (2026-11-25, #608).
 	noEffortMinimal bool
 	// noFunctionTools refuses function tools on /v1/chat/completions. The
 	// observed text blames the combination with a reasoning_effort other than
@@ -177,19 +177,34 @@ var qwenConstraint = modelConstraint{
 }
 
 // constraintRefusal is the error envelope of a refusal. Its field order is the
-// observed one: message, type, param, code (null when the refusal has none).
+// observed one: message, type, param, requestid, code (null when the refusal
+// has none). The gateway adds requestid to the upstream body it relays: the
+// 2026-11-20 log bodies (upstream side) had none, the HTTP answer of the #608
+// probe (2026-11-25, openai-v1-chat-astra-minimal-2026-11-25) carries it
+// before code, as the /v1/responses refusals do.
 type constraintRefusal struct {
 	Error struct {
-		Message string  `json:"message"`
-		Type    string  `json:"type"`
-		Param   string  `json:"param"`
-		Code    *string `json:"code"`
+		Message   string  `json:"message"`
+		Type      string  `json:"type"`
+		Param     string  `json:"param"`
+		RequestID string  `json:"requestid"`
+		Code      *string `json:"code"`
 	} `json:"error"`
 }
+
+// gatewayRequestID is the fixed placeholder of the gateway's requestid, the
+// shape the samples keep.
+const gatewayRequestID = "00000000_FAKE-NODE-00000_00000-00000"
+
+// astraEfforts is the list of levels the gateway's Chat Completions refusal
+// names for gpt-6.2-astra (observed 2026-11-25, #608; /v1/responses lists max
+// as well).
+const astraEfforts = "Supported values are: 'low', 'medium', 'high', and 'xhigh'."
 
 func newConstraintRefusal(message, param, code string) constraintRefusal {
 	var refusal constraintRefusal
 	refusal.Error.Message, refusal.Error.Type, refusal.Error.Param = message, "invalid_request_error", param
+	refusal.Error.RequestID = gatewayRequestID
 	if code != "" {
 		refusal.Error.Code = &code
 	}
@@ -219,9 +234,12 @@ func (r chatRequest) modelRefusal() (constraintRefusal, bool) {
 					"reasoning_effort to none.", index), "messages", ""), true
 		}
 	}
-	if rule.noEffortNone && none {
-		return newConstraintRefusal(
-			"Unsupported value: 'reasoning_effort' does not support 'none' with this model.",
+	// minimal is observed (#608, 2026-11-25: gpt-astra on Chat Completions,
+	// HTTP 400 with this text); none is refused in the same words, which is
+	// constructed (not requested on this wire).
+	if effort, _ := r.effortValue(); (rule.noEffortNone && none) || (rule.noEffortMinimal && effort == "minimal") {
+		return newConstraintRefusal(fmt.Sprintf(
+			"Unsupported value: 'reasoning_effort' does not support '%s' with this model. %s", effort, astraEfforts),
 			"reasoning_effort", "unsupported_value"), true
 	}
 	if rule.noFunctionTools && len(r.Tools) > 0 && !none {
