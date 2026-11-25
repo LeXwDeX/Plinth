@@ -135,6 +135,40 @@ func (r chatRequest) systemContains(text string) bool {
 	return false
 }
 
+// ToolResultsEchoMarker is a fake-only request convention: a request whose
+// last message is a tool result and whose last user message contains
+// [[fake:echo-tool-results]] is answered with ToolResultsEchoPrefix followed
+// by a JSON array of the text of every tool message after that user message,
+// in order. The official model has no such behavior; the marker exists so a
+// browser acceptance run, which cannot reach the fake's control plane, can
+// read what a tool handed back to the model (#630, #632) from the reply the
+// conversation shows. A scripted round with steps left, or a round that calls
+// a tool, is not an echo.
+const ToolResultsEchoMarker = "[[fake:echo-tool-results]]"
+
+// ToolResultsEchoPrefix starts the reply an echo request is answered with.
+const ToolResultsEchoPrefix = "tool-results: "
+
+// toolResultsEcho is the echo reply, when the request asks for one.
+func (r chatRequest) toolResultsEcho() (string, bool) {
+	lastUser := r.lastUserIndex()
+	if lastUser < 0 || lastUser == len(r.Messages)-1 || r.Messages[len(r.Messages)-1].Role != "tool" ||
+		!strings.Contains(messageText(r.Messages[lastUser].Content), ToolResultsEchoMarker) {
+		return "", false
+	}
+	results := []string{}
+	for _, message := range r.Messages[lastUser+1:] {
+		if message.Role == "tool" {
+			results = append(results, messageText(message.Content))
+		}
+	}
+	encoded, err := json.Marshal(results)
+	if err != nil {
+		return "", false
+	}
+	return ToolResultsEchoPrefix + string(encoded), true
+}
+
 // PreferencePromptMarker is the fake-only argument convention of the tool
 // call markers: {"prompt_from_preferences": true} asks the fake to replace the
 // call's prompt with the lines between the system message's preference
@@ -887,6 +921,9 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	// #548: a Skill draft request is answered with a draft object.
 	if draft, asked := request.skillDraft(); asked && !scripted && len(calls) == 0 {
 		reply = draft
+	}
+	if echo, asked := request.toolResultsEcho(); asked && len(calls) == 0 {
+		reply = echo
 	}
 	form := request.replyForm()
 	if form.dsml && len(calls) > 0 {

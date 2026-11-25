@@ -48,11 +48,24 @@
 //     F621  #621/#620：系统上下文含语言规则；Agent 自读 Skill 的标记是「本轮使用」。#620 的回执只回给模型，记 INFO。
 //     F623  #623：管理首页余额卡逐供应商一行、带单位或占位（要管理员账号，缺少时 SKIP）。
 //     F624  #624：3D 瓦片有预览或 3D 占位；拦掉预览后瓦片与输入框芯片都是 3D 占位。
+//   批次 H（#629 至 #632 的 fake 复现：PROD 抽样发现、批次 F 的 fake 验收没抓到的缺陷；修复前的版本上这些检查应 FAIL）
+//     F629  #629：上传一张 3072x5504、超过图生图上限的噪点 PNG 作三视图正面源图（锁上限最低的可用模型，触发冻结前压缩），
+//           卡片上依次点正面、左侧、背面的「继续生成」：不返回 409，各视角都开始，卡片状态与服务端一致；
+//           变体：点「继续生成」后立刻刷新（请求中途断开），同一视角仍可再启动或已在后台继续，其余视角不 409。
+//     F630  #630：卡片上推进完视角后，3D 轮次的系统上下文含本组运行 ID；Agent 传视角 Task ID 时拒绝文案点名运行 ID
+//           （经 [[fake:echo-tool-results]] 读工具结果）；传运行 ID 时多视图 3D 提交成功。
+//     F631  #631：v1 是画板上唯一一层时单击版本条 v1、经 @画布 发 refine（reference_handles ["@img1"]）：新版本只连到 v1、
+//           提示词含「image 1:」不含「image 2」、详情来源「来自 v1」；对照组画板两层时快照仍在前（image 2 是 v1）。
+//     F632  #632：中文会话里 inspect_image、inspect_model、record_self_check 交回给模型的结果没有连续 6 个以上英文单词
+//           （标识符、数字、句柄不算词，同 #407 评测口径；经 [[fake:echo-tool-results]] 读工具结果）。
+//     目标环境的 fake 早于 [[fake:echo-tool-results]] 时，依赖它的检查记 INFO（读不到工具结果），不记 PASS。
+//     批次 H 的会话结束时删除（R190_KEEP_SESSIONS=1 保留，便于人工查看）；上传的大图留在账号素材里，dev-test 下次发布即清空。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4,f610,…,f624  只跑其中几项（默认全部）
+//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4,f610,…,f624,f629,…,f632  只跑其中几项（默认全部）
+//   R190_KEEP_SESSIONS=1  不删除批次 H 建的会话
 //   R190_REQUIRE_BATCH4=1  目标环境缺批次 4（PR #598）时 M1/M2 记 FAIL 而不是 SKIP
 //   R190_M1_COUNTS=4,6,8,10  M1 每组的结果张数；R190_M1_WIDTHS=1440,1280  M1 看弹层的窗口宽度
 //   R190_REQUIRE_BATCH2=1  目标环境缺批次 2 能力时记 FAIL 而不是 SKIP（批次 2 部署后用）
@@ -71,10 +84,11 @@
 //   删除（产品是软删除，这些用户的历史用量仍按原组留在 dev-test 的统计里，dev-test 下次发布即清空）。
 // 目标环境不是 fake 上游形态（ART_AI_UPSTREAM_SHAPE!=fake）时拒绝运行（退出码 2），不会发起真实生成。
 // 不打印口令、Cookie 或签名 URL。最后一行输出 `PASS=n FAIL=n SKIP=n`；有 FAIL 时退出码 1。
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomFillSync } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { makePng } from './browser_matrix/fixtures.mjs';
 import { resolvePlaywright } from './browser_matrix/lib.mjs';
 
@@ -89,7 +103,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4,f610,f611,f612,f614,f615,f616,f617,f618,f619,f621,f623,f624').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4,f610,f611,f612,f614,f615,f616,f617,f618,f619,f621,f623,f624,f629,f630,f631,f632').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -2568,6 +2582,498 @@ async function itemF624() {
   });
 }
 
+// ---------------------------------------------------------------- batch H (#629 to #632)
+// Defects PROD sampling found on d68d1020 that the batch F fake run did not catch. Every check is meant to fail on a
+// revision without the batch H fixes and pass with them, on the fake stack alone. What the fake cannot show is INFO.
+const KEEP_SESSIONS = process.env.R190_KEEP_SESSIONS === '1';
+const batchHSessions = [];
+async function batchHSession(title) {
+  const sid = await createSession(title);
+  batchHSessions.push(sid);
+  return sid;
+}
+async function cleanupBatchH() {
+  if (KEEP_SESSIONS) {
+    if (batchHSessions.length) console.log(`batch H: kept sessions ${batchHSessions.join(' ')}`);
+    return;
+  }
+  for (const sid of batchHSessions) {
+    const [status] = await api('DELETE', `/api/chat/sessions/${sid}`);
+    if (![200, 204].includes(status)) console.log(`cleanup: session ${sid} DELETE ${status}`);
+  }
+}
+
+// The fake-only convention that answers the round after a tool result with that round's tool results (fake.go
+// ToolResultsEchoMarker). The browser cannot reach the fake's control plane, so this is how it reads what a tool
+// handed back to the model. A fake that predates it answers the fixed text: the caller reports INFO, never PASS.
+const ECHO = '[[fake:echo-tool-results]]';
+const ECHO_PREFIX = 'tool-results: ';
+async function echoedToolResults(sid) {
+  const reply = String((await lastReply(sid)).content || '');
+  const at = reply.indexOf(ECHO_PREFIX);
+  if (at < 0) return { results: null, reply };
+  const rest = reply.slice(at + ECHO_PREFIX.length).trim();
+  try {
+    const parsed = JSON.parse(rest);
+    if (Array.isArray(parsed)) return { results: parsed.map(String), reply };
+  } catch {}
+  return { results: [rest], reply }; // the reply was cut or reworded: scan it as one text
+}
+// #407's mixed-language mark, as review_language_632_test.go reads it: six or more English words in a row, where
+// identifiers (snake_case, handles, placeholders, numbers, file and model names) are machine tokens, not words.
+const ENGLISH_SENTENCE = /[A-Za-z][A-Za-z'’]*(?:[ ,;:()/-]+[A-Za-z][A-Za-z'’]*){5,}/;
+const MACHINE_TOKEN = /[A-Za-z0-9_@#./{}=<>%-]*[_@#{}0-9=<>%][A-Za-z0-9_@#./{}=<>%-]*/g;
+const englishSentenceIn = (value) => (String(value).replace(MACHINE_TOKEN, '|').match(ENGLISH_SENTENCE) || [''])[0];
+/** Every string leaf of the tool results (JSON or plain text) that carries an English sentence, with its path. */
+function englishLeaves(results) {
+  const found = [];
+  const walk = (value, where) => {
+    if (Array.isArray(value)) value.forEach((child) => walk(child, `${where}[]`));
+    else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) walk(child, `${where}.${key}`);
+    else if (typeof value === 'string') {
+      const match = englishSentenceIn(value);
+      if (match) found.push(`${where || '.'}: ${match}`);
+    }
+  };
+  results.forEach((result, index) => {
+    let parsed = result;
+    try { parsed = JSON.parse(result); } catch {}
+    walk(parsed, `#${index}`);
+  });
+  return found;
+}
+
+// ---- #629 helpers: a picture big in bytes (not in the repository), and the three-view card driven by hand.
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c;
+  }
+  return table;
+})();
+function crc32(parts) {
+  let c = -1;
+  for (const part of parts) for (let index = 0; index < part.length; index += 1) c = CRC_TABLE[(c ^ part[index]) & 0xff] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+function pngChunk(type, data) {
+  const name = Buffer.from(type, 'ascii');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32([name, data]));
+  return Buffer.concat([length, name, data, crc]);
+}
+/**
+ * An RGB PNG of width x height, about `bytes` long: a centered block of random noise (incompressible, so the file
+ * really weighs that much, like the PROD front picture) on a flat light background, so the subject stays inside the
+ * frame. Generated per run; nothing large is committed.
+ */
+function noisyPng(width, height, bytes) {
+  const stride = width * 3 + 1;
+  const raw = Buffer.alloc(stride * height, 232);
+  for (let y = 0; y < height; y += 1) raw[y * stride] = 0;
+  const left = Math.floor(width * 0.15);
+  const span = width - 2 * left;
+  const rows = Math.min(Math.floor(height * 0.9), Math.ceil(bytes / (span * 3)));
+  const top = Math.floor((height - rows) / 2);
+  for (let y = top; y < top + rows; y += 1) randomFillSync(raw, y * stride + 1 + left * 3, span * 3);
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(raw, { level: 1 })), pngChunk('IEND', Buffer.alloc(0))]);
+}
+const mb = (value) => `${(value / 1e6).toFixed(1)} MB`;
+/** The available image-to-image model whose reference limit is lowest (the one a big source picture overflows). */
+async function smallestImageLimit() {
+  const [, body] = await api('GET', '/api/v1/offerings?capability=image-to-image');
+  const rows = (body.offerings || []).filter((offering) => offering.available).map((offering) => {
+    const parameter = (offering.parameters || []).find((entry) => entry.name === 'reference_assets') || {};
+    return { model: offering.model_id, offering: offering.id, limit: Number(parameter.max_bytes || 0) };
+  }).filter((row) => row.limit > 0 && row.limit < 30_000_000).sort((a, b) => a.limit - b.limit);
+  return rows[0] || null;
+}
+async function threeViewGroups(sid) {
+  const [, body] = await api('GET', `/api/v1/chat/sessions/${sid}/three-views`);
+  return body.items || [];
+}
+const groupOf = async (group) => (await threeViewGroups(group.sid)).find((entry) => entry.run_id === group.run) || { slots: [] };
+const slotsText = (slots) => (slots || []).map((slot) => `${slot.key}=${slot.status}${slot.status === 'not_started' ? (slot.startable ? '/可启动' : '/不可启动') : ''}`).join(' ');
+const cardOf = () => tid('three-view-card').last();
+const cardSlots = async () => cardOf().locator('[data-testid=three-view-slot]').evaluateAll((items) => items.map((item) => ({
+  key: item.dataset.slot, status: item.dataset.status, start: Boolean(item.querySelector('[data-testid=three-view-start]')),
+})));
+async function openCard(sid) {
+  await openSession(sid);
+  await cardOf().waitFor({ timeout: 60000 });
+}
+/** Clicks a view's 「继续生成」 and returns the answer of its POST; `drop` reloads the page at once instead. */
+async function startView(key, { drop = false } = {}) {
+  const button = cardOf().locator(`[data-testid=three-view-slot][data-slot="${key}"] [data-testid=three-view-start]`);
+  if (!await button.count()) return { key, clicked: false };
+  const answered = page.waitForResponse((response) => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith(`/views/${key}`) && response.url().includes('/three-views/'),
+  { timeout: drop ? 3000 : 240000 }).catch(() => null);
+  await button.click();
+  if (drop) {
+    // The person leaves at once: the reload drops the request while the server is still freezing the input.
+    await page.waitForTimeout(400);
+    await page.reload({ waitUntil: 'load' }).catch(() => {});
+    const early = await answered;
+    return { key, clicked: true, status: early ? early.status() : 'dropped' };
+  }
+  const response = await answered;
+  let code = '';
+  if (response) {
+    try {
+      const body = await response.json();
+      code = body.code || body.error?.code || (typeof body.error === 'string' ? body.error : '') || '';
+    } catch {}
+  }
+  return { key, clicked: true, status: response ? response.status() : 0, code: String(code) };
+}
+const STOPPED = ['not_started', 'failed', 'denied', 'canceled'];
+/** Waits until the view has started (approving what it asks for); returns its slot or null. */
+async function viewStarted(group, key, seconds = 240) {
+  return waitFor(async () => {
+    await approvePending(group.sid);
+    const slot = (await groupOf(group)).slots.find((entry) => entry.key === key);
+    return slot && slot.status !== 'not_started' ? slot : null;
+  }, seconds, 2000);
+}
+/** Starts one view from the card the way a person does, once the server says it can start. */
+async function advanceView(group, key, answers, reached) {
+  // A required view that never started holds back the ones after it: do not wait 180 seconds for each of them.
+  const blocked = Object.entries(reached).find(([, status]) => status === 'not_started');
+  if (blocked) {
+    answers.push({ key, note: `前面的 ${blocked[0]} 没开始，未尝试` });
+    reached[key] = 'not_started';
+    return;
+  }
+  const ready = await waitFor(async () => {
+    await approvePending(group.sid);
+    const slot = (await groupOf(group)).slots.find((entry) => entry.key === key);
+    return slot && (slot.status !== 'not_started' || slot.startable) ? slot : null;
+  }, 180, 2000);
+  if (!ready) {
+    answers.push({ key, note: '180 秒内既没开始也不可启动' });
+    reached[key] = 'not_started';
+    return;
+  }
+  if (ready.status === 'not_started') {
+    await openCard(group.sid);
+    answers.push(await startView(key));
+  } else {
+    answers.push({ key, note: `已是 ${ready.status}` });
+  }
+  reached[key] = (await viewStarted(group, key))?.status || 'not_started';
+}
+/** The card says what the server says: each view's status, and a start button exactly where it can start. */
+async function cardMatchesServer(group) {
+  const before = await groupOf(group);
+  const card = await cardSlots();
+  const after = await groupOf(group);
+  const problems = [];
+  for (const slot of after.slots) {
+    const shown = card.find((entry) => entry.key === slot.key);
+    const earlier = before.slots.find((entry) => entry.key === slot.key);
+    if (!shown) { problems.push(`${slot.key} 卡片上没有`); continue; }
+    if (shown.status !== slot.status && shown.status !== earlier?.status) problems.push(`${slot.key} 卡片=${shown.status} 服务端=${slot.status}`);
+    if (slot.status === 'not_started' && shown.status === 'not_started' && Boolean(slot.startable) !== shown.start) {
+      problems.push(`${slot.key} 服务端 startable=${slot.startable} 卡片按钮=${shown.start}`);
+    }
+  }
+  return { problems, server: slotsText(after.slots), card: card.map((entry) => `${entry.key}=${entry.status}${entry.start ? '/按钮' : ''}`).join(' ') };
+}
+const answersText = (answers) => answers.map((answer) => (answer.clicked ? `${answer.key}:${answer.status}${answer.code ? ` ${answer.code}` : ''}` : `${answer.key}:${answer.note || '无按钮'}`)).join(' ');
+const answeredWell = (answers) => answers.every((answer) => !answer.clicked || answer.status === 'dropped' || (answer.status >= 200 && answer.status < 300));
+const requiredKeys = (group) => (group.slots || []).filter((slot) => !slot.optional).map((slot) => slot.key);
+
+// #629: a source picture over the model's byte limit is frozen as a compressed copy; the card's views must still start.
+async function itemF629() {
+  const pick = await smallestImageLimit();
+  if (!pick) {
+    record('FAIL', '#629', '大图三视图', 'fake 栈没有上限低于 30 MB 的可用图生图模型，上传的大图触发不了压缩');
+    return;
+  }
+  const bytes = Math.min(Math.round(pick.limit * 1.5), 45_000_000);
+  const startGroup = async (title, name) => {
+    const png = noisyPng(3072, 5504, bytes);
+    const upload = await ctx.request.post(`${base}/api/v1/assets`, {
+      headers: ORIGIN, timeout: 300000, multipart: { file: { name: `${tag}-${name}.png`, mimeType: 'image/png', buffer: png } },
+    });
+    const source = (await upload.json().catch(() => ({}))).id;
+    if (![200, 201].includes(upload.status()) || !source) throw new Error(`upload of the ${png.length}-byte picture: ${upload.status()}`);
+    const sid = await batchHSession(`${tag} ${title}`);
+    await turn(sid, '用这张图做三视图 [[fake:tool:create_three_view {"reference_handles":["@img1"]}]]',
+      { image_urls: [`/api/v1/assets/${source}`], ai_model: pick.model, explicit_model_2d: pick.model });
+    await approvePending(sid);
+    const found = await waitFor(async () => (await threeViewGroups(sid))[0] || null, 60, 2000);
+    if (!found) throw new Error(`no three-view group (reply 「${String((await lastReply(sid)).content || '').slice(0, 120)}」)`);
+    console.log(`#629 ${title} ${sid}: run ${found.run_id}, source ${source} ${png.length} bytes, model ${pick.model} (limit ${pick.limit})`);
+    await openCard(sid);
+    return { sid, run: found.run_id, size: png.length, keys: requiredKeys(found), initial: slotsText(found.slots) };
+  };
+
+  const main = await startGroup('大图三视图', 'front');
+  await check('#629', `3072x5504 正面源图（${mb(main.size)}，超过「${pick.model}」上限 ${mb(pick.limit)}）：依次点各视角「继续生成」不返回 409，各视角都开始，卡片与服务端一致`, async () => {
+    const answers = [];
+    const reached = {};
+    for (const key of main.keys) await advanceView(main, key, answers, reached);
+    await openCard(main.sid);
+    const consistency = await cardMatchesServer(main);
+    const file = await shot('629', 'large-front');
+    return {
+      ok: answers.every((answer) => answer.status !== 409) && answeredWell(answers)
+        && main.keys.every((key) => !STOPPED.includes(reached[key])) && consistency.problems.length === 0,
+      detail: `必需视角=${main.keys.join(',')} 初始=${main.initial} 点击应答=${answersText(answers)} 到达=${JSON.stringify(reached)} `
+        + `服务端=${consistency.server} 卡片=${consistency.card} 不一致=${JSON.stringify(consistency.problems)} 截图 ${file}`,
+    };
+  });
+
+  const dropped = await startGroup('大图三视图 中途断开', 'front-drop');
+  await check('#629', '点「继续生成」后立刻刷新（请求中途断开）：同一视角仍可再启动或已在后台继续，之后各视角不 409，卡片与服务端一致', async () => {
+    const answers = [];
+    const reached = {};
+    const first = await waitFor(async () => (await groupOf(dropped)).slots.find((slot) => slot.status === 'not_started' && slot.startable) || null, 120, 2000);
+    if (!first) return { ok: false, detail: `没有可启动的视角：${slotsText((await groupOf(dropped)).slots)}` };
+    answers.push(await startView(first.key, { drop: true }));
+    await cardOf().waitFor({ timeout: 60000 });
+    await page.waitForTimeout(5000);
+    const afterDrop = (await groupOf(dropped)).slots.find((slot) => slot.key === first.key) || {};
+    const stuck = afterDrop.status === 'not_started' && !afterDrop.startable;
+    if (afterDrop.status === 'not_started' && afterDrop.startable) {
+      await openCard(dropped.sid);
+      answers.push(await startView(first.key));
+    }
+    reached[first.key] = (await viewStarted(dropped, first.key))?.status || 'not_started';
+    for (const key of dropped.keys.filter((entry) => entry !== first.key)) await advanceView(dropped, key, answers, reached);
+    await openCard(dropped.sid);
+    const consistency = await cardMatchesServer(dropped);
+    const file = await shot('629', 'dropped-request');
+    return {
+      ok: !stuck && answers.every((answer) => answer.status !== 409) && answeredWell(answers)
+        && dropped.keys.every((key) => !STOPPED.includes(reached[key])) && consistency.problems.length === 0,
+      detail: `断开的视角=${first.key} 断开 5 秒后服务端=${afterDrop.status}${afterDrop.status === 'not_started' ? `/startable=${afterDrop.startable}` : ''} `
+        + `点击应答=${answersText(answers)} 到达=${JSON.stringify(reached)} 服务端=${consistency.server} 卡片=${consistency.card} `
+        + `不一致=${JSON.stringify(consistency.problems)} 截图 ${file}`,
+    };
+  });
+  record('INFO', '#629', 'fake 缺口', 'fake 生图字节很小（平铺色块），生成图作正面时不触发压缩，这里改用上传的噪点大图；压缩耗时（PROD 约 51 秒）fake 也不模拟。见 fake 登记表 openai-images-v1/generated-picture-byte-weight');
+}
+
+// #630: the Agent can name the three-view group the person advanced on the card.
+async function itemF630() {
+  const sid = await batchHSession(`${tag} 三视图运行 ID`);
+  await turn(sid, '画一把剑 [[fake:tool:refine_image {"prompt":"a plain steel sword on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the sword picture did not succeed');
+  await turn(sid, '做三视图 [[fake:tool:create_three_view {"reference_handles":["@img1"]}]]');
+  await approvePending(sid);
+  const found = await waitFor(async () => (await threeViewGroups(sid))[0] || null, 60, 2000);
+  if (!found) throw new Error('no three-view group');
+  const group = { sid, run: found.run_id };
+  console.log(`#630 ${sid}: run ${group.run}`);
+  // The person advances the views on the card; the Agent is not involved, so no tool result names the run.
+  await openCard(sid);
+  const answers = [];
+  const reached = {};
+  for (const key of requiredKeys(found)) await advanceView(group, key, answers, reached);
+  const done = await waitFor(async () => {
+    await approvePending(sid);
+    const slots = (await groupOf(group)).slots.filter((slot) => !slot.optional);
+    return slots.length && slots.every((slot) => slot.status === 'succeeded') ? slots : null;
+  }, 180, 2000);
+  const views = done || (await groupOf(group)).slots;
+  const viewTask = (views.find((slot) => slot.key !== 'front' && slot.task_id) || views.find((slot) => slot.task_id) || {}).task_id;
+  const advanced = `卡片点击=${answersText(answers)} 视角=${slotsText((await groupOf(group)).slots)}`;
+
+  await check('#630', '卡片上推进完视角后，3D 轮次的系统上下文列出本组运行 ID', async () => {
+    await turn(sid, `用三视图生成 3D [[fake:system-contains ${group.run}]]`, { creative_domain: 'model-3d' });
+    const reply = String((await lastReply(sid)).content || '');
+    return { ok: Boolean(done) && reply.includes(`present: ${group.run}`), detail: `${advanced} 回复「${reply.slice(0, 120)}」` };
+  });
+
+  await check('#630', 'Agent 把视角 Task ID 当 three_view_group：拒绝、不提交，工具结果点名本组运行 ID', async () => {
+    if (!viewTask) return { ok: false, detail: `没有视角任务：${advanced}` };
+    const known = (await sessionTasks(sid)).map((task) => task.id);
+    await turn(sid, `用三视图生成 3D [[fake:tool:create_model_3d_from_views ${JSON.stringify({ three_view_group: viewTask })}]] ${ECHO}`, { creative_domain: 'model-3d' });
+    const made = await newTasks(sid, known);
+    const { results, reply } = await echoedToolResults(sid);
+    if (!results) return { info: true, detail: `目标 fake 不支持 ${ECHO}（早于本批 fake），读不到工具结果；新任务=${made.length} 回复「${reply.slice(0, 80)}」` };
+    const resultText = results.join('\n');
+    return {
+      ok: made.length === 0 && resultText.includes(group.run),
+      detail: `传入=${viewTask} 运行 ID=${group.run} 新任务=${made.length} 工具结果「${resultText.slice(0, 300)}」`,
+    };
+  });
+
+  await check('#630', '传本组运行 ID：多视图 3D 提交成功（不被 group_not_found 拒绝）', async () => {
+    const known = (await sessionTasks(sid)).map((task) => task.id);
+    await turn(sid, `用三视图生成 3D [[fake:tool:create_model_3d_from_views ${JSON.stringify({ three_view_group: group.run })}]]`, { creative_domain: 'model-3d' });
+    const made = await waitFor(async () => {
+      await approvePending(sid);
+      return (await newTasks(sid, known)).find((task) => /3d/i.test(String(task.capability || '')) && ['SUCCEEDED', 'FAILED'].includes(task.state)) || null;
+    }, 300, 2000);
+    const reply = String((await lastReply(sid)).content || '');
+    return {
+      ok: made?.state === 'SUCCEEDED',
+      detail: `运行 ID=${group.run} 新任务=${made ? `${made.offering_id} ${made.state}` : '无'} 回复「${reply.slice(0, 120)}」`,
+    };
+  });
+  record('INFO', '#630', '需真实模型复测', 'Agent 自己从系统上下文读出运行 ID 并用它调用：fake 对话模型只按标记调工具，这里验的是上下文里有运行 ID、拒绝文案点名运行 ID、用运行 ID 能提交');
+}
+
+// #631: a version that is the board's only layer, clicked on the strip and named by the Agent, is sent once.
+async function itemF631() {
+  const versionLabel = async (version) => (await text('ui.studio.version.label_2d')).replace('{version}', String(version));
+  const madeFrom = async (parent) => (await text('ui.result.detail.made_from')).replace('{parent}', parent);
+  const marker = (handle) => `[[fake:tool:refine_image ${JSON.stringify({ prompt: 'add a brass buckle', reference_handles: [handle], reference_purposes: { [handle]: 'the original pouch' } })}]]`;
+  const { field } = await inputSourceField();
+  const onBoard = async (picture) => {
+    const name = picture.handle.replace(/^@/, '');
+    if (!(await layerNames()).includes(name)) {
+      await tileThumb(`n:${picture.id}`).dblclick();
+      await page.waitForTimeout(2000);
+    }
+    return name;
+  };
+  // Sent with @画布: on dev-test (d68d1020) a plain send after the strip click went out without the canvas source
+  // (inputSource null), so the PROD path, a canvas turn whose board shows the named version, was never reached.
+  // @画布 makes it a canvas turn as it was in PROD; the Agent still names the version alone.
+  const sendOnBoard = async (sid, content) => {
+    const boardToken = `@${await text('ui.studio.composer.mention.token_board')}`;
+    const box = composerBox();
+    await box.fill('');
+    await box.click();
+    await box.pressSequentially('@');
+    const list = tid('composer-mention-list');
+    await list.waitFor({ timeout: 10000 });
+    await list.locator(`[data-testid=composer-mention-option][data-handle="${boardToken}"]`).first().click();
+    await page.waitForTimeout(500);
+    await box.press('End');
+    const before = await finalAssistantCount(sid);
+    const posted = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/chat/sessions/${sid}/messages`), { timeout: 45000 });
+    await page.keyboard.insertText(` ${content}`);
+    const typed = await box.inputValue();
+    await tid('composer-send').first().click();
+    const request = await posted;
+    let body = {};
+    try { body = request.postDataJSON() || {}; } catch {}
+    await waitFor(async () => (await finalAssistantCount(sid)) > before, 150);
+    return { body, typed, others: [] };
+  };
+  const refine = async (sid, picture) => {
+    const known = (await sessionTasks(sid)).map((task) => task.id);
+    const sent = await sendOnBoard(sid, `给小袋加一个铜扣 ${marker(picture.handle)}`);
+    const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED') || null, 120, 1500);
+    const [, detail] = made ? await api('GET', `/api/v1/tasks/${made.id}`) : [0, {}];
+    const edges = made ? await incomingEdges(sid, made.id) : [];
+    return { sent, made, prompt: String(detail?.input?.prompt || ''), sources: edges.map((edge) => String(edge.from)) };
+  };
+
+  const sid = await batchHSession(`${tag} 版本条单层画板`);
+  await turn(sid, '画一个皮质小袋 [[fake:tool:refine_image {"prompt":"a small leather pouch on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the pouch picture did not succeed');
+  const [v1] = await handleTasks(sid);
+  if (!v1) throw new Error('the pouch picture has no handle');
+  await openSession(sid);
+  const name = await onBoard(v1);
+  for (const other of (await layerNames()).filter((layer) => layer !== name)) await removeLayer(other).catch(() => {});
+  await tileThumb(`n:${v1.id}`).click();
+  await page.waitForTimeout(1500);
+  const stage = await stageVersion();
+  let made = null;
+  await check('#631', 'v1 是画板唯一一层，单击版本条 v1 后经 @画布 refine（reference_handles 只有 v1）：新版本只连到 v1，提示词「image 1:」、不含「image 2」', async () => {
+    const layers = await layerNames();
+    const result = await refine(sid, v1);
+    made = result.made;
+    const file = await shot('631', 'single-layer');
+    return {
+      ok: Boolean(made) && result.sources.length === 1 && result.sources[0].includes(v1.id) && /image 1:/.test(result.prompt) && !/image 2/.test(result.prompt),
+      detail: `画布图层=${JSON.stringify(layers)} 舞台「${stage}」 POST ${field}=${JSON.stringify(result.sent.body[field] ?? null)} 发送时其他 POST=${JSON.stringify(result.sent.others)} `
+        + `新任务=${made?.id || '无'} 入边来源=${JSON.stringify(result.sources)}（v1=${v1.id}） 提示词「${result.prompt.slice(0, 200)}」 截图 ${file}`,
+    };
+  });
+  await check('#631', '新版本详情的来源是 v1，不是上传', async () => {
+    if (!made) return { ok: false, detail: '上一项没有产出新任务' };
+    const want = await madeFrom(await versionLabel(1));
+    const upload = await madeFrom(await text('ui.studio.version.upload'));
+    await openSession(sid);
+    await tileOf(`n:${made.id}`).locator('[data-testid=version-detail]').click();
+    await tid('result-detail-rows').first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(1000);
+    const values = Object.fromEntries(await tid('result-detail-row').evaluateAll((items) => items.map((item) => [item.dataset.key, item.innerText.replace(/\s+/g, ' ').trim()])));
+    const file = await shot('631', 'detail-source');
+    await page.keyboard.press('Escape');
+    const source = values.source || '';
+    return { ok: source.includes(want) && !source.includes(upload), detail: `来源行「${source}」 应含「${want}」、不含「${upload}」 截图 ${file}` };
+  });
+
+  // Control: with a second picture on the board the board is more than the named version, and #266 still leads
+  // with the snapshot: the named version is image 2.
+  const control = await batchHSession(`${tag} 版本条两层画板`);
+  await turn(control, '画一个皮质小袋 [[fake:tool:refine_image {"prompt":"a small leather pouch on a white background"}]]');
+  await turn(control, '再画一个水壶 [[fake:tool:create_concept_sketch {"prompt":"a metal canteen on a white background"}]]');
+  if (!await waitTasks(control, (tasks) => tasks.filter((task) => task.state === 'SUCCEEDED').length >= 2)) throw new Error('two control pictures did not succeed');
+  const [c1, c2] = await handleTasks(control);
+  if (!c1 || !c2) throw new Error('the control pictures have no handles');
+  await openSession(control);
+  await onBoard(c1);
+  await onBoard(c2);
+  await tileThumb(`n:${c1.id}`).click();
+  await page.waitForTimeout(1500);
+  await check('#631', '对照：画板两层（v1 与另一张）时单击 v1 经 @画布 refine：快照仍在前（入边为上传快照与 v1），v1 是 image 2', async () => {
+    const layers = await layerNames();
+    const result = await refine(control, c1);
+    const file = await shot('631', 'two-layers');
+    return {
+      // The snapshot has no purpose of its own, so only the named version's line shows, numbered 2; the lineage
+      // has the snapshot upload and the version.
+      ok: Boolean(result.made) && /image 2:/.test(result.prompt) && result.sources.length === 2
+        && result.sources.some((source) => source.startsWith('upload:')) && result.sources.some((source) => source.includes(c1.id)),
+      detail: `画布图层=${JSON.stringify(layers)} POST ${field}=${JSON.stringify(result.sent.body[field] ?? null)} 新任务=${result.made?.id || '无'} `
+        + `入边来源=${JSON.stringify(result.sources)} 提示词「${result.prompt.slice(0, 200)}」 截图 ${file}`,
+    };
+  });
+  record('INFO', '#631', '需真实模型复测', '真实 GPT/QWEN 对话下 Agent 自己选 @img1 并写 reference_purposes：fake 对话模型按标记调用，这里只验平台侧的参考图、编号与来源');
+}
+
+// #632: what the read-only check tools hand back to the model in a Chinese session is not English prose.
+async function itemF632() {
+  const sid = await batchHSession(`${tag} 检查结果语言`);
+  await turn(sid, '画一个木箱 [[fake:tool:refine_image {"prompt":"a wooden crate on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the crate picture did not succeed');
+  const [picture] = await handleTasks(sid);
+  await turn(sid, '做一个木箱 3D 模型 [[fake:tool:create_model_3d {"prompt":"a wooden crate"}]]', { creative_domain: 'model-3d' });
+  const model = await waitFor(async () => {
+    await approvePending(sid);
+    return (await sessionTasks(sid)).find((task) => /3d/i.test(String(task.capability || '')) && task.state === 'SUCCEEDED') || null;
+  }, 300, 2000);
+  const calls = [
+    ['inspect_image', { image: picture?.handle || '@img1', checklist: '3d_input' }, 'image'],
+    ['inspect_model', { model: model?.id || '' }, 'model-3d'],
+    ['record_self_check', { model: model?.id || '', status: 'passed', summary: '轮廓与参考图一致' }, 'model-3d'],
+  ];
+  for (const [tool, args, domain] of calls) {
+    await check('#632', `中文会话 ${tool}：交回给模型的结果没有连续 6 个以上英文单词`, async () => {
+      if (domain === 'model-3d' && !model) return { ok: false, detail: 'fake 3D 任务没有成功' };
+      await turn(sid, `检查一下 [[fake:tool:${tool} ${JSON.stringify(args)}]] ${ECHO}`, { creative_domain: domain });
+      const { results, reply } = await echoedToolResults(sid);
+      if (!results) {
+        return { info: true, detail: `目标 fake 不支持 ${ECHO}（早于本批 fake），fake 控制面也不对浏览器开放，读不到工具结果；回复「${reply.slice(0, 80)}」` };
+      }
+      const found = englishLeaves(results);
+      return { ok: results.join('').length > 0 && found.length === 0, detail: `英文整句 ${found.length} 处 ${JSON.stringify(found.slice(0, 6))} 结果共 ${results.join('').length} 字` };
+    });
+  }
+  record('INFO', '#632', '需真实模型复测', 'QWEN-MAX 等真实模型在工具结果为中文后回复不再夹英文整段：fake 对话模型只回固定文字或回显，回复措辞要真实模型复测');
+}
+
 // ---------------------------------------------------------------- run
 const runners = {
   586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
@@ -2575,6 +3081,7 @@ const runners = {
   p1: itemP1, p2: itemP2, p3: itemP3, p4: itemP4,
   f610: itemF610, f611: itemF611, f612: itemF612, f614: itemF614, f615: itemF615, f616: itemF616, f617: itemF617,
   f618: itemF618, f619: itemF619, f621: itemF621, f623: itemF623, f624: itemF624,
+  f629: itemF629, f630: itemF630, f631: itemF631, f632: itemF632,
 };
 try {
   for (const item of ITEMS) {
@@ -2590,6 +3097,7 @@ try {
 } finally {
   // Remove this run's test users and personal Skills even when a check failed half-way.
   try { await cleanupP599(); } catch (error) { console.log(`cleanup: test users ${error.message.split('\n')[0]}`); }
+  try { await cleanupBatchH(); } catch (error) { console.log(`cleanup: batch H sessions ${error.message.split('\n')[0]}`); }
   const [, mine] = await api('GET', '/api/v1/chat/skills/personal');
   for (const skill of mine.skills || []) {
     if (String(skill.name || '').startsWith(tag)) await api('DELETE', `/api/v1/chat/skills/personal/${encodeURIComponent(skill.id)}`);
