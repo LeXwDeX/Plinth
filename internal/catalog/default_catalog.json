@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.25",
+    "revision": "2026-11-24.19.26",
     "terminology": {
       "user_facing": [
         {
@@ -10672,6 +10672,7 @@
           "selection_mask_without_canvas": "这条消息带了选区蒙版，但本轮不是画布来源或画布快照没有通过校验，本轮未执行。请让用户带上画板快照重新发送，或移除蒙版后再试。",
           "selection_mask_invalid": "选区蒙版无效或无法读取，本轮未执行。请重新圈选后发送。",
           "selection_mask_size_mismatch": "选区蒙版与画板快照尺寸不一致，本轮未执行。请重新画蒙版后发送。",
+          "selection_mask_format_mismatch": "选区蒙版与画板快照格式不一致，本轮未执行。蒙版是 PNG，画板快照也必须是 PNG；平台不会替你转换格式。请把画板导出格式改回 PNG 后重新发送。",
           "mask_unreadable_template": "选区蒙版无法读取或不属于当前用户（{reason}），本轮未执行。请让用户重新圈选后发送。",
           "mask_size_mismatch_template": "选区蒙版尺寸 {mask} 与画板快照 {canvas} 不一致，本轮未执行。请让用户重新画蒙版；蒙版必须与画板快照同尺寸。",
           "mask_unsupported_template": "用户圈选了区域，但所选模型 {model} 不支持蒙版，因此没有提交任务，也不会退化成整图重画。请换成支持蒙版的模型（{choices}），或请用户改选模型后再试。",
@@ -21527,6 +21528,7 @@
             "chat.presentation.messages.selection_mask_without_canvas": "This message carried a selection mask, but the turn was not a canvas turn or its artboard snapshot did not verify, so the turn was not run. Ask the person to send again with the artboard snapshot, or to remove the mask and retry.",
             "chat.presentation.messages.selection_mask_invalid": "The selection mask is invalid or cannot be read, so the turn was not run. Ask the person to paint the selection again and resend.",
             "chat.presentation.messages.selection_mask_size_mismatch": "The selection mask does not have the artboard snapshot size, so the turn was not run. Ask the person to repaint the mask and resend.",
+            "chat.presentation.messages.selection_mask_format_mismatch": "The selection mask and the artboard snapshot are not of the same format, so the turn was not run. The mask is a PNG, so the artboard snapshot must be a PNG too; the platform does not convert it. Export the artboard as PNG and resend.",
             "chat.presentation.messages.mask_unreadable_template": "The selection mask cannot be read or does not belong to this user ({reason}), so the turn was not run. Ask the person to paint the selection again and resend.",
             "chat.presentation.messages.mask_size_mismatch_template": "The selection mask is {mask} but the artboard snapshot is {canvas}, so the turn was not run. Ask the person to repaint the mask; it must have the same size as the artboard snapshot.",
             "chat.presentation.messages.mask_unsupported_template": "The person selected an area, but the chosen model {model} does not support masks, so nothing was submitted and it was not turned into a whole-image redraw. Switch to a model that supports masks ({choices}), or ask the person to choose another model and retry.",

@@ -42,6 +42,32 @@ func (resolver *Resolver) ImageDimensions(ctx context.Context, ownerID, assetID 
 	return config.Width, config.Height, nil
 }
 
+var _ chat.PictureFormatReader = (*Resolver)(nil)
+
+// PictureFormat reads the image format of an input asset the owner holds, as
+// the registered decoders name it from the bytes (png, jpeg, webp). The chat
+// service compares an artboard snapshot's format with its selection mask's by
+// it (#583); the filename and the stored media type are not consulted. Only
+// the image header is decoded.
+func (resolver *Resolver) PictureFormat(ctx context.Context, ownerID, assetID string) (string, error) {
+	if ownerID == "" || assetID == "" {
+		return "", chat.ErrAttachmentRejected
+	}
+	_, body, err := resolver.inputs.OpenOwned(ctx, generation.OwnerID(ownerID), generation.AssetID(assetID))
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+	config, format, err := image.DecodeConfig(io.LimitReader(body, maximumDimensionHeaderBytes))
+	if err != nil {
+		return "", err
+	}
+	if config.Width <= 0 || config.Height <= 0 || format == "" {
+		return "", errors.New("chat references: picture without a size or format")
+	}
+	return format, nil
+}
+
 var _ chat.InputAssetDigester = (*Resolver)(nil)
 
 // InputAssetRecords reads an owner's input asset record without opening its

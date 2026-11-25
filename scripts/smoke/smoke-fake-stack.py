@@ -4834,7 +4834,8 @@ def scenario_mask_selection(api, offerings, work):
     into the Offering's mask parameter, the approval card shows the mask input,
     the fake upstream changes only the masked pixels, a model without masks is
     refused without creating a Task, and the read-only create_selection_mask
-    tool makes a usable mask for a later refine. Fake only.
+    tool makes a usable mask for a later refine. An artboard snapshot of another
+    format than the PNG mask is refused before the turn (#583). Fake only.
 
     Cross-user denial is not observable here (the development mock login makes
     every request the one mock user, see check_delivery); internal/chat and
@@ -4858,6 +4859,23 @@ def scenario_mask_selection(api, offerings, work):
     if not source_id or not mask_id:
         record("#244 mask fixtures upload", False, f"source={source_id} mask={mask_id}")
         return
+
+    # (#583) an artboard snapshot of another format than the PNG mask is refused
+    # with its own 400 before any turn starts: no message, no Task, no conversion.
+    jpeg_id = upload_asset(api, "board.jpg", JPEG_64, "image/jpeg")
+    jpeg_session = new_session(api)
+    status, refusal = api.json("POST", f"/api/chat/sessions/{jpeg_session}/messages", {
+        "content": "把这里改成蓝色", "creative_domain": "image", "ai_model": model,
+        "selection": [{"kind": "image", "assetId": jpeg_id, "url": f"/api/v1/assets/{jpeg_id}"}],
+        "inputSource": "canvas", "selectionMask": {"maskAssetId": mask_id}})
+    status_messages, messages = api.json("GET", f"/api/chat/sessions/{jpeg_session}/messages")
+    stored = None
+    if status_messages == 200:
+        stored = messages if isinstance(messages, list) else messages.get("messages", [])
+    record("#583 JPEG artboard snapshot with a PNG mask is refused before the turn",
+           bool(jpeg_id) and status == 400 and "格式不一致" in json.dumps(refusal, ensure_ascii=False)
+           and not session_tasks(api, jpeg_session) and stored == [],
+           f"upload={jpeg_id} status={status} body={refusal} messages={status_messages}/{stored}")
 
     selection = [{"kind": "image", "assetId": source_id, "url": f"/api/v1/assets/{source_id}"}]
     marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + model + '"}]]')
