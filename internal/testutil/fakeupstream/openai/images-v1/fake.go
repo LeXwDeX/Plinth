@@ -777,6 +777,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		// A masked edit keeps the reference picture's pixels, so it keeps its size.
 		width, height = editor.width, editor.height
 	}
+	weight := h.env.PictureWeightOf(r, req.prompt, width, height)
 	body := fakeupstream.Clone(h.ok[endpoint])
 	if list, ok := body["data"].([]any); ok && len(list) > 0 {
 		if template, ok := list[0].(map[string]any); ok {
@@ -793,7 +794,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			items := make([]any, 0, maxCandidates)
 			for index := 0; index < count; index++ {
 				item := fakeupstream.Clone(template)
-				candidate, err := h.candidate(editor, format, width, height, transparent, index)
+				candidate, err := h.candidate(editor, format, width, height, transparent, index, weight)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -849,13 +850,20 @@ func outputSize(value string) (width, height int) {
 // reference when an edit carries a mask, else the fake subject picture at the
 // requested size and format (an alpha PNG for background=transparent). Every
 // index shades the picture differently, so n>1 answers distinct bytes.
-func (h *handler) candidate(editor *maskedEditor, format string, width, height int, transparent bool, index int) ([]byte, error) {
+//
+// weight pads the picture to a real answer's byte count when a test asks for
+// it (fakeupstream weight.go, #629); the zero weight keeps the drawn bytes.
+func (h *handler) candidate(editor *maskedEditor, format string, width, height int, transparent bool, index int, weight fakeupstream.PictureWeight) ([]byte, error) {
 	if editor != nil {
-		return editor.encode(format, index)
+		data, err := editor.encode(format, index)
+		if err != nil || weight.Bytes <= len(data) {
+			return data, err
+		}
+		return fakeupstream.PadFileWith(fakeupstream.File{MediaType: "image/" + format, Data: data}, weight.Bytes, weight.Filler).Data, nil
 	}
-	file, err := fakeupstream.Picture(fakeupstream.PictureSpec{
+	file, err := fakeupstream.WeightedPicture(fakeupstream.PictureSpec{
 		Format: format, Width: width, Height: height, Transparent: transparent && format == "png", Variant: index,
-	})
+	}, weight)
 	if err != nil {
 		return nil, err
 	}

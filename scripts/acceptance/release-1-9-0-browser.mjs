@@ -2709,8 +2709,11 @@ const cardSlots = async () => cardOf().locator('[data-testid=three-view-slot]').
   key: item.dataset.slot, status: item.dataset.status, start: Boolean(item.querySelector('[data-testid=three-view-start]')),
 })));
 async function openCard(sid) {
-  await openSession(sid);
-  await cardOf().waitFor({ timeout: 60000 });
+  // After a reload the session list can load after the first open: open the session again if the card does not show.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await openSession(sid);
+    try { await cardOf().waitFor({ timeout: attempt < 2 ? 20000 : 60000 }); return; } catch (error) { if (attempt === 2) throw error; }
+  }
 }
 /** Clicks a view's 「继续生成」 and returns the answer of its POST; `drop` reloads the page at once instead. */
 async function startView(key, { drop = false } = {}) {
@@ -2774,7 +2777,7 @@ async function advanceView(group, key, answers, reached) {
   reached[key] = (await viewStarted(group, key))?.status || 'not_started';
 }
 /** The card says what the server says: each view's status, and a start button exactly where it can start. */
-async function cardMatchesServer(group) {
+async function cardMatchesServerOnce(group) {
   const before = await groupOf(group);
   const card = await cardSlots();
   const after = await groupOf(group);
@@ -2789,6 +2792,15 @@ async function cardMatchesServer(group) {
     }
   }
   return { problems, server: slotsText(after.slots), card: card.map((entry) => `${entry.key}=${entry.status}${entry.start ? '/按钮' : ''}`).join(' ') };
+}
+/** The card re-reads when a task ends, so right after one finished it may lag the server by a few seconds: wait for the two to agree (at most 20 s). */
+async function cardMatchesServer(group) {
+  let read = await cardMatchesServerOnce(group);
+  for (let attempt = 0; attempt < 10 && read.problems.length; attempt += 1) {
+    await page.waitForTimeout(2000);
+    read = await cardMatchesServerOnce(group);
+  }
+  return read;
 }
 const answersText = (answers) => answers.map((answer) => (answer.clicked ? `${answer.key}:${answer.status}${answer.code ? ` ${answer.code}` : ''}` : `${answer.key}:${answer.note || '无按钮'}`)).join(' ');
 const answeredWell = (answers) => answers.every((answer) => !answer.clicked || answer.status === 'dropped' || (answer.status >= 200 && answer.status < 300));
@@ -2864,7 +2876,7 @@ async function itemF629() {
         + `不一致=${JSON.stringify(consistency.problems)} 截图 ${file}`,
     };
   });
-  record('INFO', '#629', 'fake 缺口', 'fake 生图字节很小（平铺色块），生成图作正面时不触发压缩，这里改用上传的噪点大图；压缩耗时（PROD 约 51 秒）fake 也不模拟。见 fake 登记表 openai-images-v1/generated-picture-byte-weight');
+  record('INFO', '#629', 'fake 缺口', 'fake 生图默认字节很小（平铺色块）；要让生成图变重，可经提示词标记 [[fake:picture-bytes:<n>]] 或 fake 控制面全栈体积（见 fake 登记表 openai-images-v1/generated-picture-byte-weight，fake 栈 three-view 场景已覆盖生成的大正面图），这里仍用上传的噪点大图；压缩耗时（PROD 约 51 秒）fake 不模拟，见 openai-images-v1/generated-picture-pixel-entropy');
 }
 
 // #630: the Agent can name the three-view group the person advanced on the card.
