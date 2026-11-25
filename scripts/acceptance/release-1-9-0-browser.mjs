@@ -12,11 +12,18 @@
 //     #548  设置弹窗 Skills 页：名称加要求「生成」草稿，逐项改后保存；列表显示说明，派生说明标「建议补写」；
 //           编辑时各字段分别保存；删除。
 //     #548  对话里要三视图，助手消息出现「本轮使用 Skill」标记，刷新后仍在。
+//   第三批（#593、#591、三视图/四视图不强制先有图）
+//     N1  详情里「插入到画布」/「在舞台中打开」在预览正下方（预览 → 按钮 → 信息行，不在底部动作行），2D 与 3D 各一次。
+//     N2  版本条 2D 瓦片双击把图插回画布（单击仍只查看）；3D 瓦片双击不插入；裁图瓦片双击能插入。
+//     N3  瓦片下的「详情」是按钮，宽度等于瓦片宽度（±2px）。
+//     N4  输入框上方的图片芯片是 68px 宽、高大于宽的竖排卡片（缩略图在上、徽标在下、× 在右上），不随输入框拉伸。
+//     N5  聊天栏最窄 440、最宽 640；窄栏下结果卡「选用」「不要这个」不重叠。
+//     N6  手选「四视图」「三视图」后不给图直接发送：不弹“需要一张图”，消息发出。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,559,587,560,548-skill,548-chip  只跑其中几项（默认全部）
+//   R190_ITEMS=586,559,587,560,548-skill,548-chip,n1,…,n6  只跑其中几项（默认全部）
 //   R190_REQUIRE_BATCH2=1  目标环境缺批次 2 能力时记 FAIL 而不是 SKIP（批次 2 部署后用）
 //   OUT=<目录>  截图与 results.json 的位置（默认系统临时目录 plinth-acceptance-r190-*，不要写进仓库）
 //   PLAYWRIGHT_MODULE_PATH  Playwright 的位置（工作树没有 node_modules 时指向主检出的 node_modules/playwright）
@@ -26,6 +33,7 @@
 //   会话 B：上传一张 256x192 的双色 PNG，一轮 fake crop_image_regions 从中裁出左右两块（Agent 裁图）。
 //   会话 C：空会话，只用来看设置弹窗（会在该会话上选一次 2D 模型）。
 //   会话 D（批次 2）：一轮 fake use_skill 三视图。个人 Skill r190-*（结束时删除）。
+//   N6：两个空会话，各手选一个系统 Skill 后发一条文字（fake 对话模型只回文字）。N4/N5 会拖动聊天栏宽度，结束时拖回最窄。
 // 目标环境不是 fake 上游形态（ART_AI_UPSTREAM_SHAPE!=fake）时拒绝运行（退出码 2），不会发起真实生成。
 // 不打印口令、Cookie 或签名 URL。最后一行输出 `PASS=n FAIL=n SKIP=n`；有 FAIL 时退出码 1。
 import fs from 'node:fs';
@@ -45,7 +53,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -704,8 +712,286 @@ async function item548Chip() {
   });
 }
 
+// ---------------------------------------------------------------- N1–N6（#593、#591 与三视图/四视图不强制先有图）
+const boxOf = async (locator) => {
+  const found = await locator.boundingBox();
+  if (!found) throw new Error('element has no bounding box (not rendered)');
+  return found;
+};
+const round = (b) => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`;
+const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+const layerRow = (label) => tid('layer-row').filter({ hasText: new RegExp(`^\\s*${label}\\s*$`) }).first();
+async function removeLayer(label) {
+  const row = layerRow(label);
+  await row.hover();
+  await row.getByRole('button', { name: await text('ui.canvas.action.delete') }).click();
+  await page.waitForTimeout(1500);
+}
+const tileThumb = (key) => tileOf(key).locator('button').first();
+const chatHandle = () => tid('chat-resize-handle').first();
+async function dragChat(dx) {
+  const handle = await boxOf(chatHandle());
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+}
+const chatWidth = async () => ({
+  column: Math.round((await boxOf(tid('studio-chat-column').first())).width),
+  value: Number(await chatHandle().getAttribute('aria-valuenow')),
+});
+
+async function itemN1() {
+  const seed = await seedSessionA();
+  await openSession(seed.sid);
+  // DOM order inside the detail: preview → place row (the button) → info rows; the button is not in the action row.
+  const layout = async () => {
+    const order = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid=result-detail]');
+      const q = (id) => root?.querySelector(`[data-testid=${id}]`) || null;
+      const preview = q('result-detail-preview');
+      const button = q('result-detail-open-canvas');
+      const rows = q('result-detail-rows');
+      const actions = q('result-detail-actions');
+      const before = (a, b) => Boolean(a && b && !a.contains(b) && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        found: { preview: Boolean(preview), button: Boolean(button), rows: Boolean(rows) },
+        previewThenButton: before(preview, button),
+        buttonThenRows: before(button, rows),
+        inActions: Boolean(actions && button && actions.contains(button)),
+        label: button?.innerText.trim() || '',
+      };
+    });
+    const preview = await boxOf(tid('result-detail-preview').first());
+    const button = await boxOf(tid('result-detail-open-canvas').first());
+    const rows = await boxOf(tid('result-detail-rows').first());
+    const centre = button.x + button.width / 2;
+    const geometry = button.y >= preview.y + preview.height - 2 && button.y - (preview.y + preview.height) < 80
+      && centre > preview.x && centre < preview.x + preview.width && rows.y >= button.y + button.height - 2;
+    return { ...order, geometry, boxes: `预览 ${round(preview)} 按钮 ${round(button)} 信息行 ${round(rows)}` };
+  };
+  for (const [kind, key, want] of [['2D', `n:${seed.second}`, 'ui.result.detail.open_canvas'], ['3D', `n:${seed.model}`, 'ui.result.detail.open_stage']]) {
+    await check('N1', `${kind} 详情：按钮在预览正下方（预览 → 按钮 → 信息行，不在底部动作行）`, async () => {
+      if (kind === '3D' && !seed.model) return { ok: false, detail: 'fake 3D 任务没有成功' };
+      await tileOf(key).locator('[data-testid=version-detail]').click();
+      await tid('result-detail-open-canvas').first().waitFor({ timeout: 10000 });
+      await page.waitForTimeout(800);
+      const found = await layout();
+      const label = await text(want);
+      const file = await shot('N1', `detail-${kind}`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+      return {
+        ok: found.label === label && found.previewThenButton && found.buttonThenRows && !found.inActions && found.geometry,
+        detail: `按钮「${found.label}」 预览→按钮=${found.previewThenButton} 按钮→信息行=${found.buttonThenRows} 在动作行=${found.inActions} 位置正下方=${found.geometry} ${found.boxes} 截图 ${file}`,
+      };
+    });
+  }
+}
+
+async function itemN2() {
+  const seed = await seedSessionA();
+  await openSession(seed.sid);
+  const label = (seed.handles[seed.second] || '@img2').replace(/^@/, '');
+  const count = async (name) => (await layerNames()).filter((item) => item === name).length;
+  await check('N2', '2D 瓦片：单击只查看，双击把已删出画布的图插回画布', async () => {
+    if (!await count(label)) await tileThumb(`n:${seed.second}`).dblclick();
+    await page.waitForTimeout(1500);
+    if (await count(label)) await removeLayer(label);
+    const removed = await layerNames();
+    await tileThumb(`n:${seed.second}`).click();
+    await page.waitForTimeout(1800);
+    const afterClick = await layerNames();
+    await tileThumb(`n:${seed.second}`).dblclick();
+    await page.waitForTimeout(2500);
+    const afterDouble = await layerNames();
+    const file = await shot('N2', 'double-click-2d');
+    return {
+      ok: !removed.includes(label) && !afterClick.includes(label) && afterDouble.filter((item) => item === label).length === 1,
+      detail: `删除后=${JSON.stringify(removed)} 单击后=${JSON.stringify(afterClick)} 双击后=${JSON.stringify(afterDouble)} 截图 ${file}`,
+    };
+  });
+  await check('N2', '3D 瓦片双击不往画布插入', async () => {
+    if (!seed.model) return { ok: false, detail: 'fake 3D 任务没有成功' };
+    const before = await layerNames();
+    await tileThumb(`n:${seed.model}`).dblclick();
+    await page.waitForTimeout(2500);
+    const stage = await stageVersion();
+    const fileStage = await shot('N2', 'double-click-3d');
+    // The 3D stage hides the layers panel: read the board again from a 2D version (a view-only click).
+    await tileThumb(`n:${seed.first}`).click();
+    await page.waitForTimeout(2000);
+    const after = await layerNames();
+    return { ok: /3D/.test(stage) && JSON.stringify(after) === JSON.stringify(before), detail: `舞台「${stage}」 图层前=${JSON.stringify(before)} 后=${JSON.stringify(after)} 截图 ${fileStage}` };
+  });
+  const crops = await seedSessionB();
+  await openSession(crops.sid);
+  const crop = crops.crops[0];
+  const cropLabel = crop.handle.replace(/^@/, '');
+  await check('N2', '裁图瓦片双击能插入画布', async () => {
+    if (await count(cropLabel)) await removeLayer(cropLabel);
+    const before = await layerNames();
+    await tileThumb(`u:${crop.asset}`).click();
+    await page.waitForTimeout(1800);
+    const afterClick = await layerNames();
+    await tileThumb(`u:${crop.asset}`).dblclick();
+    await page.waitForTimeout(2500);
+    const after = await layerNames();
+    const file = await shot('N2', 'double-click-crop');
+    return {
+      ok: !before.includes(cropLabel) && !afterClick.includes(cropLabel) && after.includes(cropLabel),
+      detail: `@${cropLabel}：插入前=${JSON.stringify(before)} 单击后=${JSON.stringify(afterClick)} 双击后=${JSON.stringify(after)} 截图 ${file}`,
+    };
+  });
+}
+
+async function itemN3() {
+  const sessions = [['会话 A（2D/3D）', (await seedSessionA()).sid], ['会话 B（上传/裁图）', (await seedSessionB()).sid]];
+  for (const [name, sid] of sessions) {
+    await check('N3', `${name}：瓦片下的「详情」是按钮，宽度等于瓦片宽度（±2px）`, async () => {
+      await openSession(sid);
+      const tiles = tid('version-tile');
+      const total = await tiles.count();
+      const rows = [];
+      for (let index = 0; index < total; index += 1) {
+        const tile = tiles.nth(index);
+        const detail = tile.locator('[data-testid=version-detail]');
+        if (!await detail.count()) { rows.push({ key: await tile.getAttribute('data-key'), missing: true }); continue; }
+        const tileBox = await boxOf(tile);
+        const detailBox = await boxOf(detail);
+        rows.push({
+          key: await tile.getAttribute('data-key'),
+          tag: await detail.evaluate((node) => node.tagName),
+          tile: Math.round(tileBox.width), detail: Math.round(detailBox.width),
+        });
+      }
+      const file = await shot('N3', `detail-width-${sid.slice(-6)}`);
+      const bad = rows.filter((row) => row.missing || row.tag !== 'BUTTON' || Math.abs(row.tile - row.detail) > 2);
+      return { ok: total > 0 && bad.length === 0, detail: `${JSON.stringify(rows.map((row) => row.missing ? `${row.key}:无详情` : `${row.tag} 瓦片${row.tile}/详情${row.detail}`))} 截图 ${file}` };
+    });
+  }
+}
+
+async function itemN4() {
+  const seed = await seedSessionA();
+  await openSession(seed.sid);
+  await check('N4', '输入框上方的图片芯片是固定宽高的竖排卡片，宽度不随输入框拉伸', async () => {
+    const chip = tid('composer-object-chip').first();
+    await chip.waitFor({ timeout: 15000 });
+    const measure = async () => {
+      const card = await boxOf(chip);
+      const thumb = await boxOf(chip.locator('img').first());
+      const badge = await boxOf(chip.locator('[data-testid=kind-badge]').first());
+      const remove = await boxOf(chip.locator('[data-testid=chip-card-remove]').first());
+      const composer = await boxOf(tid('studio-composer').first());
+      return { card, thumb, badge, remove, composer };
+    };
+    const narrow = await measure();
+    await dragChat(400);
+    const wide = await measure();
+    const fileWide = await shot('N4', 'chip-wide-composer');
+    await dragChat(-600);
+    const { card, thumb, badge, remove } = narrow;
+    const shape = Math.abs(card.width - 68) <= 2 && card.height > card.width;
+    const stacked = thumb.y + thumb.height <= badge.y + 1 && thumb.y < badge.y;
+    const corner = remove.x + remove.width >= card.x + card.width - 8 && remove.y <= card.y + 8 && remove.x > card.x + card.width / 2;
+    const fixed = Math.abs(wide.card.width - card.width) <= 1 && wide.composer.width > narrow.composer.width + 50;
+    const file = await shot('N4', 'chip');
+    return {
+      ok: shape && stacked && corner && fixed,
+      detail: `卡片 ${round(card)} 缩略图 ${round(thumb)} 徽标 ${round(badge)} × ${round(remove)}；竖排=${stacked} ×在右上=${corner}；`
+        + `输入框 ${Math.round(narrow.composer.width)}→${Math.round(wide.composer.width)}px 时卡片宽 ${Math.round(card.width)}→${Math.round(wide.card.width)}px 截图 ${file} ${fileWide}`,
+    };
+  });
+}
+
+async function itemN5() {
+  const seed = await seedSessionA();
+  const crops = await seedSessionB();
+  await openSession(crops.sid);
+  await check('N5', '聊天栏拖到最窄宽度 ≥ 440（最宽 ≤ 640）', async () => {
+    await dragChat(500);
+    const widest = await chatWidth();
+    await dragChat(-800);
+    const narrowest = await chatWidth();
+    const file = await shot('N5', 'chat-narrowest');
+    return {
+      ok: narrowest.column >= 439 && narrowest.value >= 440 && widest.value <= 640 && widest.value > narrowest.value,
+      detail: `最窄：栏宽 ${narrowest.column}px aria-valuenow=${narrowest.value}；最宽：栏宽 ${widest.column}px aria-valuenow=${widest.value} 截图 ${file}`,
+    };
+  });
+  for (const [name, sid] of [['裁图卡（两张候选）', crops.sid], ['生成结果卡', seed.sid]]) {
+    await check('N5', `窄栏下${name}的「选用」「不要这个」不重叠`, async () => {
+      if (sid !== crops.sid) await openSession(sid);
+      if ((await chatWidth()).value > 441) await dragChat(-800);
+      const cards = tid('chat-image-result');
+      const total = await cards.count();
+      const pairs = [];
+      for (let index = 0; index < total; index += 1) {
+        const picks = cards.nth(index).locator('[data-testid=candidate-pick]');
+        const rejects = cards.nth(index).locator('[data-testid=candidate-reject]');
+        const n = Math.min(await picks.count(), await rejects.count());
+        for (let item = 0; item < n; item += 1) {
+          const pick = await boxOf(picks.nth(item));
+          const reject = await boxOf(rejects.nth(item));
+          pairs.push({ pick: round(pick), reject: round(reject), overlap: intersects(pick, reject) });
+        }
+      }
+      await cards.last().scrollIntoViewIfNeeded().catch(() => {});
+      const file = await shot('N5', `buttons-${sid.slice(-6)}`);
+      return { ok: pairs.length > 0 && pairs.every((pair) => !pair.overlap), detail: `栏宽 ${(await chatWidth()).column}px 按钮对=${JSON.stringify(pairs)} 截图 ${file}` };
+    });
+  }
+}
+
+async function itemN6() {
+  for (const skill of ['四视图', '三视图']) {
+    await check('N6', `手选「${skill}」、不给图直接发送：不弹“需要一张图”，消息发出`, async () => {
+      const sid = await createSession(`${tag} 手选${skill}`);
+      await openSession(sid);
+      const pictures = await page.locator('[data-testid=composer-object-chip],[data-testid=composer-attachment-chip]').count();
+      await openSettings('skills');
+      await tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]', { hasText: skill }).first().click();
+      await page.waitForTimeout(1000);
+      await closeSettings();
+      const chip = (await tid('composer-skill-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      // Record every toast that shows up from here on (sonner removes them after a few seconds).
+      await page.evaluate(() => {
+        window.__r190Toasts = [];
+        new MutationObserver(() => {
+          for (const toast of document.querySelectorAll('[data-sonner-toast]')) {
+            const value = toast.innerText.trim();
+            if (value && !window.__r190Toasts.includes(value)) window.__r190Toasts.push(value);
+          }
+        }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      });
+      const content = `${tag} 做一个木头小人的${skill}`;
+      await page.locator('[data-testid=studio-composer] textarea').first().fill(content);
+      const posted = page.waitForResponse((response) => response.url().includes(`/api/chat/sessions/${sid}/messages`) && response.request().method() === 'POST', { timeout: 20000 }).catch(() => null);
+      await tid('composer-send').first().click();
+      const response = await posted;
+      const shown = await waitFor(async () => (await tid('chat-message').filter({ hasText: content }).count()) > 0, 30);
+      await page.waitForTimeout(1500);
+      const toasts = await page.evaluate(() => window.__r190Toasts || []);
+      const stored = (await messagesOf(sid)).some((message) => message.role === 'user' && String(message.content || '').includes(content));
+      const file = await shot('N6', `send-${skill}`);
+      const blocked = toasts.filter((item) => /需要一张图/.test(item));
+      return {
+        ok: pictures === 0 && chip.includes(skill) && [200, 201, 202].includes(response?.status()) && Boolean(shown) && stored && blocked.length === 0,
+        detail: `输入区图片=${pictures} Skill 芯片「${chip}」 POST HTTP ${response ? response.status() : '无请求'} 对话里显示=${Boolean(shown)} 服务端存了=${stored} toast=${JSON.stringify(toasts)} 截图 ${file}`,
+      };
+    });
+  }
+}
+
 // ---------------------------------------------------------------- run
-const runners = { 586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip };
+const runners = {
+  586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
+  n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5, n6: itemN6,
+};
 try {
   for (const item of ITEMS) {
     const runner = runners[item];
