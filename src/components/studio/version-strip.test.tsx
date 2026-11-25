@@ -16,7 +16,7 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({
 vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session', messagesBySession: { session: state.messages } }) }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (selector: any) => selector({ currentObject: state.object }) }));
 vi.mock('@/store/studio-store', () => ({ useStudioStore: (selector: any) => selector({ compare: state.compare, setAllOutputsOpen: vi.fn() }) }));
-// The popovers render in place, so a static render shows what an open 「全部」 lists.
+// The popovers render in place, so a static render shows what an open 「更多」 lists.
 vi.mock('@base-ui/react/popover', () => {
   const pass = ({ children }: { children?: ReactNode }) => children;
   const element = (tag: string) => ({ children, positionMethod: _p, side: _s, align: _a, sideOffset: _o, collisionPadding: _c, ...props }: Record<string, any>) => React.createElement(tag, props, children);
@@ -146,13 +146,13 @@ describe('output strip navigation and details', () => {
   const foldList = (html: string) => html.slice(html.indexOf('data-testid="version-fold-list"'));
   const primaries = () => state.buttons.filter((button) => button.props['data-shortcut-arrows']);
   const details = () => state.buttons.filter((button) => button.props['data-testid'] === 'version-detail');
-  it.each([3, 4, 8])('folds %i results of one step into the first one and 「全部」, which lists every one of them in order (#596)', (count) => {
+  it.each([3, 4, 8])('folds %i results of one step into the first one and 「更多」, which lists every one of them in order (#596)', (count) => {
     state.tiles = siblings(count);
     const html = renderToStaticMarkup(<VersionStrip />);
     const strip = html.slice(0, html.indexOf('data-testid="version-fold-list"'));
-    // One 50px compact result plus a 32px 「全部」 remains inside the strip; no "+N" count.
+    // One 50px compact result plus a 32px 「更多」 remains inside the strip; no "+N" count.
     expect(keysIn(strip)).toEqual(['n:0']);
-    expect(html).toMatch(/data-testid="version-fold-trigger"[^>]*>全部<\/button>/);
+    expect(html).toMatch(/data-testid="version-fold-trigger"[^>]*>更多<\/button>/);
     expect(html).not.toMatch(/>\+\d+</);
     expect(html).not.toContain('同一来源的其他结果');
     expect(html).toContain('h-[34px]'); expect(html).toContain('h-5'); expect(html).toContain('h-8');
@@ -163,7 +163,7 @@ describe('output strip navigation and details', () => {
   it('references a folded result on a click without swapping the one outside or reordering the list (#596)', () => {
     state.tiles = siblings(4);
     const before = renderToStaticMarkup(<VersionStrip />);
-    // The list is [n:0 outside, then n:0..n:3 inside 「全部」]: a click on n:2 references it, stage only.
+    // The list is [n:0 outside, then n:0..n:3 inside 「更多」]: a click on n:2 references it, stage only.
     primaries()[3].props.onClick(click);
     expect(state.stage).toHaveBeenCalledTimes(1);
     expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't2', assetId: 'a2', via: 'view' }));
@@ -186,7 +186,7 @@ describe('output strip navigation and details', () => {
     details()[2].props.onClick(click);
     expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't1', assetId: 'a1' }));
   });
-  it('shows both of two results of one step, with no 「全部」', () => {
+  it('shows both of two results of one step, with no 「更多」', () => {
     state.tiles = siblings(2);
     const html = renderToStaticMarkup(<VersionStrip />);
     expect(keysIn(html)).toEqual(['n:0', 'n:1']);

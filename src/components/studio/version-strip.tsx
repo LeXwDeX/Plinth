@@ -547,7 +547,7 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
  * 用连接线说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。来源不是紧挨着的前一格时，
  * 连接下写出来源名；用多张图做成的结果（多视图 3D）列出全部来源，不挑其中一张。点一格就是把它放上
  * 舞台、成为当前对象，输入框上方的引用随之换成它（#559：不放上画布；放上画布在详情里点「插入到画布」，
- * 或双击 2D 那一格，#593）；时间上相邻的同源结果在一列里叠起来，多了就留第一个、其余收进「全部」，
+ * 或双击 2D 那一格，#593）；时间上相邻的同源结果在一列里叠起来，多了就留第一个、其余收进「更多」，
  * 点哪一个都不改变各格的位置和这一组留在外面的那一个（#596）。
  */
 /** 切换会话、版本链还没到时的占位：几块与缩略图同尺寸的骨架。 */
@@ -718,9 +718,9 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
 }
 
 /**
- * 一组里放不下的结果收在「全部」后面（#596）：弹层列出这一步生成的全部内容（外面那一格也在内），按生成先后排好。
+ * 一组里放不下的结果收在「更多」后面（#596）：弹层列出这一步生成的全部内容（外面那一格也在内），按生成先后排好。
  * 每一项和版本条上的一格一样：单击引用、双击插入画布、「详情」看详情；点哪一项都不改变顺序，也不换外面那一格。
- * 当前对象在收起的部分时，「全部」按钮高亮。
+ * 当前对象在收起的部分时，「更多」按钮高亮。
  */
 function FoldedTiles({ tiles, currentHidden, currentKey, branch, inCompareTile, captionOf, sessionId, onOpen }: {
   /** Every result of the column, in the order they were made. */
