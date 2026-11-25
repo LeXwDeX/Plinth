@@ -9,10 +9,16 @@ import { schemaText } from '@/lib/product-schema';
 import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { groupsAreActive, remainingSlots, slotAction, slotReplaceable, viewLabelOfTask, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
+import { createLineageRefreshGate, type LineageWatch } from '@/lib/workspace/lineage-refresh';
 import type { CanvasNode } from '@/store/canvas-store';
 import { useChatStore } from '@/store/chat-store';
+import { useStudioStore } from '@/store/studio-store';
+import { useWorkspaceStore } from '@/store/workspace-store';
 
 const NONE: ThreeViewGroup[] = [];
+
+/** The gate every useThreeViews consumer shares, so one change asks for one read (as for the version chain). */
+const claimThreeViewRefresh = createLineageRefreshGate();
 
 /**
  * The session's three-view groups. They are read from the server's projection and
@@ -34,6 +40,27 @@ export function useThreeViews() {
       refreshInterval: (latest) => (groupsAreActive(latest) ? schema.chat.frontend.fallback_poll_milliseconds : 0),
     },
   );
+  // #618: a group is made by a turn (or a step approved after it), not by this page, so with no group in flight
+  // nothing above reads again. The changes that can make or move one are read once more: the session's turn
+  // starting or ending, a tracked Task of it registered or settling, and the studio's versions bump (an approval).
+  const revision = useStudioStore((state) => state.versionsRevision);
+  const turnRunning = useChatStore((state) => Boolean(sessionId && (state.streamingBuffers[sessionId]
+    || state.messagesBySession[sessionId]?.some((message) => message.isPending))));
+  const runningTasks = useWorkspaceStore((state) => state.trackedTasks
+    .filter((task) => task.sessionId === sessionId && !task.terminal)
+    .map((task) => task.taskId).sort().join(','));
+  const watched = useRef<LineageWatch | null>(null);
+  useEffect(() => {
+    if (!enabled || !sessionId) {
+      watched.current = null;
+      return;
+    }
+    const previous = watched.current;
+    const next: LineageWatch = { sessionId, signature: `${revision}|${turnRunning ? 1 : 0}|${runningTasks}` };
+    watched.current = next;
+    // Every consumer sees the change; one asks (an open is read by SWR itself, deduplicated).
+    if (claimThreeViewRefresh(previous, next)) void mutate();
+  }, [enabled, sessionId, revision, turnRunning, runningTasks, mutate]);
   const [busy, setBusy] = useState<string | null>(null);
   /** `${runId}:${slotKey}` of views waiting for a free admission slot; they resubmit on their own. */
   const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set());
