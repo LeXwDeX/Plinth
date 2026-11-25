@@ -3,7 +3,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
-import { PersonalSkillInvalid, PersonalSkillNotFound } from '@/lib/personal-skills';
+import { PersonalSkillInvalid, PersonalSkillNotFound, SkillDraftQuotaExhausted } from '@/lib/personal-skills';
 import { SkillCreator, type SkillEditTarget } from './skill-creator';
 
 vi.mock('@/components/product-schema-provider', async () => {
@@ -122,7 +122,7 @@ describe('SkillCreator create mode (#548: name and requirement, then review)', (
     fireEvent.change(screen.getByLabelText(label('requirement')), { target: { value: '角色设定图用柔和水彩' } });
     fireEvent.click(screen.getByTestId('skill-generate'));
     await waitFor(() => expect((screen.getByLabelText(label('slug')) as HTMLInputElement).value).toBe('soft-watercolor'));
-    expect(draftPersonalSkill.mock.calls[0][1]).toEqual({ name: '水彩角色', requirement: '角色设定图用柔和水彩' });
+    expect(draftPersonalSkill.mock.calls[0][1]).toEqual({ name: '水彩角色', requirement: '角色设定图用柔和水彩', session_id: 'session-1' });
     expect(createPersonalSkill).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(label('description')), { target: { value: '画角色设定图时使用。' } });
     fireEvent.change(screen.getByLabelText(label('apply')), { target: { value: 'instruction' } });
@@ -132,6 +132,16 @@ describe('SkillCreator create mode (#548: name and requirement, then review)', (
       name: '水彩角色', slug: 'soft-watercolor', description: '画角色设定图时使用。', prompt: '柔和水彩。', apply: 'instruction',
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('says the chat model quota is used up instead of a bare failure (#619)', async () => {
+    draftPersonalSkill.mockRejectedValue(new SkillDraftQuotaExhausted('HTTP 503'));
+    renderCreator();
+    fireEvent.change(screen.getByLabelText(label('name')), { target: { value: '水墨' } });
+    fireEvent.change(screen.getByLabelText(label('requirement')), { target: { value: '用水墨' } });
+    fireEvent.click(screen.getByTestId('skill-generate'));
+    expect(label('draft_quota_exhausted')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(label('draft_quota_exhausted')));
   });
 
   it('says once that drafting failed and keeps the write-it-myself way', async () => {

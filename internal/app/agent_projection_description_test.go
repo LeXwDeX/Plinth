@@ -17,7 +17,7 @@ func TestAgentOfferingProjectionCarriesTheSchemaDescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
+	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true, "")
 	var projection struct {
 		Capabilities []struct {
 			Capability string                       `json:"capability"`
@@ -100,7 +100,7 @@ func TestAgentOfferingProjectionIsIdsOnlyByNameAndNarrowsToCapabilityOrModel(t *
 		}
 		return id
 	}
-	slim := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", "", false))
+	slim := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", "", false, ""))
 	if len(slim) == 0 {
 		t.Fatal("the ids-only projection lists no capability")
 	}
@@ -118,7 +118,7 @@ func TestAgentOfferingProjectionIsIdsOnlyByNameAndNarrowsToCapabilityOrModel(t *
 			}
 		}
 	}
-	detail := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", "", true))
+	detail := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", "", true, ""))
 	if len(detail) == 0 {
 		t.Fatal("the detailed projection lists no capability")
 	}
@@ -127,7 +127,7 @@ func TestAgentOfferingProjectionIsIdsOnlyByNameAndNarrowsToCapabilityOrModel(t *
 	// Schema declares it and omit it where the Schema declares none (#130).
 	// text-to-3d declares no description on any of its offerings, so it cannot
 	// stand for "the detail is complete"; #382 picked it by mistake.
-	one := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "remesh", "", true))
+	one := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "remesh", "", true, ""))
 	if len(one) != 1 || one[0].Capability != "remesh" || len(one[0].Offerings) == 0 {
 		t.Fatalf("capability filter = %+v", one)
 	}
@@ -168,7 +168,7 @@ func TestAgentOfferingProjectionIsIdsOnlyByNameAndNarrowsToCapabilityOrModel(t *
 	if chosen == "" {
 		t.Fatal("no model_id to filter on")
 	}
-	filtered := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", chosen, true))
+	filtered := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "", chosen, true, ""))
 	if len(filtered) == 0 {
 		t.Fatalf("model filter %q kept nothing", chosen)
 	}

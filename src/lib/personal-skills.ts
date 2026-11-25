@@ -90,8 +90,14 @@ export async function updatePersonalSkill(schema: ProductSchema, id: string, inp
   return body.skill;
 }
 
-/** 由名称与要求起草一个 Skill（#548）：服务端调一次对话模型，结果不落库。 */
-export async function draftPersonalSkill(schema: ProductSchema, input: { name: string; requirement: string }, signal?: AbortSignal): Promise<PersonalSkillDraft> {
+/** 起草时所用对话模型的额度已用完（#619）：换一个对话模型后可重试。 */
+export class SkillDraftQuotaExhausted extends Error {}
+
+/**
+ * 由名称与要求起草一个 Skill（#548）：服务端调一次对话模型，结果不落库。
+ * session_id 是打开起草的会话，服务端用该会话当前的对话模型（#619）；省略时用默认模型。
+ */
+export async function draftPersonalSkill(schema: ProductSchema, input: { name: string; requirement: string; session_id?: string }, signal?: AbortSignal): Promise<PersonalSkillDraft> {
   const route = sameOriginRoute(schema.chat.skills.creation.draft_route);
   const response = await fetch(route, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -99,6 +105,8 @@ export async function draftPersonalSkill(schema: ProductSchema, input: { name: s
   });
   if (!response.ok) {
     const problem: unknown = await response.json().catch(() => ({}));
+    const code = problem && typeof problem === 'object' ? (problem as { code?: unknown }).code : undefined;
+    if (code === 'skill_draft_quota_exhausted') throw new SkillDraftQuotaExhausted(`HTTP ${response.status}`);
     throw new RequestFailure(`HTTP ${response.status}`, responseRequestId(response, problem));
   }
   const body: { draft?: Partial<PersonalSkillDraft> } = await response.json();

@@ -15,7 +15,7 @@ func TestAgentOfferingsProjectionCarriesOfferingKnowledge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
+	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true, "")
 	var projection struct {
 		Capabilities []struct {
 			Offerings []struct {

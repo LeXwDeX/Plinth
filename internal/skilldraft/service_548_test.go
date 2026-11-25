@@ -35,7 +35,12 @@ func drafter(t *testing.T, agent agents.Adapter) (*skilldraft.Service, catalog.C
 	chat := product.Application().Chat
 	service, err := skilldraft.New(skilldraft.Config{
 		Chat: chat, Agent: agent, MaxPromptCharacters: 50,
-		Model: func(context.Context) (string, string, error) { return "default-connection", "default-model", nil },
+		Model: func(_ context.Context, _, sessionID string) (string, string, error) {
+			if sessionID == "session-qwen" {
+				return "QWEN", "qwen-max", nil
+			}
+			return "default-connection", "default-model", nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,5 +140,23 @@ func TestDraftRefusesEmptyInputAndReportsModelFailure(t *testing.T) {
 	}
 	if _, err := service.Draft(context.Background(), skilldraft.Request{Name: "n", Requirement: "r"}); err == nil || len(agent.requests) != 1 {
 		t.Fatalf("err = %v, completions = %d", err, len(agent.requests))
+	}
+}
+
+// #619: a draft opened from a session runs on that session's chat model: the
+// owner and the session reach the model source, and the request goes to the
+// connection it names. A used-up quota stays recognizable to the caller.
+func TestDraftRunsOnTheSessionChatModel(t *testing.T) {
+	agent := &recordingAgent{completion: agents.Completion{Content: `{"slug":"a","description":"说明。","prompt":"正文。","apply":"instruction"}`}}
+	service, _ := drafter(t, agent)
+	if _, err := service.Draft(context.Background(), skilldraft.Request{Name: "n", Requirement: "r", OwnerID: "owner-a", SessionID: "session-qwen"}); err != nil {
+		t.Fatal(err)
+	}
+	if request := agent.requests[len(agent.requests)-1]; request.Connection != "QWEN" || request.Model != "qwen-max" {
+		t.Fatalf("draft request = connection %q model %q", request.Connection, request.Model)
+	}
+	agent.err = errors.Join(&agents.QuotaExhaustion{Class: "insufficient_balance"}, errors.New("HTTP 429"))
+	if _, err := service.Draft(context.Background(), skilldraft.Request{Name: "n", Requirement: "r", OwnerID: "owner-a"}); !errors.Is(err, agents.ErrQuotaExhausted) {
+		t.Fatalf("quota error = %v", err)
 	}
 }

@@ -110,13 +110,23 @@ func callSkillFrom(ctx context.Context) *callSkill {
 }
 
 // skillUnsupported is the readable refusal of an Agent style Skill on an
-// Offering without the Skill feature. The person's own pick keeps its
-// existing answer.
-func (executor *Executor) skillUnsupported(skill callSkill) string {
+// Offering without the Skill feature, followed by the models of the call's
+// capability that can apply it (#620), or the Schema's answer that none can.
+// The person's own pick keeps its existing answer.
+func (executor *Executor) skillUnsupported(skill callSkill, capability generation.Capability) string {
 	if skill.Used == nil || skill.Used.Source != "agent" {
 		return ""
 	}
-	return strings.ReplaceAll(executor.chat.Skills.Directory.Messages.Unsupported, "{name}", skill.Used.DisplayName)
+	directory := executor.chat.Skills.Directory
+	var models []string
+	if executor.gateway != nil {
+		models = chat.StyleSkillModels(executor.availableOfferings(capability), executor.chat.Skills.Feature, nil)
+	}
+	refusal := strings.ReplaceAll(directory.Messages.Unsupported, "{name}", skill.Used.DisplayName)
+	if line := directory.StyleModelsText(models); line != "" {
+		refusal += " " + line
+	}
+	return refusal
 }
 
 // attachCallSkill records the call's Skill on its result: the note for the
