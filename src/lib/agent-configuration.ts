@@ -12,6 +12,10 @@ export interface AgentSkillConfiguration {
   prompt: string;
   image_to_image_template?: string;
   tags?: string[];
+  /** #548：标准名称、说明与生效方式（个人 Skill 才写）。 */
+  slug?: string;
+  description?: string;
+  apply?: string;
 }
 export interface AgentConfiguration {
   /** Read-only: the prompts ship with the Product Schema and are never submitted (#554). */

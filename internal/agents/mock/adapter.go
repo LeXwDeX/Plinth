@@ -176,6 +176,9 @@ func (adapter *Adapter) stream(
 		if len(calls) == 0 {
 			calls = []plannedCall{{name: adapter.toolName, arguments: map[string]any{adapter.promptArgument: prompt}}}
 		}
+		if !answered {
+			calls = adapter.withSkillCalls(request, prompt, calls)
+		}
 		for index, call := range calls {
 			calls[index] = adapter.harnessCall(request, call, prompt)
 		}
@@ -431,6 +434,11 @@ func (adapter *Adapter) Complete(
 	}
 	if request.Purpose == agents.PurposeSummary {
 		return adapter.summarize(request)
+	}
+	if request.Purpose == agents.PurposeSkillDraft {
+		completion := agents.Completion{Content: skillDraft(adapter.latestUserContent(request.Messages))}
+		completion.Usage = adapter.usage(request, completion)
+		return completion, nil
 	}
 	content := adapter.latestUserContent(request.Messages)
 	if content == "" {

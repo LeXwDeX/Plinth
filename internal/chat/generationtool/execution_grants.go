@@ -142,6 +142,7 @@ func (executor *Executor) prepareAgentOperation(
 		OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 		Capability: capability, OfferingID: offering.ID, Input: input, ParameterReasons: reasons,
 		ParameterSources: sources, ModelChoice: approvalModelChoice,
+		SkillChoice: skillChoiceEvidence(*callSkillFrom(ctx)),
 	})
 	if err != nil {
 		// An input the Schema refuses (a count out of range, extra credits over

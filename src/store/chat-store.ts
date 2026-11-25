@@ -38,6 +38,15 @@ export interface ChatToolCall {
   summary?: unknown;
 }
 
+/** #548: one Skill an assistant reply used: picked by the person for the turn, or chosen by the Agent. */
+export interface ChatUsedSkill {
+  id: string;
+  displayName: string;
+  source: 'user' | 'agent';
+  /** False when the Skill the call named did not take effect (the person's own Skill replaced it). */
+  applied: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -56,6 +65,8 @@ export interface ChatMessage {
   toolCallCount?: number;
   /** 助手消息里的工具调用及其紧凑结果（#103）；用户消息没有。 */
   toolCalls?: ChatToolCall[];
+  /** #548: the Skills this reply used; absent when it used none. */
+  usedSkills?: ChatUsedSkill[];
   createdAt: number;
 }
 

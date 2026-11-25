@@ -18,11 +18,42 @@ var ErrPersonalSkillLimit = errors.New("personal Skill limit reached")
 var ErrInvalidPersonalSkill = errors.New("invalid personal Skill")
 var ErrPersonalSkillNotFound = errors.New("personal Skill not found")
 
+// Personal Skill fields a validation error names (#548), so a client that
+// saves one field at a time can show the error next to it.
+const (
+	PersonalSkillFieldName        = "name"
+	PersonalSkillFieldPrompt      = "prompt"
+	PersonalSkillFieldSlug        = "slug"
+	PersonalSkillFieldDescription = "description"
+	PersonalSkillFieldApply       = "apply"
+)
+
+// PersonalSkillFieldError is an ErrInvalidPersonalSkill that names the field.
+type PersonalSkillFieldError struct{ Field string }
+
+func (e PersonalSkillFieldError) Error() string {
+	return ErrInvalidPersonalSkill.Error() + ": " + e.Field
+}
+
+func (e PersonalSkillFieldError) Unwrap() error { return ErrInvalidPersonalSkill }
+
+// InvalidPersonalSkillField is the field a validation error names, or "".
+func InvalidPersonalSkillField(err error) string {
+	var field PersonalSkillFieldError
+	if errors.As(err, &field) {
+		return field.Field
+	}
+	return ""
+}
+
 // PersonalSkillStore accepts only server-created IDs and scopes every read and
 // write by the authenticated owner. It never changes shared configuration.
 type PersonalSkillStore interface {
 	InsertPersonalSkill(context.Context, string, catalog.SkillSchema, int) error
 	UpdatePersonalSkill(context.Context, string, string, catalog.SkillSchema) error
+	// ModifyPersonalSkill reads the owner's Skill and the owner's other
+	// Skills, applies change and writes the result back in one transaction.
+	ModifyPersonalSkill(ctx context.Context, owner, id string, change func(current catalog.SkillSchema, others []catalog.SkillSchema) (catalog.SkillSchema, error)) (catalog.SkillSchema, error)
 	ListPersonalSkills(context.Context, string) ([]catalog.SkillSchema, error)
 	DeletePersonalSkill(context.Context, string, string) error
 }
@@ -32,6 +63,20 @@ type CreatePersonalSkillInput struct {
 	Prompt          string `json:"prompt"`
 	Category        string `json:"category"`
 	RecommendedSize string `json:"recommended_size"`
+	// Slug, Description and Apply are the standard fields (#548). An empty
+	// slug takes one derived from the new ID; an empty description reads a
+	// derived one; an empty apply reads as a style Skill.
+	Slug        string `json:"slug,omitempty"`
+	Description string `json:"description,omitempty"`
+	Apply       string `json:"apply,omitempty"`
+}
+
+// PatchPersonalSkillInput changes only the members it carries (#548).
+type PatchPersonalSkillInput struct {
+	Name        *string `json:"name,omitempty"`
+	Prompt      *string `json:"prompt,omitempty"`
+	Slug        *string `json:"slug,omitempty"`
+	Description *string `json:"description,omitempty"`
 }
 
 func WithPersonalSkills(store PersonalSkillStore) Option {
@@ -57,8 +102,18 @@ func (s *Service) CreatePersonalSkill(ctx context.Context, owner string, input C
 		ID:   "personal-" + hex.EncodeToString(random[:]),
 		Name: content.Name, Category: content.Category,
 		RecommendedSize: content.RecommendedSize, Prompt: content.Prompt,
+		Slug: content.Slug, Description: content.Description, Apply: content.Apply,
 	}
-	if err := s.validatePersonalSkill(skill); err != nil {
+	// A Skill saved without a slug keeps the one derived from its ID, so the
+	// person sees and can edit the name the Agent's directory lists.
+	if skill.Slug == "" {
+		skill.Slug = catalog.SkillSlug(skill)
+	}
+	others, err := s.personalSkills.ListPersonalSkills(ctx, owner)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if err := s.validatePersonalSkill(skill, others); err != nil {
 		return catalog.SkillSchema{}, err
 	}
 	if err := s.personalSkills.InsertPersonalSkill(ctx, owner, skill, s.schema.AgentConfiguration.Limits.MaxSkillCount); err != nil {
@@ -82,14 +137,62 @@ func (s *Service) UpdatePersonalSkill(ctx context.Context, owner, id string, inp
 		ID:   id,
 		Name: content.Name, Category: content.Category,
 		RecommendedSize: content.RecommendedSize, Prompt: content.Prompt,
+		Slug: content.Slug, Description: content.Description, Apply: content.Apply,
 	}
-	if err := s.validatePersonalSkill(skill); err != nil {
-		return catalog.SkillSchema{}, err
+	if skill.Slug == "" {
+		skill.Slug = catalog.SkillSlug(skill)
 	}
-	if err := s.personalSkills.UpdatePersonalSkill(ctx, owner, id, skill); err != nil {
-		return catalog.SkillSchema{}, err
+	return s.personalSkills.ModifyPersonalSkill(ctx, owner, id, func(_ catalog.SkillSchema, others []catalog.SkillSchema) (catalog.SkillSchema, error) {
+		if err := s.validatePersonalSkill(skill, others); err != nil {
+			return catalog.SkillSchema{}, err
+		}
+		return skill, nil
+	})
+}
+
+// PatchPersonalSkill changes only the given members of the owner's Skill
+// (#548): the stored Skill is read, merged and checked by the same validator
+// as creation, and written back in one transaction. Only later turns see the
+// change; a turn in flight keeps its frozen copy.
+func (s *Service) PatchPersonalSkill(ctx context.Context, owner, id string, input PatchPersonalSkillInput) (catalog.SkillSchema, error) {
+	if s.personalSkills == nil || strings.TrimSpace(owner) == "" || !validPersonalSkillID(id) {
+		return catalog.SkillSchema{}, ErrPersonalSkillNotFound
 	}
-	return skill, nil
+	return s.personalSkills.ModifyPersonalSkill(ctx, owner, id, func(current catalog.SkillSchema, others []catalog.SkillSchema) (catalog.SkillSchema, error) {
+		next := current
+		if input.Name != nil {
+			next.Name = *input.Name
+		}
+		if input.Prompt != nil {
+			next.Prompt = *input.Prompt
+		}
+		if input.Description != nil {
+			next.Description = strings.TrimSpace(*input.Description)
+			// Clearing it would bring the derived text back silently: the
+			// standard requires a description, so an explicit one is kept.
+			if next.Description == "" {
+				return catalog.SkillSchema{}, PersonalSkillFieldError{PersonalSkillFieldDescription}
+			}
+		}
+		if input.Slug != nil {
+			next.Slug = strings.TrimSpace(*input.Slug)
+			if next.Slug == "" {
+				next.Slug = catalog.SkillSlug(catalog.SkillSchema{ID: id})
+			}
+		}
+		content, err := s.personalSkillContent(CreatePersonalSkillInput{
+			Name: next.Name, Prompt: next.Prompt, Category: next.Category, RecommendedSize: next.RecommendedSize,
+			Slug: next.Slug, Description: next.Description, Apply: next.Apply,
+		})
+		if err != nil {
+			return catalog.SkillSchema{}, err
+		}
+		next.Name, next.Prompt, next.Slug, next.Description = content.Name, content.Prompt, content.Slug, content.Description
+		if err := s.validatePersonalSkill(next, others); err != nil {
+			return catalog.SkillSchema{}, err
+		}
+		return next, nil
+	})
 }
 
 // validPersonalSkillID accepts only the IDs the server generates. System and
@@ -109,20 +212,60 @@ func validPersonalSkillID(id string) bool {
 func (s *Service) personalSkillContent(input CreatePersonalSkillInput) (CreatePersonalSkillInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Prompt = strings.TrimSpace(input.Prompt)
-	if input.Name == "" || utf8.RuneCountInString(input.Name) > s.schema.Chat.Skills.Creation.MaxNameCharacters ||
-		input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > s.schema.AgentConfiguration.Limits.MaxSkillPromptCharacters {
-		return CreatePersonalSkillInput{}, fmt.Errorf("%w: name or prompt", ErrInvalidPersonalSkill)
+	input.Slug = strings.TrimSpace(input.Slug)
+	input.Description = strings.TrimSpace(input.Description)
+	input.Apply = strings.TrimSpace(input.Apply)
+	switch {
+	case input.Name == "" || utf8.RuneCountInString(input.Name) > s.schema.Chat.Skills.Creation.MaxNameCharacters:
+		return CreatePersonalSkillInput{}, PersonalSkillFieldError{PersonalSkillFieldName}
+	case input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > s.schema.AgentConfiguration.Limits.MaxSkillPromptCharacters:
+		return CreatePersonalSkillInput{}, PersonalSkillFieldError{PersonalSkillFieldPrompt}
+	case input.Slug != "" && !catalog.ValidSkillSlug(input.Slug):
+		return CreatePersonalSkillInput{}, PersonalSkillFieldError{PersonalSkillFieldSlug}
+	case input.Description != "" && catalog.ValidateSkillDescription(input.Description) != nil:
+		return CreatePersonalSkillInput{}, PersonalSkillFieldError{PersonalSkillFieldDescription}
+	case input.Apply != "" && input.Apply != catalog.SkillApplyGenerationPrompt && input.Apply != catalog.SkillApplyInstruction:
+		return CreatePersonalSkillInput{}, PersonalSkillFieldError{PersonalSkillFieldApply}
 	}
 	return input, nil
 }
 
-func (s *Service) validatePersonalSkill(skill catalog.SkillSchema) error {
+// validatePersonalSkill runs the configuration validator on the Skill and
+// keeps its slug unique among the owner's other Skills (the validator already
+// keeps it off the system Skills' slugs). A stored Skill without a slug takes
+// its derived one here too.
+func (s *Service) validatePersonalSkill(skill catalog.SkillSchema, others []catalog.SkillSchema) error {
+	for _, other := range others {
+		if other.ID != skill.ID && catalog.SkillSlug(other) == catalog.SkillSlug(skill) {
+			return PersonalSkillFieldError{PersonalSkillFieldSlug}
+		}
+	}
 	candidate := clone(s.defaults)
 	candidate.Skills = []catalog.SkillSchema{skill}
 	if err := s.Validate(candidate); err != nil {
+		if strings.Contains(err.Error(), "slug") {
+			return fmt.Errorf("%w: %v", PersonalSkillFieldError{PersonalSkillFieldSlug}, err)
+		}
 		return fmt.Errorf("%w: %v", ErrInvalidPersonalSkill, err)
 	}
 	return nil
+}
+
+// TakenSkillSlugs are the slugs the owner can no longer give a new Skill: the
+// system Skills' and the owner's own (derived ones included).
+func (s *Service) TakenSkillSlugs(ctx context.Context, owner string) (map[string]bool, error) {
+	taken := map[string]bool{}
+	for _, skill := range s.schema.Chat.Skills.SystemSkills {
+		taken[catalog.SkillSlug(skill)] = true
+	}
+	personal, err := s.PersonalSkills(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	for _, skill := range personal {
+		taken[catalog.SkillSlug(skill)] = true
+	}
+	return taken, nil
 }
 
 // DeletePersonalSkill removes the owner's own Skill. System and shared Skills

@@ -173,6 +173,19 @@ func (service *Service) sessionModel(ctx context.Context, chosen string) (ChatMo
 	return option, ChatModelView{Selected: option.ID, Chosen: chosen, Default: set.DefaultID, Fallback: fellBack, Options: options}, nil
 }
 
+// DefaultChatModel is the model a request outside any session runs on (the
+// Skill draft, #548): the same resolution as a session that chose nothing,
+// so the administrator's default model, else the first offered one, else the
+// deployment's model. It returns the connection and the upstream model.
+func (service *Service) DefaultChatModel(ctx context.Context) (connection, model string, err error) {
+	set, err := service.models.Models(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	option, _ := service.models.resolve(set, "")
+	return option.ID, option.Model, nil
+}
+
 // SessionChatModel reads the session's chat model and the models it may use.
 func (service *Service) SessionChatModel(ctx context.Context, ownerID, sessionID string) (ChatModelView, error) {
 	if err := service.requireSession(ctx, ownerID, sessionID); err != nil {

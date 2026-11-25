@@ -1641,6 +1641,25 @@
       "why_not_real": "这些形态没有入库样本（deepseek 的 usage 在 finish_reason 块上是已观测形态），待真实一轮"
     },
     {
+      "id": "openai-v1/chat-skill-draft",
+      "provider": "openai",
+      "api": "v1",
+      "endpoints": [
+        "POST /chat/completions"
+      ],
+      "category": "response-shape",
+      "status": "constructed",
+      "behavior": "#548：最后一条 user 消息带 <<<SKILL_REQUEST>>> 定界（Product Schema chat.skills.authoring.user_template 的形状）时，答一个 Skill 草稿 JSON（slug fake-skill-draft、固定 description、apply instruction、要求原文作正文）；要求里的 [[fake:skill-draft {JSON}]] 可覆盖 slug、description、prompt、apply，用来脚本化不合规 slug、画风型或空正文。",
+      "basis": [
+        {
+          "source": "项目自有的起草提示词形状，非上游契约",
+          "section": "chat.skills.authoring（default_catalog.json）"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "这是 Plinth 自己的请求约定，上游没有对应行为；真实模型的草稿质量按用户决定不做评测"
+    },
+    {
       "id": "openai-v1/chat-image-refusals",
       "provider": "openai",
       "api": "v1",

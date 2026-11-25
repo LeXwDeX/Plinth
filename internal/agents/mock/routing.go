@@ -36,6 +36,7 @@ const (
 	toolAskChoice            = "ask_choice"
 	toolCreativeLabDesign    = "create_creative_lab_design"
 	toolCreativeLabBuild     = "build_creative_lab_item"
+	toolUseSkill             = "use_skill"
 	selectionMarker          = "当前选中对象"
 	sessionNotesOpenMarker   = "<<<SESSION_NOTES>>>"
 	selectedAlias            = "@selected"
@@ -43,11 +44,15 @@ const (
 )
 
 var (
-	imageHandlePattern = regexp.MustCompile(`@img\d+`)
-	modelHandlePattern = regexp.MustCompile(`@model\d+`)
-	rememberPrefix     = regexp.MustCompile(`^[\s，,：:]*(请)?(帮我)?(记住|设定)[\s，,：:]*`)
-	polycountPattern   = regexp.MustCompile(`(\d+)\s*(万)?\s*面`)
-	uploadedPattern    = regexp.MustCompile(`句柄\s*(@img\d+)[：:]\s*用户上传`)
+	// #548: "读 Skill <name>" reads one Skill of the directory with use_skill;
+	// "skill=<name>" passes a style Skill on the 2D generation call.
+	skillReadPattern     = regexp.MustCompile(`读\s*Skill[\s:：]*([a-z0-9][a-z0-9-]*)`)
+	skillArgumentPattern = regexp.MustCompile(`skill=([a-z0-9][a-z0-9-]*)`)
+	imageHandlePattern   = regexp.MustCompile(`@img\d+`)
+	modelHandlePattern   = regexp.MustCompile(`@model\d+`)
+	rememberPrefix       = regexp.MustCompile(`^[\s，,：:]*(请)?(帮我)?(记住|设定)[\s，,：:]*`)
+	polycountPattern     = regexp.MustCompile(`(\d+)\s*(万)?\s*面`)
+	uploadedPattern      = regexp.MustCompile(`句柄\s*(@img\d+)[：:]\s*用户上传`)
 	// 只有明确的编辑动词才把四视角请求当作编辑；“保持/再来/继续”是新的一组。
 	// 多张视角图生成 3D：句中既有 3D 词又有视角词，且手上至少有两张图。
 	viewsTo3DPattern     = regexp.MustCompile(`(?i)(3d|模型|建模)`)
@@ -249,6 +254,37 @@ var seriesProjectPattern = regexp.MustCompile(`同系列|沿用项目|项目风�
 type plannedCall struct {
 	name      string
 	arguments map[string]any
+}
+
+// withSkillCalls follows the routing sentence of the system context (#548): a
+// three-view or four-view request reads the matching Skill with use_skill
+// before create_three_view, in the same round. "读 Skill <name>" reads the
+// named Skill first; "skill=<name>" passes a style Skill on the 2D generation
+// call. Without use_skill offered the calls are unchanged.
+func (adapter *Adapter) withSkillCalls(request agents.Request, text string, calls []plannedCall) []plannedCall {
+	if !adapter.hasTool(request, toolUseSkill) {
+		return calls
+	}
+	if match := skillArgumentPattern.FindStringSubmatch(text); match != nil {
+		for _, call := range calls {
+			if call.name == toolRefineImage || call.name == toolCreateConceptSketch {
+				call.arguments["skill"] = match[1]
+			}
+		}
+	}
+	name := ""
+	if match := skillReadPattern.FindStringSubmatch(text); match != nil {
+		name = match[1]
+	} else if len(calls) > 0 && calls[0].name == toolCreateThreeView {
+		name = "three-view"
+		if strings.Contains(text, "四视图") {
+			name = "four-view"
+		}
+	}
+	if name == "" {
+		return calls
+	}
+	return append([]plannedCall{{name: toolUseSkill, arguments: map[string]any{"name": name}}}, calls...)
 }
 
 // routeCalls 在 route 的基础上把“列了几个变体”的改图请求拆成每个变体一次

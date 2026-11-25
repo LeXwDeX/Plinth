@@ -1726,6 +1726,8 @@ export interface ChatProductSchema {
       tool_arguments: string;
       /** #103: 只读工具结果的紧凑摘要（工具调用上的成员）。 */
       tool_summary?: string;
+      /** #548: the Skills an assistant message used, read from its persisted tool calls. */
+      used_skills?: string;
       message_id: string;
       session_id: string;
       error: string;
@@ -2035,7 +2037,11 @@ export interface ChatProductSchema {
   skills: {
     fields: ChatSkillCatalogFieldsSchema;
     categories: Array<{ id: string; label: string; hidden_capabilities: string[] }>;
-    creation: { route: string; item_route?: string; max_name_characters: number; recommended_size: string };
+    creation: {
+      route: string; item_route?: string; max_name_characters: number; recommended_size: string;
+      /** #548：由名称与要求起草 Skill 的路由（不落库）与要求的字数上限。 */
+      draft_route?: string; max_requirement_characters?: number;
+    };
   };
   presentation: {
     messages: {
@@ -2213,6 +2219,10 @@ export interface ChatSkillCatalogFieldsSchema {
   default_message: string;
   one_shot: string;
   error: string;
+  /** #548：标准名称、说明（未写时为派生）与说明是否为派生。 */
+  slug?: string;
+  description?: string;
+  description_derived?: string;
 }
 
 export interface NavigationItemSchema {

@@ -5007,7 +5007,10 @@ type ChatAPIResponseFields struct {
 	ToolArguments string `json:"tool_arguments"`
 	// ToolSummary is the compact result summary a read-only tool attaches to
 	// its tool call (#103); empty leaves it out.
-	ToolSummary  string `json:"tool_summary,omitempty"`
+	ToolSummary string `json:"tool_summary,omitempty"`
+	// UsedSkills is the assistant message member listing the Skills the turn
+	// used, read from its persisted tool calls (#548); empty leaves it out.
+	UsedSkills   string `json:"used_skills,omitempty"`
 	MessageID    string `json:"message_id"`
 	SessionID    string `json:"session_id"`
 	Error        string `json:"error"`
@@ -6351,6 +6354,9 @@ type ChatToolResultFields struct {
 	// pictures this step actually injected (#240). It is present only when
 	// some project asset was used, so the Agent can cite them as they are.
 	StyleSources string `json:"style_sources,omitempty"`
+	// SkillNote is the optional key of the note that the person's own style
+	// Skill was applied instead of the one the call named (#548).
+	SkillNote string `json:"skill_note,omitempty"`
 	// Parameters is the optional key of the list of model parameters the step
 	// really froze that differ from the Offering's defaults, each with its
 	// label, value and source (#296). An empty list says every parameter is at
@@ -6398,6 +6404,11 @@ type ChatSkillsSchema struct {
 	// StyleSummaryMaxCharacters bounds {summary}: the Skill prompt's first
 	// sentence, cut to this many characters.
 	StyleSummaryMaxCharacters int `json:"style_summary_max_characters,omitempty"`
+	// Directory is the Agent's Skill directory and use_skill contract (#548).
+	Directory ChatSkillDirectorySchema `json:"directory,omitempty"`
+	// Authoring is the server-only prompt that drafts a personal Skill from a
+	// name and a requirement (#548); never projected publicly.
+	Authoring ChatSkillAuthoringSchema `json:"authoring,omitempty"`
 }
 
 type ChatSkillCreationSchema struct {
@@ -6407,6 +6418,12 @@ type ChatSkillCreationSchema struct {
 	ItemRoute         string `json:"item_route,omitempty"`
 	MaxNameCharacters int    `json:"max_name_characters"`
 	RecommendedSize   string `json:"recommended_size"`
+	// DraftRoute drafts a Skill from a name and a requirement with one chat
+	// model call (#548); the draft is not saved. It is Route followed by
+	// "/draft".
+	DraftRoute string `json:"draft_route,omitempty"`
+	// MaxRequirementCharacters bounds the requirement a draft is made from.
+	MaxRequirementCharacters int `json:"max_requirement_characters,omitempty"`
 }
 
 // ChatSkillRecipeSchema is an executable, versioned Skill definition.
@@ -6462,6 +6479,12 @@ type ChatSkillCatalogFields struct {
 	DefaultMessage       string `json:"default_message"`
 	OneShot              string `json:"one_shot"`
 	Error                string `json:"error"`
+	// Slug, Description and DescriptionDerived project the standard name, the
+	// description (derived for a Skill stored without one) and whether it was
+	// derived (#548); empty leaves the member out.
+	Slug               string `json:"slug,omitempty"`
+	Description        string `json:"description,omitempty"`
+	DescriptionDerived string `json:"description_derived,omitempty"`
 }
 
 type ChatSkillCategorySchema struct {

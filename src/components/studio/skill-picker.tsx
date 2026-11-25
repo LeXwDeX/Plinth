@@ -32,7 +32,7 @@ export function skillUnavailableReason(schema: ProductSchema, skill: ChatSkill, 
  * 只有本人的个人 Skill 带删除操作（#238）；“不使用”与系统/共享 Skill 都没有。
  */
 export function skillPickerRows({
-  catalog, effective, personalIds, noneLabel, noneHint, editLabel, deleteLabel, deleting, onEdit, onDelete, notEnabledReason, reasonForSkill,
+  catalog, effective, personalIds, noneLabel, noneHint, editLabel, deleteLabel, deleting, onEdit, onDelete, notEnabledReason, reasonForSkill, derivedLabel,
 }: {
   catalog: ChatSkillCatalog | null;
   effective: AgentEffectiveConfiguration | null;
@@ -47,6 +47,8 @@ export function skillPickerRows({
   /** Why a row the effective configuration leaves out is dimmed (#94); no hint when omitted. */
   notEnabledReason?: string;
   reasonForSkill?: (skill: ChatSkill) => string;
+  /** #548：本人 Skill 的说明是派生的时，在说明后面加这句提示。 */
+  derivedLabel?: string;
 }): TableRow[] {
   return [
     ...(catalog?.skills ?? []).map((skill) => ({
@@ -56,7 +58,9 @@ export function skillPickerRows({
         ? { disabledReason: reasonForSkill?.(skill) ?? notEnabledReason, focusableDisabled: Boolean(reasonForSkill) } : {}),
       cells: [
         { text: skill.displayName, strong: true, kind: 'name' as const },
-        { text: skill.prompt.replace(/\s+/g, ' '), muted: true },
+        // #548：列出说明（description）；没有时退回正文。本人 Skill 的派生说明标出“建议补写”。
+        { text: [ (skill.description ?? skill.prompt).replace(/\s+/g, ' '),
+          skill.descriptionDerived && derivedLabel && personalIds.has(skill.id) ? derivedLabel : '' ].filter(Boolean).join(' · '), muted: true },
         { text: skill.recommendedSize || '—', muted: true },
       ],
       actions: personalIds.has(skill.id)
@@ -158,7 +162,10 @@ export function SkillPicker({
   const edit = (id: string) => {
     const skill = visibleCatalog?.skills.find((item) => item.id === id);
     if (!skill) return;
-    setEditing({ id: skill.id, name: skill.name, prompt: skill.prompt, recommendedSize: skill.recommendedSize });
+    setEditing({
+      id: skill.id, name: skill.name, prompt: skill.prompt, recommendedSize: skill.recommendedSize,
+      slug: skill.slug ?? '', description: skill.description ?? '', descriptionDerived: Boolean(skill.descriptionDerived),
+    });
     setEditingOpen(true);
   };
   const rows = skillPickerRows({
@@ -169,6 +176,7 @@ export function SkillPicker({
     deleteLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.delete_label'), { name }),
     deleting, onEdit: edit, onDelete: (id) => { void remove(id); },
     reasonForSkill: (skill) => skillUnavailableReason(schema, skill, supportingModels?.[skill.id] ?? []),
+    derivedLabel: schemaText(schema, 'ui.workspace.skills.description_derived'),
   });
 
   // The table is off while nothing can be chosen; the short reason is the one the shared notice shows (#94).
@@ -184,7 +192,7 @@ export function SkillPicker({
           testId: 'workspace-skill-picker-section',
           title: schemaText(schema, 'ui.studio.skill.title'),
           hint: schemaText(schema, 'ui.studio.skill.hint'),
-          head: [schemaText(schema, 'ui.studio.skill.col.name'), schemaText(schema, 'ui.studio.skill.col.prompt'), schemaText(schema, 'ui.studio.skill.col.size')],
+          head: [schemaText(schema, 'ui.studio.skill.col.name'), schemaText(schema, 'ui.studio.skill.col.description'), schemaText(schema, 'ui.studio.skill.col.size')],
           columns: 'minmax(0,1.2fr) minmax(0,2fr) 40px',
           rows,
           selectedKey: selectedId ?? NO_SKILL,

@@ -55,6 +55,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/routing"
 	"github.com/LeXwDeX/Plinth/internal/scene"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
+	"github.com/LeXwDeX/Plinth/internal/skilldraft"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
 	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
@@ -200,6 +201,9 @@ type Config struct {
 	AgentState       *agentparams.Store
 	AgentOperations  AgentOperationReader
 	PromptEnhancer   *promptenhance.Service
+	// SkillDrafter drafts a personal Skill from a name and a requirement
+	// (#548); nil leaves the draft route out.
+	SkillDrafter     *skilldraft.Service
 	ProviderAccounts *provideraccounts.Service
 	// ProviderBalances reads the provider balances through the shared short
 	// cache (#385): the web balance route is polled by every open page, so it
@@ -338,6 +342,7 @@ type Server struct {
 	chatContext                       ChatContextCompactor
 	ownsAgentSession                  func(context.Context, string, string) bool
 	promptEnhancer                    *promptenhance.Service
+	skillDrafter                      *skilldraft.Service
 	providerAccounts                  *provideraccounts.Service
 	providerBalances                  ProviderBalanceReader
 	assetProxy                        AssetProxy
@@ -569,6 +574,7 @@ func New(config Config) (*Server, error) {
 		chatContext:              config.ChatContext,
 		ownsAgentSession:         config.OwnsAgentSession,
 		promptEnhancer:           config.PromptEnhancer,
+		skillDrafter:             config.SkillDrafter,
 		providerAccounts:         config.ProviderAccounts,
 		providerBalances:         config.ProviderBalances,
 		assetProxy:               config.AssetProxy,
@@ -1284,6 +1290,7 @@ func (s *Server) skillCatalogSchema(
 			skill.NameZH = s.textIn(locale, skill.NameZH)
 			skill.Prompt = s.textIn(locale, skill.Prompt)
 			skill.DefaultMessage = s.textIn(locale, skill.DefaultMessage)
+			skill.Description = s.textIn(locale, skill.Description)
 		}
 		projected := map[string]any{
 			fields.ID:              skill.ID,
@@ -1309,6 +1316,17 @@ func (s *Server) skillCatalogSchema(
 			projected[fields.RequiresImage] = skill.RequiresImage
 			projected[fields.DefaultMessage] = skill.DefaultMessage
 			projected[fields.OneShot] = skill.OneShot
+		}
+		// #548: the standard name and description, and whether the
+		// description was derived for a Skill stored without one.
+		if fields.Slug != "" {
+			projected[fields.Slug] = catalog.SkillSlug(skill)
+		}
+		if fields.Description != "" {
+			projected[fields.Description] = catalog.SkillDescriptionFor(skill, s.application.Chat.Skills.Directory)
+		}
+		if fields.DescriptionDerived != "" {
+			projected[fields.DescriptionDerived] = strings.TrimSpace(skill.Description) == ""
 		}
 		skills = append(skills, projected)
 	}
