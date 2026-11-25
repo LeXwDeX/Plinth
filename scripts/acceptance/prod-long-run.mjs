@@ -24,6 +24,8 @@
 //   branch [--message I] [--go]    读某条消息的「分支到新对话」是否可用；--go 时点它，并核对新会话的历史
 //   reload-check / switch-check    刷新页面 / 切走再切回，比较前后历史消息、图片与结果卡
 //   skill-create --name N --requirement R [--save]  设置 → Skills 新建：只填名称和要求，点「生成」读草稿；--save 保存
+//   pick-model --name N [--domain image|model-3d]  设置 → 模型页手选工作区模型（存在浏览器本地，像用户自己选的一样）
+//   task --id T                    只读：打印一个任务的公开投影（输入、参数、产物；URL 只留路径）
 //   observe                        截图并记下会话积分、任务与消息数
 //   admin                          只读看管理端：概览/用量、用户、Agent 配置页（含 Skills），截图并读用量分组表
 //   balances --label L             读 /api/meshy/balance（各家原生余额），记入 state.json
@@ -58,8 +60,8 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const command = args['dry-run'] ? 'dry-run' : args._[0];
 const COMMANDS = new Set(['init', 'say', 'approve', 'deny', 'watch', 'strip', 'tile', 'detail', 'more', 'branch', 'reload-check',
-  'switch-check', 'skill-create', 'observe', 'admin', 'balances', 'coverage', 'report', 'dry-run']);
-const READ_ONLY = new Set(['strip', 'observe', 'admin', 'balances', 'coverage', 'report']);
+  'switch-check', 'skill-create', 'pick-model', 'task', 'observe', 'admin', 'balances', 'coverage', 'report', 'dry-run']);
+const READ_ONLY = new Set(['task', 'strip', 'observe', 'admin', 'balances', 'coverage', 'report']);
 const refuse = (message) => { console.error(`refusing: ${message}`); process.exit(2); };
 if (!COMMANDS.has(command)) refuse(`unknown command "${command || ''}"; see the header of ${path.basename(new URL(import.meta.url).pathname)}`);
 
@@ -805,6 +807,20 @@ async function cmdSkillCreate(sid, name, requirement, save) {
   record({ input: `${name}: ${requirement}`, summary: `slug=${draft.slug} desc=${draft.description}`, draft, saved: saved ? { slug: saved.slug, description: saved.description, apply: saved.apply } : null });
 }
 
+async function cmdPickModel(sid, name, domain) {
+  await openSession(sid);
+  await openSettings('models');
+  const rows = page.locator(`[data-testid=workspace-model-picker-${domain}] [role=menuitemradio]`);
+  const names = await rows.evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim().slice(0, 80)));
+  await rows.filter({ hasText: name }).first().click();
+  await page.waitForTimeout(1500);
+  const checked = await page.locator(`[data-testid=workspace-model-picker-${domain}] [role=menuitemradio][aria-checked=true]`).first().innerText().catch(() => '');
+  await shot(`model-${domain}`);
+  await closeSettings();
+  note(checked.includes(name) ? 'PASS' : 'FAIL', `工作区 ${domain} 模型选为「${name}」`, `已选「${checked.replace(/\s+/g, ' ').slice(0, 80)}」；可选 ${JSON.stringify(names)}`);
+  record({ input: `pick-model ${domain} ${name}`, summary: `checked=${checked.replace(/\s+/g, ' ').slice(0, 80)}`, options: names });
+}
+
 async function cmdObserve(sid) {
   await openSession(sid);
   const counts = await chatCounts();
@@ -937,6 +953,12 @@ try {
     case 'reload-check': await cmdBounce(await currentSession(), 'reload'); break;
     case 'switch-check': await cmdBounce(await currentSession(), 'switch'); break;
     case 'skill-create': await cmdSkillCreate(await currentSession(), String(args.name), String(args.requirement), Boolean(args.save)); break;
+    case 'pick-model': await cmdPickModel(await currentSession(), String(args.name), String(args.domain || 'image')); break;
+    case 'task': {
+      const [status, body] = await api('GET', `/api/v1/tasks/${args.id}`);
+      console.log(`task HTTP ${status}: ${redactText(JSON.stringify(body), 6000)}`);
+      break;
+    }
     case 'observe': await cmdObserve(await currentSession()); break;
     case 'admin': await cmdAdmin(); break;
     case 'balances': await cmdBalances(String(args.label || stamp())); break;
