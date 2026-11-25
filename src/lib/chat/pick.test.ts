@@ -42,4 +42,16 @@ describe('candidate pick', () => {
     expect(isPickedCandidate(unnamed, candidate('t1'), attachment('t1', 'a1', 1))).toBe(true);
     expect(isPickedCandidate(unnamed, candidate('t1'), attachment('t1', 'a2', 2))).toBe(false);
   });
+
+  it('claims an Agent crop by its asset, and only a crop, when the picture has no task (#587)', () => {
+    const crop: ChatAttachment = { handle: '@img2', kind: 'image', role: 'crop', assetId: 'c1', imageSlot: 1 };
+    expect(pickClaim(candidate('', '/api/v1/assets/c1'), crop)).toEqual({ kind: 'image', assetId: 'c1' });
+    expect(pickClaim(candidate('', '/api/v1/assets/c1'), { ...crop, role: 'upload' })).toBeNull();
+    expect(pickClaim(candidate('', '/api/v1/assets/c1'), { ...crop, assetId: undefined })).toBeNull();
+    const pick: ChatAttachment = { handle: '@img2', kind: 'image', role: 'crop', assetId: 'c1' };
+    expect(isPickedCandidate(pick, candidate('', '/api/v1/assets/c1'), crop)).toBe(true);
+    expect(isPickedCandidate({ ...pick, assetId: 'c2' }, candidate('', '/api/v1/assets/c1'), crop)).toBe(false);
+    expect(isPickedCandidate({ ...pick, taskId: 't1' }, candidate('', '/api/v1/assets/c1'), crop)).toBe(false);
+    expect(isPickedCandidate(pick, candidate('', '/api/v1/assets/c1'), { ...crop, role: 'upload' })).toBe(false);
+  });
 });

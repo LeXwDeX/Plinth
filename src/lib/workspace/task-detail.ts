@@ -273,6 +273,11 @@ export interface ActionContext {
   inActiveSession: boolean;
   hasPrompt: boolean;
   hasFile: boolean;
+  /**
+   * A picture of the session with no Task that still is a stage object: an upload or an Agent crop of the
+   * version strip (#587). It can be inserted into the canvas; nothing else a Task offers applies to it.
+   */
+  stageObject?: boolean;
 }
 
 export interface DetailActions {
@@ -292,7 +297,7 @@ export function detailActions(context: ActionContext): DetailActions {
   const media = context.kind === 'image' || context.kind === 'model';
   return {
     download: ready,
-    openOnCanvas: ready && media && context.hasTask && context.inActiveSession,
+    openOnCanvas: ready && media && context.inActiveSession && (context.hasTask || (context.kind === 'image' && context.stageObject === true)),
     sendTo3D: ready && context.kind === 'image' && context.hasTask && context.inActiveSession,
     sendTo2D: ready && context.kind === 'model' && context.hasTask && context.inActiveSession,
     regenerate: context.hasTask && context.hasPrompt && context.inActiveSession && (context.status === 'ready' || context.status === 'failed'),

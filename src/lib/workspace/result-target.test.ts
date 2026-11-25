@@ -78,3 +78,17 @@ it('opens an exact Splat version tile in detail and never on the stage', () => {
   expect(target).toMatchObject({ kind: 'splat', taskId: 't1', url: '/api/splat', assetId: 'splat' });
   expect(objectOfTarget(target)).toBeNull();
 });
+
+it('opens an upload or an Agent crop as a file with no Task that still reaches the stage by its object id (#587)', () => {
+  const crop = blankTile({ key: 'u:crop-1', taskId: 'upload:crop-1', taskIds: ['upload:crop-1'], domain: 'image', status: 'ready', origin: 'upload', operation: 'crop',
+    assets: [{ id: 'crop-1', role: 'image', variant: '', ordinal: 0, mediaType: 'image/png', url: '/api/v1/assets/crop-1', kind: 'image' }] });
+  const target = targetOfTile(crop, 's1', '裁图');
+  expect(target.taskId).toBeUndefined();
+  expect(target).toMatchObject({ stageObjectId: 'upload:crop-1', assetId: 'crop-1', url: '/api/v1/assets/crop-1', kind: 'image' });
+  expect(objectOfTarget(target)).toMatchObject({ taskId: 'upload:crop-1', assetId: 'crop-1', kind: 'image', sessionId: 's1' });
+  // A Task result keeps its Task and carries no object id of its own.
+  const task = targetOfTile({ ...crop, key: 'n:t', taskId: 't', taskIds: ['t'], origin: 'task' }, 's1', '2D v1');
+  expect(task.taskId).toBe('t'); expect(task.stageObjectId).toBeUndefined();
+  // An object id never makes a model or a file a stage object.
+  expect(objectOfTarget({ ...target, kind: 'other' })).toBeNull();
+});

@@ -40,6 +40,20 @@ export function useObjectActions() {
     return sameObject(useWorkspaceStore.getState().currentObject, object);
   }, []);
 
+  /**
+   * #559: looking at a version (a strip tile, a source jump, stepping through versions) only puts it on the
+   * stage. A picture already on the board is selected there; one the person removed stays removed.
+   */
+  const viewOnStage = useCallback((object: CurrentObject): boolean =>
+    openOnStage(object.kind === 'image' ? { ...object, placement: 'view' } : object), [openOnStage]);
+
+  /**
+   * #559: 「插入到画布」 puts exactly this picture on the board and records it as placed. A model has no
+   * 2D board: it opens on the 3D stage as before.
+   */
+  const insertOnCanvas = useCallback((object: CurrentObject): boolean =>
+    openOnStage(object.kind === 'image' ? { ...object, placement: 'insert' } : object), [openOnStage]);
+
   /** The turn that converts the object's own picture, addressed by its @img handle (no upload). */
   const requestObjectTurn = useCallback((object: CurrentObject) => {
     const key = object.handle ? 'ui.studio.action.to3d_turn' : 'ui.studio.action.to3d_turn_current';
@@ -228,5 +242,5 @@ export function useObjectActions() {
     return true;
   }, [schema]);
 
-  return { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
+  return { openOnStage, viewOnStage, insertOnCanvas, toThreeD, inputPictureToThreeD, multiviewToThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
 }

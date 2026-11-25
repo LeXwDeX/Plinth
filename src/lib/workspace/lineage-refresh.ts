@@ -17,6 +17,25 @@ export function lineageWatchSignature(settled: string, viewsDone: string, revisi
   return `${revision}|${settled}|${viewsDone}`;
 }
 
+/**
+ * #587: the Agent's crops the session's chat shows that the loaded chain does not list yet. A crop has no Task,
+ * so no task settling announces it; its chat message does. Until the chain has loaded, nothing counts. The ids
+ * are prefixed (`crop:<asset>`) so they share the settled counter with Task IDs without colliding.
+ */
+export function cropsOutsideChain(
+  messages: ReadonlyArray<{ attachments?: ReadonlyArray<{ role?: string; assetId?: string }> }>,
+  chainUploads: ReadonlySet<string> | null,
+): string {
+  if (!chainUploads) return '';
+  const missing = new Set<string>();
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.role === 'crop' && attachment.assetId && !chainUploads.has(attachment.assetId)) missing.add(`crop:${attachment.assetId}`);
+    }
+  }
+  return [...missing].sort().join(',');
+}
+
 /** How long one change, claimed by the first consumer that sees it, stays claimed for the others. */
 const CLAIM_MILLISECONDS = 1_000;
 

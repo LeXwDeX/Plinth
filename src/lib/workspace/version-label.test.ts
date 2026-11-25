@@ -13,6 +13,7 @@ const schema = {
       'ui.studio.version.unnumbered_2d': '2D',
       'ui.studio.version.unnumbered_3d': '3D',
       'ui.studio.version.upload': '上传',
+      'ui.studio.version.crop': '裁图',
       'ui.studio.version.label_merge': '2D m{version}',
       'ui.studio.version.capture_caption': '{parent} 截图',
       'ui.studio.version.capture_caption_alone': '截图',
@@ -43,5 +44,13 @@ describe('version labels', () => {
   it('captions a group with its own label and an ordinary result with nothing', () => {
     expect(versionTitle(schema, { ...model, groupLabel: '三视图' }, [model])).toBe('3D v1 · 三视图');
     expect(versionTitle(schema, model, [model])).toBe('3D v1');
+  });
+});
+
+describe('an Agent crop (#587)', () => {
+  it('is named a crop, not an upload, and carries no number', () => {
+    const crop = blankTile({ key: 'u:c', taskId: 'upload:c', domain: 'image', status: 'ready', origin: 'upload', operation: 'crop', version: 3 });
+    expect(versionLabel(schema, crop, 'image')).toBe('裁图');
+    expect(versionLabel(schema, { ...crop, operation: '' }, 'image')).toBe('上传');
   });
 });

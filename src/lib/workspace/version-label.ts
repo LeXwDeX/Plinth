@@ -7,11 +7,12 @@ import type { VersionTile } from '@/lib/workspace/versions';
  */
 export function versionLabel(
   schema: ProductSchema,
-  tile: Pick<VersionTile, 'domain' | 'version' | 'groupLabel'> & Partial<Pick<VersionTile, 'origin'>> | null,
+  tile: Pick<VersionTile, 'domain' | 'version' | 'groupLabel'> & Partial<Pick<VersionTile, 'origin' | 'operation'>> | null,
   kind: 'image' | 'model',
 ): string {
   const domain = tile?.domain ?? kind;
-  if (tile?.origin === 'upload') return schemaText(schema, 'ui.studio.version.upload');
+  // #587: a picture the Agent cut out has no number either; it is a crop, not something the person uploaded.
+  if (tile?.origin === 'upload') return schemaText(schema, tile.operation === 'crop' ? 'ui.studio.version.crop' : 'ui.studio.version.upload');
   if (tile?.origin === 'merge') return formatSchemaText(schemaText(schema, 'ui.studio.version.label_merge'), { version: tile.version });
   const key = domain === 'model' ? 'ui.studio.version.label_3d' : 'ui.studio.version.label_2d';
   if (!tile || tile.version <= 0) return schemaText(schema, domain === 'model' ? 'ui.studio.version.unnumbered_3d' : 'ui.studio.version.unnumbered_2d');

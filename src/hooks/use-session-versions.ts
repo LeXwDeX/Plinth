@@ -10,7 +10,8 @@ import { mergedVersionsOf } from '@/lib/workspace/merge-version';
 import { useCanvasStore } from '@/store/canvas-store';
 import { buildVersionTiles, type VersionTile, type VersionTiles } from '@/lib/workspace/versions';
 import { mergeLineagePages } from '@/lib/workspace/lineage';
-import { claimLineageRefresh, countSettledChanges, lineageWatchSignature, settledOutsideChain, type LineageWatch } from '@/lib/workspace/lineage-refresh';
+import { claimLineageRefresh, countSettledChanges, cropsOutsideChain, lineageWatchSignature, settledOutsideChain, type LineageWatch } from '@/lib/workspace/lineage-refresh';
+import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { useChatStore } from '@/store/chat-store';
 import { VERSIONS_WATCH_INTERVAL_MS, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
@@ -67,6 +68,12 @@ export function useSessionVersions(sessionOverride?: string | null) {
     ? new Set(graph.nodes.filter((node) => !node.state || taskStatePresentation(schema, node.state).terminal).map((node) => node.taskId))
     : null), [graph, schema]);
   const settled = useMemo(() => settledOutsideChain(settledIds, chainFinished), [settledIds, chainFinished]);
+  // #587: an Agent crop has no Task; a chat message showing one the chain does not list yet is a change.
+  const messages = useSessionMessages(sessionId);
+  const chainUploads = useMemo(() => (graph
+    ? new Set(graph.nodes.filter((node) => node.kind === 'upload').flatMap((node) => node.assets.map((asset) => asset.id)))
+    : null), [graph]);
+  const crops = useMemo(() => cropsOutsideChain(messages, chainUploads), [messages, chainUploads]);
   // Opening a session is read once by SWR itself (shared, deduplicated key); only a later change of the chain
   // is refreshed explicitly, by one consumer for all of them (lib/workspace/lineage-refresh).
   const watched = useRef<LineageWatch | null>(null);
@@ -76,10 +83,12 @@ export function useSessionVersions(sessionOverride?: string | null) {
       return;
     }
     const previous = watched.current;
-    const next: LineageWatch = { sessionId, signature: lineageWatchSignature(countSettledChanges(sessionId, settled), viewsDone, revision) };
+    // Crops share the counter, so the read that brings them into the chain does not flip the signature back.
+    const changes = [settled, crops].filter(Boolean).join(',');
+    const next: LineageWatch = { sessionId, signature: lineageWatchSignature(countSettledChanges(sessionId, changes), viewsDone, revision) };
     watched.current = next;
     if (claimLineageRefresh(previous, next)) void mutate();
-  }, [enabled, sessionId, settled, viewsDone, revision, mutate]);
+  }, [enabled, sessionId, settled, viewsDone, revision, crops, mutate]);
   const boardNodes = useCanvasStore((state) => state.nodesBySession[sessionId ?? '']);
   const merged = useMemo(() => (boardNodes ? mergedVersionsOf(boardNodes) : []), [boardNodes]);
   // Rebuilt on every task update (progress included); a tile that did not change keeps its object, and

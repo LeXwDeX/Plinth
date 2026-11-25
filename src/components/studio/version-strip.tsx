@@ -3,7 +3,7 @@
 import { useCanvasStore } from '@/store/canvas-store';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { AlertTriangle, Box, Brush, Camera, Check, ChevronUp, Columns2, Eraser, Grid2x2, Link2Off, Maximize2, Merge, Paintbrush, Paperclip, Wand2, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, Box, Brush, Camera, Check, ChevronUp, Columns2, Crop, Eraser, Grid2x2, Link2Off, Maximize2, Merge, Paintbrush, Paperclip, Wand2, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
@@ -50,6 +50,7 @@ const LINK_ICONS: Record<LinkClass, LucideIcon> = {
   remove_background: Eraser,
   reference: Paperclip,
   merge: Merge,
+  crop: Crop,
   unknown: Link2Off,
 };
 
@@ -213,7 +214,7 @@ function CandidatePopover({ tile, sessionId, current }: { tile: VersionTile; ses
 function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessionId: string; current: boolean }) {
   const { schema } = useProductSchema();
   const { previewAssetUrl } = useAssetURLRewriter();
-  const { openOnStage } = useObjectActions();
+  const { openOnStage, viewOnStage } = useObjectActions();
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick, busy, choose } = useSessionPick(chat, sessionId);
   const boardNodes = useCanvasStore((state) => state.nodesBySession[sessionId]);
@@ -271,8 +272,9 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
               <button
                 type="button"
                 onClick={() => {
+                  // Looking at a candidate only shows it (#559); 选用 below still puts it on the board.
                   const object = objectOfTile(tile, sessionId, { taskId: candidate.taskId, assetId: candidate.assetId });
-                  if (object) openOnStage(object);
+                  if (object) viewOnStage(object);
                 }}
                 aria-label={[schemaText(schema, 'ui.studio.strip.view'), candidate.label].join(' ')}
                 className={cn('relative h-20 w-20 overflow-hidden rounded-md border bg-muted focus-visible:outline-2 focus-visible:outline-ring', shown ? 'border-primary' : 'border-border')}
@@ -318,6 +320,11 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
   );
 }
 
+/** A detail without a Task needs a file to show. */
+function canDisplayTarget(target: { url: string; stageObjectId?: string }): boolean {
+  return Boolean(target.url && target.stageObjectId);
+}
+
 /** A locally viewed candidate takes precedence over the persisted pick only within its exact tile. */
 function selectedTilePick(tile: VersionTile, object: CurrentObject | null, pick: TilePick = {}): TilePick {
   const belongs = (taskId: string | undefined, assetId: string | undefined) => Boolean(
@@ -359,6 +366,8 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
   // Uploads, canvas composites and captures have object IDs or source-model IDs, not their own public request.
   const taskBacked = tile.origin === 'task' && Boolean(rawTarget.taskId);
   const target = taskBacked ? rawTarget : { ...rawTarget, taskId: undefined };
+  // An upload or an Agent crop (#587) has no Task, but its detail still shows it and offers 「插入到画布」.
+  const detailed = taskBacked || (tile.origin === 'upload' && tile.status === 'ready' && canDisplayTarget(target));
   const canDisplay = objectOfTile(tile, sessionId, selected) !== null;
   const dragged = useRef(false);
   const dragSource = useCanvasDragSource(target);
@@ -409,7 +418,7 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
         </button>
       </HintTooltip>
       <div className="flex h-4 items-center justify-center" data-testid="version-detail-row">
-        {taskBacked ? <button
+        {detailed ? <button
           type="button"
           data-testid="version-detail"
           aria-label={[schemaText(schema, 'ui.studio.strip.detail'), label].join(' · ')}
@@ -523,7 +532,7 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
  * 底部的版本条：本会话每个 2D / 3D 版本一格，严格按创建时间排开（最新的在最右，#558）；格与格之间
  * 用连接线说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。来源不是紧挨着的前一格时，
  * 连接下写出来源名；用多张图做成的结果（多视图 3D）列出全部来源，不挑其中一张。点一格就是把它放上
- * 舞台；时间上相邻的同源结果在一列里叠起来。
+ * 舞台（#559：只查看，不再放上画布；放上画布在详情里点「插入到画布」）；时间上相邻的同源结果在一列里叠起来。
  */
 /** 切换会话、版本链还没到时的占位：几块与缩略图同尺寸的骨架。 */
 function VersionStripSkeleton({ label }: { label: string }) {
@@ -570,7 +579,7 @@ export function VersionStrip() {
   const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, tiles), [schema, tiles]);
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick } = useSessionPick(chat, sessionId);
-  const { openOnStage } = useObjectActions();
+  const { viewOnStage } = useObjectActions();
 
   // The same callback for every tile and render (it reads the latest state through a ref), so memoized tiles stay put.
   const openLatest = useRef<(tile: VersionTile) => void>(() => undefined);
@@ -584,7 +593,8 @@ export function VersionStrip() {
     // Keep the currently viewed candidate when revisiting its tile, then fall back to the persisted pick.
     const picked = selectedTilePick(tile, object, pick?.kind === 'image' ? pick : {});
     const selected = objectOfTile(tile, sessionId, picked);
-    if (selected) openOnStage(selected);
+    // #559: a click looks at the version; it does not put it on the board again. 「插入到画布」 in its detail does.
+    if (selected) viewOnStage(selected);
   };
   const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);
 
