@@ -2614,6 +2614,30 @@ def scenario_multiview_text(work, api, offerings):
     reply = str((_quality_final_reply(_quality_messages(api, picked)) or {}).get("content") or "") if answered else ""
     record("multiview-text: a hand-picked four-view Skill with no picture is sent and tells the Agent to draw a source first",
            answered and f"present: {rule}" in reply, f"send {status} reply={reply[:120]!r}")
+    # #611: with four-view picked the directory no longer lists three-view, the turn block names four-view, and
+    # use_skill("three-view") neither returns the three-view body nor marks the reply 三视图.
+    picked_skill = {"id": "system-four-view", "name": "四视图"}
+    for marker, want in (("- three-view（", "absent"), ("「四视图」（four-view）", "present")):
+        replies = _visual_anchor_reply_count(api, picked)
+        status, _ = api.json("POST", f"/api/chat/sessions/{picked}/messages", {
+            "content": f"我要一把剑的四视图 [[fake:system-contains {marker}]]", "creative_domain": "image",
+            "_skill": picked_skill})
+        answered = status in (200, 201, 202) and _visual_anchor_wait_reply(api, picked, replies)
+        reply = str((_quality_final_reply(_quality_messages(api, picked)) or {}).get("content") or "") if answered else ""
+        record(f"multiview-text: with four-view picked the system context reads {want}: {marker}",
+               answered and f"{want}: {marker}" in reply, f"send {status} reply={reply[:120]!r}")
+    replies = _visual_anchor_reply_count(api, picked)
+    status, _ = api.json("POST", f"/api/chat/sessions/{picked}/messages", {
+        "content": '我要一把剑的四视图 [[fake:tool:use_skill {"name":"three-view"}]]', "creative_domain": "image",
+        "_skill": picked_skill})
+    answered = status in (200, 201, 202) and _visual_anchor_wait_reply(api, picked, replies)
+    receipts = _tool_message_contents(work, "main", picked, "use_skill") if answered else []
+    used = ((_quality_final_reply(_quality_messages(api, picked)) or {}).get("used_skills") or []) if answered else []
+    record("multiview-text: with four-view picked use_skill(three-view) is answered with the pick, not marked 三视图",
+           answered and any("四视图" in text and "three-view" in text and "正面、左侧、背面各一张" not in text
+                            for text in receipts)
+           and not any(item.get("id") == "system-three-view" for item in used),
+           f"send {status} receipts={[text[:80] for text in receipts]} used_skills={used}")
     session = new_session(api)
     # #548: the resident craft keeps only the route; the four-view rule itself
     # lives in the system four-view Skill, which the Agent reads with use_skill.

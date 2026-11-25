@@ -11,7 +11,9 @@ import (
 // tool-binding Skill (a Product Schema system Skill). The Skill text and the
 // directive template come from the Schema; the block is added only while the
 // bound tool is really offered this turn (scope and availability), so the
-// Agent is never told to call a tool it cannot use.
+// Agent is never told to call a tool it cannot use. The block names the pick
+// by its display name and standard name (#611), the same names the directory
+// and the used-Skill mark show.
 func (orchestrator *Orchestrator) skillToolDirective(ctx context.Context, registry *toolRegistry, options TurnOptions) string {
 	if options.SkillID == "" {
 		return ""
@@ -35,7 +37,8 @@ func (orchestrator *Orchestrator) skillToolDirective(ctx context.Context, regist
 			return ""
 		}
 		return strings.NewReplacer(
-			"{name}", skill.Name,
+			"{name}", catalog.SkillDisplayName(skill),
+			"{slug}", catalog.SkillSlug(skill),
 			"{prompt}", skill.Prompt,
 			"{tool}", skill.Tool,
 		).Replace(orchestrator.schema.Skills.ToolDirectiveTemplate)

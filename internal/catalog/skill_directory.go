@@ -190,6 +190,10 @@ type ChatSkillDirectoryMessages struct {
 	// instead of the one the Agent named ({name} the person's, {slug} the
 	// ignored one).
 	UserChoiceKept string `json:"user_choice_kept"`
+	// Picked answers use_skill for another Skill bound to the same tool as the
+	// Skill the person picked for the turn (#611): the pick's text is already
+	// in the turn ({name} the pick, {slug} the Skill not read).
+	Picked string `json:"picked"`
 }
 
 // Enabled reports whether the Schema declares a directory at all.
@@ -214,6 +218,7 @@ func validateSkillDirectory(skills ChatSkillsSchema, agentTools map[string]struc
 		"style_instruction_template": directory.StyleInstructionTemplate,
 		"messages.unknown":           directory.Messages.Unknown, "messages.not_style": directory.Messages.NotStyle,
 		"messages.unsupported": directory.Messages.Unsupported, "messages.user_choice_kept": directory.Messages.UserChoiceKept,
+		"messages.picked": directory.Messages.Picked,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("skills.directory.%s 不能为空", field)
@@ -230,6 +235,8 @@ func validateSkillDirectory(skills ChatSkillsSchema, agentTools map[string]struc
 		{directory.DerivedDescriptionTemplate, "{summary}", "derived_description_template"},
 		{directory.StyleInstructionTemplate, "{slug}", "style_instruction_template"},
 		{directory.StyleInstructionTemplate, "{argument}", "style_instruction_template"},
+		{directory.Messages.Picked, "{name}", "messages.picked"},
+		{directory.Messages.Picked, "{slug}", "messages.picked"},
 	} {
 		if !strings.Contains(check.text, check.placeholder) {
 			return fmt.Errorf("skills.directory.%s 必须包含 %s", check.field, check.placeholder)

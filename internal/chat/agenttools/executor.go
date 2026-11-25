@@ -533,7 +533,9 @@ func (e *Executor) Execute(
 		}
 		return e.recordSelfCheck(ctx, command)
 	case ToolCreateThreeView:
-		return e.createThreeView(ctx, command, observe)
+		result, err := e.createThreeView(ctx, command, observe)
+		e.recordPickedSkill(command, &result)
+		return result, err
 	case ToolUseSkill:
 		return e.useSkill(command), nil
 	default:
