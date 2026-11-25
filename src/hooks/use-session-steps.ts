@@ -15,8 +15,8 @@ import {
 /**
  * #330 §6: the live 3D step standing of one asset session, for the "give it a
  * few more steps" entry of an external MCP asset. A session that is not a
- * steps asset reads as 404 and yields no standing, so the bar never renders
- * for an ordinary chat.
+ * steps asset reads as 204 with no body (#616) and yields no standing, so the
+ * bar never renders for an ordinary chat.
  */
 export function useSessionSteps(sessionID: string | null) {
   const { schema } = useProductSchema();
