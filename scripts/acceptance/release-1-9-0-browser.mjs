@@ -33,11 +33,26 @@
 //     P3  A 改到 B 的组后，A 的历史金额随当前组归集。
 //     P4  管理端用户页设组保存、刷新仍在；用量页组表（未分组文案、两位小数百分比、用户表带组列）截图；普通用户访问
 //         管理接口 401/403。
+//   批次 F（PR #627：#610 至 #624；全部经输入框发带 fake 标记的消息，只验平台侧；要真实模型才能看出的行为记 INFO「需真实模型复测」）
+//     F610  #610：画布留着弓、单击版本条里的斧再发 refine：POST 不带画布来源、无快照上传，新版本血缘只连到斧；@画布 仍按画布发送。
+//     F611  #611：手选四视图/三视图：系统上下文点名所选、不列兄弟、带“先简短问一句”；标记显示所选、卡片视角数对；
+//           手选四视图时 use_skill(three-view) 不记三视图。
+//     F612  #612/#613：工作区没选 2D 模型时文生图与图生图照常出任务；用途（立绘）与工作区 GPT Image 冲突时两种工具都出
+//           模型选择卡，点选后续跑、按所点模型出任务。
+//     F614  #614：工作区 GPT Image，Agent set_params size=3840x2160 后画布轮次 refine，冻结参数为 3840x2160。
+//     F615  #615：同一轮两次 ask_choice（分两步、同一回应并列）只出一张卡，刷新后仍一张。
+//     F616  #616：打开普通会话 /steps 不是 404、控制台无相关 error。
+//     F617  #617（PR #627 修的部分）：「更多」代表格有句柄徽标；文生图详情来源写 no_source 文案；裁图详情有类型、来源、尺寸。
+//     F618  #618：可选右侧先完成时卡片头只算必需视角；最窄聊天栏下按钮不越界不重叠；插到画布的视角图层名带视角。
+//     F619  #619：起草请求带当前会话 ID；[[fake:quota:insufficient_quota]] 时 503 与 Schema 文案。
+//     F621  #621/#620：系统上下文含语言规则；Agent 自读 Skill 的标记是「本轮使用」。#620 的回执只回给模型，记 INFO。
+//     F623  #623：管理首页余额卡逐供应商一行、带单位或占位（要管理员账号，缺少时 SKIP）。
+//     F624  #624：3D 瓦片有预览或 3D 占位；拦掉预览后瓦片与输入框芯片都是 3D 占位。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4  只跑其中几项（默认全部）
+//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4,f610,…,f624  只跑其中几项（默认全部）
 //   R190_REQUIRE_BATCH4=1  目标环境缺批次 4（PR #598）时 M1/M2 记 FAIL 而不是 SKIP
 //   R190_M1_COUNTS=4,6,8,10  M1 每组的结果张数；R190_M1_WIDTHS=1440,1280  M1 看弹层的窗口宽度
 //   R190_REQUIRE_BATCH2=1  目标环境缺批次 2 能力时记 FAIL 而不是 SKIP（批次 2 部署后用）
@@ -74,7 +89,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4,f610,f611,f612,f614,f615,f616,f617,f618,f619,f621,f623,f624').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -990,7 +1005,8 @@ async function itemN6() {
       await openSession(sid);
       const pictures = await page.locator('[data-testid=composer-object-chip],[data-testid=composer-attachment-chip]').count();
       await openSettings('skills');
-      await tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]', { hasText: skill }).first().click();
+      // Anchored at the row's start: since #611 the three-view row's description mentions 四视图 too.
+      await tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]', { hasText: new RegExp(`^\\s*${skill}`) }).first().click();
       await page.waitForTimeout(1000);
       await closeSettings();
       const chip = (await tid('composer-skill-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
@@ -1748,11 +1764,817 @@ async function cleanupP599() {
   await p599.admin.close().catch(() => {});
 }
 
+// ---------------------------------------------------------------- 批次 F（PR #627：#610 至 #624）
+// Every turn goes through the box with fake markers (the fake chat model answers fixed text and calls only the tools a
+// marker names), so these checks prove the platform side of each fix: what the page sends, what the server freezes,
+// what the conversation shows. What a real model would decide on its own (pick four-view from the wording, ask first,
+// keep the language) is out of reach here and is reported as needing a real-model rerun, never as passed.
+const PREFS_KEY = 'art-ai-workspace-prefs';
+const composerBox = () => page.locator('[data-testid=studio-composer] textarea').first();
+const readPrefs = async () => page.evaluate((key) => { try { return localStorage.getItem(key); } catch { return null; } }, PREFS_KEY);
+async function writePrefs(value) {
+  await page.evaluate(([key, next]) => {
+    try { if (next === null) localStorage.removeItem(key); else localStorage.setItem(key, next); } catch {}
+  }, [PREFS_KEY, value]);
+}
+/** Runs `body` and puts this browser's workspace model choice back afterwards (later items send without a model). */
+async function keepingPrefs(body) {
+  if (!page.url().startsWith(base)) await page.goto(`${base}/`, { waitUntil: 'load' });
+  const saved = await readPrefs();
+  try {
+    return await body();
+  } finally {
+    await closeSettings().catch(() => {});
+    await writePrefs(saved);
+    await page.reload({ waitUntil: 'load' }).catch(() => {});
+    console.log(`batch F: workspace model choice put back to ${saved === null ? 'none' : saved}`);
+  }
+}
+/** No 2D model in the workspace picker (the state #612 starts from); the page must be reloaded to read it. */
+async function clearWorkspaceImageModel() {
+  const saved = await readPrefs();
+  let parsed = { state: { modelByDomain: { image: null, 'model-3d': null } }, version: 2 };
+  try { if (saved) parsed = JSON.parse(saved); } catch {}
+  parsed.state = { ...(parsed.state || {}), modelByDomain: { ...(parsed.state?.modelByDomain || {}), image: null } };
+  await writePrefs(JSON.stringify(parsed));
+}
+/** Picks a 2D model in the settings dialog by the first row whose text matches; returns the row's text. */
+async function chooseImageModel(pattern) {
+  await openSettings('models');
+  const rows = page.locator('[data-testid=workspace-model-picker-image] [role=menuitemradio]');
+  const texts = await rows.evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim()));
+  const index = texts.findIndex((value) => pattern.test(value));
+  if (index < 0) throw new Error(`no 2D model row matches ${pattern} (rows: ${texts.join(' | ').slice(0, 300)})`);
+  await rows.nth(index).click();
+  await page.waitForTimeout(1200);
+  await closeSettings();
+  return texts[index];
+}
+/** Hand-picks a system Skill for the next turn (the settings dialog's Skills tab); returns the composer chip text. */
+async function pickSkill(skill) {
+  await openSettings('skills');
+  await tid('workspace-skill-picker-panel').first().locator('[role=menuitemradio]', { hasText: new RegExp(`^\\s*${skill}`) }).first().click();
+  await page.waitForTimeout(1000);
+  await closeSettings();
+  return (await tid('composer-skill-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+}
+/**
+ * Sends one turn through the box (as a person would) and returns the JSON body the page posted plus the other POSTs it
+ * made while sending (a board snapshot is uploaded before the message). Waits for the final reply unless told not to.
+ */
+async function sendThroughBox(sid, content, { wait = true, until = null } = {}) {
+  const before = await finalAssistantCount(sid);
+  const others = [];
+  const onRequest = (request) => {
+    if (request.method() === 'POST' && !request.url().includes('/messages')) others.push(new URL(request.url()).pathname);
+  };
+  page.on('request', onRequest);
+  try {
+    const posted = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/chat/sessions/${sid}/messages`), { timeout: 45000 });
+    await composerBox().fill(content);
+    await tid('composer-send').first().click();
+    const request = await posted;
+    let body = {};
+    try { body = request.postDataJSON() || {}; } catch {}
+    const response = await request.response().catch(() => null);
+    if (wait) {
+      const done = await waitFor(async () => ((await finalAssistantCount(sid)) > before) || (until ? await until() : false), 150);
+      if (!done) throw new Error('the turn produced no final reply in 150 s');
+    }
+    return { body, status: response ? response.status() : 0, others };
+  } finally {
+    page.off('request', onRequest);
+  }
+}
+const lastReply = async (sid) => [...await messagesOf(sid)].reverse()
+  .find((message) => message.role === 'assistant' && !String(message.content || '').startsWith('__GENERATING__')) || {};
+async function approvePending(sid) {
+  const schema = await publicSchema();
+  const decision = schema?.chat?.api?.fields?.decision || 'decision';
+  const [, pending] = await api('GET', `/api/v1/chat/sessions/${sid}/pending-approvals`);
+  for (const card of (pending.items || []).filter((item) => item.status === 'pending')) {
+    await api('PUT', `/api/v1/tasks/grants/${card.request_id}`, { [decision]: 'approve' });
+  }
+}
+async function inputSourceField() {
+  const schema = await publicSchema();
+  return { field: schema?.chat?.api?.fields?.input_source || 'input_source', canvas: schema?.chat?.context?.canvas_input_source || 'canvas' };
+}
+const incomingEdges = async (sid, taskId) => {
+  const [, lineage] = await api('GET', `/api/v1/chat/sessions/${sid}/lineage`);
+  return (lineage?.edges || []).filter((edge) => String(edge.to).includes(taskId));
+};
+const newTasks = async (sid, known) => (await sessionTasks(sid)).filter((task) => !known.includes(task.id));
+async function handleTasks(sid) {
+  const order = [];
+  for (const message of await messagesOf(sid)) {
+    for (const attachment of message.attachments || []) {
+      const taskId = attachment.task_id || attachment.taskId;
+      if (taskId && attachment.handle && attachment.kind === 'image' && !order.some((entry) => entry.id === taskId)) order.push({ id: taskId, handle: attachment.handle });
+    }
+  }
+  return order;
+}
+
+// #610: a version clicked on the strip, with another picture left on the board, is the turn's only input.
+async function itemF610() {
+  const sid = await createSession(`${tag} 弓与斧`);
+  await turn(sid, '画一把弓 [[fake:tool:refine_image {"prompt":"a wooden bow on a white background"}]]');
+  await turn(sid, '再画一把斧 [[fake:tool:create_concept_sketch {"prompt":"a steel axe on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.filter((task) => task.state === 'SUCCEEDED').length >= 2)) throw new Error('two fake pictures did not succeed');
+  const pictures = await handleTasks(sid);
+  const bow = pictures[0];
+  const axe = pictures[1];
+  if (!bow || !axe) throw new Error(`the seed has no two handled pictures (${JSON.stringify(pictures)})`);
+  console.log(`seed #610 ${sid}: bow ${bow.handle}=${bow.id} axe ${axe.handle}=${axe.id}`);
+  await openSession(sid);
+  const bowName = bow.handle.replace(/^@/, '');
+  const axeName = axe.handle.replace(/^@/, '');
+  if (!(await layerNames()).includes(bowName)) { await tileThumb(`n:${bow.id}`).dblclick(); await page.waitForTimeout(2000); }
+  if ((await layerNames()).includes(axeName)) await removeLayer(axeName);
+  await tileThumb(`n:${axe.id}`).click();
+  await page.waitForTimeout(2000);
+  const { field, canvas } = await inputSourceField();
+  let refined = '';
+
+  await check('#610', '画布留着弓、单击版本条里的斧再发 refine：本轮不带画布快照，参考图只有斧', async () => {
+    const layers = await layerNames();
+    const chip = (await tid('composer-object-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    const known = (await sessionTasks(sid)).map((task) => task.id);
+    const sent = await sendThroughBox(sid, `把斧头改成金色 [[fake:tool:refine_image ${JSON.stringify({ prompt: 'make the axe golden', reference_handles: [axe.handle] })}]]`);
+    const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED') || null, 120, 1500);
+    refined = made?.id || '';
+    const edges = refined ? await incomingEdges(sid, refined) : [];
+    const sources = edges.map((edge) => String(edge.from));
+    const file = await shot('610', 'refine-axe');
+    const snapshot = sent.others.filter((route) => /asset|upload|capture|canvas/.test(route));
+    return {
+      ok: layers.includes(bowName) && !layers.includes(axeName) && sent.body[field] !== canvas && Boolean(refined)
+        && sources.length === 1 && sources[0].includes(axe.id) && snapshot.length === 0,
+      detail: `画布图层=${JSON.stringify(layers)} 输入区芯片「${chip}」 POST ${field}=${JSON.stringify(sent.body[field] ?? null)} 发送时其他 POST=${JSON.stringify(sent.others)} `
+        + `新任务=${refined || '无'} 入边来源=${JSON.stringify(sources)}（斧=${axe.id}） 截图 ${file}`,
+    };
+  });
+
+  await check('#610', '版本条：新版本只连到斧（不连弓、不连画布）', async () => {
+    if (!refined) return { ok: false, detail: '上一项没有产出新任务' };
+    await openSession(sid);
+    const tile = tileOf(`n:${refined}`);
+    await tile.waitFor({ timeout: 20000 });
+    const edges = await incomingEdges(sid, refined);
+    const file = await shot('610', 'strip');
+    return {
+      ok: edges.length === 1 && String(edges[0].from).includes(axe.id) && !edges.some((edge) => String(edge.from).includes(bow.id)),
+      detail: `血缘入边=${JSON.stringify(edges.map((edge) => ({ from: edge.from, kind: edge.kind, evidence: edge.evidence })))} 截图 ${file}`,
+    };
+  });
+
+  await check('#610', '@画布 仍按画布发送（本轮来源是画布快照）', async () => {
+    const boardToken = `@${await text('ui.studio.composer.mention.token_board')}`;
+    const box = composerBox();
+    await box.fill('');
+    await box.click();
+    await box.pressSequentially('@');
+    const list = tid('composer-mention-list');
+    await list.waitFor({ timeout: 10000 });
+    await list.locator(`[data-testid=composer-mention-option][data-handle="${boardToken}"]`).first().click();
+    await page.waitForTimeout(500);
+    const before = await finalAssistantCount(sid);
+    const known = (await sessionTasks(sid)).map((task) => task.id);
+    const posted = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/chat/sessions/${sid}/messages`), { timeout: 45000 });
+    await box.press('End');
+    await page.keyboard.insertText(' 整张画布调暖 [[fake:tool:refine_image {"prompt":"warm up the whole board"}]]');
+    const typed = await box.inputValue();
+    await tid('composer-send').first().click();
+    const request = await posted;
+    let body = {};
+    try { body = request.postDataJSON() || {}; } catch {}
+    await waitFor(async () => (await finalAssistantCount(sid)) > before, 150);
+    const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED') || null, 120, 1500);
+    const edges = made ? await incomingEdges(sid, made.id) : [];
+    const file = await shot('610', 'board-mention');
+    return {
+      ok: typed.includes(boardToken) && body[field] === canvas && Boolean(made),
+      detail: `输入框「${typed.slice(0, 60)}」 POST ${field}=${JSON.stringify(body[field] ?? null)} 新任务=${made?.id || '无'} 入边=${JSON.stringify(edges.map((edge) => edge.from))} 截图 ${file}`,
+    };
+  });
+}
+
+// #611 (and #618 on the same cards): a hand-picked view Skill is the one the turn uses and shows.
+async function itemF611() {
+  for (const [skill, slug, sibling, siblingSlug] of [['四视图', 'four-view', '三视图', 'three-view'], ['三视图', 'three-view', '四视图', 'four-view']]) {
+    const sid = await createSession(`${tag} 手选${skill}`);
+    await turn(sid, '画一把剑 [[fake:tool:refine_image {"prompt":"a plain steel sword on a white background"}]]');
+    if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the sword picture did not succeed');
+    await openSession(sid);
+    const ensurePicked = async () => {
+      const chip = (await tid('composer-skill-chip').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      return chip.includes(skill) ? chip : pickSkill(skill);
+    };
+    for (const [marker, want] of [[`「${skill}」（${slug}）`, 'present'], [`- ${siblingSlug}（`, 'absent'], ['先简短问一句想要的样子', 'present']]) {
+      await check('#611', `手选「${skill}」：系统上下文 ${want === 'present' ? '含' : '不含'}「${marker}」`, async () => {
+        const chip = await ensurePicked();
+        await sendThroughBox(sid, `我要一把剑的${skill} [[fake:system-contains ${marker}]]`);
+        const reply = String((await lastReply(sid)).content || '');
+        return { ok: chip.includes(skill) && reply.includes(`${want}: ${marker}`), detail: `芯片「${chip}」 回复「${reply.slice(0, 80)}」` };
+      });
+    }
+    await check('#611', `手选「${skill}」后要${skill}：对话标记显示「${skill}」，不显示「${sibling}」，卡片视角数对`, async () => {
+      const chip = await ensurePicked();
+      await sendThroughBox(sid, `我要一把剑的${skill} [[fake:tool:create_three_view {"reference_handles":["@img1"]}]]`);
+      await approvePending(sid);
+      const card = tid('three-view-card').last();
+      const live = await card.waitFor({ timeout: 20000 }).then(() => true, () => false);
+      if (!live) await openSession(sid);
+      await card.waitFor({ timeout: 60000 });
+      const used = (await tid('chat-used-skills').last().innerText({ timeout: 20000 }).catch(() => '')).trim();
+      const stored = (await lastReply(sid)).used_skills || [];
+      const slots = await card.locator('[data-testid=three-view-slot]').evaluateAll((items) => items.map((item) => ({
+        slot: item.dataset.slot, optional: Boolean(item.querySelector('[data-testid=three-view-optional]')),
+      })));
+      const required = slots.filter((slot) => !slot.optional).length;
+      const file = await shot('611', `marker-${slug}`);
+      return {
+        // The card is the same three-view card for both Skills: front, left, back required and the right view on it
+        // (marked optional by the card's design). Four views need the right slot there; three need three required.
+        ok: chip.includes(skill) && used.includes(skill) && !used.includes(sibling) && required === 3
+          && (slug === 'four-view' ? slots.some((slot) => slot.slot === 'right') : true),
+        detail: `芯片「${chip}」 标记「${used}」 服务端 used_skills=${JSON.stringify(stored).slice(0, 200)} 视角=${JSON.stringify(slots)} 卡片不刷新即出现=${live} 截图 ${file}`,
+      };
+    });
+    if (slug === 'four-view') {
+      await check('#611', '手选「四视图」时 Agent 读 three-view：不记「三视图」标记', async () => {
+        const chip = await ensurePicked();
+        await sendThroughBox(sid, '我要一把剑的四视图 [[fake:tool:use_skill {"name":"three-view"}]]');
+        const reply = await lastReply(sid);
+        const used = (reply.used_skills || []).map((item) => item.id || item.name || '');
+        return { ok: chip.includes('四视图') && !used.some((id) => /three-view|三视图/.test(id)), detail: `芯片「${chip}」 本轮 used_skills=${JSON.stringify(reply.used_skills || [])}` };
+      });
+    }
+  }
+  record('INFO', '#611', '观察', '手选「四视图」出的卡片与三视图同一张：右侧视角仍标「可选」，必需计数 3；四视图要不要把右侧算必需不在 #611 的验收范围，留给产品判断');
+  record('INFO', '#611', '需真实模型复测', '用户说「我要一把剑的四视图」时 Agent 自己选 four-view、没给图且主体笼统时先问：fake 对话模型只按标记调工具，只验了平台侧（手选块、目录、标记、卡片）');
+}
+
+// #612/#613: no 2D model in the workspace no longer refuses the turn; a purpose/workspace clash opens a model card.
+async function itemF612() {
+  await keepingPrefs(async () => {
+    await clearWorkspaceImageModel();
+    const sid = await createSession(`${tag} 无工作区模型`);
+    await openSession(sid);
+    const prefs = await readPrefs();
+    for (const [tool, args, capability] of [
+      ['create_concept_sketch', { prompt: 'a wooden barrel concept' }, 'text-to-image'],
+      ['refine_image', { prompt: 'make the barrel iron', reference_handles: ['@img1'] }, 'image-to-image'],
+    ]) {
+      await check('#612', `工作区没选 2D 模型：${tool}（${capability}）照常出任务，不整轮拒绝`, async () => {
+        const known = (await sessionTasks(sid)).map((task) => task.id);
+        const sent = await sendThroughBox(sid, `${tool} [[fake:tool:${tool} ${JSON.stringify(args)}]]`);
+        const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED') || null, 120, 1500);
+        const reply = String((await lastReply(sid)).content || '');
+        const file = await shot('612', `no-model-${tool}`);
+        return {
+          ok: Boolean(made) && made.capability === capability && !/请先在工作区选择生成模型/.test(reply),
+          detail: `工作区偏好=${prefs} POST 模型字段=${JSON.stringify(Object.fromEntries(Object.entries(sent.body).filter(([key]) => /model/i.test(key))))} 新任务=${made ? `${made.capability} ${made.offering_id}` : '无'} 回复「${reply.slice(0, 60)}」 截图 ${file}`,
+        };
+      });
+    }
+
+    // A purpose the person set (illustration recommends Gemini / Nano Banana Pro) against a workspace GPT Image pick.
+    // A pick made in a session is that session's explicit lock, which wins without asking; the confirmation is for
+    // the model the picker merely shows (remembered by this browser). So the pick is made in the session above and
+    // the clash is played in a new session that only sees it. Its picture and brief are seeded through the API.
+    const picked = await chooseImageModel(/gpt[\s-]*image/i);
+    const sid2 = await createSession(`${tag} 用途与工作区冲突`);
+    await turn(sid2, '画一个骑士 [[fake:tool:refine_image {"prompt":"a knight standing"}]]');
+    if (!await waitTasks(sid2, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the knight picture did not succeed');
+    await turn(sid2, '用途是角色立绘 [[fake:tool:update_production_brief {"image_use":"illustration"}]]');
+    await openSession(sid2);
+    const visible = await readPrefs();
+    console.log(`#613 session ${sid2}: workspace shows ${visible}`);
+    await conflictCards(sid2, picked);
+    record('INFO', '#613', '需真实模型复测', '点卡后由 Agent 读到所选并用它重新调用工具：fake 对话模型对答复只回固定文字（答复那轮工具调用 0 次），续跑由标记代演；真实模型是否照所选续跑要真实模型复测');
+  });
+}
+async function conflictCards(sid, picked) {
+  {
+    for (const [tool, args, capability, answer] of [
+      ['create_concept_sketch', { prompt: 'a knight portrait' }, 'text-to-image', 'recommended'],
+      ['refine_image', { prompt: 'give the knight a red cape', reference_handles: ['@img1'] }, 'image-to-image', 'workspace'],
+    ]) {
+      await check('#613', `用途推荐与工作区「${picked}」冲突：${tool} 在对话里出模型选择卡，点选后按所选模型续跑`, async () => {
+        const known = (await sessionTasks(sid)).map((task) => task.id);
+        const cardsBefore = await tid('chat-choice-card').count();
+        const sent = await sendThroughBox(sid, `${tool} [[fake:tool:${tool} ${JSON.stringify(args)}]]`, { until: async () => (await tid('chat-choice-card').count()) > cardsBefore });
+        const card = tid('chat-choice-card').last();
+        if (!await waitFor(async () => (await tid('chat-choice-card').count()) > cardsBefore, 30)) {
+          const made = await waitFor(async () => (await newTasks(sid, known))[0] || null, 20, 1500);
+          const fileNone = await shot('613', `no-card-${tool}`);
+          const brief = (await tid('chat-production-brief').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+          return {
+            ok: false,
+            detail: `没有出模型选择卡；POST 模型字段=${JSON.stringify(Object.fromEntries(Object.entries(sent.body).filter(([key]) => /model/i.test(key))))} `
+              + `直接出的任务=${made ? `${made.capability} ${made.offering_id}` : '无'} 回复「${String((await lastReply(sid)).content || '').slice(0, 80)}」 设定摘要「${brief}」 截图 ${fileNone}`,
+          };
+        }
+        await page.waitForTimeout(1500);
+        const options = await card.locator('[data-testid=chat-choice-option]').evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim()));
+        const beforeAnswer = (await newTasks(sid, known)).length;
+        const fileCard = await shot('613', `card-${tool}`);
+        const index = answer === 'workspace' ? options.findIndex((option) => /gpt[\s-]*image/i.test(option)) : 0;
+        if (index < 0) return { ok: false, detail: `卡上没有工作区模型：${JSON.stringify(options)} 截图 ${fileCard}` };
+        // Answering sends the pick as the person's message; the Agent then calls the tool again with that model
+        // (docs/product.md, #612/#613). The fake chat model answers that message with fixed text, so the Agent's
+        // second call is played by a marker naming the picked model, as a real model would.
+        const before = await finalAssistantCount(sid);
+        await card.locator('[data-testid=chat-choice-option]').nth(index).click();
+        await card.locator('[data-testid=chat-choice-confirm]').click();
+        await waitFor(async () => (await finalAssistantCount(sid)) > before, 120);
+        const answerText = String([...await messagesOf(sid)].reverse().find((message) => message.role === 'user')?.content || '');
+        // By model id: the turn's shape (text- or image-to-image, the board picture binds as a source) picks the Offering.
+        const model = answer === 'workspace' ? 'gpt-image-2.6-sunburst' : 'gemini-3-pro-image';
+        const offering = answer === 'workspace' ? 'openai/gpt-image-2/' : 'gemini/gemini-3-pro-image/';
+        const cardsNow = await tid('chat-choice-card').count();
+        await sendThroughBox(sid, `用所选模型继续 [[fake:tool:${tool} ${JSON.stringify({ ...args, model })}]]`);
+        const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED') || null, 150, 1500);
+        const extraCard = (await tid('chat-choice-card').count()) > cardsNow;
+        const file = await shot('613', `answered-${tool}`);
+        return {
+          ok: options.length >= 2 && /推荐/.test(options[0]) && options.some((option) => /gpt[\s-]*image/i.test(option)) && beforeAnswer === 0
+            && answerText.includes(options[index].split(' 预计')[0].split(' · ').pop().split(' ')[0]) && Boolean(made)
+            && String(made.offering_id).startsWith(offering) && !extraCard,
+          detail: `选项=${JSON.stringify(options)} 点选前新任务=${beforeAnswer} 点「${options[index]}」后发出「${answerText.slice(0, 60)}」 `
+            + `Agent 带 model=${model} 续跑后任务=${made ? `${made.capability} ${made.offering_id}` : '无'} 又出卡=${extraCard} 截图 ${fileCard} ${file}`,
+        };
+      });
+    }
+  }
+}
+
+// #614: a size the Agent set wins over the board on a canvas turn.
+async function itemF614() {
+  await keepingPrefs(async () => {
+    const sid = await createSession(`${tag} 3840x2160`);
+    await openSession(sid);
+    const picked = await chooseImageModel(/gpt[\s-]*image/i);
+    const known = [];
+    await sendThroughBox(sid, '画一座城堡 [[fake:tool:refine_image {"prompt":"a castle on a hill"}]]');
+    const first = await waitFor(async () => (await sessionTasks(sid)).find((task) => task.state === 'SUCCEEDED') || null, 120, 1500);
+    if (!first) throw new Error('the castle picture did not succeed');
+    known.push(first.id);
+    const offering = String(first.offering_id || '').replace(/text-to-image$/, 'image-to-image');
+    await openSession(sid);
+    await tileThumb(`n:${first.id}`).dblclick();
+    await page.waitForTimeout(2000);
+    await tileThumb(`n:${first.id}`).click();
+    await page.waitForTimeout(1500);
+    const { field, canvas } = await inputSourceField();
+    await check('#614', `工作区「${picked}」，Agent 设 size=3840x2160 后画布轮次 refine：冻结参数是 3840x2160`, async () => {
+      const layers = await layerNames();
+      // A picture double-clicked onto the board can sit across the dashed frame's edge, which (#610) no longer makes
+      // the board the turn's source; @画布 forces the canvas turn the issue is about.
+      const script = `[[fake:script:set_params ${JSON.stringify({ offering_id: offering, params: { size: '3840x2160' } })}|refine_image ${JSON.stringify({ prompt: 'make it a night scene' })}|done]]`;
+      const boardToken = `@${await text('ui.studio.composer.mention.token_board')}`;
+      const box = composerBox();
+      await box.fill('');
+      await box.click();
+      await box.pressSequentially('@');
+      const list = tid('composer-mention-list');
+      await list.waitFor({ timeout: 10000 });
+      await list.locator(`[data-testid=composer-mention-option][data-handle="${boardToken}"]`).first().click();
+      await page.waitForTimeout(500);
+      await box.press('End');
+      const before = await finalAssistantCount(sid);
+      const posted = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/chat/sessions/${sid}/messages`), { timeout: 45000 });
+      await page.keyboard.insertText(` 设成 3840x2160 再改成夜景 ${script}`);
+      await tid('composer-send').first().click();
+      const request = await posted;
+      const sent = { body: {} };
+      try { sent.body = request.postDataJSON() || {}; } catch {}
+      await waitFor(async () => (await finalAssistantCount(sid)) > before, 150);
+      const made = await waitFor(async () => (await newTasks(sid, known)).find((task) => task.state === 'SUCCEEDED' || task.state === 'FAILED') || null, 150, 1500);
+      const [, detail] = made ? await api('GET', `/api/v1/tasks/${made.id}`) : [0, {}];
+      const parameters = detail?.input?.parameters || {};
+      let pixels = '';
+      const asset = (detail.assets || []).find((item) => item.role === 'image');
+      if (asset?.url) {
+        const bytes = await (await ctx.request.get(base + asset.url)).body().catch(() => Buffer.alloc(0));
+        if (bytes.length > 24 && bytes.readUInt32BE(12) === 0x49484452) pixels = `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+      }
+      const file = await shot('614', 'size');
+      return {
+        ok: sent.body[field] === canvas && made?.state === 'SUCCEEDED' && made.offering_id === offering && parameters.size === '3840x2160',
+        detail: `图层=${JSON.stringify(layers)} POST ${field}=${JSON.stringify(sent.body[field] ?? null)} 任务=${made ? `${made.offering_id} ${made.state}` : '无'} 冻结参数=${JSON.stringify(parameters)} 产物像素=${pixels || '非 PNG 未读'}（fake 产物尺寸固定，只看冻结参数） 截图 ${file}`,
+      };
+    });
+  });
+}
+
+// #615: one turn opens at most one ask_choice card.
+async function itemF615() {
+  const sid = await createSession(`${tag} 两张选择卡`);
+  await openSession(sid);
+  await check('#615', '同一轮连发两次 ask_choice：对话里只出一张卡（第一张），刷新后仍是一张', async () => {
+    const first = { kind: 'next_step', options: [{ id: 'sword', label: `${tag} 甲：剑` }, { id: 'axe', label: `${tag} 乙：斧` }] };
+    const second = { kind: 'next_step', options: [{ id: 'bow', label: `${tag} 丙：弓` }, { id: 'spear', label: `${tag} 丁：矛` }] };
+    await sendThroughBox(sid, `给我选一个方向 [[fake:script:ask_choice ${JSON.stringify(first)}|ask_choice ${JSON.stringify(second)}|done]]`);
+    await page.waitForTimeout(2500);
+    const live = await tid('chat-choice-card').evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim()));
+    const fileLive = await shot('615', 'one-card');
+    await openSession(sid);
+    const reloaded = await tid('chat-choice-card').evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim()));
+    const file = await shot('615', 'one-card-reload');
+    return {
+      ok: live.length === 1 && live[0].includes('甲：剑') && !live[0].includes('丙：弓') && reloaded.length === 1,
+      detail: `卡片=${JSON.stringify(live).slice(0, 200)} 刷新后=${reloaded.length} 张 截图 ${fileLive} ${file}`,
+    };
+  });
+  // The same with both calls in one model response (two markers: two tool calls of one round).
+  const other = await createSession(`${tag} 两张选择卡 同一回应`);
+  await openSession(other);
+  await check('#615', '同一回应里并列两次 ask_choice：对话里只出一张卡', async () => {
+    const first = { kind: 'next_step', options: [{ id: 'red', label: `${tag} 红` }, { id: 'blue', label: `${tag} 蓝` }] };
+    const second = { kind: 'next_step', options: [{ id: 'green', label: `${tag} 绿` }, { id: 'gold', label: `${tag} 金` }] };
+    await sendThroughBox(other, `选个颜色 [[fake:tool:ask_choice ${JSON.stringify(first)}]] [[fake:tool:ask_choice ${JSON.stringify(second)}]]`);
+    await page.waitForTimeout(2500);
+    await openSession(other);
+    const cards = await tid('chat-choice-card').evaluateAll((items) => items.map((item) => item.innerText.replace(/\s+/g, ' ').trim()));
+    const file = await shot('615', 'one-card-parallel');
+    return { ok: cards.length === 1, detail: `卡片=${JSON.stringify(cards).slice(0, 200)} 截图 ${file}` };
+  });
+}
+
+// #616: opening a plain session reads /steps without a 404 or a console error.
+async function itemF616() {
+  const sid = await createSession(`${tag} steps`);
+  await check('#616', '打开普通会话：/steps 不是 404，控制台没有相关 error', async () => {
+    const errors = [];
+    const steps = [];
+    const onConsole = (message) => { if (message.type() === 'error') errors.push(message.text()); };
+    const onResponse = (response) => { if (response.url().includes(`/sessions/${sid}/steps`)) steps.push(`${response.request().method()} ${response.status()}`); };
+    page.on('console', onConsole);
+    page.on('response', onResponse);
+    try {
+      await openSession(sid);
+      await page.waitForTimeout(2500);
+    } finally {
+      page.off('console', onConsole);
+      page.off('response', onResponse);
+    }
+    const related = errors.filter((message) => /404|steps/i.test(message));
+    return { ok: steps.length > 0 && steps.every((entry) => !/ 404$/.test(entry)) && related.length === 0, detail: `/steps 应答=${JSON.stringify(steps)} 控制台 error=${JSON.stringify(errors).slice(0, 300)}` };
+  });
+}
+
+// #617 (the parts PR #627 fixed): compact-tile handle badge, "no source" for text-to-image, crop detail rows.
+async function itemF617() {
+  const seed = await seedEdits(4);
+  await openSession(seed.sid);
+  await check('#617', '「更多」组留在外面那格有句柄徽标', async () => {
+    const column = tid('version-strip').first().locator('[data-testid=version-column]').filter({ has: page.locator('[data-testid=version-fold]') }).first();
+    await column.waitFor({ timeout: 20000 });
+    const outside = column.locator('[data-testid=version-tile]').first();
+    const badge = (await outside.locator('[data-testid=version-handle-badge]').first().innerText({ timeout: 5000 }).catch(() => '')).trim();
+    const file = await shot('617', 'group-badge');
+    return { ok: /^@?img\d+$/.test(badge), detail: `代表格 ${await outside.getAttribute('data-key')} 徽标「${badge}」 截图 ${file}` };
+  });
+  const noSource = await text('ui.result.detail.no_source');
+  await check('#617', `文生图详情来源写「${noSource}」`, async () => {
+    const source = (await sessionTasks(seed.sid)).find((task) => task.capability === 'text-to-image');
+    if (!source) return { ok: false, detail: '会话里没有文生图任务' };
+    await tileOf(`n:${source.id}`).locator('[data-testid=version-detail]').click();
+    const rows = tid('result-detail-rows').first();
+    await rows.waitFor({ timeout: 15000 });
+    await page.waitForTimeout(1000);
+    const values = await tid('result-detail-row').evaluateAll((items) => items.map((item) => [item.dataset.key, item.innerText.replace(/\s+/g, ' ').trim()]));
+    const file = await shot('617', 'no-source');
+    await page.keyboard.press('Escape');
+    return { ok: values.some(([, value]) => value.includes(noSource)) && !values.some(([, value]) => /来源未知/.test(value)), detail: `详情行=${JSON.stringify(values).slice(0, 400)} 截图 ${file}` };
+  });
+  const crops = await seedSessionB();
+  await openSession(crops.sid);
+  await check('#617', '裁图详情有类型、来源（可跳转）与尺寸', async () => {
+    const crop = crops.crops[0];
+    await tileOf(`u:${crop.asset}`).locator('[data-testid=version-detail]').click();
+    const rows = tid('result-detail-rows').first();
+    await rows.waitFor({ timeout: 15000 });
+    await page.waitForTimeout(1000);
+    const values = Object.fromEntries(await tid('result-detail-row').evaluateAll((items) => items.map((item) => [item.dataset.key, item.innerText.replace(/\s+/g, ' ').trim()])));
+    const jump = await tid('result-detail-source-jump').count();
+    const file = await shot('617', 'crop-detail');
+    await page.keyboard.press('Escape');
+    return {
+      ok: Boolean(values.type) && Boolean(values.source) && jump > 0 && /128x192/.test(values.size || ''),
+      detail: `详情行=${JSON.stringify(values)} 来源可跳转=${jump}（源图 256x192 左半应为 128x192） 截图 ${file}`,
+    };
+  });
+  record('INFO', '#617', '未在本批修复的部分', '裁图组徽标显示「2D」与选定后舞台未跟随仍开启（Issue 保持 OPEN），本次不验');
+}
+
+// #618: the three-view card counts required views only, its buttons stay in their columns, layers are named by view.
+async function itemF618() {
+  const sid = await createSession(`${tag} 三视图卡片`);
+  await turn(sid, '画一把剑 [[fake:tool:refine_image {"prompt":"a plain steel sword on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the sword picture did not succeed');
+  const seedIds = (await sessionTasks(sid)).map((task) => task.id);
+  await openSession(sid);
+  const baseline = await layerNames();
+  await sendThroughBox(sid, '做三视图 [[fake:tool:create_three_view {"reference_handles":["@img1"]}]]');
+  await approvePending(sid);
+  const card = tid('three-view-card').last();
+  // Found on dev-test e83af476: the session's three-view list is read once when the session opens and is not read
+  // again after a turn, so a run started in the open session shows no card (and its view layers no view name) until
+  // the page is reloaded. Recorded as its own check, then the page is reloaded to go on with the #618 checks.
+  await check('#618', '出三视图后不刷新：对话里出现三视图卡片，画布上的视角图层名带视角', async () => {
+    const live = await card.waitFor({ timeout: 30000 }).then(() => true, () => false);
+    const added = (await layerNames()).filter((name) => !baseline.includes(name));
+    const file = await shot('618', 'live-card');
+    const generic = await page.evaluate(() => window.__ART_AI_PRODUCT_SCHEMA__?.content?.messages?.['ui.canvas.layer.image'] ?? '图片');
+    return { ok: live && !added.includes(generic) && !added.includes('图片'), detail: `30 秒内卡片出现=${live} 新图层=${JSON.stringify(added)} 截图 ${file}` };
+  });
+  if (!await card.isVisible().catch(() => false)) await openSession(sid);
+  await card.waitFor({ timeout: 60000 });
+  const slotState = async () => card.locator('[data-testid=three-view-slot]').evaluateAll((items) => items.map((item) => ({
+    slot: item.dataset.slot, status: item.dataset.status, optional: Boolean(item.querySelector('[data-testid=three-view-optional]')),
+    label: item.querySelector('.font-medium')?.innerText.trim() || '',
+  })));
+  const progress = async () => (await card.locator('[data-testid=three-view-progress]').innerText()).trim();
+  const completeText = await page.evaluate(() => window.__ART_AI_PRODUCT_SCHEMA__?.content?.messages?.['ui.studio.three_view.complete'] ?? '');
+  const counted = (header, slots) => {
+    const required = slots.filter((slot) => !slot.optional);
+    const done = required.filter((slot) => slot.status === 'succeeded').length;
+    const numbers = (header.match(/\d+/g) || []).map(Number);
+    // The finished card says so in words (ui.studio.three_view.complete) instead of a count.
+    if ((completeText && header === completeText) || numbers.length === 0) return { ok: done === required.length && Boolean(header), want: `${done}/${required.length}（完成时为文字）` };
+    return { ok: numbers.length >= 2 && numbers[0] === done && numbers[1] === required.length, want: `${done}/${required.length}` };
+  };
+  await waitFor(async () => (await slotState()).some((slot) => slot.status === 'succeeded'), 90, 1500);
+
+  await check('#618', '可选右侧先完成时，卡片头计数仍只算必需视角', async () => {
+    const before = await slotState();
+    const right = before.find((slot) => slot.optional);
+    if (!right) return { ok: false, detail: `没有可选视角：${JSON.stringify(before)}` };
+    const start = card.locator(`[data-testid=three-view-slot][data-slot="${right.slot}"] [data-testid=three-view-start]`);
+    if (await start.count()) await start.click();
+    await approvePending(sid);
+    await waitFor(async () => (await slotState()).find((slot) => slot.slot === right.slot)?.status === 'succeeded', 120, 1500);
+    const slots = await slotState();
+    const header = await progress();
+    const verdict = counted(header, slots);
+    const file = await shot('618', 'count-optional');
+    return { ok: verdict.ok && slots.find((slot) => slot.slot === right.slot)?.status === 'succeeded', detail: `卡片头「${header}」 应为 ${verdict.want} 视角=${JSON.stringify(slots)} 截图 ${file}` };
+  });
+
+  await check('#618', '聊天栏最窄（440）时各视角按钮不越界、不互相压住', async () => {
+    await dragChat(-800);
+    await page.waitForTimeout(800);
+    const boxes = await card.locator('[data-testid=three-view-slot]').evaluateAll((items) => items.map((item) => {
+      const column = item.getBoundingClientRect();
+      return {
+        slot: item.dataset.slot,
+        column: { x: column.x, width: column.width },
+        buttons: [...item.querySelectorAll('button')].filter((button) => button.offsetParent).map((button) => {
+          const b = button.getBoundingClientRect();
+          return { text: button.innerText.trim(), x: b.x, y: b.y, width: b.width, height: b.height };
+        }),
+      };
+    }));
+    const problems = [];
+    for (const [index, slot] of boxes.entries()) {
+      for (const button of slot.buttons) {
+        if (button.x < slot.column.x - 1 || button.x + button.width > slot.column.x + slot.column.width + 1) problems.push(`${slot.slot}「${button.text}」越出本列`);
+        for (const other of boxes.slice(index + 1)) {
+          for (const target of other.buttons) if (intersects(button, target)) problems.push(`${slot.slot}「${button.text}」压住 ${other.slot}「${target.text}」`);
+        }
+      }
+    }
+    const width = await chatWidth();
+    const file = await shotOf(card, '618', 'buttons-narrow');
+    return { ok: problems.length === 0 && boxes.length >= 3, detail: `聊天栏 ${width.value}px 问题=${JSON.stringify(problems)} 截图 ${file}` };
+  });
+
+  await check('#618', '生成其余视角后卡片头显示完成；插到画布的视角图层名带视角', async () => {
+    const rest = card.locator('[data-testid=three-view-start-remaining]');
+    if (await rest.count()) await rest.click();
+    for (let round = 0; round < 6; round += 1) {
+      await approvePending(sid);
+      const starts = card.locator('[data-testid=three-view-slot]:not([data-status=succeeded]) [data-testid=three-view-start]');
+      if (await starts.count()) await starts.first().click().catch(() => {});
+      if (await waitFor(async () => (await slotState()).filter((slot) => !slot.optional).every((slot) => slot.status === 'succeeded'), 20, 1500)) break;
+    }
+    const slots = await slotState();
+    const header = await progress();
+    const verdict = counted(header, slots);
+    const labels = slots.map((slot) => slot.label);
+    const views = (await sessionTasks(sid)).filter((task) => !seedIds.includes(task.id) && task.state === 'SUCCEEDED');
+    // Each view's 「查看」 puts that view on the stage (the board, for a picture); the layers it adds are counted as
+    // a multiset difference, so a second layer with an existing name still counts.
+    const before = await layerNames();
+    const opened = [];
+    for (const slot of slots.filter((entry) => entry.slot !== 'front' && entry.status === 'succeeded')) {
+      const view = card.locator(`[data-testid=three-view-slot][data-slot="${slot.slot}"] [data-testid=three-view-open]`);
+      if (!await view.count()) continue;
+      await view.click();
+      await page.waitForTimeout(2000);
+      opened.push(slot.label);
+    }
+    const after = await layerNames();
+    const remaining = [...before];
+    const added = after.filter((name) => {
+      const index = remaining.indexOf(name);
+      if (index >= 0) { remaining.splice(index, 1); return false; }
+      return true;
+    });
+    const all = await layerNames();
+    const file = await shot('618', 'layers');
+    const wanted = opened.filter((label) => !all.includes(label));
+    // Which picture each layer holds: select it and read the stage's version label (the fake views are identical
+    // pictures, so the bytes cannot tell them apart).
+    const held = [];
+    const rows = tid('layer-row');
+    for (let index = 0; index < await rows.count(); index += 1) {
+      const row = rows.nth(index);
+      const name = (await row.innerText()).trim();
+      if (name === 'img1' || /画布图层/.test(name)) continue;
+      await row.click().catch(() => {});
+      await page.waitForTimeout(800);
+      held.push(`${name}→${await stageVersion()}`);
+    }
+    return {
+      ok: verdict.ok && opened.length > 0 && wanted.length === 0 && !all.includes('图片'),
+      detail: `卡片头「${header}」 应为 ${verdict.want} 视角名=${JSON.stringify(labels)} 视角任务=${views.length} 点了「查看」=${JSON.stringify(opened)} `
+        + `新图层=${JSON.stringify(added)} 全部图层=${JSON.stringify(all)} 缺视角名=${JSON.stringify(wanted)} 选中图层→舞台版本=${JSON.stringify(held)} 截图 ${file}`,
+    };
+  });
+}
+
+// #619: the Skill draft names the session it was opened from; a spent quota says so in Schema words.
+async function itemF619() {
+  const sid = await createSession(`${tag} Skill 草稿`);
+  await openSession(sid);
+  const openCreator = async () => {
+    await closeSettings();
+    await openSettings('skills');
+    await page.getByRole('button', { name: await text('ui.workspace.skills.create'), exact: true }).click();
+    await tid('workspace-skill-creator').waitFor({ timeout: 10000 });
+    await page.waitForTimeout(800);
+  };
+  // In the full run the requirement once landed in the name field (the creator was still settling its focus): fill,
+  // read both fields back, and fill again when they are not what was typed.
+  const fillDraft = async (name, requirement) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await page.locator('#personal-skill-name').fill(name);
+      await page.locator('#personal-skill-requirement').fill(requirement);
+      await page.waitForTimeout(300);
+      if (await page.locator('#personal-skill-name').inputValue() === name
+        && await page.locator('#personal-skill-requirement').inputValue() === requirement) return;
+    }
+    throw new Error('the Skill creator did not keep the typed name and requirement');
+  };
+  await check('#619', '起草请求带上当前会话 ID，草稿生成成功', async () => {
+    await openCreator();
+    await fillDraft(`${tag}-draft`, `道具图一律白底 [[fake:skill-draft ${JSON.stringify({ slug: `${tag}-draft`, description: `${tag} 草稿` })}]]`);
+    const posted = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes('/skills/personal/draft'), { timeout: 30000 });
+    await tid('skill-generate').click();
+    const request = await posted;
+    let body = {};
+    try { body = request.postDataJSON() || {}; } catch {}
+    const response = await request.response();
+    await page.locator('#personal-skill-slug').waitFor({ timeout: 60000 }).catch(() => {});
+    const slug = await page.locator('#personal-skill-slug').inputValue().catch(() => '');
+    const file = await shot('619', 'draft');
+    const sessionField = Object.entries(body).find(([key]) => /session/i.test(key));
+    return { ok: sessionField?.[1] === sid && response?.status() === 200 && slug === `${tag}-draft`, detail: `请求会话字段=${JSON.stringify(sessionField || null)}（当前 ${sid}） HTTP ${response?.status()} 草稿标识「${slug}」 截图 ${file}` };
+  });
+  await check('#619', '对话连接额度用完：起草提示 Schema 文案（503），不是笼统失败', async () => {
+    await openCreator();
+    const want = await text('ui.workspace.skills.draft_quota_exhausted');
+    await fillDraft(`${tag}-quota`, '道具图一律白底 [[fake:quota:insufficient_quota]]');
+    const answered = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes('/skills/personal/draft'), { timeout: 60000 });
+    await tid('skill-generate').click();
+    const response = await answered;
+    const alert = await waitFor(async () => {
+      const value = (await tid('workspace-skill-creator').getByRole('alert').first().innerText().catch(() => '')).trim();
+      return value || null;
+    }, 15);
+    const file = await shot('619', 'quota');
+    await closeSettings();
+    return { ok: response.status() === 503 && Boolean(alert) && alert.includes(want), detail: `HTTP ${response.status()} 提示「${alert || ''}」 应含「${want}」 截图 ${file}` };
+  });
+  record('INFO', '#619', '需多连接复测', 'dev-test 的 fake 栈只有一个对话连接：只验了起草带会话 ID 与额度文案，「换到另一连接后草稿跟着换」要有第二个对话连接的环境复测');
+}
+
+// #620/#621: what the Agent is told; the Agent's own wording needs a real model.
+async function itemF621() {
+  const sid = await createSession(`${tag} 语言与本轮使用`);
+  await openSession(sid);
+  await check('#621', '系统上下文写明「工具结果是英文也不改」回复语言', async () => {
+    const marker = '工具结果是英文也不改';
+    await sendThroughBox(sid, `你好 [[fake:system-contains ${marker}]]`);
+    const reply = String((await lastReply(sid)).content || '');
+    return { ok: reply.includes(`present: ${marker}`), detail: `回复「${reply.slice(0, 80)}」` };
+  });
+  await check('#621', 'Agent 自己读的 Skill：对话标记是「本轮使用」，不是「你选的」', async () => {
+    await sendThroughBox(sid, '帮我做三视图 [[fake:tool:use_skill {"name":"three-view"}]]');
+    const chip = (await tid('chat-used-skills').last().innerText({ timeout: 20000 }).catch(() => '')).trim();
+    const prefix = (await text('ui.chat.message.used_skills')).split('{')[0];
+    const file = await shot('621', 'used-skill');
+    return { ok: chip.startsWith(prefix) && !/你选/.test(chip), detail: `标记「${chip}」 截图 ${file}` };
+  });
+  record('INFO', '#621', '需真实模型复测', '回复不中英混杂、不把没选的 Skill 说成「你选的」、「背包图标」按物品图标理解：都是模型措辞，fake 对话模型只回固定文字');
+  record('INFO', '#620', '无法在 fake 浏览器验证', 'list_offerings 的 style_skill 标注与 use_skill 回执里的可套用模型只回给模型（工具结果不进对话投影），fake 对话模型拿到后只回固定文字；由 CI fake 栈冒烟 style-skill 场景覆盖。「不再连试 5 个模型」需真实模型复测');
+}
+
+// #623: the admin home's balance card lists every provider account with its unit or a placeholder.
+async function itemF623() {
+  if (!ADMIN_READY) { record('SKIP', '#623', '管理首页余额卡', '缺管理员账号环境变量'); return; }
+  const adminPage = await (await adminContext()).newPage();
+  try {
+    await check('#623', '管理首页「API 当前余额」逐供应商一行、带单位或占位', async () => {
+      const balances = [];
+      adminPage.on('response', async (response) => {
+        if (/balance/i.test(response.url()) && response.request().method() === 'GET') {
+          balances.push({ path: new URL(response.url()).pathname, status: response.status() });
+        }
+      });
+      await adminPage.goto(`${base}/admin`, { waitUntil: 'load' });
+      const card = adminPage.locator('[data-testid=admin-balance]');
+      await card.waitFor({ timeout: 30000 });
+      await adminPage.waitForTimeout(2000);
+      const rows = await card.locator('li').evaluateAll((items) => items.map((item) => item.innerText.trim()));
+      const messages = await adminPage.evaluate(() => window.__ART_AI_PRODUCT_SCHEMA__?.content?.messages || {});
+      const placeholders = [messages['ui.pricing.balance_unknown'], messages['ui.workspace.balance.unavailable']].filter(Boolean);
+      const bad = rows.filter((row) => {
+        const value = row.split(/[:：]\s*/).slice(1).join(':').trim();
+        if (!value) return true;
+        if (placeholders.some((placeholder) => value.includes(placeholder))) return false;
+        return /^[\d.,\s]+$/.test(value);
+      });
+      const file = await shotOf(adminPage, '623', 'balance');
+      return {
+        ok: rows.length >= 2 && bad.length === 0,
+        detail: `余额行=${JSON.stringify(rows)} 无单位行=${JSON.stringify(bad)} 余额请求=${JSON.stringify(balances)} 截图 ${file}`,
+      };
+    });
+  } finally {
+    await adminPage.close().catch(() => {});
+  }
+}
+
+// #624: a 3D tile and a 3D object chip without a preview show the 3D placeholder, never a black square.
+async function itemF624() {
+  const seed = await seedSessionA();
+  if (!seed.model) { record('FAIL', '#624', '3D 占位', 'fake 3D 任务没有成功'); return; }
+  const thumbState = async (scope) => scope.locator('[data-testid=object-thumb]').first().evaluate((node) => {
+    const image = node.querySelector('img');
+    return {
+      state: node.dataset.state, kind: node.dataset.kind, icon: Boolean(node.querySelector('svg')),
+      loaded: image ? image.complete && image.naturalWidth > 0 : false, src: image ? new URL(image.src).pathname : '',
+      background: getComputedStyle(node).backgroundColor,
+    };
+  });
+  const sound = (thumb) => thumb.kind === 'model' && ((thumb.state === 'image' && thumb.loaded) || (thumb.state === 'placeholder' && thumb.icon));
+  await openSession(seed.sid);
+  const tile = tileOf(`n:${seed.model}`);
+  let normal = null;
+  await check('#624', '3D 瓦片：有预览显示预览，没有时显示 3D 占位', async () => {
+    await tile.waitFor({ timeout: 20000 });
+    await page.waitForTimeout(1500);
+    normal = await thumbState(tile);
+    const file = await shotOf(tile, '624', 'tile');
+    return { ok: sound(normal), detail: `${JSON.stringify(normal)} 截图 ${file}` };
+  });
+  await check('#624', '3D 预览加载失败：瓦片与输入框芯片都回到 3D 占位（不是黑块）', async () => {
+    const blocked = normal?.src || '';
+    if (blocked) await page.route((url) => url.pathname === blocked, (route) => route.abort());
+    try {
+      await openSession(seed.sid);
+      await tile.waitFor({ timeout: 20000 });
+      await tileThumb(`n:${seed.model}`).click();
+      await page.waitForTimeout(2500);
+      const tileThumbState = await thumbState(tile);
+      const chip = tid('composer-object-chip').first();
+      const chipState = await chip.count() ? await thumbState(chip).catch((error) => ({ error: error.message.split('\n')[0] })) : { missing: true };
+      const file = await shot('624', 'placeholder');
+      const placeholder = (thumb) => thumb.kind === 'model' && thumb.state === 'placeholder' && thumb.icon;
+      return {
+        ok: placeholder(tileThumbState) && (blocked ? placeholder(chipState) : sound(chipState)),
+        detail: `拦截预览=${blocked || '（本来就没有预览）'} 瓦片=${JSON.stringify(tileThumbState)} 芯片=${JSON.stringify(chipState)} 截图 ${file}`,
+      };
+    } finally {
+      if (blocked) await page.unroute((url) => url.pathname === blocked).catch(() => {});
+      await page.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
+    }
+  });
+}
+
 // ---------------------------------------------------------------- run
 const runners = {
   586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
   n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5, n6: itemN6, m1: itemM1, m2: itemM2,
   p1: itemP1, p2: itemP2, p3: itemP3, p4: itemP4,
+  f610: itemF610, f611: itemF611, f612: itemF612, f614: itemF614, f615: itemF615, f616: itemF616, f617: itemF617,
+  f618: itemF618, f619: itemF619, f621: itemF621, f623: itemF623, f624: itemF624,
 };
 try {
   for (const item of ITEMS) {
