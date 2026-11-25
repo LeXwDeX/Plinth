@@ -71,6 +71,27 @@ describe('ResultDetail', () => {
     expect(rowOf(unknown, 'source')).toContain('来源未知');
     expect(unknown).not.toContain('result-detail-source-jump');
   });
+  it('lists an Agent crop: what it is, the version it was cut from and its size (#617)', () => {
+    const parent = blankTile({ key: 'n:img9', taskId: 'img9', domain: 'image', status: 'ready', version: 9 });
+    const crop = blankTile({ key: 'u:c1', taskId: 'upload:c1', domain: 'image', status: 'ready', origin: 'upload', operation: 'crop',
+      size: { width: 512, height: 384 },
+      parents: [{ key: 'n:img9', known: true, kind: 'source_asset', evidence: 'recorded', link: 'crop', step: '' }] });
+    versions.tiles = [parent, crop]; versions.byTask.set('img9', 'n:img9'); versions.byTask.set('upload:c1', 'u:c1');
+    const html = renderToStaticMarkup(<ResultDetail target={{ sessionId: 's1', stageObjectId: 'upload:c1', kind: 'image', url: '/api/v1/assets/c1', title: '裁图', status: 'ready' }} />);
+    expect(rowOf(html, 'type')).toContain('裁图');
+    expect(rowOf(html, 'source')).toContain('来自 2D v9');
+    expect(html).toContain('data-testid="result-detail-source-jump"');
+    expect(rowOf(html, 'size')).toContain('512x384');
+    expect(html).not.toContain('data-key="prompt"');
+  });
+  it('says a text-to-image result was made from no earlier version (#617)', () => {
+    state.task = ready();
+    versions.tiles = [blankTile({ key: 'n:t1', taskId: 't1', domain: 'image', status: 'ready', version: 1 })];
+    versions.byTask.set('t1', 'n:t1');
+    const html = renderToStaticMarkup(<ResultDetail target={target} />);
+    expect(rowOf(html, 'source')).toContain(schemaText(schema, 'ui.result.detail.no_source'));
+    expect(rowOf(html, 'source')).not.toContain('来源未知');
+  });
   it('shows model, size, ratio, count, prompt and credits for a finished task', () => {
     state.task = ready(); state.offering = offering(true);
     const html = renderToStaticMarkup(<ResultDetail target={target} />);
