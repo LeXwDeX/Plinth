@@ -88,11 +88,11 @@ func TestReviseRetryIsCappedPerStepForTheAgent(t *testing.T) {
 	}
 	retried, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
 		ExpectedPlanVersion: failed.Version, Operation: OperationRetry, StepIndex: 1, Reason: "上游限流，重试"})
-	if err != nil || retried.Steps[1].Retry != 1 {
+	if err != nil || retried.Steps[1].Retry != 1 || retried.Steps[1].AgentRetries != 1 {
 		t.Fatalf("revise retry = %+v %v", retried.Steps, err)
 	}
 	capped := store.plans[plan.ID]
-	capped.Steps[1].Retry = MaxAgentStepRetries
+	capped.Steps[1].AgentRetries = MaxAgentStepRetries
 	capped.State, capped.Failure = failed.State, failed.Failure
 	capped.Steps[1].State, capped.Steps[1].TaskID = Failed, "step-2"
 	store.plans[plan.ID] = capped
@@ -124,5 +124,34 @@ func TestReviseInsertUsesEachContingencyOnce(t *testing.T) {
 		ContingencyID: "pivot", Contingency: &contingency, Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
 		Reason: "再用一次预案"}); !errors.Is(err, ErrRevisionOutsidePlan) {
 		t.Fatalf("second insert of one contingency = %v, want ErrRevisionOutsidePlan", err)
+	}
+}
+
+// #665: the cap counts the Agent's retries only. A step the person retried
+// from the panel (and a cancel reconcile) as often as the cap still takes the
+// Agent's revise retry.
+func TestReviseRetryCapIgnoresThePersonsRetries665(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	failedTask := gateway.tasks["step-1"]
+	failedTask.State = generation.TaskFailed
+	failedTask.Failure = &generation.Failure{Class: generation.FailureRateLimited, Retryable: true}
+	gateway.tasks["step-1"] = failedTask
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	failed := store.plans[plan.ID]
+	if failed.State != Failed {
+		t.Fatalf("plan after upstream failure = %s", failed.State)
+	}
+	failed.Steps[0].Retry = MaxAgentStepRetries // the person retried from the panel
+	store.plans[plan.ID] = failed
+	retried, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: failed.Version, Operation: OperationRetry, StepIndex: 0, Reason: "上游限流，重试"})
+	if err != nil || retried.Steps[0].AgentRetries != 1 || retried.Steps[0].Retry != MaxAgentStepRetries+1 {
+		t.Fatalf("agent retry after the person's retries = %+v %v", retried.Steps, err)
 	}
 }

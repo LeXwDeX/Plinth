@@ -113,6 +113,11 @@ type Step struct {
 	State            string                `json:"state"`
 	TaskID           generation.TaskID     `json:"task_id,omitempty"`
 	Retry            int                   `json:"retry"`
+	// AgentRetries counts the retries the Agent's revise retry started for
+	// this step (#665). Retry also counts the person's panel retries and the
+	// new keys a reconcile after a cancel takes; only this one is capped by
+	// MaxAgentStepRetries.
+	AgentRetries int `json:"agent_retries,omitempty"`
 	Failure          string                `json:"failure,omitempty"`
 	Retryable        bool                  `json:"retryable,omitempty"`
 	// Resumable marks a PAUSED step that Resume may continue after the user
