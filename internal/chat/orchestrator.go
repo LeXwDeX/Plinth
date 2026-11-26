@@ -782,6 +782,10 @@ func (orchestrator *Orchestrator) finalizeStoppedTurn(
 		command.OwnerID,
 		*assistant,
 	); err != nil {
+		// #665: the stream ends whether or not the stop text was stored, as
+		// a failure's does, or its client would wait for an event that never
+		// comes.
+		orchestrator.appendDone(ctx, command.SessionID)
 		return err
 	}
 	return orchestrator.appendEvent(

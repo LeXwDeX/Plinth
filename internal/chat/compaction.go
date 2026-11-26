@@ -243,8 +243,12 @@ func (orchestrator *Orchestrator) autoCompact(ctx context.Context, command Proce
 	orchestrator.statusEvent(ctx, command.SessionID, status.Compacting)
 	_, err = orchestrator.compactHistory(ctx, command.OwnerID, command.SessionID, history[:current], state,
 		CompactionAuto, model)
-	orchestrator.noteCompactionOutcome(key, err == nil || errors.Is(err, ErrNothingToCompact) ||
-		errors.Is(err, ErrCompactionConflict))
+	// #665: a compaction cut short by a stop or a shutdown did not fail; the
+	// session does not back off for it.
+	if ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+		orchestrator.noteCompactionOutcome(key, err == nil || errors.Is(err, ErrNothingToCompact) ||
+			errors.Is(err, ErrCompactionConflict))
+	}
 	switch {
 	case err == nil:
 		orchestrator.statusEvent(ctx, command.SessionID, status.Compacted)

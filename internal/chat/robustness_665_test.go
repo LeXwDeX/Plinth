@@ -248,3 +248,68 @@ func TestOrchestratorReplayedPlanIsNotCappedAgain(t *testing.T) {
 		t.Fatalf("reply = %q with %d calls", reply.Content, len(reply.ToolCalls))
 	}
 }
+
+// #665: a stop whose stop text cannot be stored still ends the stream with its
+// done event, as a failure does.
+func TestOrchestratorStopEndsTheStreamWhenItsTextCannotBeStored(t *testing.T) {
+	repository := &endingFlakyRepository{memoryChatRepository: newMemoryChatRepository()}
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Presentation.Messages.TurnStopped = "configured stopped"
+	repository.failEnding(10, "configured stopped")
+	agent := &blockingStreamAgent{entered: make(chan struct{})}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model", Agent: agent, Tools: scriptedToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID}
+	processDone := make(chan error, 1)
+	go func() { processDone <- orchestrator.Process(ctx, command) }()
+	<-agent.entered
+	if active, err := orchestrator.CancelTurn(ctx, "owner-a", session.ID); err != nil || !active {
+		t.Fatalf("CancelTurn = %v, %v", active, err)
+	}
+	if err := <-processDone; err == nil {
+		t.Fatal("Process ended without the store failure")
+	}
+	if _, closed := streamStatus(t, service, schema, command); !closed {
+		t.Fatal("the stream got no done event")
+	}
+}
+
+// #665: an automatic compaction cut short by a cancellation (a stop, a
+// shutdown) is not a failure: the next turn tries it again without backoff.
+func TestCanceledAutomaticCompactionDoesNotBackOff(t *testing.T) {
+	fixture := newContextFixture(t, chat.ModelPolicy{Model: "deepseek", WindowOverride: 1000})
+	for round := 1; round <= fixture.schema.ContextCompaction.KeepRecentRounds+2; round++ {
+		fixture.turn(t, fmt.Sprintf("round %d", round))
+	}
+	fixture.agent.usage = &agents.Usage{PromptTokens: 950}
+	fixture.turn(t, "fill")
+	fixture.agent.summaryErr = context.Canceled
+	fixture.turn(t, "keep going")
+	fixture.agent.mu.Lock()
+	tried := len(fixture.agent.summaries)
+	fixture.agent.summaryErr = nil
+	fixture.agent.mu.Unlock()
+	if tried == 0 {
+		t.Fatal("the automatic compaction was not tried")
+	}
+	fixture.turn(t, "and again")
+	fixture.agent.mu.Lock()
+	defer fixture.agent.mu.Unlock()
+	if len(fixture.agent.summaries) == tried {
+		t.Fatal("a canceled compaction started the failure backoff")
+	}
+}
