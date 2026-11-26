@@ -88,7 +88,7 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
   // size is not "wrong" here, and the offer would only resize it (#653).
   const adopt = delivery.ratio.label === plan.outputRatio
     ? null
-    : canvasPixelsForRatio(plan.outputRatio, pixels, schema.canvas.frontend.artboard, schema.canvas.limits);
+    : canvasPixelsForRatio(plan.outputRatio, schema.canvas.frontend.artboard, schema.canvas.limits);
   return (
     <div data-testid="canvas-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
       <SizeUnavailable schema={schema} detail={text} />

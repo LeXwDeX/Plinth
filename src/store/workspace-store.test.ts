@@ -300,12 +300,13 @@ describe('dismissed tasks stay dismissed after the history is read again (#651)'
     expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['gone']);
   });
 
-  it('works without storage: dismissed tasks then simply return, as before', () => {
+  it('works without storage: dismissing does not throw, and the task stays cleared for this page', () => {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: () => { throw new Error('blocked'); } });
     const store = useWorkspaceStore.getState();
     store.registerTask({ taskId: 'x', capability: 'image-to-image', progressMaximum: 100, restored: true });
     expect(() => store.dismissTask('x')).not.toThrow();
     store.registerTask({ taskId: 'x', capability: 'image-to-image', progressMaximum: 100, restored: true });
-    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['x']);
+    // Only a reload loses it: the list lives in memory for the page, in storage for the next one.
+    expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
   });
 });

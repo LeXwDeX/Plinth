@@ -12157,7 +12157,7 @@
         "continuation": {
           "enabled": true,
           "reasons": {
-            "budget_not_covered": "已批准计划的预算不再覆盖后续视角",
+            "budget_not_covered": "后续视角没有获得自动批准：已批准计划的预算不覆盖，或需要你确认",
             "view_not_finished": "这个视角的任务没有成功完成",
             "view_already_started": "另一个视角已在等待或生成中",
             "consistency_retries_exhausted": "自动重做次数已用完，这一张仍与正面图不一致"

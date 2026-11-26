@@ -293,7 +293,6 @@ export function canvasRatioOptions(tables: RatioTables): string[] {
  */
 export function canvasPixelsForRatio(
   ratio: string,
-  current: CanvasPixels | null,
   artboard: Pick<ArtboardSchema, 'default_width' | 'default_height'>,
   limits: Pick<CanvasProductSchema['limits'], 'minimum_dimension' | 'maximum_dimension'>,
 ): CanvasPixels | null {
