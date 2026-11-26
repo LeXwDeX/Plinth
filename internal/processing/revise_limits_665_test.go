@@ -155,3 +155,25 @@ func TestReviseRetryCapIgnoresThePersonsRetries665(t *testing.T) {
 		t.Fatalf("agent retry after the person's retries = %+v %v", retried.Steps, err)
 	}
 }
+
+// #665: a replace stays within the session's approved production plan: a
+// capability the plan does not name is refused as outside the plan, one it
+// names (here as a correction capability) is accepted. Without a production
+// plan the replace is decided by the per-step grants as before.
+func TestReviseReplaceStaysWithinTheApprovedProductionPlan665(t *testing.T) {
+	ctx := context.Background()
+	service, _, _, plan := checkpointFixture(t)
+	approved := budget.Plan{Title: "plan", Steps: []budget.PlanStep{{Capability: "remesh"}, {Capability: "rigging"}}}
+	command := ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: plan.Version, Operation: OperationReplace, StepIndex: 1,
+		Capability: "resize", OfferingID: "resize", Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "换成缩放", ApprovedPlan: &approved}
+	if _, err := service.Revise(ctx, command); !errors.Is(err, ErrRevisionOutsidePlan) {
+		t.Fatalf("replace outside the approved plan = %v, want ErrRevisionOutsidePlan", err)
+	}
+	approved.CorrectionCapabilities = []string{"resize"}
+	replaced, err := service.Revise(ctx, command)
+	if err != nil || replaced.Steps[1].Capability != "resize" {
+		t.Fatalf("replace within the approved plan = %+v %v", replaced.Steps, err)
+	}
+}

@@ -67,6 +67,11 @@ type ReviseCommand struct {
 	// session's production plan. The Agent names only its id; the tool layer
 	// fills this from the approved plan, never from the arguments.
 	Contingency *budget.PlanContingency `json:"-"`
+	// ApprovedPlan is the session's active production plan the server read,
+	// or nil when the session has none (#665). A replace stays within it: the
+	// new step's capability must be one the plan approved (a step, a
+	// contingency or a correction capability).
+	ApprovedPlan *budget.Plan `json:"-"`
 	Capability  generation.Capability   `json:"capability,omitempty"`
 	OfferingID  generation.OfferingID   `json:"offering_id,omitempty"`
 	Parameters  json.RawMessage         `json:"parameters,omitempty"`
@@ -210,6 +215,9 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	if capability == "" {
 		capability = step.Capability
 	}
+	if command.ApprovedPlan != nil && !approvedPlanCovers(*command.ApprovedPlan, capability) {
+		return Plan{}, ErrRevisionOutsidePlan
+	}
 	planned, err := s.revisedStep(capability, offeringID, command.Parameters)
 	if err != nil {
 		return Plan{}, err
@@ -226,6 +234,22 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	plan.Steps = steps
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
+}
+
+// approvedPlanCovers reports whether the approved production plan names the
+// capability as one of its steps, contingencies or correction capabilities.
+func approvedPlanCovers(plan budget.Plan, capability generation.Capability) bool {
+	for _, step := range plan.Steps {
+		if step.Capability == string(capability) {
+			return true
+		}
+	}
+	for _, contingency := range plan.Contingencies {
+		if contingency.Step.Capability == string(capability) {
+			return true
+		}
+	}
+	return slices.Contains(plan.CorrectionCapabilities, string(capability))
 }
 
 func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseCommand, reason string) (Plan, error) {

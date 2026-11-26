@@ -68,7 +68,19 @@ func (executor *Executor) ReviseProcessingPlan(ctx context.Context, command chat
 			return executor.revisionRefusal(command, config, config.Messages.ContingencyUnknown)
 		}
 	}
+	// A replace stays within the session's approved production plan (#665).
+	var approvedPlan *budget.Plan
+	if arguments.Operation == processing.OperationReplace && executor.grants != nil {
+		summary, found, err := executor.grants.BudgetSummary(ctx, command.OwnerID, command.SessionID)
+		if err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
+		if found && summary.State == budget.StateActive {
+			approvedPlan = &summary.Plan
+		}
+	}
 	revised, err := executor.plans.Revise(ctx, processing.ReviseCommand{
+		ApprovedPlan:        approvedPlan,
 		Harness:             turnHarnessBinding(command),
 		OwnerID:             generation.OwnerID(command.OwnerID),
 		SessionID:           command.SessionID,
