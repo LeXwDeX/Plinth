@@ -5,8 +5,8 @@ import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ParamSchema } from '@/lib/providers/types';
 import { effectiveOfferingValues } from './generation-params';
 import {
-  canvasResizeForChoice, canvasSizeChoice, canvasSizeFit, canvasSizeParameters, canvasTurnOutput, imageSizeAllows, initialCanvasPixels,
-  outputPixels, pixelsForChoice, referenceTurnOutput, settingsAfterModelSwitch, type RatioTables,
+  canvasPixelsForRatio, canvasRatioChoice, canvasRatioOptions, canvasRatioTurnOutput, canvasRatioValues, canvasShapeOf, canvasSizeChoice, canvasSizeParameters,
+  canvasTierParameters, canvasTurnOutput, imageSizeAllows, initialCanvasPixels, outputPixels, referenceTurnOutput, type RatioTables,
 } from './canvas-size';
 
 const artboard = catalog.application.canvas.frontend.artboard;
@@ -37,83 +37,82 @@ const banana = {
   parameters: [{ name: 'aspect_ratio', semantic: 'output-size', default: '1:1', options: ratios.map((value) => ({ value, label: value })) }],
 } as unknown as OfferingWire;
 
-describe('canvas size and the 2D output size (#246)', () => {
+describe('the canvas is a ratio (#653)', () => {
   it('reads pixel sizes directly and ratio-only sizes through the Schema ratio table', () => {
     expect(outputPixels([gptParam], { size: '3840x2160' }, ratioPixels)).toEqual({ width: 3840, height: 2160 });
     expect(outputPixels([bananaParam], { aspect_ratio: '16:9' }, ratioPixels)).toEqual({ width: 1344, height: 768 });
+    expect(outputPixels([seedreamParam], {}, ratioPixels)).toEqual({ width: 4096, height: 4096 });
     expect(outputPixels([], {}, ratioPixels)).toBeNull();
   });
 
-  it('starts a canvas at the model output, else at the Schema default', () => {
-    expect(initialCanvasPixels(artboard, [gptParam], { size: '1536x1024' })).toEqual({ width: 1536, height: 1024 });
-    expect(initialCanvasPixels(artboard, [], {})).toEqual({ width: artboard.default_width, height: artboard.default_height });
+  it('starts a new canvas at the Schema default, 1:1, whatever the model', () => {
+    const initial = initialCanvasPixels(artboard);
+    expect(initial).toEqual({ width: artboard.default_width, height: artboard.default_height });
+    expect(canvasShapeOf(initial, ratioPixels).label).toBe('1:1');
   });
 
-  it('applies forced values when reading what a choice produces', () => {
-    expect(pixelsForChoice(seedream, [seedreamParam], {}, 'size', '2048x2048', ratioPixels)).toEqual({ width: 4096, height: 4096 });
-    expect(pixelsForChoice(gpt, [gptParam], {}, 'size', null, ratioPixels)).toEqual({ width: 2048, height: 2048 });
+  it('reads the ratio of an existing canvas from its pixels, without migrating it', () => {
+    expect(canvasShapeOf({ width: 2048, height: 1152 }, ratioPixels)).toEqual({ label: '16:9', ratio: 16 / 9 });
+    expect(canvasShapeOf({ width: 2048, height: 878 }, ratioPixels).label).toBe('21:9');
+    // The pixels the Schema maps a ratio to name that ratio (canvases made for a ratio-only model before #653).
+    expect(canvasShapeOf({ width: 1344, height: 768 }, ratioPixels).label).toBe('16:9');
+    expect(canvasShapeOf({ width: 3072, height: 5504 }, ratioPixels).label).toBe('9:16');
+    // Any other shape keeps its own ratio, named simply.
+    expect(canvasShapeOf({ width: 1000, height: 700 }, ratioPixels)).toEqual({ label: '10:7', ratio: 1000 / 700 });
+    expect(canvasShapeOf({ width: 2048, height: 683 }, ratioPixels).label).toBe('3:1');
   });
 
-  it('says match, align or conflict, never changing the canvas', () => {
-    expect(canvasSizeFit(undefined, [gptParam], {}, { width: 2048, height: 2048 }, ratioPixels)).toEqual({ kind: 'none' });
-    expect(canvasSizeFit(gpt, [gptParam], { size: '2048x2048' }, { width: 2048, height: 2048 }, ratioPixels)).toEqual({ kind: 'match' });
-    // Same model, another option produces the canvas size.
-    expect(canvasSizeFit(gpt, [gptParam], { size: '1024x1024' }, { width: 3840, height: 2160 }, ratioPixels))
-      .toEqual({ kind: 'align', settings: { size: '3840x2160' }, output: { width: 1024, height: 1024 } });
-    // Seedream cannot produce 2048x2048 (its 2K choice is forced to 4K).
-    expect(canvasSizeFit(seedream, [seedreamParam], { size: '4096x4096' }, { width: 2048, height: 2048 }, ratioPixels))
-      .toEqual({ kind: 'conflict', output: { width: 4096, height: 4096 } });
-    // The named option wins over one forced to the same size.
-    expect(canvasSizeFit(seedream, [seedreamParam], { size: '5504x3040' }, { width: 4096, height: 4096 }, ratioPixels))
-      .toMatchObject({ kind: 'align', settings: { size: '4096x4096' } });
-    // A ratio-only model aligns through the ratio table and conflicts with any other size.
-    expect(canvasSizeFit(banana, [bananaParam], { aspect_ratio: '1:1' }, { width: 1344, height: 768 }, ratioPixels))
-      .toMatchObject({ kind: 'align', settings: { aspect_ratio: '16:9' } });
-    expect(canvasSizeFit(banana, [bananaParam], { aspect_ratio: '1:1' }, { width: 2048, height: 2048 }, ratioPixels))
-      .toEqual({ kind: 'conflict', output: { width: 1024, height: 1024 } });
-  });
-
-  it('reads a ratio through the tier the Offering is set to (Gemini image_size, official per-tier sizes)', () => {
-    const geminiRatio = { ...bananaParam, options: [...(bananaParam.options ?? []), { value: '21:9', label: '21:9' }] } as ParamSchema;
-    const gemini = {
-      id: 'gemini', available: true,
-      parameters: [
-        { name: 'aspect_ratio', semantic: 'output-size', default: '1:1', options: geminiRatio.options },
-        { name: 'image_size', default: '4K', options: [{ value: '1K', label: '1K' }, { value: '2K', label: '2K' }, { value: '4K', label: '4K' }], presentation: { surface: 'readonly' } },
-      ],
-    } as unknown as OfferingWire;
-    expect(outputPixels([geminiRatio], { aspect_ratio: '1:1', image_size: '4K' }, ratioPixels)).toEqual({ width: 4096, height: 4096 });
-    expect(outputPixels([geminiRatio], { aspect_ratio: '16:9', image_size: '2K' }, ratioPixels)).toEqual({ width: 2752, height: 1536 });
-    expect(outputPixels([geminiRatio], { aspect_ratio: '21:9', image_size: '1K' }, ratioPixels)).toEqual({ width: 1584, height: 672 });
-    // The default tier (4K) applies without an entered value: a new canvas for Gemini is 4096x4096, not 1024.
-    expect(pixelsForChoice(gemini, [geminiRatio], {}, 'aspect_ratio', '1:1', ratioPixels)).toEqual({ width: 4096, height: 4096 });
-    // A 1024 canvas is a conflict at 4K and a match at 1K.
-    expect(canvasSizeFit(gemini, [geminiRatio], { aspect_ratio: '1:1', image_size: '4K' }, { width: 1024, height: 1024 }, ratioPixels))
-      .toEqual({ kind: 'conflict', output: { width: 4096, height: 4096 } });
-    expect(canvasSizeFit(gemini, [geminiRatio], { aspect_ratio: '1:1', image_size: '1K' }, { width: 1024, height: 1024 }, ratioPixels))
-      .toEqual({ kind: 'match' });
-    // Without a tier parameter the plain ratio table applies (Nano Banana).
-    expect(outputPixels([bananaParam], { aspect_ratio: '1:1' }, ratioPixels)).toEqual({ width: 1024, height: 1024 });
-  });
-
-  it('turns a size chosen in the panel into the canvas size only when the canvas has one', () => {
+  it('offers the Schema ratios from the tallest to the widest and keeps the long edge when one is picked', () => {
+    expect(canvasRatioOptions(ratioPixels)).toEqual(['9:16', '2:3', '3:4', '4:5', '1:1', '5:4', '4:3', '3:2', '16:9', '21:9']);
     const limits = { minimum_dimension: 64, maximum_dimension: 8192 };
-    expect(canvasResizeForChoice(true, gpt, [gptParam], { size: '2048x2048' }, 'size', '3840x2160', ratioPixels, limits)).toEqual({ width: 3840, height: 2160 });
-    // Resetting to the default resizes to the default's pixels.
-    expect(canvasResizeForChoice(true, gpt, [gptParam], { size: '1024x1024' }, 'size', null, ratioPixels, limits)).toEqual({ width: 2048, height: 2048 });
-    expect(canvasResizeForChoice(true, seedream, [seedreamParam], {}, 'size', '2048x2048', ratioPixels, limits)).toEqual({ width: 4096, height: 4096 });
-    expect(canvasResizeForChoice(false, gpt, [gptParam], {}, 'size', '1024x1024', ratioPixels, limits)).toBeNull();
+    expect(canvasPixelsForRatio('16:9', { width: 2048, height: 2048 }, artboard, limits)).toEqual({ width: 2048, height: 1152 });
+    expect(canvasPixelsForRatio('9:16', { width: 2048, height: 1152 }, artboard, limits)).toEqual({ width: 1152, height: 2048 });
+    // A larger canvas keeps its long edge; a small one grows to the default's.
+    expect(canvasPixelsForRatio('4:3', { width: 4096, height: 4096 }, artboard, limits)).toEqual({ width: 4096, height: 3072 });
+    expect(canvasPixelsForRatio('1:1', { width: 512, height: 512 }, artboard, limits)).toEqual({ width: 2048, height: 2048 });
+    for (const ratio of canvasRatioOptions(ratioPixels)) {
+      expect(canvasShapeOf(canvasPixelsForRatio(ratio, null, artboard, limits)!, ratioPixels).label).toBe(ratio);
+    }
+    expect(canvasPixelsForRatio('auto', null, artboard, limits)).toBeNull();
   });
 
-  it('aligns the model setting only after a real model switch in the same session', () => {
-    const align = { kind: 'align' as const, settings: { size: '1024x1024' }, output: null };
-    expect(settingsAfterModelSwitch({ sessionId: 's', offering: 'banana' }, { sessionId: 's', offering: 'gpt' }, align)).toEqual({ size: '1024x1024' });
-    // Opening the board, coming back to it in another session, or the same model: never written.
-    expect(settingsAfterModelSwitch({ sessionId: null, offering: '' }, { sessionId: 's', offering: 'gpt' }, align)).toBeNull();
-    expect(settingsAfterModelSwitch({ sessionId: 'other', offering: 'banana' }, { sessionId: 's', offering: 'gpt' }, align)).toBeNull();
-    expect(settingsAfterModelSwitch({ sessionId: 's', offering: 'gpt' }, { sessionId: 's', offering: 'gpt' }, align)).toBeNull();
-    // A model that cannot produce the canvas size is left as it is (the notice says so).
-    expect(settingsAfterModelSwitch({ sessionId: 's', offering: 'gpt' }, { sessionId: 's', offering: 'seedream' }, { kind: 'conflict', output: null })).toBeNull();
+  it('takes the most pixels of the canvas ratio, else of the nearest ratio', () => {
+    const constraint = { min_pixels: 655360, max_pixels: 8294400, max_edge: 3840, multiple: 16, max_ratio: 3 };
+    const options = gptSizes.map((value) => ({ value, label: value }));
+    // Options alone: the largest of the ratio; custom sizes: the largest within the bounds.
+    expect(canvasRatioChoice({ options }, canvasShapeOf({ width: 2048, height: 2048 }, ratioPixels))).toBe('2048x2048');
+    expect(canvasRatioChoice({ options, image_size: constraint }, canvasShapeOf({ width: 2048, height: 2048 }, ratioPixels))).toBe('2880x2880');
+    // No option of the ratio: the nearest ratio, at its most pixels.
+    expect(canvasRatioChoice({ options }, canvasShapeOf({ width: 2048, height: 1536 }, ratioPixels))).toBe('1536x1024');
+    expect(canvasRatioChoice({ options: [{ value: 'auto', label: '' }] }, { label: '1:1', ratio: 1 })).toBeNull();
+  });
+
+  it('switching models never changes the canvas: only the output size is computed again', () => {
+    const canvas = Object.freeze({ width: 2048, height: 1152 });
+    const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
+    const gemini = schemaOffering('gemini/gemini-3-pro-image/image-to-image');
+    expect(canvasRatioTurnOutput(gptImage, effectiveOfferingValues(gptImage, {}), canvas, ratioPixels))
+      .toEqual({ value: '3840x2160', pixels: { width: 3840, height: 2160 }, ratioOnly: false, nearest: false, ratio: '16:9', outputRatio: '16:9' });
+    expect(canvasRatioTurnOutput(gemini, effectiveOfferingValues(gemini, {}), canvas, ratioPixels))
+      .toEqual({ value: '16:9', pixels: { width: 5504, height: 3072 }, ratioOnly: true, nearest: false, ratio: '16:9', outputRatio: '16:9' });
+    expect(canvas).toEqual({ width: 2048, height: 1152 });
+  });
+
+  it('names the nearest ratio when the model has none of the canvas ratio', () => {
+    const banana = schemaOffering('meshy/nano-banana-pro/image-to-image');
+    expect(canvasRatioTurnOutput(banana, effectiveOfferingValues(banana, {}), { width: 2048, height: 878 }, ratioPixels))
+      .toMatchObject({ value: '16:9', nearest: true, ratio: '21:9', outputRatio: '16:9' });
+    const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
+    expect(canvasRatioTurnOutput(gptImage, effectiveOfferingValues(gptImage, {}), { width: 8192, height: 2048 }, ratioPixels))
+      .toMatchObject({ value: '3840x1280', nearest: true, ratio: '4:1', outputRatio: '3:1' });
+  });
+
+  it('sets the highest tier only when a person may choose the tier', () => {
+    const gemini = schemaOffering('gemini/gemini-3-pro-image/image-to-image');
+    // Gemini's image_size is read-only (its 4K default is the Offering's own).
+    expect(canvasTierParameters(gemini, ratioPixels)).toEqual([]);
+    expect(canvasRatioTurnOutput(gemini, effectiveOfferingValues(gemini, { image_size: '1K' }), { width: 2048, height: 2048 }, ratioPixels))
+      .toMatchObject({ value: '1:1', pixels: { width: 1024, height: 1024 } });
   });
 });
 
@@ -151,18 +150,50 @@ describe('the output size a chat edit of one picture sends (#296)', () => {
   });
 });
 
-describe('the output size a canvas-sourced turn sends (#272/#284)', () => {
+describe('the output size a canvas-sourced turn sends (#272/#653)', () => {
+  const fixtureOfferings = (sharedTurnSizes as unknown as { offerings: Record<string, OfferingWire> }).offerings;
   // The same cases run against the server rule (internal/chat/generationtool, TestCanvasTurnSizesSharedWithTheWebClient).
   for (const test of sharedTurnSizes.cases.filter((item) => !('source' in item) || item.source !== 'reference')) {
     it(`${test.name} (shared with the server)`, () => {
-      const offering = schemaOffering(test.offering);
+      const fixture = fixtureOfferings[test.offering];
+      const offering = fixture ? ({ ...fixture, available: true } as OfferingWire) : schemaOffering(test.offering);
       // A size remembered for the session that differs from the canvas (the #284 scene: 1536x1152 on 2048x2048).
       const stale = effectiveOfferingValues(offering, { size: '1536x1152', aspect_ratio: '1:1' });
-      const turn = canvasTurnOutput(offering, stale, { width: test.width, height: test.height }, ratioPixels);
-      expect(turn).toMatchObject({ value: test.value, nearest: test.nearest });
+      const canvas = { width: test.width, height: test.height };
+      const turn = canvasRatioTurnOutput(offering, stale, canvas, ratioPixels);
+      expect(turn).toMatchObject({ value: test.value, nearest: test.nearest, ratio: test.ratio });
+      const extra = test as { pixels?: string; also?: Record<string, string> };
+      if (extra.pixels) expect(turn?.pixels && `${turn.pixels.width}x${turn.pixels.height}`).toBe(extra.pixels);
+      if (extra.also) expect(canvasRatioValues(offering, canvas, ratioPixels)).toMatchObject(extra.also);
+      // The canvas is not changed by the model.
+      expect(canvas).toEqual({ width: test.width, height: test.height });
     });
   }
 
+  it('says nothing once the Agent chose the size: the server carries out the Agent\'s size (#614)', () => {
+    const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
+    const agentSize = effectiveOfferingValues(gptImage, { size: '3840x2160' });
+    const square = { width: 1024, height: 1024 };
+    expect(canvasRatioTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'agent' } })).toBeNull();
+    // The person's panel choice stays under the canvas: the canvas still sets the size.
+    expect(canvasRatioTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'user' } }))
+      .toMatchObject({ value: '2880x2880', nearest: false });
+    expect(canvasRatioTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'default' } }))
+      .toMatchObject({ value: '2880x2880', nearest: false });
+  });
+
+  it('sets only the size a person may choose, and nothing without an Offering or a size setting', () => {
+    const gemini = schemaOffering('gemini/gemini-3-pro-image/image-to-image');
+    // Gemini's image_size is read-only (the 4K tier is the Offering's own), so only aspect_ratio follows the canvas.
+    expect(canvasSizeParameters(gemini).map((wire) => wire.name)).toEqual(['aspect_ratio']);
+    expect(canvasRatioTurnOutput(undefined, {}, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
+    expect(canvasRatioTurnOutput({ id: 'x', parameters: [{ name: 'prompt', semantic: 'prompt' }] } as unknown as OfferingWire, {}, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
+    const fixed = { id: 'x', parameters: [{ name: 'size', semantic: 'output-size', fixed: true, default: '1024x1024', options: [{ value: '1024x1024', label: '' }] }] } as unknown as OfferingWire;
+    expect(canvasRatioTurnOutput(fixed, { size: '1024x1024' }, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
+  });
+});
+
+describe('the legal size closest to a picture (#284/#308: one reference picture and inpainting)', () => {
   it('reads the pixels it sends: the value itself, or a ratio through the tier the Offering is set to', () => {
     const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
     expect(canvasTurnOutput(gptImage, effectiveOfferingValues(gptImage, { size: '1536x1152' }), { width: 4096, height: 4096 }, ratioPixels))
@@ -173,29 +204,7 @@ describe('the output size a canvas-sourced turn sends (#272/#284)', () => {
     expect(turn).toEqual({ value: '4:3', pixels: tiers.image_size?.['4K']?.['4:3'], ratioOnly: true, nearest: false });
   });
 
-  it('says nothing once the Agent chose the size: the server carries out the Agent\'s size (#614)', () => {
-    const gptImage = schemaOffering('openai/gpt-image-2/image-to-image');
-    const agentSize = effectiveOfferingValues(gptImage, { size: '3840x2160' });
-    const square = { width: 1024, height: 1024 };
-    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'agent' } })).toBeNull();
-    // The person's panel choice resizes the canvas itself (#246): the canvas still sets the size.
-    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'user' } }))
-      .toMatchObject({ value: '1024x1024', nearest: false });
-    expect(canvasTurnOutput(gptImage, agentSize, square, ratioPixels, { size: { source: 'default' } }))
-      .toMatchObject({ value: '1024x1024', nearest: false });
-  });
-
-  it('sets only the size a person may choose, and nothing without an Offering or a size setting', () => {
-    const gemini = schemaOffering('gemini/gemini-3-pro-image/image-to-image');
-    // Gemini's image_size is read-only (the 4K tier is the Offering's own), so only aspect_ratio follows the canvas.
-    expect(canvasSizeParameters(gemini).map((wire) => wire.name)).toEqual(['aspect_ratio']);
-    expect(canvasTurnOutput(undefined, {}, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
-    expect(canvasTurnOutput({ id: 'x', parameters: [{ name: 'prompt', semantic: 'prompt' }] } as unknown as OfferingWire, {}, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
-    const fixed = { id: 'x', parameters: [{ name: 'size', semantic: 'output-size', fixed: true, default: '1024x1024', options: [{ value: '1024x1024', label: '' }] }] } as unknown as OfferingWire;
-    expect(canvasTurnOutput(fixed, { size: '1024x1024' }, { width: 2048, height: 2048 }, ratioPixels)).toBeNull();
-  });
-
-  it('chooses the canvas size, its grid size or the nearest option like the server', () => {
+  it('chooses the picture size, its grid size or the nearest option like the server', () => {
     const constraint = { min_pixels: 655360, max_pixels: 8294400, max_edge: 3840, multiple: 16, max_ratio: 3 };
     expect(imageSizeAllows(constraint, 1920, 1088)).toBe(true);
     expect(imageSizeAllows(constraint, 1000, 704)).toBe(false); // off the 16 grid

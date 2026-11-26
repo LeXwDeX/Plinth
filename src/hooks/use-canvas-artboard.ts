@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useGenerationParams, type GenerationParams } from '@/hooks/use-generation-params';
 import { canvasArtboard, type CanvasArtboard, type CanvasPixels } from '@/lib/canvas/artboard';
-import { canvasSizeFit, canvasTurnOutput, initialCanvasPixels, type CanvasSizeFit, type CanvasTurnOutput, type ReferenceTurnOutput } from '@/lib/workspace/canvas-size';
+import { canvasRatioTurnOutput, canvasShapeOf, initialCanvasPixels, type CanvasRatioTurnOutput, type CanvasShape, type ReferenceTurnOutput } from '@/lib/workspace/canvas-size';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { useCanvasStore } from '@/store/canvas-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -12,20 +12,28 @@ import { useWorkspaceStore } from '@/store/workspace-store';
 export interface CanvasDelivery {
   /** The dashed frame in board coordinates: the canvas, one world unit per pixel (#246). */
   artboard: CanvasArtboard;
-  /** The canvas pixel size: exports, the Agent's canvas snapshot and inpainting are exactly this size. */
+  /**
+   * The canvas pixels: only editing precision (#653). Exports, the Agent's canvas snapshot and inpainting are this
+   * size; the output size of a canvas turn is the model's (`plan`).
+   */
   pixels: CanvasPixels;
+  /** The canvas ratio, read from its pixels (#653): the canvas's truth, shown instead of its pixels. */
+  ratio: CanvasShape;
   /** True once the canvas has its saved (or freshly initialised) size; before that the frame shows `initial`. */
   known: boolean;
-  /** The size a new or legacy canvas starts with: what the chosen 2D model produces, else the Schema default. */
+  /** The size a new canvas starts with: the Schema default, 1:1 (#653). A legacy canvas is migrated from it. */
   initial: CanvasPixels;
-  /** How the chosen 2D model's output size relates to the canvas size. */
-  fit: CanvasSizeFit;
   /**
-   * #284: the output size the next turn really sends when the artboard is its source (a canvas turn, #644):
-   * the server then sets the size from the canvas (#272), not from `fit`'s settings.
-   * Null when the artboard is not the source or the model has no output-size setting the canvas sets.
+   * #653: the output size a canvas turn would send with the chosen 2D model: its highest quality at the canvas
+   * ratio, or at the nearest ratio it has (`nearest`). Null when the model has no output-size setting the canvas
+   * sets, or the Agent chose the size (#614).
    */
-  turn: CanvasTurnOutput | null;
+  plan: CanvasRatioTurnOutput | null;
+  /**
+   * #284: `plan` when the artboard is the next turn's source (a canvas turn, #644): the server then sets the size
+   * from the canvas (#272). Null otherwise.
+   */
+  turn: CanvasRatioTurnOutput | null;
   /** The artboard is the next turn's source: the composer sends a canvas turn (#644). */
   source: boolean;
   /**
@@ -33,7 +41,7 @@ export interface CanvasDelivery {
    * picture sends if nobody chose a size (the chat column measures the picture and fills this in).
    */
   reference?: { pixels: CanvasPixels; turn: ReferenceTurnOutput } | null;
-  /** The settings of the model the next turn runs (the size fit is read from these). */
+  /** The settings of the model the next turn runs (`plan` is read from these). */
   generation: GenerationParams['nextTurn'];
   /** Whether those settings have loaded (an initial size read before then would be the Schema default). */
   settled: boolean;
@@ -41,7 +49,8 @@ export interface CanvasDelivery {
 
 /**
  * 虚线画板 = 画布（#246）：像素尺寸随画布项目保存，世界坐标 1 单位 = 1 像素，画布以 Schema 锚点为中心。
- * 画布尺寸不再由所选模型推导；模型的输出尺寸只用于新画布/旧画布迁移的初始尺寸和尺寸冲突提示。
+ * #653：画布以比例为准，像素只作编辑精度；新画布按 Schema 默认（1:1）开始，与所选模型无关。画板轮的出图尺寸由
+ * 当前模型决定（该比例下的最高画质），切换模型不改画布。
  */
 export function useCanvasArtboard(sessionId: string | null, referenceContext?: boolean): CanvasDelivery {
   const { schema } = useProductSchema();
@@ -52,15 +61,15 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
   const generation = useGenerationParams('image', sessionId, hasReference);
   const saved = useCanvasStore((state) => (sessionId ? state.canvasSizeBySession[sessionId] : undefined));
   const anchor = schema.canvas.frontend.artboard;
-  const { offering, model, values, parameterStates } = generation.nextTurn;
-  const sizeParams = model.sizeParams;
-  const initial = useMemo(() => initialCanvasPixels(anchor, sizeParams, values), [anchor, sizeParams, values]);
+  const { offering, values, parameterStates } = generation.nextTurn;
+  const initial = useMemo(() => initialCanvasPixels(anchor), [anchor]);
   const width = saved?.width ?? initial.width;
   const height = saved?.height ?? initial.height;
   const known = saved !== undefined;
-  const fit = useMemo(
-    () => canvasSizeFit(offering, sizeParams, values, { width, height }, anchor),
-    [anchor, height, offering, sizeParams, values, width],
+  const ratio = useMemo(() => canvasShapeOf({ width, height }, anchor), [anchor, height, width]);
+  const plan = useMemo(
+    () => canvasRatioTurnOutput(offering, values, { width, height }, anchor, parameterStates),
+    [anchor, height, offering, parameterStates, values, width],
   );
   // Stable while the size is: consumers key effects on the frame (placement, mask remap, the board registry).
   const geometry = useMemo(() => ({
@@ -70,16 +79,13 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
   // #644: the board is the turn's source only on a canvas turn, as the composer decides it (以画板为主, a selection
   // or mask, `@画布`); a picture on the board alone no longer makes it one.
   const boardIsSource = context?.sessionId === sessionId && context.boardTurn === true;
-  const turn = useMemo(
-    () => (boardIsSource ? canvasTurnOutput(offering, values, { width, height }, anchor, parameterStates) : null),
-    [anchor, boardIsSource, height, offering, parameterStates, values, width],
-  );
   return {
     ...geometry,
+    ratio,
     known,
     initial,
-    fit,
-    turn,
+    plan,
+    turn: boardIsSource ? plan : null,
     source: boardIsSource,
     generation: generation.nextTurn,
     settled: generation.ready || generation.failed,

@@ -30,31 +30,35 @@ function board(sessionId = 's', explicit?: boolean) {
   renderToStaticMarkup(<Probe />); return delivery;
 }
 beforeEach(() => { runtime.context = null; runtime.object = null; runtime.saved = {}; runtime.nodes = {}; vi.clearAllMocks(); });
-describe('canvas geometry follows the actual composer Offering context', () => {
+// #653: the canvas starts at the Schema default (1:1) whatever the model; the model decides only the output size of
+// a canvas turn (`plan`), so the Offering the composer would run is read from `plan` here.
+const planned = (delivery: CanvasDelivery) => delivery.plan?.value;
+describe('the canvas output size follows the actual composer Offering context', () => {
   it('uses text-to-image sizes on the empty board and image-to-image sizes when attachments supply a reference', () => {
-    expect(board().pixels).toEqual({ width: 1536, height: 1024 });
+    expect(planned(board())).toBe('1536x1024');
     runtime.context = { sessionId: 's', hasReference: true };
-    expect(board().pixels).toEqual({ width: 1024, height: 1536 });
+    expect(planned(board())).toBe('1024x1536');
   });
   it('uses direct composer context immediately when a skipped picture changes applicability', () => {
     runtime.context = { sessionId: 's', hasReference: true };
-    expect(board('s', false).pixels).toEqual({ width: 1536, height: 1024 });
+    expect(planned(board('s', false))).toBe('1536x1024');
   });
   it('does not inherit another session reference context or stage object', () => {
     runtime.context = { sessionId: 'other', hasReference: true };
     runtime.object = { kind: 'image', sessionId: 'other', taskId: 't' };
-    expect(board().pixels).toEqual({ width: 1536, height: 1024 });
+    expect(planned(board())).toBe('1536x1024');
     runtime.object = { kind: 'image', sessionId: 's', taskId: 't' };
-    expect(board().pixels).toEqual({ width: 1024, height: 1536 });
+    expect(planned(board())).toBe('1024x1536');
   });
-  it('a saved canvas size is the frame; the model output only decides the initial size and the fit (#246)', () => {
-    expect(board()).toMatchObject({ known: false, pixels: { width: 1536, height: 1024 }, initial: { width: 1536, height: 1024 }, fit: { kind: 'match' } });
+  it('a new canvas is 1:1 whatever the model; a saved canvas keeps its pixels and reads its ratio from them (#653)', () => {
+    expect(board()).toMatchObject({ known: false, pixels: { width: 2048, height: 2048 }, initial: { width: 2048, height: 2048 }, ratio: { label: '1:1' } });
     runtime.saved = { s: { width: 3072, height: 2048 } };
     const delivery = board();
-    expect(delivery).toMatchObject({ known: true, pixels: { width: 3072, height: 2048 }, initial: { width: 1536, height: 1024 } });
-    // Same ratio, twice the pixels: the frame is twice as large in world units, around the same centre.
+    expect(delivery).toMatchObject({ known: true, pixels: { width: 3072, height: 2048 }, initial: { width: 2048, height: 2048 }, ratio: { label: '3:2' } });
+    // The frame is the canvas pixels in world units, around the same centre.
     expect(delivery.artboard).toEqual({ x: 600 - 1536, y: 400 - 1024, width: 3072, height: 2048 });
-    expect(delivery.fit).toEqual({ kind: 'conflict', output: { width: 1536, height: 1024 } });
+    // The model has a 3:2 size: the canvas turn takes it.
+    expect(delivery.plan).toMatchObject({ value: '1536x1024', nearest: false, ratio: '3:2' });
   });
 
   it('says what a turn sends when the artboard is its source, not the remembered size (#284)', () => {
@@ -66,11 +70,12 @@ describe('canvas geometry follows the actual composer Offering context', () => {
     runtime.nodes = { s: [{ id: 'p', type: 'image', imageUrl: '/api/v1/assets/a', taskId: 't', x: 0, y: 0, width: 512, height: 512, zIndex: 1 }] };
     expect(board().source).toBe(false);
     expect(board().turn).toBeNull();
+    // The plan is known anyway: a model without the canvas ratio is said before a canvas turn.
+    expect(board().plan).toMatchObject({ value: '1536x1024', nearest: true, ratio: '1:1', outputRatio: '3:2' });
     // A canvas turn (the toggle, a selection or mask, @画布): the artboard is the source and the canvas sets the size.
     runtime.context = { sessionId: 's', hasReference: false, boardTurn: true };
     const delivery = board();
     expect(delivery.source).toBe(true);
-    expect(delivery.fit.kind).toBe('conflict');
     expect(delivery.turn).toMatchObject({ value: '1536x1024', nearest: true });
     // Another session's canvas turn is not this one's; without a composer context nothing is sent from the board.
     runtime.context = { sessionId: 'other', hasReference: false, boardTurn: true };

@@ -17,8 +17,8 @@ const gptImage = (catalog.offerings as unknown as Array<{ id: string }>).find((i
 
 function delivery(source: boolean, states: Record<string, { source: 'default' | 'agent' | 'user' }> = {}): CanvasDelivery {
   return {
-    artboard: { x: 0, y: 0, width: 2048, height: 2048 }, pixels: { width: 2048, height: 2048 }, known: true,
-    initial: { width: 2048, height: 2048 }, fit: { kind: 'match' }, turn: null, source, settled: true,
+    artboard: { x: 0, y: 0, width: 2048, height: 2048 }, pixels: { width: 2048, height: 2048 }, ratio: { label: '1:1', ratio: 1 }, known: true,
+    initial: { width: 2048, height: 2048 }, plan: null, turn: null, source, settled: true,
     generation: { offering: { ...gptImage, available: true }, values: { size: '2048x2048' }, parameterStates: states } as unknown as CanvasDelivery['generation'],
   };
 }

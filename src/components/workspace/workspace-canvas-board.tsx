@@ -43,7 +43,6 @@ import {
 import { resolveCanvasFrame } from '@/lib/canvas/canvas-frame';
 import { canvasArtboard } from '@/lib/canvas/artboard';
 import { initialCanvasNodes } from '@/lib/canvas/initial-layer';
-import { settingsAfterModelSwitch } from '@/lib/workspace/canvas-size';
 import { artboardContent, exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { chooseClipboardPaste, pasteAnchor } from '@/lib/canvas/clipboard';
 import { flushPendingEdits, localBitmapNodeIds } from '@/lib/canvas/pending-edits';
@@ -282,7 +281,7 @@ export function WorkspaceCanvasBoard() {
 
   /**
    * #246: a canvas without a saved pixel size gets one before the board shows. A new canvas starts at the
-   * size the chosen 2D model produces (the Schema default without one). A legacy canvas (saved before
+   * Schema default, 1:1 (#653: the canvas is a ratio, whatever the model). A legacy canvas (saved before
    * coordinate version 2) is migrated once: its old 512-unit frame becomes the pixel frame around the same
    * centre and every node scales with it, then the save below records the size and version.
    */
@@ -321,21 +320,8 @@ export function WorkspaceCanvasBoard() {
     setLoadedSessionID(sessionID);
   }, [fetchedSessionID, initialHeight, initialWidth, loadedSessionID, schema, sessionID, settled]);
 
-  /**
-   * #246: switching the 2D model keeps the canvas size. When the new model offers that size, its setting
-   * follows the canvas; otherwise the notice over the board says what the model will produce instead.
-   */
-  const fitOffering = canvasDelivery.generation.offering?.id ?? '';
-  const seenOffering = useRef<{ sessionId: string | null; offering: string }>({ sessionId: null, offering: '' });
-  const setGenerationValue = canvasDelivery.generation.setValue;
-  const fit = canvasDelivery.fit;
-  useEffect(() => {
-    if (!sessionID || loadedSessionID !== sessionID || !settled) return;
-    const seen = seenOffering.current;
-    seenOffering.current = { sessionId: sessionID, offering: fitOffering };
-    const settings = settingsAfterModelSwitch(seen, { sessionId: sessionID, offering: fitOffering }, fit);
-    for (const [name, value] of Object.entries(settings ?? {})) setGenerationValue(name, value);
-  }, [fit, fitOffering, loadedSessionID, sessionID, setGenerationValue, settled]);
+  // #653: switching the 2D model changes neither the canvas nor the model's settings: a canvas turn takes the new
+  // model's highest quality at the canvas ratio, and the notice over the board says when it has no such ratio.
 
   // Besides the nodes, the save also runs for each new size or registration, even while an earlier one is
   // still unsaved and its dirty flag therefore does not change (#246, see boardAutosaveTrigger).
