@@ -58,13 +58,15 @@
 //           提示词含「image 1:」不含「image 2」、详情来源「来自 v1」；对照组画板两层时快照仍在前（image 2 是 v1）。
 //     F632  #632：中文会话里 inspect_image、inspect_model、record_self_check 交回给模型的结果没有连续 6 个以上英文单词
 //           （标识符、数字、句柄不算词，同 #407 评测口径；经 [[fake:echo-tool-results]] 读工具结果）。
+//     F644  #644：当前图在画板上、「以画板为主」默认关时发 refine 不带画布来源、不上传快照；打开开关再发带画布来源，
+//           发出后开关回到关闭。
 //     目标环境的 fake 早于 [[fake:echo-tool-results]] 时，依赖它的检查记 INFO（读不到工具结果），不记 PASS。
 //     批次 H 的会话结束时删除（R190_KEEP_SESSIONS=1 保留，便于人工查看）；上传的大图留在账号素材里，dev-test 下次发布即清空。
 //
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-0-browser.mjs
 // 环境变量：
-//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4,f610,…,f624,f629,…,f632  只跑其中几项（默认全部）
+//   R190_ITEMS=586,…,n6,m1,m2,p1,…,p4,f610,…,f624,f629,…,f632,f644  只跑其中几项（默认全部）
 //   R190_KEEP_SESSIONS=1  不删除批次 H 建的会话
 //   R190_REQUIRE_BATCH4=1  目标环境缺批次 4（PR #598）时 M1/M2 记 FAIL 而不是 SKIP
 //   R190_M1_COUNTS=4,6,8,10  M1 每组的结果张数；R190_M1_WIDTHS=1440,1280  M1 看弹层的窗口宽度
@@ -103,7 +105,7 @@ if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') {
   process.exit(2);
 }
 
-const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4,f610,f611,f612,f614,f615,f616,f617,f618,f619,f621,f623,f624,f629,f630,f631,f632').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R190_ITEMS || '586,559,587,560,548-skill,548-chip,n1,n2,n3,n4,n5,n6,m1,m2,p1,p2,p3,p4,f610,f611,f612,f614,f615,f616,f617,f618,f619,f621,f623,f624,f629,f630,f631,f632,f644').split(',').map((item) => item.trim()).filter(Boolean);
 const REQUIRE_BATCH2 = process.env.R190_REQUIRE_BATCH2 === '1';
 const tag = `r190-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r190-'));
@@ -3086,6 +3088,45 @@ async function itemF632() {
   record('INFO', '#632', '需真实模型复测', 'QWEN-MAX 等真实模型在工具结果为中文后回复不再夹英文整段：fake 对话模型只回固定文字或回显，回复措辞要真实模型复测');
 }
 
+// #644: 以画板为主. A plain message works on the conversation even with the current picture on the board; the toggle
+// makes one message a canvas turn and is off again after it.
+async function itemF644() {
+  const sid = await batchHSession(`${tag} 以画板为主`);
+  await turn(sid, '画一只陶罐 [[fake:tool:refine_image {"prompt":"a clay jar on a white background"}]]');
+  if (!await waitTasks(sid, (tasks) => tasks.some((task) => task.state === 'SUCCEEDED'))) throw new Error('the fake picture did not succeed');
+  const [jar] = await handleTasks(sid);
+  if (!jar) throw new Error('the seed has no handled picture');
+  await openSession(sid);
+  if (!(await layerNames()).includes(jar.handle.replace(/^@/, ''))) { await tileThumb(`n:${jar.id}`).dblclick(); await page.waitForTimeout(2000); }
+  await tileThumb(`n:${jar.id}`).click();
+  await page.waitForTimeout(1500);
+  const { field, canvas } = await inputSourceField();
+  const toggle = () => tid('composer-board-mode').first();
+  const pressed = async () => toggle().getAttribute('aria-pressed').catch(() => null);
+  const marker = (prompt) => `[[fake:tool:refine_image ${JSON.stringify({ prompt })}]]`;
+
+  await check('#644', '当前图在画板上、开关默认关：本轮不带画布来源、不上传画板快照', async () => {
+    const before = await pressed();
+    const sent = await sendThroughBox(sid, `陶罐改成蓝色 ${marker('make the jar blue')}`);
+    const snapshot = sent.others.filter((route) => /input-assets|upload/.test(route));
+    return {
+      ok: before === 'false' && sent.body[field] !== canvas && snapshot.length === 0,
+      detail: `开关 aria-pressed=${before} POST ${field}=${JSON.stringify(sent.body[field] ?? null)} 发送时其他 POST=${JSON.stringify(sent.others)}`,
+    };
+  });
+
+  await check('#644', '打开「以画板为主」：本轮带画布来源与快照，发出后开关回到关闭', async () => {
+    await toggle().click();
+    const before = await pressed();
+    const sent = await sendThroughBox(sid, `按画板调暖 ${marker('warm up the board')}`);
+    const after = await pressed();
+    return {
+      ok: before === 'true' && sent.body[field] === canvas && after === 'false',
+      detail: `发送前 aria-pressed=${before} POST ${field}=${JSON.stringify(sent.body[field] ?? null)} 发送后 aria-pressed=${after} 其他 POST=${JSON.stringify(sent.others)}`,
+    };
+  });
+}
+
 // ---------------------------------------------------------------- run
 const runners = {
   586: item586, 559: item559, 587: item587, 560: item560, '548-skill': item548Skill, '548-chip': item548Chip,
@@ -3093,7 +3134,7 @@ const runners = {
   p1: itemP1, p2: itemP2, p3: itemP3, p4: itemP4,
   f610: itemF610, f611: itemF611, f612: itemF612, f614: itemF614, f615: itemF615, f616: itemF616, f617: itemF617,
   f618: itemF618, f619: itemF619, f621: itemF621, f623: itemF623, f624: itemF624,
-  f629: itemF629, f630: itemF630, f631: itemF631, f632: itemF632,
+  f629: itemF629, f630: itemF630, f631: itemF631, f632: itemF632, f644: itemF644,
 };
 try {
   for (const item of ITEMS) {
