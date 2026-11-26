@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.09.18",
+    "revision": "2026-11-26.09.19",
     "terminology": {
       "user_facing": [
         {
@@ -7037,6 +7037,14 @@
           "max_retry_after_seconds": 60,
           "empty_response_retries": 1
         },
+        "quota_mute": {
+          "window_seconds": 3600,
+          "http_status": 503,
+          "contains_any": [
+            "all targets muted",
+            "all targets recovering"
+          ]
+        },
         "consent_wait_timeout_seconds": 120,
         "max_generation_calls_per_turn": 20,
         "max_parallel_generation_submissions": 8,
@@ -10902,7 +10910,7 @@
           },
           "agent_image_invalid_reason_separator": "；",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
-          "agent_quota_exhausted": "对话模型的上游额度已用完（账户余额或 API Key 额度），暂时无法回复。请联系管理员处理，处理前重试也不会成功。",
+          "agent_quota_exhausted": "对话模型额度不足，请联系管理员",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
           "error_reference": "（错误 ID：{id}）",
           "sse_interrupted": "SSE 连接中断",
@@ -22012,7 +22020,7 @@
             "chat.presentation.messages.agent_image_invalid_reason_labels.format": "the picture's format is not accepted",
             "chat.presentation.messages.agent_image_invalid_reason_labels.count": "too many pictures",
             "chat.presentation.messages.agent_image_invalid_reason_separator": "; ",
-            "chat.presentation.messages.agent_quota_exhausted": "The chat model's upstream quota is used up (account balance or API key quota), so no reply can be given for now. Please contact an administrator; retrying will not help until then.",
+            "chat.presentation.messages.agent_quota_exhausted": "The chat model's quota is insufficient. Please contact an administrator.",
             "chat.presentation.messages.agent_content_rejected":"The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
             "chat.presentation.messages.error_reference": " (Error ID: {id})",

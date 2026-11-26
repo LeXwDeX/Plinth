@@ -5384,6 +5384,21 @@ type ChatAgentRetrySchema struct {
 	EmptyResponseRetries int `json:"empty_response_retries,omitempty"`
 }
 
+// ChatAgentQuotaMuteSchema is chat.agent.quota_mute (#640): how a gateway's
+// mute after a used-up quota is read. A gateway that saw a connection's
+// upstream refuse with a used-up quota (429 quota_exceeded) mutes the target
+// and answers later calls itself with HTTPStatus ("all targets muted until
+// ..."). Within WindowSeconds of the connection's last used-up quota, such an
+// answer whose body contains one of ContainsAny (case-insensitive) is the same
+// used-up quota, with the class it had: it is not retried, and the person reads
+// the quota text, not a generic failure. Outside the window, or without an
+// earlier used-up quota, it stays the transient status it is.
+type ChatAgentQuotaMuteSchema struct {
+	WindowSeconds int      `json:"window_seconds"`
+	HTTPStatus    int      `json:"http_status"`
+	ContainsAny   []string `json:"contains_any"`
+}
+
 // ChatAgentRequestPicturesSchema is chat.agent.request_pictures: every picture
 // the Agent may see is re-encoded into Format before the vision budget counts
 // its bytes and before the request goes out. A picture with transparency is
@@ -5446,6 +5461,9 @@ type ChatAgentSchema struct {
 	// Retry is how a model call meets a transient failure (#509); absent: it
 	// is sent once.
 	Retry *ChatAgentRetrySchema `json:"retry,omitempty"`
+	// QuotaMute reads a gateway's mute after a used-up quota as that quota
+	// (#640); absent: such an answer stays transient.
+	QuotaMute *ChatAgentQuotaMuteSchema `json:"quota_mute,omitempty"`
 	// ConsentWaitTimeoutSeconds 界定一轮对话因等待用户批准决定而挂起的
 	// 最长时长（AGT-12：挂起不占 worker；由 orchestrator 消费，不得在
 	// 代码中硬编码）。

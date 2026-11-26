@@ -4389,6 +4389,9 @@ func validateChatAgentResilience(agent ChatAgentSchema) error {
 		(agent.RoundTimeoutSeconds > 0 && agent.RoundTimeoutSeconds < agent.RequestTimeoutSeconds) {
 		return errors.New("agent.round_timeout_seconds 不能为负数，声明时不能小于 request_timeout_seconds")
 	}
+	if err := validateChatAgentQuotaMute(agent.QuotaMute); err != nil {
+		return err
+	}
 	retry := agent.Retry
 	if retry == nil {
 		return nil
@@ -4408,6 +4411,30 @@ func validateChatAgentResilience(agent ChatAgentSchema) error {
 	if agent.RoundTimeoutSeconds > 0 && (retry.MaxRetryAfterSeconds >= agent.RoundTimeoutSeconds ||
 		retry.MaxBackoffMillis >= agent.RoundTimeoutSeconds*1000) {
 		return errors.New("agent.retry 的等待上限必须小于 round_timeout_seconds")
+	}
+	return nil
+}
+
+// validateChatAgentQuotaMute checks chat.agent.quota_mute (#640): a declared
+// one needs a positive window, an HTTP error status and at least one
+// non-empty marker.
+func validateChatAgentQuotaMute(mute *ChatAgentQuotaMuteSchema) error {
+	if mute == nil {
+		return nil
+	}
+	if mute.WindowSeconds <= 0 {
+		return errors.New("agent.quota_mute.window_seconds 必须为正数")
+	}
+	if mute.HTTPStatus < 400 || mute.HTTPStatus > 599 {
+		return errors.New("agent.quota_mute.http_status 必须是 4xx 或 5xx 状态码")
+	}
+	if len(mute.ContainsAny) == 0 {
+		return errors.New("agent.quota_mute.contains_any 至少声明一个标记串")
+	}
+	for _, marker := range mute.ContainsAny {
+		if strings.TrimSpace(marker) == "" {
+			return errors.New("agent.quota_mute.contains_any 不能含空标记串")
+		}
 	}
 	return nil
 }
