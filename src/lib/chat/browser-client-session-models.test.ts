@@ -72,4 +72,24 @@ describe('ChatBrowserClient session not found (#665)', () => {
     const page = await failure(new Response('404 page not found', { status: 404 }));
     expect(page?.serverAnswered).toBe(false);
   });
+
+  it('finds the API\'s request ID among the X-Request-ID values a proxy joined to it', async () => {
+    const id = 'req_0123456789abcdef';
+    const joined = (values: string[]) => {
+      const headers = new Headers();
+      for (const value of values) headers.append('X-Request-ID', value);
+      return headers;
+    };
+    // `Headers.get` gives the proxy's and the API's values as one comma-joined string, in either order.
+    for (const values of [['proxy-abc', id], [id, 'proxy-abc']]) {
+      const answer = await failure(Response.json({ [errorField()]: '会话不存在', request_id: id }, { status: 404, headers: joined(values) }));
+      expect(answer).toMatchObject({ status: 404, serverAnswered: true });
+    }
+    // None of the joined values is the body's ID: not the API's answer.
+    const other = await failure(Response.json({ [errorField()]: 'Not Found', request_id: id }, { status: 404, headers: joined(['proxy-abc', 'req_ffffffffffffffff']) }));
+    expect(other?.serverAnswered).toBe(false);
+    // A prefix of a joined value is not a match.
+    const prefix = await failure(Response.json({ [errorField()]: 'Not Found', request_id: id }, { status: 404, headers: joined([`${id}x`]) }));
+    expect(prefix?.serverAnswered).toBe(false);
+  });
 });

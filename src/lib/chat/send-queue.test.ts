@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cancelQueuedTurn, claimStoredTurn, drainAwaitsRead, drainWait, enqueueTurn, foreignHold, holdDrainForRead, holdsToRelease,
-  MAX_QUEUE_PROBE_TOTAL, MAX_QUEUE_PROBES, MIN_DRAIN_WAIT_MS, nextDrainStep, parseQueue, parseSendHold, pruneQueuedSessions,
+  MAX_QUEUE_PROBE_TOTAL, MAX_QUEUE_PROBES, MAX_TURN_LOCK_REFUSALS, MAX_TURN_LOCK_RETRY_MS, MIN_DRAIN_WAIT_MS, turnLockRetryDelay, nextDrainStep, parseQueue, parseSendHold, pruneQueuedSessions,
   queueMayDrain, queuedFor, readCompleted, SEND_HOLD_MS, SEND_QUEUE_KEY, sendHoldKey, sessionGone, takeQueuedTurn, writeQueue,
   type DrainGate, type QueuedTurn,
 } from '@/lib/chat/send-queue';
@@ -172,6 +172,20 @@ describe('releasing holds per session (#665)', () => {
     expect(holdsToRelease(held, { sending: 'a', activeSessionId: 'c', activeTurnRunning: false })).toEqual(['b', 'c']);
     expect(holdsToRelease(held, { sending: null, activeSessionId: 'a', activeTurnRunning: false })).toEqual(['a', 'b', 'c']);
     expect(holdsToRelease([], { sending: null, activeSessionId: null, activeTurnRunning: false })).toEqual([]);
+  });
+
+  it('waits longer after each turn lock refusal in a row, up to a cap', () => {
+    expect(turnLockRetryDelay(1)).toBe(SEND_HOLD_MS / 3);
+    expect(turnLockRetryDelay(2)).toBe((SEND_HOLD_MS / 3) * 2);
+    expect(turnLockRetryDelay(3)).toBe((SEND_HOLD_MS / 3) * 4);
+    expect(turnLockRetryDelay(MAX_TURN_LOCK_REFUSALS)).toBe(MAX_TURN_LOCK_RETRY_MS);
+    expect(turnLockRetryDelay(1_000)).toBe(MAX_TURN_LOCK_RETRY_MS);
+    expect(turnLockRetryDelay(0)).toBe(SEND_HOLD_MS / 3);
+  });
+
+  it('releases the idle hold of the session in view once a later claim of it failed', () => {
+    // The turn this tab sent ended (no reply runs) and its next claim failed: nothing is being sent, so the hold goes.
+    expect(holdsToRelease(['a'], { sending: null, activeSessionId: 'a', activeTurnRunning: false })).toEqual(['a']);
   });
 });
 

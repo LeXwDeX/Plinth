@@ -117,6 +117,19 @@ describe('workspace chat message wiring', () => {
 // #665: the queue's drain across tabs is tested on its steps (nextDrainStep, holdsToRelease, the read gate and the
 // pruning in src/lib/chat/send-queue.test.ts), the per-session holds and turn lock in
 // src/store/send-queue-store-665.test.ts, and the read numbering in src/lib/chat/session-recovery.test.ts.
+describe('the queue drain releases an idle hold after a claim fails (#665)', () => {
+  it('bumps drainTick on a failed claim, and the hold release runs on drainTick', () => {
+    const failed = agentDialog.indexOf("if (!(await useSendQueueStore.getState().claim(sessionId, turn.id))) {");
+    expect(failed).toBeGreaterThan(0);
+    const branch = agentDialog.slice(failed, agentDialog.indexOf('return;', failed));
+    expect(branch).toContain('drainingRef.current = null;');
+    expect(branch).toContain('setDrainTick((tick) => tick + 1);');
+    const release = agentDialog.indexOf('holdsToRelease(store.heldSessions()');
+    expect(release).toBeGreaterThan(failed);
+    const dependencies = agentDialog.slice(agentDialog.indexOf('}, [', release), agentDialog.indexOf(']);', release));
+    expect(dependencies).toContain('drainTick');
+  });
+});
 
 describe('plan reload and explicit 3D lock wiring (#103)', () => {
   it('re-reads the session after a plan decision, retries, and offers a reload instead of a stale card', () => {

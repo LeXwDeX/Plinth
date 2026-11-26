@@ -1646,6 +1646,9 @@ export function ChatColumn() {
         drainingRef.current = null;
         const next = lastReadStarted() + 1;
         setDrainGate((gate) => holdDrainForRead(gate, sessionId, next));
+        // The hold this tab may still keep from its last turn goes now (the release effect runs on drainTick), so
+        // another tab's queued messages for the session are not held back by an idle heartbeat and turn lock.
+        setDrainTick((tick) => tick + 1);
         return;
       }
       const started = startedTurnsRef.current;
