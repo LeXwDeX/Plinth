@@ -54,3 +54,33 @@ func TestThreeViewPermanentSubmitRefusalDeniesAnyApprovedGrant665(t *testing.T) 
 		t.Fatalf("an uncertain refusal denied the grant: %+v err=%v", still, err)
 	}
 }
+
+// #665 third review: a transient refusal (an overlapping conversion, a full
+// admission with or without a RetryAfter) keeps whatever approval the grant
+// holds, a person's included; only a permanent refusal denies it.
+func TestThreeViewTransientSubmitRefusalKeepsTheApproval665(t *testing.T) {
+	ctx := context.Background()
+	for name, refusal := range map[string]error{
+		"conversion in progress": generation.ErrConversionInProgress,
+		"admission full":         &generation.Error{Code: generation.ErrTooManyRequests, Operation: "submit_prepared"},
+		"admission retry after":  &generation.Error{Code: generation.ErrTooManyRequests, Operation: "submit_prepared", RetryAfter: 5e9},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newContinuationFixtureWithMode(t, false, "auto")
+			if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
+				t.Fatal(err)
+			}
+			_, grant, err := f.runtime.RequestAgentGrantWithBudget(ctx, "owner-a", f.run.ID, "front", "turn-a")
+			if err != nil || grant.Status != executiongrant.Approved {
+				t.Fatalf("front grant = %+v err=%v", grant, err)
+			}
+			f.gateway.refuse = refusal
+			if _, _, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front"); err == nil {
+				t.Fatal("the refused submit reported success")
+			}
+			if still, err := f.repo.GetExecutionGrant(ctx, "owner-a", grant.RequestID); err != nil || still.Status != executiongrant.Approved {
+				t.Fatalf("a transient refusal denied the grant: %+v err=%v", still, err)
+			}
+		})
+	}
+}

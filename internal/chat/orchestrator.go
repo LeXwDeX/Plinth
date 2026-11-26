@@ -51,6 +51,9 @@ type ToolCommand struct {
 	// derive a different paid-operation identity from a changed tool schema.
 	FrozenIdempotencyKey string
 	TaskWaitDeadline     time.Time
+	// PriorGenerationCalls is the turn's max_generation_calls_per_turn count
+	// before this call, rebuilt from the units the turn checkpoint keeps
+	// (TurnCheckpoint.GenerationUnits, #665).
 	PriorGenerationCalls int
 	// ConsentWaitDeadline 非零表示本轮已因等待同意而挂起过：工具在
 	// 决定未出且已过该时刻时应返回等待文案，而不是再次登记挂起。
@@ -134,6 +137,13 @@ type ToolResult struct {
 	// call for a retry while the Schema request timeout allows, and hands
 	// that receipt to the model only once it ran out.
 	RetryAfter time.Duration `json:"-"`
+	// GenerationUnits is what this call added to the turn's
+	// max_generation_calls_per_turn count (a processing plan its paid steps,
+	// an applied insert or retry one, a generation that proceeded to submit
+	// one; 0 when it was not counted). The orchestrator keeps it on the turn
+	// checkpoint so a later call after a restart starts from the same count
+	// (#665).
+	GenerationUnits int `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -2065,7 +2075,7 @@ func (orchestrator *Orchestrator) Process(
 			// The calls answered without running stay listed for the whole
 			// turn (#501): a stop in a later round still reconciles them.
 			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls, InvalidJSONCalls: invalidJSONCalls,
-				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls}
+				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls, GenerationUnits: turn.Checkpoint.GenerationUnits}
 			version, saveErr := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), turn,
 				orchestrator.service.TurnRunningState(), turn.Checkpoint, false)
 			if saveErr != nil {
@@ -3317,17 +3327,7 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			waitDeadline = entry.Deadline
 		}
-		priorTaskCalls := map[string]struct{}{}
-		for id := range boundTasks {
-			if id != call.ID {
-				priorTaskCalls[id] = struct{}{}
-			}
-		}
-		for id := range taskBindings {
-			if id != call.ID {
-				priorTaskCalls[id] = struct{}{}
-			}
-		}
+		priorGenerationCalls := turn.Checkpoint.priorGenerationUnits(call.ID, boundTasks, taskBindings)
 		tool, found := registry.resolve(call.Name, boundTaskID != "")
 		if !found && boundTaskID == "" {
 			// Current catalog availability cannot hide an already accepted Task.
@@ -3446,7 +3446,7 @@ func (orchestrator *Orchestrator) executeTools(
 				BoundTaskID:          boundTaskID,
 				FrozenIdempotencyKey: frozenKey,
 				TaskWaitDeadline:     waitDeadline,
-				PriorGenerationCalls: len(priorTaskCalls),
+				PriorGenerationCalls: priorGenerationCalls,
 				ConsentWaitDeadline:  command.ConsentWaitDeadline,
 				Call:                 call,
 				Tool:                 tool,
@@ -3481,6 +3481,9 @@ func (orchestrator *Orchestrator) executeTools(
 				)
 			},
 		)
+		// Before any branch below: a suspended, queued or discarded result
+		// still counted against the turn (#665).
+		turn.Checkpoint.recordGenerationUnits(call.ID, result.GenerationUnits)
 		if err != nil && !result.NoSubmission && result.TaskID == "" && paidTool(tool.Execution) {
 			// Task acceptance may have committed while the response or chat
 			// binding was lost. Keep this call outside Checkpoint.Completed so

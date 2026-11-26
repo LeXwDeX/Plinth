@@ -116,10 +116,11 @@ type Step struct {
 	// AgentRetries counts the retries the Agent's revise retry started for
 	// this step (#665). Retry also counts the person's panel retries and the
 	// new keys a reconcile after a cancel takes; only this one is capped by
-	// MaxAgentStepRetries.
-	AgentRetries int `json:"agent_retries,omitempty"`
-	Failure          string                `json:"failure,omitempty"`
-	Retryable        bool                  `json:"retryable,omitempty"`
+	// MaxAgentStepRetries. It is always written, so a step stored before it
+	// existed is told apart on load (see UnmarshalJSON).
+	AgentRetries int    `json:"agent_retries"`
+	Failure      string `json:"failure,omitempty"`
+	Retryable    bool   `json:"retryable,omitempty"`
 	// Resumable marks a PAUSED step that Resume may continue after the user
 	// confirms the current cost; unreconciled submissions are never resumable.
 	Resumable bool `json:"resumable,omitempty"`
@@ -148,6 +149,29 @@ type Step struct {
 	// QueuedUntil 记录生成内核因在途准入已满拒绝本步提交后的下一次重试
 	// 时间：内核确定没有提交，计划保持活动，到点后后台按同一幂等键再提交。
 	QueuedUntil *time.Time `json:"queued_until,omitempty"`
+}
+
+// UnmarshalJSON reads a stored step. A step stored before agent_retries
+// existed (#665) does not say which of its retries the Agent started, so all
+// of them count as the Agent's: the Agent cannot start a step again beyond its
+// bound by reading an old plan, while the person can still retry it from the
+// panel.
+func (s *Step) UnmarshalJSON(data []byte) error {
+	type plain Step
+	var decoded struct {
+		plain
+		AgentRetries *int `json:"agent_retries"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = Step(decoded.plain)
+	if decoded.AgentRetries != nil {
+		s.AgentRetries = *decoded.AgentRetries
+	} else {
+		s.AgentRetries = s.Retry
+	}
+	return nil
 }
 
 // Origins of a processing plan. An Agent-created plan's steps are eligible for

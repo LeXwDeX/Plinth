@@ -128,14 +128,6 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if revision == "" {
 			return chat.ToolResult{NoSubmission: true}, skillrun.ErrInvalid
 		}
-		// A new run is one paid generation of the turn, counted against
-		// max_generation_calls_per_turn like generateWithParams (#563); the
-		// same call back on its own run (recovery, observation) does not
-		// reach here and is not counted again.
-		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
-		}
 		// One group per source picture at a time (#665): a parallel call or a
 		// re-ask while the earlier group waits on its card or runs would start
 		// a second front view, charge it and raise a second card. The lock is
@@ -150,6 +142,15 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		} else if found {
 			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
 				NoSubmission: true}, nil
+		}
+		// A new run is one paid generation of the turn, counted against
+		// max_generation_calls_per_turn like generateWithParams (#563); the
+		// same call back on its own run (recovery, observation) does not
+		// reach here and is not counted again. A call the duplicate guard
+		// refused starts no run and is not counted (#665).
+		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
+			command.Call.ID, command.PriorGenerationCalls) {
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
 		release = releaseSource
 		// The frame of every view follows the source subject's shape instead
@@ -399,6 +400,20 @@ func (e *Executor) threeViewTurnStopped(ctx context.Context, grant executiongran
 	return stopped, err
 }
 
+// threeViewTurnOver reports whether the grant's trigger turn has ended (any
+// end reason) or no longer exists. Without the turn reader, or without a
+// trigger turn, nothing is known and the turn counts as going on.
+func (e *Executor) threeViewTurnOver(ctx context.Context, grant executiongrant.Grant) (bool, error) {
+	if grant.TriggerTurnID == "" || e.threeViewTurnEnded == nil {
+		return false, nil
+	}
+	ended, err := e.threeViewTurnEnded(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return true, nil
+	}
+	return ended, err
+}
+
 func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, error) {
 	taskActive := func(id generation.TaskID) (bool, error) {
 		task, err := e.skillRuntime.Generation.Get(ctx, owner, id)
@@ -426,7 +441,21 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 				return false, nil
 			}
 			stopped, err := e.threeViewTurnStopped(ctx, grant)
-			return !stopped, err
+			if err != nil || stopped {
+				return false, err
+			}
+			if grant.Status == executiongrant.Approved {
+				// An approval is submitted by its turn when it replays the
+				// call. Once that turn has ended for any reason (an error
+				// between approval and submit included) or is gone, nothing
+				// replays it: the group no longer counts as running, or the
+				// guard would refuse every new ask for good (#665). A person
+				// can still continue the view from the panel. A turn a crash
+				// left running is ended by the turn recovery.
+				over, err := e.threeViewTurnOver(ctx, grant)
+				return !over, err
+			}
+			return true, nil
 		case executiongrant.Claimed:
 			return true, nil
 		case executiongrant.Bound:

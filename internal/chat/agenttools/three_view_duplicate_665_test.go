@@ -265,3 +265,46 @@ func TestThreeViewSessionLockIsEvictedAndHonoursTheContext665(t *testing.T) {
 		t.Fatalf("lock entries = %d, want 0", size)
 	}
 }
+
+// #665 third review: an approval whose turn ended without submitting it (an
+// error between approval and submit) or whose turn is gone is replayed by
+// nobody, so it no longer keeps the group active; a pending card of such a
+// turn still waits until it expires.
+func TestThreeViewApprovalOfAnEndedTurnIsNotActive665(t *testing.T) {
+	waiting := []skillrun.Step{{Phase: skillrun.GrantPending, GrantRequestID: "grant-earlier"}}
+	grantOf := func(status executiongrant.Status) executiongrant.Grant {
+		return executiongrant.Grant{RequestID: "grant-earlier", Identity: executiongrant.Identity{OwnerID: "owner",
+			SessionID: "session"}, TriggerTurnID: "turn-earlier", Status: status, Source: executiongrant.AgentPending,
+			DecidedBy: "human:owner"}
+	}
+	for _, tt := range []struct {
+		name    string
+		status  executiongrant.Status
+		turnErr error
+		ended   bool
+		refused bool
+	}{
+		{"approval, turn ended with an error", executiongrant.Approved, nil, true, false},
+		{"approval, turn gone", executiongrant.Approved, chat.ErrMessageNotFound, false, false},
+		{"approval, turn still going", executiongrant.Approved, nil, false, true},
+		{"pending card, turn ended", executiongrant.Pending, nil, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			creates := 0
+			executor, command := duplicateGuardExecutor(t, waiting, grantOf(tt.status), false, tt.ended, &creates)
+			executor.SetThreeViewTurnEnded(func(context.Context, string, string, string) (bool, error) {
+				return tt.ended, tt.turnErr
+			})
+			result, err := executor.createThreeView(context.Background(), command, nil)
+			if tt.refused {
+				if err != nil || result.AgentContent != "already running: run-earlier" || creates != 0 {
+					t.Fatalf("result=%+v err=%v creates=%d", result, err, creates)
+				}
+				return
+			}
+			if !errors.Is(err, errDuplicateTestCreate) {
+				t.Fatalf("an approval nobody replays blocked a new group: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}

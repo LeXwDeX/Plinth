@@ -363,12 +363,14 @@ func (adapter *Adapter) Stream(
 						}
 					}
 				}
-				// #665: a gateway that leaves out the index starts a new
-				// call with every new call ID and continues the last call
-				// otherwise; a new call ID at an index already in use starts
-				// a new call too (a gateway that numbers parallel calls all
-				// 0). One that repeats the whole ID or name in each fragment
-				// does not double them.
+				// #665: a fragment without an index continues the last call.
+				// A different call ID at the call being continued starts a
+				// new call only when the fragment also names a tool and the
+				// call so far is whole (a gateway that numbers parallel calls
+				// all 0, or leaves out the index); otherwise it is the next
+				// piece of an ID streamed in pieces and is appended. One that
+				// repeats the whole ID or name in each fragment does not
+				// double them.
 				position := len(calls) - 1
 				if fragment.Index != nil {
 					if known, found := byIndex[*fragment.Index]; found {
@@ -377,7 +379,8 @@ func (adapter *Adapter) Stream(
 						position = -1
 					}
 				}
-				if position >= 0 && fragment.ID != "" && calls[position].ID != "" && fragment.ID != calls[position].ID {
+				if position >= 0 && fragment.ID != "" && calls[position].ID != "" && fragment.ID != calls[position].ID &&
+					fragment.Function.Name != "" && wholeToolCall(calls[position], declared) {
 					position = -1
 				}
 				if position < 0 {
@@ -390,6 +393,8 @@ func (adapter *Adapter) Stream(
 				call := calls[position]
 				if call.ID == "" {
 					call.ID = fragment.ID
+				} else if fragment.ID != "" && fragment.ID != call.ID {
+					call.ID += fragment.ID
 				}
 				call.Name = appendNameFragment(call.Name, fragment.Function.Name, declared)
 				call.Arguments = append(
@@ -504,6 +509,17 @@ func (adapter *Adapter) Complete(
 // repeats the whole name so far is a gateway resending it (#665) and is
 // dropped, unless it is a single character (a name streamed character by
 // character, as "l", "l") or the doubled name is a tool the request declares.
+// wholeToolCall reports whether a call assembled so far could end here: it
+// names a tool (a declared one, when the request declares tools) and its
+// arguments are empty or a complete JSON value. A fragment with a new call ID
+// after a call that is not whole continues that call.
+func wholeToolCall(call *agents.ToolCall, declared map[string]bool) bool {
+	if call.Name == "" || (len(declared) > 0 && !declared[call.Name]) {
+		return false
+	}
+	return len(call.Arguments) == 0 || json.Valid(call.Arguments)
+}
+
 func appendNameFragment(value, fragment string, declared map[string]bool) string {
 	if fragment == "" {
 		return value
