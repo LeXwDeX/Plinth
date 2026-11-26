@@ -40,7 +40,7 @@ func (r *strandingRepository) GetTurn(ctx context.Context, ownerID, sessionID, a
 	return turn, err
 }
 
-func (r *strandingRepository) UpdateTurnState(ctx context.Context, assistantMessageID, state, reason string, now time.Time) error {
+func (r *strandingRepository) UpdateTurnState(ctx context.Context, assistantMessageID, state, reason string, now time.Time, from ...string) error {
 	r.mu.Lock()
 	if state == r.running && r.failMarkRunning > 0 {
 		r.failMarkRunning--
@@ -48,7 +48,7 @@ func (r *strandingRepository) UpdateTurnState(ctx context.Context, assistantMess
 		return errors.New("injected mark running failure")
 	}
 	r.mu.Unlock()
-	return r.recoverySnapshotRepository.UpdateTurnState(ctx, assistantMessageID, state, reason, now)
+	return r.recoverySnapshotRepository.UpdateTurnState(ctx, assistantMessageID, state, reason, now, from...)
 }
 
 func (r *strandingRepository) pending() int {

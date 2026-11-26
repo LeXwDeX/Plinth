@@ -49,8 +49,12 @@ var (
 	ErrInvalidSessionPage          = errors.New("chat: invalid session page query")
 	ErrInvalidMessagePage          = errors.New("chat: invalid message page query")
 	ErrTurnCheckpointConflict      = errors.New("chat: turn checkpoint conflict")
-	ErrInvalidApprovalMode         = errors.New("chat: invalid approval mode")
-	ErrInvalidAgentScope           = errors.New("chat: invalid agent scope")
+	// ErrTurnStateChanged refuses a state write whose turn is no longer in
+	// one of the states the write expects (#665): a finished turn is never
+	// set running again.
+	ErrTurnStateChanged    = errors.New("chat: turn state changed")
+	ErrInvalidApprovalMode = errors.New("chat: invalid approval mode")
+	ErrInvalidAgentScope   = errors.New("chat: invalid agent scope")
 	// ErrNotLastTurn refuses a last-turn replacement (#645) whose messages
 	// are not exactly the session's last turn: the page is out of date.
 	ErrNotLastTurn = errors.New("chat: messages are not the session's last turn")
@@ -231,13 +235,16 @@ type Repository interface {
 	// UpdateTurnState sets the turn's state and why it ended (#328): endReason
 	// is the Schema's end reason string, empty when the turn is not finished or
 	// the Schema declares none. Every call replaces the stored reason, so a
-	// turn that runs again loses its old one.
+	// turn that runs again loses its old one. from, when given, are the
+	// states the turn must be in: a turn in another state is left as it is
+	// and ErrTurnStateChanged is returned (#665).
 	UpdateTurnState(
 		ctx context.Context,
 		assistantMessageID string,
 		state string,
 		endReason string,
 		at time.Time,
+		from ...string,
 	) error
 	// FinishTurn ends the turn and drops the request its checkpoint still
 	// holds: a terminal turn is never resumed (#382).
@@ -1759,6 +1766,9 @@ func (service *Service) TurnStopRequested(ctx context.Context, ownerID, sessionI
 
 // MarkTurnRunning sets the turn running. It stores no end reason, so a turn
 // that runs again loses the reason of its earlier end (#328).
+// MarkTurnRunning sets a queued, running or waiting turn running. The write
+// is conditional on that state (#665): a command that read the turn before it
+// finished cannot reopen it; it gets ErrTurnStateChanged.
 func (service *Service) MarkTurnRunning(
 	ctx context.Context,
 	assistantMessageID string,
@@ -1769,6 +1779,7 @@ func (service *Service) MarkTurnRunning(
 		service.turnRunning,
 		"",
 		service.clock(),
+		service.turnQueued, service.turnRunning, service.turnWaitingTask,
 	)
 }
 

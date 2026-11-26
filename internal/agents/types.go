@@ -330,6 +330,27 @@ type Completion struct {
 	// Usage is what the upstream reported for this request; nil when it
 	// reported nothing (#322).
 	Usage *Usage `json:",omitempty"`
+	// FinishReason is why the upstream ended the completion when it is one
+	// the caller acts on (#665): FinishLength or FinishContentFilter. Empty
+	// for an ordinary end.
+	FinishReason string `json:",omitempty"`
+}
+
+// The finish reasons a Completion reports (#665): the model stopped at its
+// output token limit, so its text or its tool call arguments may be cut; or
+// the upstream's content filter ended the reply.
+const (
+	FinishLength        = "length"
+	FinishContentFilter = "content_filter"
+)
+
+// FinishReasonOf keeps the upstream finish reasons a caller acts on.
+func FinishReasonOf(reason string) string {
+	switch reason {
+	case FinishLength, FinishContentFilter:
+		return reason
+	}
+	return ""
 }
 
 // Empty reports a completion that said nothing the reply can hold: no visible

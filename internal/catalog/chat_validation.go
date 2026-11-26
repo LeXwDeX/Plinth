@@ -545,6 +545,12 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if schema.Agent.MaxGenerationCallsPerTurn <= 0 {
 		return errors.New("agent 的 max_generation_calls_per_turn 必须为正数")
 	}
+	// #665: the round bound is a soft guard against a runaway tool loop; it
+	// must leave room for every paid call of the turn.
+	if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds < 0 ||
+		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
+		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
+	}
 	if schema.Agent.MaxListedModels <= 0 {
 		return errors.New("agent 的 max_listed_models 必须为正数")
 	}
@@ -2651,6 +2657,9 @@ func validateContextCompaction(compaction ChatContextCompactionSchema) error {
 		if value <= 0 {
 			return fmt.Errorf("context_compaction.%s 必须为正数", name)
 		}
+	}
+	if compaction.AutoFailureBackoffSeconds < 0 {
+		return fmt.Errorf("context_compaction.auto_failure_backoff_seconds 不能为负")
 	}
 	// Past the threshold there must be rounds to summarize beyond the kept ones.
 	if compaction.AutoMessageThreshold <= 2*compaction.KeepRecentRounds {
