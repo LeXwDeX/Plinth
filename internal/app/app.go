@@ -2048,6 +2048,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	processingService.WithGrants(executionGrants)
 	processingService.WithSourcePreference(catalog.ProcessingSourcePreference(applicationSchema.Chat.Tools))
+	// #665: the Agent's revise retry bound is the plan tool's declared one.
+	processingService.WithAgentStepRetries(catalog.ProcessingAgentStepRetries(applicationSchema.Chat.Tools))
 	// #251: checkpoints read the saved model through the review tool's bounded,
 	// owner-scoped cache; a read failure is recorded as unknown, not a pass.
 	processingService.WithModelReport(toolExecutor.ModelReport)

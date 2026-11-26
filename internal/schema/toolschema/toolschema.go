@@ -240,7 +240,7 @@ func parseNode(value any, path string, options Options) (*Schema, error) {
 			node.AdditionalProperties = &flag
 		default:
 			if !annotations[key] {
-				return nil, fmt.Errorf("%s: keyword %q is not supported", path, key)
+				return nil, &UnsupportedKeywordError{Path: path, Keyword: key}
 			}
 		}
 	}
@@ -339,6 +339,9 @@ func (s *Schema) PropertyNames() []string {
 type ValidationError struct {
 	Path    string
 	Message string
+	// Allowed is the declared enum when the value is not one of it (#665),
+	// so a caller can word the choices itself; nil for every other rule.
+	Allowed []any
 }
 
 func (e *ValidationError) Error() string { return e.Path + ": " + e.Message }
@@ -398,7 +401,8 @@ func (s *Schema) validate(value any, path string, options ValidateOptions) error
 			}
 		}
 		if !found {
-			return fail(path, "is not one of the allowed values")
+			return &ValidationError{Path: path, Allowed: s.Enum,
+				Message: "is not one of the allowed values: " + EnumChoices(s.Enum)}
 		}
 	}
 	switch typed := value.(type) {

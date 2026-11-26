@@ -398,6 +398,8 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 - **replace 受已批准制作计划约束。** 会话有生效（active）的制作计划时，replace 的新能力必须是该计划的步骤、预案步骤或修正能力（`correction_capabilities`）之一，否则按超出计划（`ErrRevisionOutsidePlan`）交人决定；没有制作计划时仍由每步授权决定。
 - **对等 MCP 工具的字符串参数。** `agent_configuration.mcp_policy.max_string_argument_characters`（默认 Catalog 为 2000，缺省或 0 表示不限）：预设工具声明的 `maxLength` 超过它时装配拒绝；没有声明 `maxLength` 的字符串参数按它限长，超长参数在到达对等端之前以 `ErrInvalidArguments` 拒绝。工作区 MCP 服务端边界（`mcpworkspace`）不受影响。
 - **内置 Skill 不让每轮失败。** `agentconfiguration.Service.Snapshot` 校验失败时，逐个单独校验打包的 Skill（默认 Skill Catalog 中的、或已下线内置 Skill 的 ID），不通过的跳过并记 Warn，其余照常；管理员或用户写的 Skill 仍无效、或跳过后整体仍不通过时，照旧返回错误。
+- **Agent 工具参数（第二轮评审）。** 编排器按工具声明校验 Agent 工具参数前，先去掉受字符串 `enum` 约束的值两端的空白（只去空白，不改大小写），并把去过空白的参数交给工具；不在 `enum` 内的值以可选的 `chat.presentation.messages.tool_argument_not_allowed`（`{field}`、`{choices}`）列出允许值，未声明时用校验器自带的英文原因（同样列出允许值）。
+- **旧 Catalog 兼容。** #665 新增的 `three_view.messages` 文案（`turn_stopped`、`model_unavailable`、`image_unavailable`、`arguments_invalid`、`denied`、`duplicate_run`）为可选：`catalog.Load` 在校验前给缺失的键借用该 Catalog 已声明的最接近文案（`presentation.messages` 的 `turn_stopped`、`tool_arguments_invalid`、`multiview_model_unavailable`/`invalid_parameters`，`reference_required`，`pending_approvals.messages.denied`，`admission_full`），产品文案不写进 Go，翻译按原文随之生效。`create_three_view` 的 `include_right` 可不声明，声明时必须是布尔。生成工具参数声明里 toolschema 子集外的关键字不再阻止加载（这些参数本就不按声明校验）；Agent 工具声明仍拒绝子集外关键字，错误写明工具、参数与关键字。`three_view.messages.denied` 改为中性文案：拒绝授权可能来自卡片上不批准、本轮停止或卡片过期。
 - **尚未做（#665 余项）。** Agent 工具结果的 Schema 长度上限与截断说明（`get_task`、处理计划结果、`list_offerings`）；`get_task`、`inspect_image`、`compare_model_reference` 的会话范围（本会话、祖先分支链与同项目资产）。
 - **装配失败即拒绝启动。** 生成工具缺任一授权端口（prepared gateway、操作存储、授权服务、停止读取）时 `app.New` 返回错误，不再退回无授权的旧提交路径。
 

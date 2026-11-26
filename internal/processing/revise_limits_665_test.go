@@ -177,3 +177,46 @@ func TestReviseReplaceStaysWithinTheApprovedProductionPlan665(t *testing.T) {
 		t.Fatalf("replace within the approved plan = %+v %v", replaced.Steps, err)
 	}
 }
+
+// #665: the retry bound is the Schema's
+// processing.plan.revision.max_agent_retries_per_step, not the constant; the
+// constant only applies when the Schema declares none.
+func TestReviseRetryCapFollowsTheSchemaBound(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		declared int
+		retries  int
+		capped   bool
+	}{
+		{"default bound reached", 0, MaxAgentStepRetries, true},
+		{"raised bound not reached", MaxAgentStepRetries + 2, MaxAgentStepRetries, false},
+		{"lowered bound reached", 1, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, store, gateway, plan := checkpointFixture(t)
+			service.WithAgentStepRetries(tc.declared)
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			failedTask := gateway.tasks["step-1"]
+			failedTask.State = generation.TaskFailed
+			failedTask.Failure = &generation.Failure{Class: generation.FailureRateLimited, Retryable: true}
+			gateway.tasks["step-1"] = failedTask
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			failed := store.plans[plan.ID]
+			if failed.State != Failed || failed.Steps[0].State != Failed {
+				t.Fatalf("plan after upstream failure = %s / %s", failed.State, failed.Steps[0].State)
+			}
+			failed.Steps[0].Retry = tc.retries
+			store.plans[plan.ID] = failed
+			_, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+				ExpectedPlanVersion: failed.Version, Operation: OperationRetry, StepIndex: 0, Reason: "上游限流，重试"})
+			if got := errors.Is(err, ErrRevisionRetryPerson); got != tc.capped {
+				t.Fatalf("retry with %d of bound %d: err = %v, capped = %v", tc.retries, tc.declared, err, got)
+			}
+		})
+	}
+}

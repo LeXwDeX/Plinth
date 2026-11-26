@@ -57,6 +57,7 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := expandSourceModelLimitTexts(&doc); err != nil {
 		return nil, err
 	}
+	fillThreeViewMessageFallbacks(doc.Application)
 	if err := validateApplication(*doc.Application); err != nil {
 		return nil, fmt.Errorf("application: %w", err)
 	}

@@ -4385,9 +4385,11 @@ type ChatThreeViewMessages struct {
 	// The texts the three-view tool answers with when it submits nothing
 	// (#665): the turn was stopped, the session's model has no image-to-image
 	// Offering for the recipe, the chosen picture cannot be used, the
-	// arguments do not have the declared shape, and the person denied the
-	// step. They are the Agent's recovery guidance, so they live here, not in
-	// code.
+	// arguments do not have the declared shape, and the step was not approved
+	// (a refusal on the card, a stopped turn or an expired card all deny the
+	// grant, so Denied names none of them). They are the Agent's recovery
+	// guidance, so they live here, not in code. Optional: a Catalog without
+	// them borrows the nearest declared text (fillThreeViewMessageFallbacks).
 	TurnStopped      string `json:"turn_stopped,omitempty"`
 	ModelUnavailable string `json:"model_unavailable,omitempty"`
 	ImageUnavailable string `json:"image_unavailable,omitempty"`
@@ -4397,7 +4399,8 @@ type ChatThreeViewMessages struct {
 	// DuplicateRun refuses a second group of the same source picture while
 	// an earlier group of the session still waits on its card or runs
 	// (#665): nothing new is created, submitted or charged. Fields: {run}.
-	DuplicateRun      string `json:"duplicate_run"`
+	// Optional: a Catalog without it borrows AdmissionFull.
+	DuplicateRun      string `json:"duplicate_run,omitempty"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
@@ -6210,7 +6213,8 @@ type ChatToolProcessingRevisionSchema struct {
 	MaxWaivedCheckpoints int `json:"max_waived_checkpoints"`
 	// MaxAgentRetriesPerStep bounds how often the Agent's revise retry may
 	// start one step again (#665); the person's own Retry is not counted
-	// against it. Aligned with processing.MaxAgentStepRetries.
+	// against it. The processing service reads it
+	// (ProcessingAgentStepRetries); 0 keeps processing.MaxAgentStepRetries.
 	MaxAgentRetriesPerStep int `json:"max_agent_retries_per_step"`
 }
 
@@ -6861,6 +6865,11 @@ type ChatMessageTexts struct {
 	// to an Agent tool whose arguments are valid JSON but break the tool's
 	// declared parameters; {reason} names the field and the rule (#665).
 	ToolArgumentsSchemaInvalid string `json:"tool_arguments_schema_invalid,omitempty"`
+	// ToolArgumentNotAllowed ({field}, {choices}) is the {reason} of a value
+	// outside the parameter's enum; {choices} lists the declared values
+	// (#665). Without it the reason is the validator's own wording, which
+	// lists them too.
+	ToolArgumentNotAllowed string `json:"tool_argument_not_allowed,omitempty"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or

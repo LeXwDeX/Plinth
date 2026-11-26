@@ -59,8 +59,9 @@ func TestChatToolParametersAreValidatedAtLoad(t *testing.T) {
 		"the three-view purpose follows three_view.purposes": {"create_three_view", func(d map[string]any) {
 			property(d, "purpose")["enum"] = []any{"model_input"}
 		}, "three_view.purposes"},
-		"the four-view switch must be declared": {"create_three_view", func(d map[string]any) {
-			delete(d["properties"].(map[string]any), "include_right")
+		// Optional since wave 2, so a pre-#665 Catalog loads; declared, it is a boolean.
+		"the four-view switch is a boolean": {"create_three_view", func(d map[string]any) {
+			property(d, "include_right")["type"] = "string"
 		}, "include_right"},
 		"the notes limit is the Schema's": {"update_session_notes", func(d map[string]any) {
 			property(d, "notes")["maxLength"] = 5000

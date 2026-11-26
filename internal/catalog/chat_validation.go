@@ -2028,7 +2028,8 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
-		// #665: the recovery texts of a call that submits nothing.
+		// #665: the recovery texts of a call that submits nothing. A Catalog
+		// written before #665 gets them from fillThreeViewMessageFallbacks.
 		"turn_stopped": messages.TurnStopped, "model_unavailable": messages.ModelUnavailable,
 		"image_unavailable": messages.ImageUnavailable, "arguments_invalid": messages.ArgumentsInvalid,
 		"denied": messages.Denied,
@@ -2782,6 +2783,10 @@ func validateToolRejectionTexts(messages ChatMessageTexts) error {
 	if text := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(text) != "" &&
 		(!strings.Contains(text, "{tool}") || !strings.Contains(text, "{reason}")) {
 		return errors.New("presentation.tool_arguments_schema_invalid 须含 {tool} 与 {reason}")
+	}
+	if text := messages.ToolArgumentNotAllowed; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{field}") || !strings.Contains(text, "{choices}")) {
+		return errors.New("presentation.tool_argument_not_allowed 须含 {field} 与 {choices}")
 	}
 	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
 		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")
