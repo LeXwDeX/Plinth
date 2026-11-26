@@ -236,6 +236,48 @@ func TestModelWithoutLevelsAndCompactionUseTheSessionModel(t *testing.T) {
 	}
 }
 
+// #640: the first-turn title runs on the model the session chose, on its
+// connection, at the title level the model family declares; only a session
+// without a choice titles on the default model.
+func TestFirstTurnTitleFollowsTheSessionChatModel(t *testing.T) {
+	ctx := context.Background()
+	fixture, models := newModelFixture(t)
+	qwenOption := chat.ChatModelOption{ID: "QWEN", Model: "qwen-max", EffortLevels: []string{"low", "medium", "xhigh"}, DefaultEffort: "xhigh"}
+	models.replace(chat.ChatModelSet{Options: []chat.ChatModelOption{deepseekOption, qwenOption}, DefaultID: "LLM"})
+	if _, err := fixture.service.SetSessionChatModel(ctx, "owner-a", fixture.session, "QWEN"); err != nil {
+		t.Fatal(err)
+	}
+	fixture.turn(t, "first")
+	fixture.agent.mu.Lock()
+	titles := append([]agents.Request(nil), fixture.agent.titles...)
+	fixture.agent.mu.Unlock()
+	if len(titles) != 1 {
+		t.Fatalf("title calls = %d", len(titles))
+	}
+	// The level is what the qwen-max family declares for a title
+	// (turn_efforts), not the session's: that family offers xhigh only.
+	profile, _ := fixture.schema.Agent.Thinking.ProfileFor("qwen-max")
+	want := profile.EffortForTurn(catalog.ChatTurnEffortTitle)
+	if titles[0].Connection != "QWEN" || titles[0].Model != "qwen-max" || titles[0].ReasoningEffort != want {
+		t.Fatalf("title request = connection %q model %q effort %q, want QWEN qwen-max %q",
+			titles[0].Connection, titles[0].Model, titles[0].ReasoningEffort, want)
+	}
+
+	// A fresh session without a choice titles on the default model.
+	session, err := fixture.service.CreateSession(ctx, "owner-a", "Owner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.session = session.ID
+	fixture.turn(t, "second session")
+	fixture.agent.mu.Lock()
+	last := fixture.agent.titles[len(fixture.agent.titles)-1]
+	fixture.agent.mu.Unlock()
+	if last.Connection != "LLM" || last.Model != "deepseek" || last.ReasoningEffort != "low" {
+		t.Fatalf("default title request = connection %q model %q effort %q", last.Connection, last.Model, last.ReasoningEffort)
+	}
+}
+
 // Without a model source the deployment's single model is the only option,
 // and a session cannot pick another.
 func TestWithoutModelSourceTheDeploymentModelIsTheOnlyOption(t *testing.T) {
