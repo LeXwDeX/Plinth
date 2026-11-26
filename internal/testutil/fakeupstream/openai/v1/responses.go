@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
@@ -86,6 +87,10 @@ type fakeItem struct {
 	// refusal: a message item whose content part is a refusal (RefusalMarker)
 	// and whose text is the refusal text.
 	refusal bool
+	// finalPadding pads the encrypted_content of a reasoning item's final
+	// object (the output of response.completed) to that many bytes
+	// (EmptyCompletionMarker).
+	finalPadding int
 }
 
 type itemStage int
@@ -107,6 +112,12 @@ type responsesPlan struct {
 	reasoning    bool
 	unknownEvent bool
 	streamError  bool
+	// selfImage: the answer is a picture the model drew itself
+	// (SelfImageMarker); hold is the wait before its .completed event, cut
+	// short when done closes (the client went away).
+	selfImage bool
+	hold      time.Duration
+	done      <-chan struct{}
 }
 
 func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +154,11 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
 		return
 	}
+	// #640: the gateway answers a muted target itself, before any model.
+	if chat.gatewayMute() {
+		h.writeGatewayMute(w, r)
+		return
+	}
 	// #401: a model with declared constraints refuses a request shape it does
 	// not accept before any response runs, streamed or not.
 	if status, body, refused := h.responsesModelRefusal(request); refused {
@@ -169,6 +185,10 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	number := h.responses.nextResponseNumber()
 	plan := h.planResponse(request, chat, items, number)
+	if err := h.applyObserved(r, request, chat, &plan, number); err != nil {
+		writeJSON(w, http.StatusInternalServerError, officialErrorBody(err.Error(), "server_error", nil, nil))
+		return
+	}
 	if request.Stream {
 		h.writeResponsesStream(w, request, plan, number)
 		return
@@ -279,6 +299,8 @@ func (h *handler) itemObject(item fakeItem, stage itemStage) map[string]any {
 			}
 		}
 		return object
+	case imageGenerationKind:
+		return imageGenerationObject(item, stage)
 	default:
 		// The reasoning item of the sample (observed at effort xhigh): content
 		// and summary as empty arrays, id, encrypted_content, type and no
@@ -294,6 +316,9 @@ func (h *handler) itemObject(item fakeItem, stage itemStage) map[string]any {
 				object["encrypted_content"] = FixedEncryptedPartial
 			case stageFinal:
 				object["encrypted_content"] = FixedEncryptedFinal
+				if item.finalPadding > 0 {
+					object["encrypted_content"] = paddedEncrypted(item.finalPadding)
+				}
 			default:
 				object["encrypted_content"] = FixedEncryptedDone
 			}
@@ -401,6 +426,9 @@ func (h *handler) responseObject(request responsesRequest, plan responsesPlan, s
 	if plan.unknownEvent {
 		body["fake_future_member"] = map[string]any{"extra": true}
 	}
+	if plan.selfImage {
+		selfImageResponse(body)
+	}
 	return body
 }
 
@@ -442,6 +470,15 @@ func (h *handler) writeResponsesStream(w http.ResponseWriter, request responsesR
 	cut := plan.status == "incomplete"
 	for _, item := range plan.items {
 		for _, event := range h.itemEvents(request, item, cut) {
+			if event["type"] == "response.image_generation_call.completed" && plan.hold > 0 {
+				timer := time.NewTimer(plan.hold)
+				select {
+				case <-timer.C:
+				case <-plan.done:
+					timer.Stop()
+					return
+				}
+			}
 			emit(event)
 		}
 	}
@@ -513,6 +550,8 @@ func (h *handler) itemEvents(request responsesRequest, item fakeItem, cut bool) 
 		itemDone := t.textEvent("response.output_item.done")
 		itemDone["item"], itemDone["output_index"] = h.itemObject(item, stageDone), item.index
 		return append(events, done, partDone, itemDone)
+	case imageGenerationKind:
+		return h.imageGenerationEvents(item)
 	default:
 		// The reasoning item's events of the sample (observed): its
 		// output_item.added, then its output_item.done, and nothing between
