@@ -1913,6 +1913,8 @@ export interface ChatProductSchema {
       error: string;
       /** #638: a model round answered with nothing, also after its retry. */
       empty_response: string;
+      /** #638: a model round drew a picture itself; it was dropped, not retried. */
+      inline_image: string;
     };
     placeholder_stale_milliseconds: number;
     failed_prompt_preview_characters: number;

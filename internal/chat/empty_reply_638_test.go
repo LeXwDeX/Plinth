@@ -55,17 +55,45 @@ func TestAnEmptyFirstRoundEndsTheTurnWithTheEmptyResponseReason(t *testing.T) {
 	wantTurnEnd(t, turn, "configured-turn-done", configuredEndReasons.EmptyResponse)
 }
 
-// A follow-up that drew its own picture instead of calling a tool (also after
-// its retry) keeps the reply so far and says so, instead of ending without a
-// word.
+// A follow-up that drew its own picture instead of calling a tool keeps the
+// reply so far and says so, instead of ending without a word; the turn ends
+// with the inline_image reason, done, not failed. Nothing sends that round
+// again: the picture is billed as a generated image.
 func TestAFollowUpThatDrewItsOwnPictureSaysSo(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
 	schema := configuredChatSchema(t)
+	inline := schema.Presentation.Messages.AgentInlineImageOutput
 	agent := &breaksAfterToolAgent{tool: schema.Tools[0].Name, opening: "Working on it.", err: agents.ErrInlineImageOutput}
-	content := runFailingTurnWith(t, schema, agent)
-	if !strings.HasPrefix(content, "Working on it.") ||
-		!strings.Contains(content, schema.Presentation.Messages.AgentInlineImageOutput) {
-		t.Fatalf("assistant = %q", content)
+	stored := runBudgetTurn(t, service, schema, agent, &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}, nil)
+	if !strings.HasPrefix(stored.Content, "Working on it.") || !strings.Contains(stored.Content, inline) {
+		t.Fatalf("assistant = %q", stored.Content)
 	}
+	if agent.streams() != 2 {
+		t.Fatalf("streams = %d, want the first round and one follow-up", agent.streams())
+	}
+	turn, err := service.GetTurn(context.Background(), "owner-a", stored.SessionID, stored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTurnEnd(t, turn, "configured-turn-done", configuredEndReasons.InlineImage)
+}
+
+// A first round that drew its own picture ends the same way: the Schema's
+// text with the error reference, the inline_image reason, not an error.
+func TestAFirstRoundThatDrewItsOwnPictureEndsWithTheInlineImageReason(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
+	schema := configuredChatSchema(t)
+	agent := failingAgent{err: agents.ErrInlineImageOutput}
+	stored := runBudgetTurn(t, service, schema, agent, noToolExecutor{}, nil)
+	if !strings.HasPrefix(stored.Content, schema.Presentation.Messages.AgentInlineImageOutput) ||
+		!strings.Contains(stored.Content, strings.SplitN(schema.Presentation.Messages.ErrorReference, "{id}", 2)[0]) {
+		t.Fatalf("assistant = %q", stored.Content)
+	}
+	turn, err := service.GetTurn(context.Background(), "owner-a", stored.SessionID, stored.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTurnEnd(t, turn, "configured-turn-done", configuredEndReasons.InlineImage)
 }
 
 // #638: the rounds after tool results think at the level the model family

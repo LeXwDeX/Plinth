@@ -505,6 +505,7 @@ var configuredEndReasons = catalog.ChatTurnEndReasonsSchema{
 	Background:       "configured-end-background",
 	Error:            "configured-end-error",
 	EmptyResponse:    "configured-end-empty-response",
+	InlineImage:      "configured-end-inline-image",
 }
 
 func newChatService(

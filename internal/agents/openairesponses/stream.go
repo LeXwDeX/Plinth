@@ -93,6 +93,9 @@ read:
 			framed = true
 			state.skipOversized(event, lines.Head())
 			event = ""
+			if state.inlineImage {
+				return agents.Completion{}, abortInlineImage(guard, response)
+			}
 			if state.terminal {
 				break
 			}
@@ -116,6 +119,9 @@ read:
 			}
 			if err := state.handle(hint, payload); err != nil {
 				return agents.Completion{}, err
+			}
+			if state.inlineImage {
+				return agents.Completion{}, abortInlineImage(guard, response)
 			}
 			if state.terminal {
 				break read
@@ -141,12 +147,6 @@ read:
 	}
 	result = state.outputs.completion(state.status == statusIncomplete)
 	usage = state.usage
-	// A picture the model drew itself has no place in the reply (#638): a
-	// round that said nothing else ends as the Chat Completions Adapter ends
-	// one with delta.images, not as an empty completion.
-	if state.inlineImage && result.Empty() {
-		return agents.Completion{}, agents.ErrInlineImageOutput
-	}
 	result.Usage = usage
 	// Text that was never streamed (an upstream that sends its message only in
 	// the done item) is delivered once, so the caller still sees it arrive.
@@ -156,6 +156,19 @@ read:
 		}
 	}
 	return result, nil
+}
+
+// abortInlineImage ends a stream at the first sign that the model is drawing a
+// picture itself (#638): the reply has no place for it, the picture is billed
+// as a generated image, and its base64 result runs to megabytes, twice (on its
+// done item and on the terminal event). The request is canceled and the body
+// closed at once, so the rest is never downloaded, and the round is
+// ErrInlineImageOutput, whatever it said before: the call is cut, so its other
+// items may be half-written.
+func abortInlineImage(guard *upstreamhttp.FirstByteGuard, response *http.Response) error {
+	guard.Release()
+	_ = response.Body.Close()
+	return agents.ErrInlineImageOutput
 }
 
 // The Responses wire's picture the model draws itself: the output item type
@@ -182,8 +195,8 @@ type streamState struct {
 	// emitted: some text delta was passed on.
 	emitted bool
 	// inlineImage: the model drew a picture itself (an image_generation_call
-	// item, #638). The picture is dropped, and a round that said nothing else
-	// is ErrInlineImageOutput.
+	// item or event, #638): the stream is cut there and the round is
+	// ErrInlineImageOutput (abortInlineImage).
 	inlineImage bool
 	terminal    bool
 	status      string

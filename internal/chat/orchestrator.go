@@ -1449,6 +1449,11 @@ func (orchestrator *Orchestrator) Process(
 	// call, also after the adapter layer's empty retry (#638): the turn ends
 	// with the empty_response reason and says so, never as completed.
 	emptyReply := false
+	// inlineImageReply means a model round drew a picture itself instead of
+	// calling a generation tool (#638). The Adapter cut that stream and nothing
+	// sends it again (the picture is billed as a generated image); the turn
+	// ends with the inline_image reason and says so.
+	inlineImageReply := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1590,10 +1595,11 @@ func (orchestrator *Orchestrator) Process(
 				finishCtx,
 				command.AssistantMessageID,
 				orchestrator.turnEndReason(finishCtx, command, assistant, turnOutcome{
-					failed:     failedTurn,
-					background: backgroundFinalized,
-					stopped:    stopFinalized,
-					empty:      emptyReply,
+					failed:      failedTurn,
+					background:  backgroundFinalized,
+					stopped:     stopFinalized,
+					empty:       emptyReply,
+					inlineImage: inlineImageReply,
 				}),
 			),
 		)
@@ -1736,6 +1742,12 @@ func (orchestrator *Orchestrator) Process(
 				return round.receive(delta, streamFilter)
 			},
 		)
+		if errors.Is(err, agents.ErrInlineImageOutput) && !orchestrator.turnCanceled(turnKey) && ctx.Err() == nil {
+			// #638: not a failure of the turn, and not to be repeated: the
+			// reply says the model drew a picture itself.
+			orchestrator.noteInlineImage(command, err)
+			inlineImageReply, completion, err = true, agents.Completion{}, nil
+		}
 		if err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -1763,7 +1775,7 @@ func (orchestrator *Orchestrator) Process(
 			)
 		}
 		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage, request)
-		emptyReply = orchestrator.noteEmptyReply(command, completion, 0)
+		emptyReply = !inlineImageReply && orchestrator.noteEmptyReply(command, completion, 0)
 		if err := streamFilter.Flush(round.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2088,7 +2100,12 @@ func (orchestrator *Orchestrator) Process(
 				"assistant_message_id", command.AssistantMessageID,
 				"error", streamErr,
 			)
-			if len(assistant.ImageURLs) == 0 && toolErr == nil {
+			if errors.Is(streamErr, agents.ErrInlineImageOutput) {
+				// #638: the reply so far stays; it says the model drew a
+				// picture itself, and the turn is not failed.
+				orchestrator.noteInlineImage(command, streamErr)
+				inlineImageReply = true
+			} else if len(assistant.ImageURLs) == 0 && toolErr == nil {
 				failed = true
 			}
 			followUpErr = streamErr
@@ -2115,7 +2132,15 @@ func (orchestrator *Orchestrator) Process(
 		request = followUp
 	}
 	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
-	if emptyReply && emptyText != "" {
+	inlineText, _ := orchestrator.agentInlineImageMessage(ctx, agents.ErrInlineImageOutput)
+	if inlineImageReply && inlineText != "" {
+		note := orchestrator.withErrorReference(ctx, inlineText, assistant.ID)
+		if assistant.Content == "" {
+			assistant.Content = note
+		} else {
+			assistant.Content += "\n\n" + note
+		}
+	} else if emptyReply && emptyText != "" {
 		// #638: the model's last round said nothing, also after its retry.
 		// What the turn wrote and did before it stays; the reply says the
 		// model stopped answering, so the person can regenerate it.
@@ -2135,8 +2160,6 @@ func (orchestrator *Orchestrator) Process(
 			assistant.Content = message
 		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
 			assistant.Content = message
-		} else if message, drew := orchestrator.agentInlineImageMessage(ctx, followUpErr); drew {
-			assistant.Content = message
 		}
 		if failed {
 			assistant.Content = orchestrator.withErrorReference(ctx, assistant.Content, assistant.ID)
@@ -2148,10 +2171,6 @@ func (orchestrator *Orchestrator) Process(
 		if refused, named := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); named {
 			message = refused
 		}
-		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
-	} else if message, drew := orchestrator.agentInlineImageMessage(ctx, followUpErr); drew {
-		// #638: the follow-up drew its own picture instead of calling a tool,
-		// also after its retry; the reply so far stays and says so.
 		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
@@ -4123,6 +4142,17 @@ func (orchestrator *Orchestrator) agentInlineImageMessage(ctx context.Context, e
 		return "", false
 	}
 	return orchestrator.text(ctx, text), true
+}
+
+// noteInlineImage logs a model round that drew a picture itself (#638): the
+// Adapter cut its stream, and the turn ends on it without sending it again.
+func (orchestrator *Orchestrator) noteInlineImage(command ProcessTurn, err error) {
+	orchestrator.logger.Warn(
+		"对话模型自己画了图（未调用生成工具），已断开该轮且不重发，回合以 inline_image 结束",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"error", err,
+	)
 }
 
 // noteEmptyReply reports a model round that answered with no text and no tool
