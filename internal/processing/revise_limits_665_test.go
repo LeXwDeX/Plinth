@@ -210,7 +210,7 @@ func TestReviseRetryCapFollowsTheSchemaBound(t *testing.T) {
 			if failed.State != Failed || failed.Steps[0].State != Failed {
 				t.Fatalf("plan after upstream failure = %s / %s", failed.State, failed.Steps[0].State)
 			}
-			failed.Steps[0].Retry = tc.retries
+			failed.Steps[0].AgentRetries = tc.retries
 			store.plans[plan.ID] = failed
 			_, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
 				ExpectedPlanVersion: failed.Version, Operation: OperationRetry, StepIndex: 0, Reason: "上游限流，重试"})
