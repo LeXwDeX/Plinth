@@ -1299,10 +1299,11 @@ func (r *memoryChatRepository) StartTurn(
 		user,
 		assistant,
 	)
+	// As in SQLite (#665), the new turn's events continue the numbering.
+	event.ID = nextMemoryEventID(r.events[event.SessionID])
 	r.events[event.SessionID] = nil
 	r.streams[event.SessionID] = stream
 	r.turns[assistant.ID] = turn
-	event.ID = int64(len(r.events[event.SessionID]))
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return assistant, event, nil
 }
@@ -1680,9 +1681,17 @@ func (r *memoryChatRepository) AppendEvent(
 	if _, found := r.sessions[event.SessionID]; !found {
 		return chat.Event{}, chat.ErrSessionNotFound
 	}
-	event.ID = int64(len(r.events[event.SessionID]))
+	event.ID = nextMemoryEventID(r.events[event.SessionID])
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return event, nil
+}
+
+// nextMemoryEventID numbers an event after the session's newest one.
+func nextMemoryEventID(events []chat.Event) int64 {
+	if len(events) == 0 {
+		return 0
+	}
+	return events[len(events)-1].ID + 1
 }
 
 func (r *memoryChatRepository) ListEvents(

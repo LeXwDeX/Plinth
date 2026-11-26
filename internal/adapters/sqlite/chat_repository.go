@@ -1422,6 +1422,17 @@ func (r *Repository) StartTurn(
 		}
 		return chat.Message{}, chat.Event{}, chat.ErrTurnActive
 	}
+	// #665: the new turn's events continue the session's numbering instead
+	// of starting at 0 again. A client still holding the ended turn's last
+	// event ID (a stream reconnect, Last-Event-ID) then resumes before the
+	// new turn's first event, never past it; nothing else reads the numbers.
+	var nextEventID int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(event_id) + 1, 0) FROM go_chat_events WHERE session_id = ?`,
+		user.SessionID,
+	).Scan(&nextEventID); err != nil {
+		return chat.Message{}, chat.Event{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM go_chat_events WHERE session_id = ?`, user.SessionID); err != nil {
 		return chat.Message{}, chat.Event{}, err
 	}
@@ -1450,7 +1461,7 @@ func (r *Repository) StartTurn(
 	); err != nil {
 		return chat.Message{}, chat.Event{}, err
 	}
-	storedEvent, err := appendChatEvent(ctx, tx, event)
+	storedEvent, err := appendChatEventFrom(ctx, tx, event, nextEventID)
 	if err != nil {
 		return chat.Message{}, chat.Event{}, err
 	}
@@ -2331,9 +2342,22 @@ func appendChatEvent(
 	tx *sql.Tx,
 	event chat.Event,
 ) (chat.Event, error) {
+	return appendChatEventFrom(ctx, tx, event, 0)
+}
+
+// appendChatEventFrom appends an event numbered after the session's newest
+// one, and never below floor (#665: a new turn's first event continues the
+// numbering of the turn whose events it replaced).
+func appendChatEventFrom(
+	ctx context.Context,
+	tx *sql.Tx,
+	event chat.Event,
+	floor int64,
+) (chat.Event, error) {
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(event_id) + 1, 0)
+		SELECT MAX(COALESCE(MAX(event_id) + 1, 0), ?)
 		FROM go_chat_events WHERE session_id = ?`,
+		floor,
 		event.SessionID,
 	).Scan(&event.ID); err != nil {
 		return chat.Event{}, err
