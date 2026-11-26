@@ -50,3 +50,26 @@ describe('ChatBrowserClient session models (#318)', () => {
     expect(session.generationModelsRetired).toEqual({ 'model-3d': 'meshy-7' });
   });
 });
+
+describe('ChatBrowserClient session not found (#665)', () => {
+  const failure = async (response: Response) => {
+    const schema = schemaFixture();
+    const client = createChatBrowserClient(schema, { fetcher: async () => response });
+    return client.getSession('s1').then(() => null, (error: unknown) => error as { status: number; serverAnswered: boolean });
+  };
+  const errorField = () => schemaFixture().chat.api.response_fields.error;
+
+  it('counts only the API\'s own chat error as the server saying the session is gone', async () => {
+    const id = 'req_0123456789abcdef';
+    // The API: its error field and the request ID its header names.
+    const api = await failure(Response.json({ [errorField()]: '会话不存在', request_id: id }, { status: 404, headers: { 'X-Request-ID': id } }));
+    expect(api).toMatchObject({ status: 404, serverAnswered: true });
+    // A gateway's JSON 404 with an `error` string, one with an ID the header does not name, and a plain-text page.
+    const gateway = await failure(Response.json({ [errorField()]: 'Not Found' }, { status: 404 }));
+    expect(gateway?.serverAnswered).toBe(false);
+    const foreignId = await failure(Response.json({ [errorField()]: 'Not Found', request_id: id }, { status: 404, headers: { 'X-Request-ID': 'req_ffffffffffffffff' } }));
+    expect(foreignId?.serverAnswered).toBe(false);
+    const page = await failure(new Response('404 page not found', { status: 404 }));
+    expect(page?.serverAnswered).toBe(false);
+  });
+});

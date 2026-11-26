@@ -82,7 +82,8 @@ export const SEND_QUEUE_KEY = 'plinth.queuedTurns';
 export const SEND_HOLD_PREFIX = 'plinth.queuedTurns.hold:';
 /**
  * #665: how long a hold lasts without a heartbeat. The holding tab refreshes it every third of this while its turn
- * runs; a tab that closed or crashed lets it lapse, and the other tabs then drain.
+ * runs, and again when it is shown (a hidden tab's timers are slowed down; its Web Lock on the turn, where the browser
+ * has one, still keeps other tabs' claims out); a tab that closed or crashed lets it lapse, and the other tabs drain.
  */
 export const SEND_HOLD_MS = 30_000;
 
@@ -99,15 +100,36 @@ export function sendHoldKey(sessionId: string): string {
   return SEND_HOLD_PREFIX + sessionId;
 }
 
-export function parseSendHold(raw: string | null): SendHold | null {
+/** #665: the time a hold written by one tab may still be on its way when another reads it. */
+const HOLD_CLOCK_SLACK_MS = 1_000;
+
+/**
+ * #665: a stored hold, or null when it cannot be read. With `now`, a hold that ends later than any tab writes one (now
+ * plus SEND_HOLD_MS, with a second for the time between the write and this read) is a corrupt value, not a hold: it is
+ * ignored, so it can neither keep the send held for ever nor put a wait beyond what a timer can count.
+ */
+export function parseSendHold(raw: string | null, now?: number): SendHold | null {
   try {
     const value: unknown = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object') return null;
     const { owner, expiresAt } = value as Record<string, unknown>;
-    return typeof owner === 'string' && typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? { owner, expiresAt } : null;
+    if (typeof owner !== 'string' || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
+    if (now !== undefined && expiresAt > now + SEND_HOLD_MS + HOLD_CLOCK_SLACK_MS) return null;
+    return { owner, expiresAt };
   } catch {
     return null;
   }
+}
+
+/** #665: the shortest wait the drain sets, so a hold that lapses now does not make it run again in a tight loop. */
+export const MIN_DRAIN_WAIT_MS = 50;
+/** The longest delay setTimeout can count; a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** #665: a timer delay kept between MIN_DRAIN_WAIT_MS and what setTimeout can count. */
+export function drainWait(milliseconds: number): number {
+  if (!Number.isFinite(milliseconds)) return MAX_TIMER_MS;
+  return Math.min(Math.max(milliseconds, MIN_DRAIN_WAIT_MS), MAX_TIMER_MS);
 }
 
 /** #665: another tab's hold that has not lapsed; null when the send is free or held by this tab. */
@@ -146,12 +168,48 @@ export function claimStoredTurn(
   now: number,
 ): 'claimed' | 'held' | 'gone' {
   const key = sendHoldKey(sessionId);
-  if (foreignHold(parseSendHold(storage.getItem(key)), owner, now)) return 'held';
+  if (foreignHold(parseSendHold(storage.getItem(key), now), owner, now)) return 'held';
   const queue = parseQueue(storage.getItem(SEND_QUEUE_KEY));
   if (!(queue[sessionId] ?? []).some((turn) => turn.id === id)) return 'gone';
   writeQueue(storage, cancelQueuedTurn(queue, sessionId, id));
   storage.setItem(key, JSON.stringify({ owner, expiresAt: now + SEND_HOLD_MS } satisfies SendHold));
-  return parseSendHold(storage.getItem(key))?.owner === owner ? 'claimed' : 'held';
+  return parseSendHold(storage.getItem(key), now)?.owner === owner ? 'claimed' : 'held';
+}
+
+/**
+ * #665: what the drain of the active session does next, once a turn waits and the page is free: wait for another tab's
+ * hold to end (`wait`, a delay to look again), ask for the read it waits for (`read`), look again later when that read
+ * failed or was cut short (`wait`), or claim the turn and send it (`claim`). `forcedRead` is the read the drain last
+ * asked for.
+ */
+export type DrainStep = { kind: 'wait'; delay: number } | { kind: 'read'; required: number } | { kind: 'claim' };
+
+export function nextDrainStep(input: {
+  hold: SendHold | null;
+  now: number;
+  required: number | undefined;
+  forcedRead: number | null;
+  pollMilliseconds: number;
+}): DrainStep {
+  if (input.hold) return { kind: 'wait', delay: drainWait(input.hold.expiresAt - input.now + MIN_DRAIN_WAIT_MS) };
+  if (input.required !== undefined) {
+    if (input.forcedRead !== input.required) return { kind: 'read', required: input.required };
+    return { kind: 'wait', delay: drainWait(input.pollMilliseconds) };
+  }
+  return { kind: 'claim' };
+}
+
+/**
+ * #665: the sessions whose hold this tab gives up now: every one whose turn is over. A session's turn runs while this
+ * page is still sending it, or while it is the session in view and its reply is still running; a session the person
+ * left is released too, so another tab, which reads the session first, may go on with its queue.
+ */
+export function holdsToRelease(
+  held: Iterable<string>,
+  input: { sending: string | null; activeSessionId: string | null; activeTurnRunning: boolean },
+): string[] {
+  return [...held].filter((sessionId) => sessionId !== input.sending &&
+    !(sessionId === input.activeSessionId && input.activeTurnRunning));
 }
 
 /**
@@ -176,8 +234,14 @@ export function drainAwaitsRead(gate: DrainGate, sessionId: string): boolean {
   return gate[sessionId] !== undefined;
 }
 
-/** #665: at most this many unknown sessions are asked about per page load; the rest wait for a later one. */
+/**
+ * #665: per page load, at most this many asks about unknown sessions may go unanswered (offline, a server error, a
+ * gateway's own 404); the rest wait for a later load. Answered asks (the session is there, or is gone) do not count, so
+ * sessions that are still there do not keep a deleted one behind them for ever; MAX_QUEUE_PROBE_TOTAL bounds them.
+ */
 export const MAX_QUEUE_PROBES = 5;
+/** #665: at most this many unknown sessions are asked about per page load, answered or not. */
+export const MAX_QUEUE_PROBE_TOTAL = 4 * MAX_QUEUE_PROBES;
 
 /**
  * #665: whether a failed read of a session says the server itself does not have it: a 404 or 410 answered with the
@@ -192,8 +256,8 @@ export function sessionGone(error: unknown): boolean {
  * #665: forgets the queues of sessions the server no longer gives this account (deleted in another tab or device, or
  * another account's after a change of login, which the server answers as not found), so their words do not stay in
  * the browser. A session the page knows is kept; one the server cannot be asked about (offline, a server error, a
- * gateway's own 404) is kept until a later load. At most MAX_QUEUE_PROBES sessions are asked about, one at a time,
- * and an aborted signal (the page unmounted) stops the rest.
+ * gateway's own 404) is kept until a later load. Sessions are asked about one at a time, until MAX_QUEUE_PROBES asks
+ * went unanswered or MAX_QUEUE_PROBE_TOTAL were made, and an aborted signal (the page unmounted) stops the rest.
  */
 export async function pruneQueuedSessions(
   sessionIds: readonly string[],
@@ -203,14 +267,17 @@ export async function pruneQueuedSessions(
   signal?: AbortSignal,
 ): Promise<void> {
   let probes = 0;
+  let unanswered = 0;
   for (const sessionId of sessionIds) {
     if (known.has(sessionId)) continue;
-    if (signal?.aborted || probes >= MAX_QUEUE_PROBES) return;
+    if (signal?.aborted || unanswered >= MAX_QUEUE_PROBES || probes >= MAX_QUEUE_PROBE_TOTAL) return;
     probes += 1;
     try {
       await getSession(sessionId, signal);
     } catch (error) {
-      if (!signal?.aborted && sessionGone(error)) forget(sessionId);
+      if (signal?.aborted) return;
+      if (sessionGone(error)) forget(sessionId);
+      else unanswered += 1;
     }
   }
 }

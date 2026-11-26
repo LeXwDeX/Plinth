@@ -101,16 +101,16 @@ import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
 import {
-  cancelQueuedTurn, drainAwaitsRead, enqueueTurn, holdDrainForRead, pruneQueuedSessions, queueMayDrain, queuedFor, readCompleted,
-  SEND_HOLD_MS, takeQueuedTurn, type DrainGate, type QueueBySession,
+  cancelQueuedTurn, enqueueTurn, holdDrainForRead, holdsToRelease, nextDrainStep, pruneQueuedSessions, queueMayDrain, queuedFor,
+  readCompleted, takeQueuedTurn, type DrainGate, type QueueBySession,
 } from '@/lib/chat/send-queue';
 import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
 import { turnFailureText } from '@/lib/chat/turn-error-text';
-import { useSendQueueStore } from '@/store/send-queue-store';
+import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
-import { recoverChatSession } from '@/lib/chat/session-recovery';
+import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
 import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
@@ -481,17 +481,17 @@ export function ChatColumn() {
   const setQueue = useSendQueueStore((state) => state.update);
   const queuedTurns = queuedFor(queue, activeSessionId);
   const [drainTick, setDrainTick] = useState(0);
-  // #665: the sessions whose drain waits for a read made after another tab's claim or send (see DrainGate), the
-  // number of reads applied so far, the read a waiting drain last asked for, and the session whose send this tab holds.
+  // #665: the sessions whose drain waits for a read started after another tab's claim or send (see DrainGate, numbered
+  // by lastReadStarted), and the read a waiting drain last asked for. The holds this tab took are kept per session in
+  // the send queue store.
   const [drainGate, setDrainGate] = useState<DrainGate>({});
-  const readCount = useRef(0);
   const forcedRead = useRef<number | null>(null);
-  const holdingRef = useRef<string | null>(null);
   // #154: the session's saved style lock and this turn's exemption. The exemption never outlives its turn.
   const styleLock = useStyleLock(chatClient, activeSessionId);
   const [styleLockSkipped, setStyleLockSkipped] = useState(false);
   useEffect(() => { setStyleLockSkipped(false); }, [activeSessionId]);
-  const drainingRef = useRef(false);
+  // #665: the session whose queued turn this page is claiming or sending, or null.
+  const drainingRef = useRef<string | null>(null);
   const startedTurnsRef = useRef(0);
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
@@ -905,11 +905,7 @@ export function ChatColumn() {
       pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
       onLoading: setHistoryLoading,
       onLoadError: () => toast.error(ui.loadFailed),
-      onRead: () => {
-        readCount.current += 1;
-        const read = readCount.current;
-        setDrainGate((gate) => readCompleted(gate, activeSessionId, read));
-      },
+      onRead: (started) => setDrainGate((gate) => readCompleted(gate, activeSessionId, started)),
       // #665: a reply that stays pending is no longer read on its own; say so and offer to read it again.
       onGaveUp: () => toast.message(replyStalled.text, {
         id: stalledToast,
@@ -950,11 +946,11 @@ export function ChatColumn() {
   }, [sessionsLoaded, chatClient]);
 
   // #665: another tab claimed a queued turn of this session, or the turn it sent ended: this tab's messages cannot
-  // show that yet, so its drain waits for a read made from now on.
+  // show that yet, so its drain waits for a read started from now on (a read already in flight does not count).
   const foreignChanges = useSendQueueStore((state) => (activeSessionId ? state.foreignChanges[activeSessionId] ?? 0 : 0));
   useEffect(() => {
     if (!activeSessionId || foreignChanges === 0) return;
-    const next = readCount.current + 1;
+    const next = lastReadStarted() + 1;
     setDrainGate((gate) => holdDrainForRead(gate, activeSessionId, next));
   }, [activeSessionId, foreignChanges]);
 
@@ -1621,40 +1617,40 @@ export function ChatColumn() {
     const { turn } = takeQueuedTurn(queue, activeSessionId);
     if (!turn) return;
     // #665: another tab holds the session's send while the turn it sent runs: wait for its release (a storage event)
-    // or for the hold to lapse (a tab that closed without releasing it).
-    const held = useSendQueueStore.getState().foreignHold(activeSessionId);
-    if (held) {
-      const timer = setTimeout(() => setDrainTick((tick) => tick + 1), Math.max(0, held.expiresAt - Date.now()) + 50);
-      return () => clearTimeout(timer);
-    }
-    // #665: after another tab's claim or send, or a claim of this tab that failed, read the session again first.
-    if (drainAwaitsRead(drainGate, activeSessionId)) {
-      const required = drainGate[activeSessionId];
-      if (forcedRead.current !== required) {
-        forcedRead.current = required;
-        setServerTurnTick((tick) => tick + 1);
-        return;
-      }
-      // That read failed or was cut short: ask again after the Schema's poll interval.
-      const retry = setTimeout(() => {
+    // or for the hold to lapse (a tab that closed without releasing it). After another tab's claim or send, or a claim
+    // of this tab that failed, read the session again first; a read that failed or was cut short is asked for again
+    // after the Schema's poll interval.
+    const step = nextDrainStep({
+      hold: useSendQueueStore.getState().foreignHold(activeSessionId),
+      now: Date.now(),
+      required: drainGate[activeSessionId],
+      forcedRead: forcedRead.current,
+      pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
+    });
+    if (step.kind === 'wait') {
+      const timer = setTimeout(() => {
         forcedRead.current = null;
         setDrainTick((tick) => tick + 1);
-      }, schema.chat.frontend.fallback_poll_milliseconds);
-      return () => clearTimeout(retry);
+      }, step.delay);
+      return () => clearTimeout(timer);
+    }
+    if (step.kind === 'read') {
+      forcedRead.current = step.required;
+      setServerTurnTick((tick) => tick + 1);
+      return;
     }
     const sessionId = activeSessionId;
-    drainingRef.current = true;
+    drainingRef.current = sessionId;
     void (async () => {
       if (!(await useSendQueueStore.getState().claim(sessionId, turn.id))) {
-        drainingRef.current = false;
-        const next = readCount.current + 1;
+        drainingRef.current = null;
+        const next = lastReadStarted() + 1;
         setDrainGate((gate) => holdDrainForRead(gate, sessionId, next));
         return;
       }
-      holdingRef.current = sessionId;
       const started = startedTurnsRef.current;
       await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
-        drainingRef.current = false;
+        drainingRef.current = null;
         if (startedTurnsRef.current === started) {
           if (useChatStore.getState().activeSessionId === sessionId) {
             setInput((current) => (current === '' ? turn.text : current));
@@ -1670,20 +1666,16 @@ export function ChatColumn() {
     })();
   }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
 
-  // #665: the hold this tab took with a claim lives while the turn it sent runs (a heartbeat), and is released once
-  // that turn is over or the person left the session, so another tab drains next.
+  // #665: each hold this tab took with a claim lives while the turn it sent runs (the store keeps it alive), and is
+  // released once that turn is over or the person left the session, so another tab drains next. A page that goes away
+  // releases them all.
   useEffect(() => {
-    const held = holdingRef.current;
-    if (!held) return;
-    const running = drainingRef.current || (held === activeSessionId && activeTurnRunning);
-    if (!running) {
-      useSendQueueStore.getState().releaseHold(held);
-      holdingRef.current = null;
-      return;
+    const store = useSendQueueStore.getState();
+    for (const sessionId of holdsToRelease(store.heldSessions(), { sending: drainingRef.current, activeSessionId, activeTurnRunning })) {
+      store.releaseHold(sessionId);
     }
-    const timer = setInterval(() => useSendQueueStore.getState().refreshHold(held), SEND_HOLD_MS / 3);
-    return () => clearInterval(timer);
   }, [activeSessionId, activeTurnRunning, drainTick]);
+  useEffect(() => releaseAllHolds, []);
 
   // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
