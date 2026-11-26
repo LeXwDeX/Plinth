@@ -88,8 +88,10 @@ func (executor *Executor) referencePurposes(
 		if err != nil || len(resolved) != 1 {
 			return refuse(handle)
 		}
-		position := slices.Index(referenceURLs, resolved[0].URL)
-		if position < 0 || resolved[0].URL == "" || slices.Contains(referenceURLs[position+1:], resolved[0].URL) {
+		// The board handle names the version picture sent in its place (#631).
+		resolvedURL := executor.boardStandIn(command, resolved[0].URL)
+		position := slices.Index(referenceURLs, resolvedURL)
+		if position < 0 || resolvedURL == "" || slices.Contains(referenceURLs[position+1:], resolvedURL) {
 			return refuse(handle)
 		}
 		entry := item{position: position + 1, handle: resolved[0].Attachment.Handle, purpose: purpose}
