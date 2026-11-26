@@ -4,7 +4,7 @@ import { cancelQueuedTurn, enqueueTurn, pruneQueuedSessions, queueMayDrain, type
 import type { ChatMessage } from './chat-store';
 import { useChatStore } from './chat-store';
 import { sendHoldKey } from '@/lib/chat/send-queue';
-import { SEND_HOLD_MS } from '@/lib/chat/send-queue';
+import { MAX_TURN_LOCK_REFUSALS, MAX_TURN_LOCK_RETRY_MS, SEND_HOLD_MS, turnLockRetryDelay } from '@/lib/chat/send-queue';
 import {
   onSendQueueStorage, refreshAllHolds, releaseAllHolds, reloadSendQueue, SEND_QUEUE_KEY, sweepLapsedHolds, useSendQueueStore,
 } from './send-queue-store';
@@ -144,6 +144,60 @@ describe('messages queued while a turn runs (#665)', () => {
     const wait = useSendQueueStore.getState().foreignHold('s1');
     expect(wait?.expiresAt).toBeGreaterThan(Date.now());
     expect(wait!.expiresAt - Date.now()).toBeLessThanOrEqual(SEND_HOLD_MS / 3);
+    vi.unstubAllGlobals();
+  });
+
+  it('back off from a turn lock a frozen tab keeps, then count the stored hold alone, until the session is forgotten', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { locks } = fakeLocks(new Set([turnLock('f')]));
+    vi.stubGlobal('navigator', { locks });
+    const store = () => useSendQueueStore.getState();
+    store().update((queue) => enqueueTurn(enqueueTurn(queue, 'f', turn('f1')), 'f', turn('f2')));
+    const waits: number[] = [];
+    for (let refusal = 0; refusal < MAX_TURN_LOCK_REFUSALS; refusal += 1) {
+      expect(await store().claim('f', 'f1')).toBe(false);
+      const wait = store().foreignHold('f')!.expiresAt - Date.now();
+      waits.push(wait);
+      vi.setSystemTime(Date.now() + wait);
+      expect(store().foreignHold('f')).toBeNull();
+    }
+    // The wait grows with each refusal in a row, up to its cap.
+    expect(waits).toEqual(Array.from({ length: MAX_TURN_LOCK_REFUSALS }, (_, index) => turnLockRetryDelay(index + 1)));
+    expect(waits[0]).toBe(SEND_HOLD_MS / 3);
+    expect(Math.max(...waits)).toBe(MAX_TURN_LOCK_RETRY_MS);
+    // Refused too often: the lock no longer blocks the session, the stored hold does.
+    memory.set(sendHoldKey('f'), JSON.stringify({ owner: 'other-tab', expiresAt: Date.now() + 10_000 }));
+    expect(await store().claim('f', 'f1')).toBe(false);
+    expect(store().foreignHold('f')?.owner).toBe('other-tab');
+    memory.delete(sendHoldKey('f'));
+    expect(await store().claim('f', 'f1')).toBe(true);
+    store().releaseHold('f');
+    // Forgetting the session ends the count: a new refusal waits the first delay again.
+    store().forgetSession('f');
+    store().update((queue) => enqueueTurn(queue, 'f', turn('f3')));
+    expect(await store().claim('f', 'f3')).toBe(false);
+    expect(store().foreignHold('f')!.expiresAt - Date.now()).toBe(SEND_HOLD_MS / 3);
+    // Clearing the queue (a logout) ends it too.
+    store().clear();
+    expect(store().foreignHold('f')).toBeNull();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('end the refusal count once the turn lock is free again', async () => {
+    const { held, locks } = fakeLocks(new Set([turnLock('g')]));
+    vi.stubGlobal('navigator', { locks });
+    useSendQueueStore.getState().update((queue) => enqueueTurn(enqueueTurn(queue, 'g', turn('g1')), 'g', turn('g2')));
+    expect(await useSendQueueStore.getState().claim('g', 'g1')).toBe(false);
+    expect(await useSendQueueStore.getState().claim('g', 'g1')).toBe(false);
+    held.delete(turnLock('g'));
+    expect(await useSendQueueStore.getState().claim('g', 'g1')).toBe(true);
+    useSendQueueStore.getState().releaseHold('g');
+    await settled();
+    held.add(turnLock('g'));
+    expect(await useSendQueueStore.getState().claim('g', 'g2')).toBe(false);
+    const wait = useSendQueueStore.getState().foreignHold('g')!.expiresAt - Date.now();
+    expect(wait).toBeLessThanOrEqual(SEND_HOLD_MS / 3);
     vi.unstubAllGlobals();
   });
 

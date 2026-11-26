@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
 import {
-  cancelQueuedTurn, claimStoredTurn, foreignHold, parseQueue, parseSendHold, SEND_HOLD_MS, SEND_HOLD_PREFIX,
-  SEND_QUEUE_KEY, sendHoldKey, writeQueue, type QueueBySession, type SendHold,
+  cancelQueuedTurn, claimStoredTurn, foreignHold, MAX_TURN_LOCK_REFUSALS, parseQueue, parseSendHold, SEND_HOLD_MS,
+  SEND_HOLD_PREFIX, SEND_QUEUE_KEY, sendHoldKey, turnLockRetryDelay, writeQueue, type QueueBySession, type SendHold,
 } from '@/lib/chat/send-queue';
 
 /**
@@ -17,8 +17,9 @@ import {
  * when it ends; another tab does not drain that session while the hold lives, and re-reads the session first after
  * it changes (foreignChanges). Holds are kept per session. Where the browser has Web Locks, the claiming tab also keeps
  * the session's turn lock until it releases the hold: a hidden tab's heartbeat is slowed down and its stored hold may
- * lapse, but the lock does not, and another tab's claim is refused while it is kept. A refresh never writes over
- * another tab's hold: that tab took the send over, and this one gives its hold up.
+ * lapse, but the lock does not, and another tab's claim is refused while it is kept (with a growing wait, and after
+ * MAX_TURN_LOCK_REFUSALS refusals in a row the stored hold alone counts, for a tab the browser froze). A refresh never
+ * writes over another tab's hold: that tab took the send over, and this one gives its hold up.
  */
 export { SEND_QUEUE_KEY };
 
@@ -72,9 +73,12 @@ function takeTurnLock(locks: Locks, sessionId: string): Promise<(() => void) | n
 
 /**
  * #665: while a claim is refused because another tab still keeps the session's turn lock (its stored hold lapsed while
- * the tab was hidden), the drain waits as for a stored hold, until this time, instead of reading again at once.
+ * the tab was hidden), the drain waits as for a stored hold, until `until`, instead of reading again at once. The wait
+ * grows with each refusal in a row (turnLockRetryDelay); after MAX_TURN_LOCK_REFUSALS of them the session's claims
+ * count the stored hold alone (a frozen tab keeps its lock). Taking the lock, forgetting the session or clearing the
+ * queue ends the count.
  */
-const lockedOut = new Map<string, number>();
+const lockedOut = new Map<string, { until: number; refusals: number }>();
 
 // Set once a write was refused (a full or read-only storage): the stored queue no longer follows this page's.
 let writesRefused = false;
@@ -154,10 +158,16 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
       if (locks && !holds.has(sessionId)) {
         const taken = await takeTurnLock(locks, sessionId);
         if (taken === null) {
-          lockedOut.set(sessionId, Date.now() + SEND_HOLD_MS / 3);
-          return false;
+          const refusals = lockedOut.get(sessionId)?.refusals ?? 0;
+          if (refusals < MAX_TURN_LOCK_REFUSALS) {
+            lockedOut.set(sessionId, { until: Date.now() + turnLockRetryDelay(refusals + 1), refusals: refusals + 1 });
+            return false;
+          }
+          // Refused too often in a row: the other tab is likely frozen; its stored hold alone counts now.
+        } else {
+          lockedOut.delete(sessionId);
+          unlock = taken;
         }
-        unlock = taken;
       }
       let result: ReturnType<typeof claimStoredTurn>;
       try {
@@ -209,9 +219,8 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
   },
   foreignHold: (sessionId) => {
     const now = Date.now();
-    const until = lockedOut.get(sessionId);
+    const until = lockedOut.get(sessionId)?.until;
     if (until !== undefined && until > now) return { owner: turnLockName(sessionId), expiresAt: until };
-    if (until !== undefined) lockedOut.delete(sessionId);
     try {
       return foreignHold(parseSendHold(localStorage.getItem(sendHoldKey(sessionId)), now), TAB_ID, now);
     } catch {
@@ -221,6 +230,7 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
   forgetSession: (sessionId) => {
     // A removed session has no turn left to hold.
     get().releaseHold(sessionId);
+    lockedOut.delete(sessionId);
     get().update((queue) => {
       if (!(sessionId in queue)) return queue;
       const { [sessionId]: _removed, ...rest } = queue;
@@ -233,6 +243,7 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
   }),
   clear: () => {
     releaseAllHolds();
+    lockedOut.clear();
     set({ queue: {} });
     write({});
   },
@@ -240,7 +251,6 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
 
 /** Starts this tab's hold of the session's send: a heartbeat, and the turn lock when the claim took one. */
 function startHold(sessionId: string, unlock: (() => void) | undefined): void {
-  lockedOut.delete(sessionId);
   const current = holds.get(sessionId);
   if (current) {
     // A new claim of a session this tab already holds keeps the lock and heartbeat it has.

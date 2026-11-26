@@ -408,7 +408,9 @@ export interface ChatBrowserClientDependencies {
 export function apiErrorAnswer(response: Response, payload: Record<string, unknown>, errorField: string): boolean {
   if (typeof payload[errorField] !== 'string') return false;
   const id = problemRequestId(payload);
-  return id !== '' && response.headers?.get?.('X-Request-ID') === id;
+  // A proxy that adds its own X-Request-ID makes `get` join both values with commas: any one of them may be the API's.
+  const header = response.headers?.get?.('X-Request-ID');
+  return id !== '' && typeof header === 'string' && header.split(',').some((value) => value.trim() === id);
 }
 
 export class ChatBrowserError extends Error {

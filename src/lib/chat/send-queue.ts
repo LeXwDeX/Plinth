@@ -112,6 +112,8 @@ const HOLD_CLOCK_SLACK_MS = 1_000;
  * #665: a stored hold, or null when it cannot be read. With `now`, a hold that ends later than any tab writes one (now
  * plus SEND_HOLD_MS, with a second for the time between the write and this read) is a corrupt value, not a hold: it is
  * ignored, so it can neither keep the send held for ever nor put a wait beyond what a timer can count.
+ * A reading tab whose clock runs more than that second behind the writer's (a clock set back) also takes a live hold
+ * for corrupt; that is accepted: where the browser has Web Locks the writer's turn lock still keeps its claims out.
  */
 export function parseSendHold(raw: string | null, now?: number): SendHold | null {
   try {
@@ -124,6 +126,24 @@ export function parseSendHold(raw: string | null, now?: number): SendHold | null
   } catch {
     return null;
   }
+}
+
+/**
+ * #665: after this many claims in a row refused by another tab's turn lock, the next claims of the session count the
+ * stored hold alone (as in a browser without Web Locks): a tab the browser froze keeps its lock with no turn left to
+ * run, and must not block the session for ever. A turn lock this tab takes again ends the count.
+ */
+export const MAX_TURN_LOCK_REFUSALS = 6;
+/** #665: the longest wait between two claims refused by another tab's turn lock. */
+export const MAX_TURN_LOCK_RETRY_MS = SEND_HOLD_MS * 4;
+
+/**
+ * #665: how long the drain waits before it claims again after the `refusals`-th refusal in a row by another tab's turn
+ * lock: a third of SEND_HOLD_MS, doubled with each refusal, at most MAX_TURN_LOCK_RETRY_MS.
+ */
+export function turnLockRetryDelay(refusals: number): number {
+  const doublings = Math.min(Math.max(Math.floor(refusals) - 1, 0), 16);
+  return Math.min((SEND_HOLD_MS / 3) * 2 ** doublings, MAX_TURN_LOCK_RETRY_MS);
 }
 
 /** #665: the shortest wait the drain sets, so a hold that lapses now does not make it run again in a tight loop. */
