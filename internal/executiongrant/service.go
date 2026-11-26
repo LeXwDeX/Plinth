@@ -353,10 +353,53 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	return PolicyResult{Grant: approved, Outcome: PolicyOutcomeApproved}, nil
 }
 
+// ContinuationBasis says what lets the server submit the next step of a series
+// (the views of a three-view group) without a person.
+type ContinuationBasis string
+
+const (
+	// ContinuationNone: every step waits for a person.
+	ContinuationNone ContinuationBasis = ""
+	// ContinuationBudget: the session's approved production plan covers the steps.
+	ContinuationBudget ContinuationBasis = "budget"
+	// ContinuationAuto: the session approves every paid step by itself (the auto
+	// mode), so the next step is exactly what a person clicking it would start.
+	ContinuationAuto ContinuationBasis = "auto"
+)
+
+// Continuation is the basis on which a series of count steps of the capability
+// at the Offering continues without a person. The auto mode needs no plan; the
+// budget mode needs a plan that covers the steps (BudgetContinuation); the
+// strict (manual) mode never continues by itself. A missing mode reader answers
+// none.
+func (s Service) Continuation(ctx context.Context, ownerID, sessionID, capability, offeringID string,
+	count int,
+) (ContinuationBasis, error) {
+	if ownerID == "" || sessionID == "" || capability == "" || count < 1 || s.Modes == nil {
+		return ContinuationNone, nil
+	}
+	mode, err := s.Modes.SessionApprovalMode(ctx, ownerID, sessionID)
+	if err != nil {
+		return ContinuationNone, err
+	}
+	switch s.Policy.NormalizeMode(mode) {
+	case approvalpolicy.ModeAuto:
+		return ContinuationAuto, nil
+	case approvalpolicy.ModeBudget:
+		covered, err := s.BudgetContinuation(ctx, ownerID, sessionID, capability, offeringID, count)
+		if err != nil || !covered {
+			return ContinuationNone, err
+		}
+		return ContinuationBudget, nil
+	}
+	return ContinuationNone, nil
+}
+
 // BudgetContinuation reports whether the session's active, approved production
 // plan explicitly covers count steps of the capability at the given Offering.
-// Only the budget mode continues without a person: strict and auto modes keep
-// their per-step behavior (#243). A missing mode reader, plan store or plan, a
+// Only the budget mode answers true here: the auto mode continues on its own
+// basis (Continuation, #663) and the strict mode keeps its per-step behavior
+// (#243). A missing mode reader, plan store or plan, a
 // plan that is not active, or a mode that is not budget answers false.
 func (s Service) BudgetContinuation(ctx context.Context, ownerID, sessionID, capability, offeringID string,
 	count int,
