@@ -118,7 +118,7 @@
 | 去背景对话框 | 居中 Dialog | 单图动作条“去背景” | canvas-image-actions.tsx:335-473 |
 | 切换蒙版模型对话框 | 居中 Dialog | 点蒙版工具但当前模型不支持 | workspace-canvas-board.tsx:480-526 |
 | 聊天图片灯箱 Lightbox | 全屏覆盖层 | 点聊天图片 | chat-message.tsx:81-224 |
-| 提示 Toast | 右上角（Schema `runtime.frontend.toaster`） | 自动 | main.tsx（Toaster）；Schema |
+| 提示 Toast | 右上角（Schema `runtime.frontend.toaster`），停留 3 秒（`duration_milliseconds`，失败通知同） | 自动 | main.tsx（Toaster）；Schema |
 | 隐藏的文件选择 | `input type=file` | 由工具栏“上传”或拖拽、粘贴触发 | workspace-canvas-board.tsx:543-547 |
 
 ### 2.2 层级

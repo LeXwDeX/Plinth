@@ -98,6 +98,8 @@ export interface TrackedTask {
    * It is part of that version, never a version of its own.
    */
   formatOf?: string;
+  /** Registered from the server's task list after a reload or history switch; see RegisterTaskInput.restored (#651). */
+  restored?: boolean;
 }
 
 export interface RegisterTaskInput {
@@ -110,6 +112,8 @@ export interface RegisterTaskInput {
   autoPreview?: boolean;
   /** See TrackedTask.formatOf. */
   formatOf?: string;
+  /** The task comes back from the server's task list (a reload or a history switch), not from this page submitting it (#651). */
+  restored?: boolean;
 }
 
 export interface TaskLivePatch {
@@ -193,6 +197,7 @@ function emptyTask(
     notFound: false,
     updatedAt: Date.now(),
     ...(input.formatOf ? { formatOf: input.formatOf } : {}),
+    ...(input.restored ? { restored: true } : {}),
   };
 }
 

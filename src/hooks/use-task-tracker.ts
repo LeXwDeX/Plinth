@@ -50,7 +50,7 @@ export function useTaskTracker(): void {
       progressMaximum: schema.runtime.frontend.percentage_multiplier,
       signal: controller.signal,
       register: (input) => {
-        if (!controller.signal.aborted) useWorkspaceStore.getState().registerTask(input);
+        if (!controller.signal.aborted) useWorkspaceStore.getState().registerTask({ ...input, restored: true });
       },
     }).catch(() => {
       // 服务端任务列表不可用时保持静默：对话内 SSE 恢复仍是主路径。
@@ -76,7 +76,7 @@ export function useTaskTracker(): void {
         if (controller.signal.aborted || useChatStore.getState().activeSessionId !== activeSessionId) return;
         const store = useWorkspaceStore.getState();
         if (store.trackedTasks.some((task) => task.taskId === input.taskId)) return;
-        store.registerTask({ ...input, autoPreview: false });
+        store.registerTask({ ...input, autoPreview: false, restored: true });
         useWorkspaceStore.getState().applyTaskDetail(input.taskId, projection, activeSessionId);
       },
     }).catch(() => {

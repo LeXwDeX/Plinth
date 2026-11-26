@@ -346,7 +346,8 @@ const minimalApplication = `"application":{
 			},
 			"toaster":{
 				"position":"top-right",
-				"rich_colors":true
+				"rich_colors":true,
+				"duration_milliseconds":3000
 			}
 		}
 	},

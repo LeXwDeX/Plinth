@@ -33,6 +33,28 @@ describe('completion notice scan', () => {
     expect(scan.finished).toEqual([]);
   });
 
+  it('does not count the stateless placeholder of a restored task as seen running (#651)', () => {
+    const placeholder = scanTasks(new Set(), [task('r', { restored: true, state: '' })]);
+    expect(placeholder.active.size).toBe(0);
+    // The reload registered it, then its detail arrived already failed: nothing to announce.
+    const failed = scanTasks(placeholder.active, [task('r', { restored: true, state: 'failed', terminal: true, failure: { detail: 'x' } })]);
+    expect(failed.finished).toEqual([]);
+  });
+
+  it('still announces a restored task that a read showed running and that then fails (#651)', () => {
+    const running = scanTasks(new Set(), [task('r', { restored: true, state: 'running' })]);
+    expect([...running.active]).toEqual(['r']);
+    const failed = scanTasks(running.active, [task('r', { restored: true, state: 'failed', terminal: true, failure: { detail: 'x' } })]);
+    expect(failed.finished.map((item) => [item.task.taskId, item.outcome])).toEqual([['r', 'failed']]);
+  });
+
+  it('keeps announcing a task this page submitted even when it fails before any read (#651)', () => {
+    const submitted = scanTasks(new Set(), [task('s', { state: '' })]);
+    expect([...submitted.active]).toEqual(['s']);
+    const failed = scanTasks(submitted.active, [task('s', { state: 'failed', terminal: true, failure: { detail: 'x' } })]);
+    expect(failed.finished.map((item) => item.outcome)).toEqual(['failed']);
+  });
+
   it('keeps running tasks active without attaching permission behavior to their registration', () => {
     const scan = scanTasks(new Set(['a']), [task('a'), task('n')]);
     expect([...scan.active].sort()).toEqual(['a', 'n']);

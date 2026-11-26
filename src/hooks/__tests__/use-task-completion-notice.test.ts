@@ -112,7 +112,7 @@ describe('task completion notice', () => {
     expect(doc.title).toBe('(1) Task finished · 画板');
   });
 
-  it('shows one manual-dismiss toast for a failure while the tab is in view', () => {
+  it('shows one toast for a failure while the tab is in view, kept for the Schema toaster duration (#651)', () => {
     install(true);
     doc.visibilityState = 'visible';
     useTaskCompletionNotice();
@@ -125,7 +125,7 @@ describe('task completion notice', () => {
     expect(title).toBe(application.content.messages['ui.workspace.notice.failed']);
     expect(options).toMatchObject({
       id: 'task-failed-t1',
-      duration: Infinity,
+      duration: application.runtime.frontend.toaster.duration_milliseconds,
       closeButton: true,
       description: 'prompt t1 · x',
     });

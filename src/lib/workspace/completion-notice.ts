@@ -13,6 +13,10 @@ export interface NoticeTask {
   downloadables: readonly unknown[];
   prompt: string;
   capability: string;
+  /** Registered from the server's task list (reload or history switch), not by this page submitting it (#651). */
+  restored?: boolean;
+  /** The last known state; empty until a server read or a live event has set one. */
+  state?: string;
 }
 
 export interface NoticeScan {
@@ -23,8 +27,9 @@ export interface NoticeScan {
 }
 
 /**
- * 只提醒"这个页面亲眼见过它在进行"的任务：刷新后回灌的历史终态任务、用户自己
- * 取消的任务（没有失败也没有产物）都不提醒。
+ * 只提醒"这个页面亲眼见过它在进行"的任务：刷新后回灌的历史终态任务（回灌时先注册
+ * 一个没有状态的占位，紧接着写入终态，不算亲眼见过）、用户自己取消的任务（没有失败
+ * 也没有产物）都不提醒（#651）。
  */
 export function scanTasks(previousActive: ReadonlySet<string>, tasks: readonly NoticeTask[]): NoticeScan {
   const active = new Set<string>();
@@ -32,7 +37,10 @@ export function scanTasks(previousActive: ReadonlySet<string>, tasks: readonly N
   for (const task of tasks) {
     const running = !task.terminal && !task.notFound;
     if (running) {
-      active.add(task.taskId);
+      // #651: a task restored from the server's list is registered as a placeholder with no state, and its detail is
+      // applied right after. That placeholder is not "seen running": a restored task already failed on the server
+      // would otherwise be announced again on every reload. It counts once a read has given it a real state.
+      if (!(task.restored && !task.state)) active.add(task.taskId);
       continue;
     }
     if (!previousActive.has(task.taskId) || task.notFound) continue;
