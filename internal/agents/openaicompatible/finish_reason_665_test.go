@@ -102,3 +102,51 @@ func TestAdapterAssemblesMixedSingleCharacterAndSameIndexToolCallFragments(t *te
 		t.Fatalf("same-index fragments = %#v", parallel.ToolCalls)
 	}
 }
+
+// #665 third review: the common fragment shapes. An ID streamed in pieces is
+// one ID again; a different ID starts a new call only after a whole call and
+// with a tool name.
+func TestAdapterAssemblesCommonToolCallFragmentShapes665(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		want []agents.ToolCall
+	}{
+		"index, id once, name once, argument chunks": {
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"refine_image\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"prompt\\\":\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"paint\\\"}\"}}]}}]}\n\n",
+			[]agents.ToolCall{{ID: "call-a", Name: "refine_image", Arguments: []byte(`{"prompt":"paint"}`)}},
+		},
+		"id in pieces": {
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_\"}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"abc\"}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"refine_image\",\"arguments\":\"{}\"}}]}}]}\n\n",
+			[]agents.ToolCall{{ID: "call_abc", Name: "refine_image", Arguments: []byte(`{}`)}},
+		},
+		"id, name and arguments in pieces": {
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-\",\"function\":{\"name\":\"refine_\",\"arguments\":\"{\\\"prompt\\\":\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\",\"function\":{\"name\":\"image\",\"arguments\":\"\\\"paint\\\"}\"}}]}}]}\n\n",
+			[]agents.ToolCall{{ID: "call-a", Name: "refine_image", Arguments: []byte(`{"prompt":"paint"}`)}},
+		},
+		"parallel calls with distinct ids at index 0": {
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-b\",\"function\":{\"name\":\"b\",\"arguments\":\"{}\"}}]}}]}\n\n",
+			[]agents.ToolCall{{ID: "call-a", Name: "a", Arguments: []byte(`{}`)}, {ID: "call-b", Name: "b", Arguments: []byte(`{}`)}},
+		},
+		"no index, id once": {
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call-a\",\"function\":{\"name\":\"a\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"1}\"}}]}}]}\n\n",
+			[]agents.ToolCall{{ID: "call-a", Name: "a", Arguments: []byte(`{"x":1}`)}},
+		},
+	} {
+		got := streamOf(t, tc.body+"data: [DONE]\n\n").ToolCalls
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: calls = %#v", name, got)
+		}
+		for i := range got {
+			if got[i].ID != tc.want[i].ID || got[i].Name != tc.want[i].Name || string(got[i].Arguments) != string(tc.want[i].Arguments) {
+				t.Fatalf("%s: call %d = %#v, want %#v", name, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
