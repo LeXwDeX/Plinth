@@ -397,15 +397,18 @@ func (e *Executor) DetachedOperationForCall(ctx context.Context, command chat.To
 type generationUsage struct {
 	turn  string
 	count int
-	calls map[string]struct{}
+	// calls holds the units each counted call of the turn added; the
+	// orchestrator persists them on the turn checkpoint (ToolResult
+	// GenerationUnits) so a restart or an eviction rebuilds the same count.
+	calls map[string]int
 	// used orders the scopes by their last call for the eviction below.
 	used uint64
 }
 
 // maxUsageScopes bounds the per-session generation counts this process keeps
 // (#665). It is a memory bound, not product policy: an evicted session loses
-// only the in-process dedup of its current turn's calls, whose count the
-// orchestrator hands back as PriorGenerationCalls from the durable reply. Far
+// only the in-process dedup of its current turn's calls, whose units the
+// orchestrator hands back as PriorGenerationCalls from the turn checkpoint. Far
 // above the sessions one process serves at once, so a running turn is never
 // the oldest entry in practice.
 const maxUsageScopes = 4096
@@ -473,6 +476,19 @@ func (e *Executor) Execute(
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
+	result, err := e.execute(ctx, command, observe)
+	// The units this call added to the turn's generation count travel with
+	// its result, so the orchestrator persists them and a restart rebuilds
+	// the same count (#665).
+	result.GenerationUnits = e.countedGenerationUnits(e.scopeKey(command), command.AssistantMessageID, command.Call.ID)
+	return result, err
+}
+
+func (e *Executor) execute(
+	ctx context.Context,
+	command chat.ToolCommand,
+	observe func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
 	switch command.Call.Name {
 	case ToolSetParams:
 		return e.setParams(command), nil
@@ -495,11 +511,20 @@ func (e *Executor) Execute(
 		}
 		// A revision that adds a paid attempt (insert, retry) is one more
 		// generation of the turn (#665); replace, skip and waive add none.
-		if revisionAddsPaidStep(command) && e.generationLimitReachedForCall(e.scopeKey(command),
-			command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls) {
+		// It is counted only once applied: a refused revision (another plan,
+		// a retry left to the person, outside the approved plan) adds no
+		// attempt and must not use up the turn's generations.
+		adds := revisionAddsPaidStep(command)
+		scope := e.scopeKey(command)
+		if adds && e.generationLimitWouldBeReached(scope, command.AssistantMessageID, command.Call.ID,
+			command.PriorGenerationCalls, 1) {
 			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
-		return e.reviseProcessingPlan(ctx, command)
+		result, err := e.reviseProcessingPlan(ctx, command)
+		if adds && err == nil && result.Error == "" {
+			e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, 1)
+		}
+		return result, err
 	case ToolUpdateSessionNotes:
 		return e.updateSessionNotes(ctx, command), nil
 	case ToolUpdateProductionBrief:
@@ -1019,6 +1044,29 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 // is created. The call is refused when its weight does not fit the rest of
 // the turn's max_generation_calls_per_turn; a call already counted is free.
 func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID string, prior, weight int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, true, true)
+}
+
+// generationLimitWouldBeReached is the check of
+// generationLimitReachedForCallWeighted without counting the call: a call
+// counted only after it was applied asks first.
+func (e *Executor) generationLimitWouldBeReached(scope, turn, callID string, prior, weight int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, true, false)
+}
+
+// recordGenerationCall counts an applied call whatever the limit says: the
+// check came before it was applied. A call already counted is not counted
+// again.
+func (e *Executor) recordGenerationCall(scope, turn, callID string, prior, weight int) {
+	e.countGenerationCall(scope, turn, callID, prior, weight, false, true)
+}
+
+// countGenerationCall checks (check) and counts (record) one call of weight
+// units against the turn's generation count, which starts at prior (the units
+// the orchestrator rebuilt from the turn checkpoint) when this process holds
+// less. It reports whether the call does not fit; a call already counted
+// always fits.
+func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight int, check, record bool) bool {
 	if weight < 1 {
 		weight = 1
 	}
@@ -1034,25 +1082,40 @@ func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID str
 	e.usageClock++
 	current.used = e.usageClock
 	if current.turn != turn {
-		current = generationUsage{turn: turn, calls: map[string]struct{}{}, used: e.usageClock}
+		current = generationUsage{turn: turn, calls: map[string]int{}, used: e.usageClock}
 	}
 	if _, seen := current.calls[callID]; seen {
+		e.usage[scope] = current
 		return false
 	}
 	if current.count < prior {
 		current.count = prior
 	}
-	if current.count+weight > e.maxGeneration {
+	if check && current.count+weight > e.maxGeneration {
 		e.usage[scope] = current
 		return true
 	}
-	current.count += weight
-	if current.calls == nil {
-		current.calls = map[string]struct{}{}
+	if record {
+		current.count += weight
+		if current.calls == nil {
+			current.calls = map[string]int{}
+		}
+		current.calls[callID] = weight
 	}
-	current.calls[callID] = struct{}{}
 	e.usage[scope] = current
 	return false
+}
+
+// countedGenerationUnits is what the call added to its turn's generation
+// count in this process (0 when it was not counted here).
+func (e *Executor) countedGenerationUnits(scope, turn, callID string) int {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known || current.turn != turn {
+		return 0
+	}
+	return current.calls[callID]
 }
 
 // evictOldestUsageLocked drops the scope whose last generation call is the
