@@ -26,7 +26,7 @@ import { parsePreferences, type ChatPreference, type PreferenceSignal } from '@/
 import { parseSelfChecks, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
-import { responseRequestId, withRequestReference } from '@/lib/problem-reference';
+import { problemRequestId, responseRequestId, withRequestReference } from '@/lib/problem-reference';
 
 /**
  * #65: the person's structured request to make one 3D model from several views of one object. The three-view
@@ -393,6 +393,17 @@ export interface PromptEnhanceResult {
 export interface ChatBrowserClientDependencies {
   fetcher?: typeof fetch;
   eventSourceFactory?: (url: string) => EventSourceAdapter;
+}
+
+/**
+ * #665: whether a failed response is the API's own chat error, not a gateway's or proxy's JSON error page. The API
+ * answers a chat error with the Schema's error field and the request's ID (`request_id`, in the server's format), the
+ * same ID its `X-Request-ID` header names; a body that only has an `error` string proves nothing.
+ */
+export function apiErrorAnswer(response: Response, payload: Record<string, unknown>, errorField: string): boolean {
+  if (typeof payload[errorField] !== 'string') return false;
+  const id = problemRequestId(payload);
+  return id !== '' && response.headers?.get?.('X-Request-ID') === id;
 }
 
 export class ChatBrowserError extends Error {
@@ -1217,7 +1228,7 @@ export function createChatBrowserClient(
           typeof message === 'string' ? message : schema.chat.presentation.messages.internal_error,
           response.status,
         );
-        error.serverAnswered = typeof message === 'string';
+        error.serverAnswered = apiErrorAnswer(response, payload, responseFields.error);
         throw error;
       }
       return normalizeSession(schema, payload);

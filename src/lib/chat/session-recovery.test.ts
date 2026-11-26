@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
-import { recoverChatSession } from './session-recovery';
+import { drainAwaitsRead, holdDrainForRead, readCompleted, type DrainGate } from './send-queue';
+import { lastReadStarted, recoverChatSession } from './session-recovery';
 
 const pending: ChatMessage[] = [{ id: 'm', role: 'assistant', content: '', isPending: true, createdAt: 1 }];
 const complete: ChatMessage[] = [{ id: 'm', role: 'assistant', content: 'finished image', createdAt: 1 }];
@@ -73,6 +74,26 @@ describe('history session recovery', () => {
     const again = f.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.onRead).toHaveBeenCalledTimes(1);
+    again();
+  });
+
+  it('numbers each read by when it started, so a read in flight before a change does not count as one made after', async () => {
+    const f = fixture();
+    const inFlight = deferred<ChatMessage[]>();
+    f.listMessages.mockReturnValueOnce(inFlight.promise).mockResolvedValue(complete);
+    const stop = f.start();
+    // Another tab claims a turn while this read is still on its way: the drain asks for a read started from now on.
+    let gate: DrainGate = holdDrainForRead({}, 'session-a', lastReadStarted() + 1);
+    f.onRead.mockImplementation((started: number) => { gate = readCompleted(gate, 'session-a', started); });
+    inFlight.resolve(complete);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).toHaveBeenCalledTimes(1);
+    expect(drainAwaitsRead(gate, 'session-a')).toBe(true);
+    stop();
+    // The read made after the change does.
+    const again = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drainAwaitsRead(gate, 'session-a')).toBe(false);
     again();
   });
 

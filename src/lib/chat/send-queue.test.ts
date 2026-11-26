@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  cancelQueuedTurn, claimStoredTurn, drainAwaitsRead, enqueueTurn, foreignHold, holdDrainForRead, MAX_QUEUE_PROBES, parseQueue,
-  parseSendHold, pruneQueuedSessions, queueMayDrain, queuedFor, readCompleted, SEND_HOLD_MS, SEND_QUEUE_KEY, sendHoldKey,
-  sessionGone, takeQueuedTurn, writeQueue, type DrainGate, type QueuedTurn,
+  cancelQueuedTurn, claimStoredTurn, drainAwaitsRead, drainWait, enqueueTurn, foreignHold, holdDrainForRead, holdsToRelease,
+  MAX_QUEUE_PROBE_TOTAL, MAX_QUEUE_PROBES, MIN_DRAIN_WAIT_MS, nextDrainStep, parseQueue, parseSendHold, pruneQueuedSessions,
+  queueMayDrain, queuedFor, readCompleted, SEND_HOLD_MS, SEND_QUEUE_KEY, sendHoldKey, sessionGone, takeQueuedTurn, writeQueue,
+  type DrainGate, type QueuedTurn,
 } from '@/lib/chat/send-queue';
 import type { ChatMessage } from '@/store/chat-store';
 
@@ -126,6 +127,52 @@ describe('send queue across tabs (#665)', () => {
     expect(parseSendHold('{"owner":1,"expiresAt":2}')).toBeNull();
     expect(foreignHold(null, 'A', 0)).toBeNull();
   });
+
+  it('ignores a hold that ends later than any tab writes one, so it cannot hold the send for ever', () => {
+    const now = 1_000;
+    expect(parseSendHold(JSON.stringify({ owner: 'B', expiresAt: now + SEND_HOLD_MS }), now)?.owner).toBe('B');
+    expect(parseSendHold(JSON.stringify({ owner: 'B', expiresAt: now + 10 * SEND_HOLD_MS }), now)).toBeNull();
+    expect(parseSendHold(JSON.stringify({ owner: 'B', expiresAt: 1e300 }), now)).toBeNull();
+    // Another tab cannot keep a corrupt hold over this tab's claim.
+    const memory = new Map<string, string>([[sendHoldKey('s1'), JSON.stringify({ owner: 'B', expiresAt: 8.64e15 })]]);
+    const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value); }, removeItem: (key: string) => { memory.delete(key); } };
+    writeQueue(storage, enqueueTurn({}, 's1', turn('q1')));
+    expect(claimStoredTurn(storage, 's1', 'q1', 'A', now)).toBe('claimed');
+  });
+
+  it('keeps every drain wait between a small floor and what a timer can count', () => {
+    expect(drainWait(-5)).toBe(MIN_DRAIN_WAIT_MS);
+    expect(drainWait(0)).toBe(MIN_DRAIN_WAIT_MS);
+    expect(drainWait(1e300)).toBe(2 ** 31 - 1);
+    expect(drainWait(Number.NaN)).toBe(2 ** 31 - 1);
+    expect(drainWait(1_234)).toBe(1_234);
+  });
+});
+
+describe('the drain\'s next step (#665)', () => {
+  const base = { hold: null, now: 1_000, required: undefined, forcedRead: null, pollMilliseconds: 2_000 };
+
+  it('waits for another tab\'s hold first, then for a fresh read, and claims only then', () => {
+    expect(nextDrainStep({ ...base, hold: { owner: 'B', expiresAt: 4_000 }, required: 3 })).toEqual({ kind: 'wait', delay: 3_000 + MIN_DRAIN_WAIT_MS });
+    // A hold that lapses now still waits the floor, not zero.
+    expect(nextDrainStep({ ...base, hold: { owner: 'B', expiresAt: 900 } })).toEqual({ kind: 'wait', delay: MIN_DRAIN_WAIT_MS });
+    expect(nextDrainStep({ ...base, required: 3 })).toEqual({ kind: 'read', required: 3 });
+    // The read it asked for came back without opening the gate (failed or cut short): ask again after the poll interval.
+    expect(nextDrainStep({ ...base, required: 3, forcedRead: 3 })).toEqual({ kind: 'wait', delay: 2_000 });
+    expect(nextDrainStep({ ...base, required: 4, forcedRead: 3 })).toEqual({ kind: 'read', required: 4 });
+    expect(nextDrainStep(base)).toEqual({ kind: 'claim' });
+  });
+});
+
+describe('releasing holds per session (#665)', () => {
+  it('keeps the hold of a session still being sent or whose reply runs in view, and releases every other one', () => {
+    const held = ['a', 'b', 'c'];
+    expect(holdsToRelease(held, { sending: 'a', activeSessionId: 'b', activeTurnRunning: true })).toEqual(['c']);
+    // The person left b: its hold goes, even with a's send still running.
+    expect(holdsToRelease(held, { sending: 'a', activeSessionId: 'c', activeTurnRunning: false })).toEqual(['b', 'c']);
+    expect(holdsToRelease(held, { sending: null, activeSessionId: 'a', activeTurnRunning: false })).toEqual(['a', 'b', 'c']);
+    expect(holdsToRelease([], { sending: null, activeSessionId: null, activeTurnRunning: false })).toEqual([]);
+  });
 });
 
 describe('pruning queues of sessions that are gone (#665)', () => {
@@ -141,22 +188,36 @@ describe('pruning queues of sessions that are gone (#665)', () => {
     expect(sessionGone(notFound(false))).toBe(false);
   });
 
-  it('asks about at most MAX_QUEUE_PROBES sessions per load and stops when aborted', async () => {
+  it('stops after MAX_QUEUE_PROBES unanswered asks, does not count answered ones, and stops when aborted', async () => {
     const ids = Array.from({ length: MAX_QUEUE_PROBES + 3 }, (_, index) => `s${index}`);
     const asked: string[] = [];
-    await pruneQueuedSessions(ids, new Set(['s0']), async (id) => { asked.push(id); throw notFound(true); }, () => undefined);
+    await pruneQueuedSessions(ids, new Set(['s0']), async (id) => { asked.push(id); throw new Error('offline'); }, () => undefined);
     expect(asked).toHaveLength(MAX_QUEUE_PROBES);
     expect(asked).not.toContain('s0');
 
+    // Sessions that are still there do not keep a deleted one behind them.
+    const live = Array.from({ length: MAX_QUEUE_PROBES + 2 }, (_, index) => `live${index}`);
+    const forgotten: string[] = [];
+    await pruneQueuedSessions([...live, 'deleted'], new Set(), async (id) => {
+      if (id === 'deleted') throw notFound(true);
+      return {};
+    }, (id) => forgotten.push(id));
+    expect(forgotten).toEqual(['deleted']);
+    // Still bounded per load.
+    const many = Array.from({ length: MAX_QUEUE_PROBE_TOTAL + 5 }, (_, index) => `m${index}`);
+    let calls = 0;
+    await pruneQueuedSessions(many, new Set(), async () => { calls += 1; return {}; }, () => undefined);
+    expect(calls).toBe(MAX_QUEUE_PROBE_TOTAL);
+
     const controller = new AbortController();
     const seen: (AbortSignal | undefined)[] = [];
-    const forgotten: string[] = [];
+    const aborted: string[] = [];
     await pruneQueuedSessions(['a', 'b', 'c'], new Set(), async (id, signal) => {
       seen.push(signal);
       if (id === 'a') controller.abort();
       throw notFound(true);
-    }, (id) => forgotten.push(id), controller.signal);
+    }, (id) => aborted.push(id), controller.signal);
     expect(seen).toEqual([controller.signal]);
-    expect(forgotten).toEqual([]);
+    expect(aborted).toEqual([]);
   });
 });

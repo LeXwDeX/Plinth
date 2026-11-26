@@ -12,6 +12,16 @@ const MAX_POLL_BACKOFF = 8;
  */
 export const MAX_PENDING_POLLS = 40;
 
+// #665: every read of a session's newest page this page started, numbered in the order they started.
+let readsStarted = 0;
+/**
+ * #665: the number of the last read started so far. A wait for "a read made from now on" asks for a later number: a
+ * read already in flight completes with an earlier one and does not satisfy it with what it read before the change.
+ */
+export function lastReadStarted(): number {
+  return readsStarted;
+}
+
 interface SessionRecoveryOptions {
   sessionId: string;
   client: Pick<ChatBrowserClient, 'listMessagePage'>;
@@ -27,8 +37,11 @@ interface SessionRecoveryOptions {
   onLoadError(): void;
   /** #665: the reads of a reply that stays pending stopped (MAX_PENDING_POLLS); called once per recovery. */
   onGaveUp?(): void;
-  /** #665: a read of the newest page was applied (the send queue waits for one after another tab's send). */
-  onRead?(): void;
+  /**
+   * #665: a read of the newest page was applied (the send queue waits for one after another tab's send); `started` is
+   * the read's number (see lastReadStarted), given when it started.
+   */
+  onRead?(started: number): void;
 }
 
 /** Owns only the load/subscription for this selected session, until effect cleanup. */
@@ -87,6 +100,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
   const settleOwnedStream = async () => {
     if (!current()) return;
     try {
+      const started = ++readsStarted;
       const page = await client.listMessagePage(sessionId, { limit: pageSize }, controller.signal);
       if (!current()) return;
       if (ownedTurn !== undefined && useChatStore.getState().streamingBuffers[sessionId]?.turn === ownedTurn) {
@@ -95,7 +109,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
       } else {
         useChatStore.getState().applyNewestMessagePage(sessionId, page);
       }
-      onRead?.();
+      onRead?.(started);
       if (page.messages.some((message) => message.isPending)) schedulePoll();
       else pendingPolls = 0;
     } catch {
@@ -134,11 +148,12 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
   async function load(tryStream: boolean, polled = false) {
     if (!current() || streaming()) return;
     try {
+      const started = ++readsStarted;
       const page = await client.listMessagePage(sessionId, { limit: pageSize }, controller.signal);
       // AbortSignal alone cannot protect already-resolved responses or custom clients.
       if (!current() || streaming()) return;
       useChatStore.getState().applyNewestMessagePage(sessionId, page);
-      onRead?.();
+      onRead?.(started);
       if (page.messages.some((message) => message.isPending)) {
         if (tryStream) reconnect();
         else schedulePoll();
