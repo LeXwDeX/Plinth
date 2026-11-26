@@ -115,7 +115,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     }
   }, [plans, registerTask, schema.runtime.frontend.percentage_multiplier, sessionID]);
   const steps = useMemo(() => source && asset
-    ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
+    ? processingSourceSteps(schema.task_states, availableCapabilities, selected, offerings, source, asset, chosen)
     : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
   // What the session purpose gives the parameters that follow it (#306), for the chosen steps of the person's own
   // session: an untouched one says "按会话用途：2K" instead of only that it follows the purpose. The server fills the
@@ -170,7 +170,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   const withStep = useCallback((current: string[], capabilityID: string) => {
     if (current.includes(capabilityID)) return current;
     const next = [...current, capabilityID];
-    const prerequisite = source && asset ? processingPrerequisite(capabilityID, availableCapabilities, offerings, source, asset) : null;
+    const prerequisite = source && asset ? processingPrerequisite(schema.task_states, capabilityID, availableCapabilities, offerings, source, asset) : null;
     if (prerequisite && !next.includes(prerequisite)) next.push(prerequisite);
     return next;
   }, [asset, availableCapabilities, offerings, source]);
@@ -394,9 +394,9 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               </p> : <UnavailableNotice testId={`processing-refused-${capability.id}`}
                 {...processingUnavailableNotice(schema, step.blocked || !source || !asset ? { blocked: step.blocked, step: capability.id } : {
                   step: capability.id, size: asset.size,
-                  refusals: sourceRefusals(offerings?.[capability.id] ?? [], source, asset),
+                  refusals: sourceRefusals(schema.task_states, offerings?.[capability.id] ?? [], source, asset),
                   // #326: the step that would come first cannot run on the model either: say why and what works.
-                  prerequisite: prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset),
+                  prerequisite: prerequisiteRefusal(schema.task_states, capability.id, availableCapabilities, offerings, source, asset),
                 })} />}
               <p data-testid={`processing-quote-${capability.id}`}>{offering ? offeringQuoteText(schema, offering) : schemaText(schema, 'ui.workspace.harness.credits_unknown')}</p>
               {offering && <ReasonHint name={capability.label_cn} reason={lockReason} className="flex w-full flex-col"><SchemaParameters parameters={parameters}

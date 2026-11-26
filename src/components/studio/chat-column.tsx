@@ -100,7 +100,8 @@ import { budgetFollowsTasks, followSettledBudget, reloadSessionBudget } from '@/
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
-import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import { cancelQueuedTurn, enqueueTurn, pruneQueuedSessions, queueMayDrain, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
 import { turnFailureText } from '@/lib/chat/turn-error-text';
@@ -758,6 +759,10 @@ export function ChatColumn() {
   }, [messages, optimisticUser, schema, streamBuf]);
 
   const coalesceReads = useRef(createCoalescer());
+  const replyStalled = useMemo(() => ({
+    text: schemaText(schema, 'ui.chat.toast.reply_stalled'),
+    retry: schemaText(schema, 'ui.chat.toast.reply_stalled.retry'),
+  }), [schema]);
   const processEvent = useCallback(
     (sessionId: string, event: ChatSemanticEvent) => {
       // #285: thinking, tool status and progress share one status slot.
@@ -800,7 +805,7 @@ export function ChatColumn() {
           break;
         case 'error':
           // #665: the same error replayed on a reattach updates its toast instead of stacking another one.
-          toast.error(event.content, { id: `chat-error:${sessionId}:${event.content}` });
+          toast.error(event.content, { id: chatErrorToastId(sessionId, buffer?.assistantDbId ?? '', event.content) });
           break;
         case 'taskRegistered':
           // P0 契约：agent 会话按任务隔离，任务注册即绑定；
@@ -882,7 +887,8 @@ export function ChatColumn() {
     void reconnectTick;
     void serverTurnTick;
     setHistoryLoading(!(activeSessionId in useChatStore.getState().messagesBySession));
-    return recoverChatSession({
+    const stalledToast = `reply-stalled:${activeSessionId}`;
+    const stop = recoverChatSession({
       sessionId: activeSessionId,
       client: chatClient,
       pageSize: messagePageSize,
@@ -890,7 +896,17 @@ export function ChatColumn() {
       pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
       onLoading: setHistoryLoading,
       onLoadError: () => toast.error(ui.loadFailed),
+      // #665: a reply that stays pending is no longer read on its own; say so and offer to read it again.
+      onGaveUp: () => toast.message(replyStalled.text, {
+        id: stalledToast,
+        duration: Infinity,
+        action: { label: replyStalled.retry, onClick: () => setServerTurnTick((tick) => tick + 1) },
+      }),
     });
+    return () => {
+      stop();
+      toast.dismiss(stalledToast);
+    };
   }, [
     activeSessionId,
     reconnectTick,
@@ -900,7 +916,21 @@ export function ChatColumn() {
     messagePageSize,
     schema.chat.frontend.fallback_poll_milliseconds,
     ui.loadFailed,
+    replyStalled,
   ]);
+
+  // #665: the queues of sessions this account no longer has (deleted in another tab or device, or another account's)
+  // leave the browser once the session list is known.
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    const known = new Set(useChatStore.getState().sessions.map((session) => session.id));
+    void pruneQueuedSessions(
+      Object.keys(useSendQueueStore.getState().queue),
+      known,
+      (sessionId) => chatClient.getSession(sessionId),
+      (sessionId) => useSendQueueStore.getState().forgetSession(sessionId),
+    );
+  }, [sessionsLoaded, chatClient]);
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
@@ -1529,32 +1559,38 @@ export function ChatColumn() {
   // 会写明基础积分、额外积分和用途，批准才算同意。
   useEffect(() => {
     if (!turnRequest) return;
-    if (useChatStore.getState().activeSessionId === null) {
-      clearTurnRequest();
-      return;
-    }
     // #665: a send refuses while attachments upload; the request is kept (and said to wait) instead of being dropped,
     // and goes out when the upload ends (this effect runs again then).
-    if (uploading || attachmentsPending(attachmentReads, captureSessionScope())) {
+    const step = stageRequestStep({
+      hasSession: useChatStore.getState().activeSessionId !== null,
+      uploadsPending: uploading || attachmentsPending(attachmentReads, captureSessionScope()),
+    });
+    if (step === 'wait') {
       toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
       return;
     }
     clearTurnRequest();
+    if (step === 'drop') return;
     void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
       turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
   }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
   // 输入框，不让用户的话丢掉。
+  // #665: after a reload the queue waits for the session's messages to be read, and for a reply the server still runs
+  // to end, so it never goes out beside a turn this page did not start. A turn is claimed from the stored queue before
+  // it is sent: another tab that already sent (or cancelled) it makes the claim fail, and it is not sent twice.
+  const drainMessages = activeSessionId ? messagesBySession[activeSessionId] : undefined;
   useEffect(() => {
-    if (!activeSessionId || isStreaming || preparing || uploading || drainingRef.current) return;
+    if (!activeSessionId || drainingRef.current) return;
+    if (!queueMayDrain({ busy: preparing || uploading, historyLoading, messages: drainMessages, streaming: isStreaming })) return;
     // The turn that just ended may still hold the send lock while it cleans up; its release bumps drainTick.
     if (sendPreparation.current.has(activeSessionId)) return;
     const { turn } = takeQueuedTurn(queue, activeSessionId);
     if (!turn) return;
     const sessionId = activeSessionId;
+    if (!useSendQueueStore.getState().claim(sessionId, turn.id)) return;
     drainingRef.current = true;
-    setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
     const started = startedTurnsRef.current;
     void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
       drainingRef.current = false;
@@ -1570,7 +1606,7 @@ export function ChatColumn() {
       }
       setDrainTick((tick) => tick + 1);
     });
-  }, [activeSessionId, drainTick, isStreaming, preparing, queue, schema, setAttachmentPurposes, setInput, uploading]);
+  }, [activeSessionId, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
 
   // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
@@ -2282,10 +2318,10 @@ export function ChatColumn() {
     // #665: a cancel the server did not take is said, and the turn is still followed (it still runs).
     if (activeSessionId) {
       const sessionId = activeSessionId;
-      chatClient.cancelTurn(sessionId).then(
-        () => controllers.current.get(sessionId)?.abort(),
-        () => toast.error(schemaText(schema, 'ui.chat.toast.stop_failed')),
-      );
+      void requestTurnStop(chatClient, sessionId, {
+        onStopped: () => controllers.current.get(sessionId)?.abort(),
+        onRefused: () => toast.error(schemaText(schema, 'ui.chat.toast.stop_failed')),
+      });
     }
   };
   // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting

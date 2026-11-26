@@ -295,9 +295,12 @@ describe('dismissed tasks stay dismissed after the history is read again (#651)'
     expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
     store.registerTask({ taskId: 'gone', capability: 'image-to-image', progressMaximum: 100, restored: true });
     expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
-    // A task this page submits again under the same ID (never happens, IDs are new) is still tracked: only history is skipped.
-    store.registerTask({ taskId: 'gone', capability: 'image-to-image', progressMaximum: 100 });
-    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['gone']);
+    // #665: a stream replayed from its first event (a reattach) registers it again without `restored`: still cleared.
+    store.registerTask({ taskId: 'gone', sessionId: 's', capability: 'image-to-image', progressMaximum: 100 });
+    expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
+    // A task never cleared on this device is tracked (a new task, a retry or a rerun gets a new ID).
+    store.registerTask({ taskId: 'fresh', sessionId: 's', capability: 'image-to-image', progressMaximum: 100 });
+    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['fresh']);
   });
 
   it('#665: a running task cleared with X is not brought back by the reload of running tasks, an uncleared one still notifies', () => {
@@ -345,6 +348,16 @@ describe('live task updates against the task detail (#665)', () => {
     store.applyTaskLive('t', { state: 'RUNNING', progress: 60 });
     store.applyTaskLive('t', { state: 'RUNNING', progress: 20 });
     expect(useWorkspaceStore.getState().trackedTasks[0].progress).toBe(60);
+  });
+
+  it('a retried attempt is not pinned at the old progress: the task detail read resets the floor', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 't', sessionId: 's', capability: 'image-to-3d', progressMaximum: 100 });
+    store.applyTaskLive('t', { state: 'RUNNING', progress: 80 });
+    // The attempt failed and the task runs again: the polled detail says where the new attempt is.
+    store.applyTaskDetail('t', { ...completedModel, state: 'RUNNING', progress: 5, terminal: false }, 's');
+    store.applyTaskLive('t', { state: 'RUNNING', progress: 12 });
+    expect(useWorkspaceStore.getState().trackedTasks[0].progress).toBe(12);
   });
 
   it('a task whose detail says it succeeded no longer carries an earlier live error', () => {

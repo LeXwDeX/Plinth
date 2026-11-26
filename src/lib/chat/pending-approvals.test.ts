@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   countPending,
+  DECIDED_LIMIT,
   DecisionLedger,
   decidePendingApproval,
   decidePendingCard,
@@ -12,6 +13,7 @@ import {
   parsePendingApprovals,
   PendingApprovalError,
   readPendingApprovals,
+  rememberDecided,
   retainExpired,
   serverClockOffset,
   type PendingApproval,
@@ -70,6 +72,31 @@ describe('expiry on the server clock (#665)', () => {
     const response = new Response(null, { headers: { Date: new Date(now).toUTCString() } });
     expect(serverClockOffset(response, now + 10 * 60_000)).toBe(-10 * 60_000);
     expect(serverClockOffset(new Response(null), now)).toBe(0);
+  });
+
+  it('ignores a lead within the header precision or too large to be a clock, and counts a cache Age', () => {
+    const at = (date: number, extra: Record<string, string> = {}) =>
+      new Response(null, { headers: { Date: new Date(date).toUTCString(), ...extra } });
+    expect(serverClockOffset(at(now), now + 900)).toBe(0);
+    // A Date header a proxy kept for two hours is stale, not a clock two hours slow.
+    expect(serverClockOffset(at(now), now + 2 * 60 * 60_000)).toBe(0);
+    // A cached answer: its Date is as old as its Age says.
+    expect(serverClockOffset(at(now, { Age: '600' }), now + 10 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { Age: '60' }), now + 10 * 60_000)).toBe(-9 * 60_000);
+    expect(serverClockOffset(new Response(null, { headers: { Date: 'garbage' } }), now)).toBe(0);
+  });
+
+  it('keeps the decided cards bounded', () => {
+    const decided = new Set<string>();
+    for (let index = 0; index < DECIDED_LIMIT + 50; index += 1) rememberDecided(decided, `r${index}`);
+    expect(decided.size).toBe(DECIDED_LIMIT);
+    expect(decided.has('r0')).toBe(false);
+    expect(decided.has(`r${DECIDED_LIMIT + 49}`)).toBe(true);
+    const ledger = new DecisionLedger();
+    for (let index = 0; index < DECIDED_LIMIT + 50; index += 1) ledger.markDecided(`r${index}`, now);
+    const listed = [approval('r0', future), approval(`r${DECIDED_LIMIT + 49}`, future)];
+    // The oldest decision was forgotten, so only the newest stays hidden from a read sent before it.
+    expect(ledger.visible({ startedAt: now - 1, items: listed }).map((item) => item.requestId)).toEqual(['r0']);
   });
 
   it('a browser clock running ahead does not turn a decided card into an expired one to re-request', async () => {

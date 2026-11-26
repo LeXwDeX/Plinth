@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import { actionParameter, actionValue, chooseProcessingSource, faceBudgetDefaults, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
+import defaultCatalog from '../../../internal/catalog/default_catalog.json';
+import type { ProductSchema } from '@/lib/product-schema';
+const states = (defaultCatalog.application as unknown as ProductSchema).task_states;
 
 const asset = { id: 'asset-a', role: 'model', variant: 'glb', delivery: 'required', ordinal: 0, mediaType: 'model/gltf-binary', size: 100, url: '/assets/a', kind: 'model' as const };
 const task: ProcessingSourceTask = { id: 'task-a', capability: 'text-to-3d', provider_id: 'provider-a', state: 'SUCCEEDED', assets: [asset] };
@@ -8,39 +11,47 @@ const offering = (parameters: OfferingWire['parameters']): OfferingWire => ({ id
 
 describe('chooseProcessingSource', () => {
   it('passes the owned local asset across providers', () => {
-    expect(chooseProcessingSource(offering([{ name: 'source_asset', label: 'model', type: 'asset', max_bytes: 100 }]), task, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+    expect(chooseProcessingSource(states, offering([{ name: 'source_asset', label: 'model', type: 'asset', max_bytes: 100 }]), task, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+  });
+  it('takes only a task whose state the Schema task_states call a success (#665)', () => {
+    const parameters: OfferingWire['parameters'] = [{ name: 'source_asset', label: 'model', type: 'asset', max_bytes: 100 }];
+    expect(chooseProcessingSource(states, offering(parameters), { ...task, state: 'RUNNING' }, asset)).toBeNull();
+    expect(chooseProcessingSource(states, offering(parameters), { ...task, state: 'FAILED' }, asset)).toBeNull();
+    const renamed = states.map((state) => (state.outcome === 'success' ? { ...state, internal_state: 'DONE', public_state: 'DONE' } : state));
+    expect(chooseProcessingSource(renamed, offering(parameters), { ...task, state: 'DONE' }, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+    expect(chooseProcessingSource(renamed, offering(parameters), task, asset)).toBeNull();
   });
   it('rejects an incompatible asset and a cross-provider task reference', () => {
-    expect(chooseProcessingSource(offering([
+    expect(chooseProcessingSource(states, offering([
       { name: 'source_asset', label: 'model', type: 'asset', max_bytes: 99 },
       { name: 'source_task', label: 'task', type: 'task', same_provider: true },
     ]), task, asset)).toBeNull();
   });
   it('permits only the declared same-provider task capability', () => {
     const animation = { ...offering([{ name: 'source_task', label: 'task', type: 'task', same_provider: true, task_capabilities: ['rigging'] }]), provider_id: 'provider-a' };
-    expect(chooseProcessingSource(animation, task, asset)).toBeNull();
-    expect(chooseProcessingSource(animation, { ...task, capability: 'rigging' }, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, animation, task, asset)).toBeNull();
+    expect(chooseProcessingSource(states, animation, { ...task, capability: 'rigging' }, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
   });
   it('prefers a declared same-provider task over its output asset', () => {
     const sameProvider = { ...offering([
       { name: 'source_asset', label: 'model', type: 'asset' },
       { name: 'source_task', label: 'task', type: 'task', same_provider: true, task_capabilities: ['text-to-3d'] },
     ]), provider_id: 'provider-a' };
-    expect(chooseProcessingSource(sameProvider, task, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
-    expect(chooseProcessingSource(sameProvider, { ...task, provider_id: 'provider-c' }, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+    expect(chooseProcessingSource(states, sameProvider, task, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, sameProvider, { ...task, provider_id: 'provider-c' }, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
   });
   it('never uses unfinished tasks or unsaved assets', () => {
     const remesh = offering([{ name: 'source_asset', label: 'model', type: 'asset' }]);
-    expect(chooseProcessingSource(remesh, { ...task, state: 'MATERIALIZING' }, asset)).toBeNull();
-    expect(chooseProcessingSource(remesh, task, { ...asset, id: '' })).toBeNull();
+    expect(chooseProcessingSource(states, remesh, { ...task, state: 'MATERIALIZING' }, asset)).toBeNull();
+    expect(chooseProcessingSource(states, remesh, task, { ...asset, id: '' })).toBeNull();
   });
   it('resolves semantically declared sources with arbitrary parameter names', () => {
     const renamed = offering([
       { name: 'input_model', label: 'model', type: 'asset', semantic: 'source-asset' },
       { name: 'input_task', label: 'task', type: 'task', semantic: 'source-task', same_provider: true, task_capabilities: ['text-to-3d'] },
     ]);
-    expect(chooseProcessingSource({ ...renamed, provider_id: 'provider-a' }, task, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
-    expect(chooseProcessingSource(renamed, { ...task, provider_id: 'provider-c' }, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+    expect(chooseProcessingSource(states, { ...renamed, provider_id: 'provider-a' }, task, asset)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, renamed, { ...task, provider_id: 'provider-c' }, asset)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
   });
   it('declared non-source semantics override legacy name fallback', () => {
     expect(sourceParameterRole({ name: 'source_assets', label: '图片', type: 'asset-array', semantic: 'reference-image' })).toBeNull();
@@ -156,7 +167,7 @@ describe('asset-backed task sources', () => {
   const local: ProcessingSourceTask = { ...task, capability: 'format-conversion', offering_id: 'local/forward', assets: [gltf] };
   const reverse = offering([{ name: 'source_task', label: 'source', type: 'task', semantic: 'source-task', task_source_kind: 'assets', task_offerings: ['local/forward'], task_capabilities: ['format-conversion'], media_types: ['model/gltf+json'], extensions: ['.gltf'], max_bytes: 100 }]);
   it('permits the unique declared asset across providers without an upstream job', () => {
-    expect(chooseProcessingSource(reverse, local, gltf)).toEqual({ sourceRole: 'source_task', value: local.id });
+    expect(chooseProcessingSource(states, reverse, local, gltf)).toEqual({ sourceRole: 'source_task', value: local.id });
   });
   it.each(['offering', 'capability', 'provider', 'multiple', 'size', 'media', 'extension', 'chosen'] as const)('rejects an incompatible %s without falling back', (reason) => {
     let source = local;
@@ -170,19 +181,19 @@ describe('asset-backed task sources', () => {
     if (reason === 'media') source = { ...local, assets: [{ ...gltf, mediaType: 'model/gltf-binary' }] };
     if (reason === 'extension') target = { ...reverse, parameters: [{ ...reverse.parameters[0], extensions: ['.fbx'] }] };
     if (reason === 'chosen') selected = { ...gltf, id: 'another' };
-    expect(chooseProcessingSource(target, source, selected)).toBeNull();
+    expect(chooseProcessingSource(states, target, source, selected)).toBeNull();
   });
   it('ignores unrelated output files while requiring the same unique model', () => {
-    expect(chooseProcessingSource(reverse, { ...local, assets: [gltf, { ...asset, id: 'binary' }] }, gltf)).toEqual({ sourceRole: 'source_task', value: local.id });
+    expect(chooseProcessingSource(states, reverse, { ...local, assets: [gltf, { ...asset, id: 'binary' }] }, gltf)).toEqual({ sourceRole: 'source_task', value: local.id });
   });
   it('keeps the existing upstream-job provider boundary', () => {
-    expect(chooseProcessingSource({ ...reverse, parameters: [{ ...reverse.parameters[0], task_source_kind: 'upstream_job' }] }, local, gltf)).toBeNull();
+    expect(chooseProcessingSource(states, { ...reverse, parameters: [{ ...reverse.parameters[0], task_source_kind: 'upstream_job' }] }, local, gltf)).toBeNull();
   });
 });
 
  it('keeps native-upload-only routes unavailable for Task assets', () => {
   const target = offering([{ name: 'source_asset', type: 'asset', label: 'upload', uploaded_model: {profile_id: 'static-glb-v1', native_only: true} }]);
-  expect(chooseProcessingSource(target, task, asset)).toBeNull();
+  expect(chooseProcessingSource(states, target, task, asset)).toBeNull();
  });
 
 describe('predicted processing sources use declarations, never invented saved bytes', () => {
@@ -225,17 +236,17 @@ describe('predicted processing sources use declarations, never invented saved by
   });
 
   it('uses real bytes only for the first step and declarations thereafter', () => {
-    const steps = processingSourceSteps([{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [reverse] }, task, asset);
+    const steps = processingSourceSteps(states, [{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [reverse] }, task, asset);
     expect(steps.map((step) => step.route?.sourceRole)).toEqual(['source_asset', 'source_task']);
     expect(steps[1].route).not.toHaveProperty('value');
-    expect(processingSourceSteps([{ id: 'format-conversion' }], ['format-conversion'], { 'format-conversion': [forward] }, { ...task, state: 'RUNNING' }, asset)[0].route).toBeNull();
+    expect(processingSourceSteps(states, [{ id: 'format-conversion' }], ['format-conversion'], { 'format-conversion': [forward] }, { ...task, state: 'RUNNING' }, asset)[0].route).toBeNull();
   });
 
   it('defaults to the first compatible Offering, as the Agent plan tool does, and lists only compatible ones (#321)', () => {
     const incompatible = { ...reverse, id: 'first', parameters: [{ ...reverse.parameters[0], task_offerings: ['unrelated'] }] };
     const unavailable = { ...reverse, id: 'off', available: false };
     const second = { ...reverse, id: 'second' };
-    const steps = processingSourceSteps([{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [unavailable, incompatible, reverse, second] }, task, asset);
+    const steps = processingSourceSteps(states, [{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [unavailable, incompatible, reverse, second] }, task, asset);
     expect(steps[1].offering.id).toBe(reverse.id);
     expect(steps[1].route).toEqual({ sourceRole: 'source_task', parameter: 'saved_model' });
     expect(steps[1].choices.map((choice) => choice.id)).toEqual([reverse.id, 'second']);
@@ -244,7 +255,7 @@ describe('predicted processing sources use declarations, never invented saved by
 
   it('keeps the first available Offering with no route when none is compatible', () => {
     const incompatible = { ...reverse, id: 'first', parameters: [{ ...reverse.parameters[0], task_offerings: ['unrelated'] }] };
-    const steps = processingSourceSteps([{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [{ ...reverse, available: false }, incompatible] }, task, asset);
+    const steps = processingSourceSteps(states, [{ id: 'format-conversion' }, { id: 'reverse' }], ['format-conversion', 'reverse'], { 'format-conversion': [forward], reverse: [{ ...reverse, available: false }, incompatible] }, task, asset);
     expect(steps[1].offering.id).toBe('first');
     expect(steps[1].route).toBeNull();
     expect(steps[1].choices).toEqual([]);
@@ -255,11 +266,11 @@ describe('predicted processing sources use declarations, never invented saved by
     const plainForward = { ...forward, id: 'local/plain', outputs: [{ role: 'model', variant: 'glb', minimum: 1, media_types: ['model/gltf-binary'], max_bytes: 200 }] };
     const offerings = { 'format-conversion': [plainForward, forward], reverse: [reverse] };
     const capabilities = [{ id: 'format-conversion' }, { id: 'reverse' }];
-    const byDefault = processingSourceSteps(capabilities, ['format-conversion', 'reverse'], offerings, task, asset);
+    const byDefault = processingSourceSteps(states, capabilities, ['format-conversion', 'reverse'], offerings, task, asset);
     expect(byDefault[0].offering.id).toBe('local/plain');
     expect(byDefault[0].choices.map((choice) => choice.id)).toEqual(['local/plain', 'local/forward']);
     expect(byDefault[1].route).toBeNull();
-    const chosen = processingSourceSteps(capabilities, ['format-conversion', 'reverse'], offerings, task, asset, { 'format-conversion': 'local/forward' });
+    const chosen = processingSourceSteps(states, capabilities, ['format-conversion', 'reverse'], offerings, task, asset, { 'format-conversion': 'local/forward' });
     expect(chosen[0].offering.id).toBe('local/forward');
     expect(chosen[1].offering.id).toBe(reverse.id);
     expect(chosen[1].route).toEqual({ sourceRole: 'source_task', parameter: 'saved_model' });
@@ -268,8 +279,8 @@ describe('predicted processing sources use declarations, never invented saved by
   it('falls back to the default when the chosen Offering is unavailable or no longer compatible', () => {
     const second = { ...forward, id: 'local/second' };
     const offerings = { 'format-conversion': [forward, { ...second, available: false }] };
-    expect(processingSourceSteps([{ id: 'format-conversion' }], ['format-conversion'], offerings, task, asset, { 'format-conversion': 'local/second' })[0].offering.id).toBe(forward.id);
-    expect(processingSourceSteps([{ id: 'format-conversion' }], ['format-conversion'], offerings, task, asset, { 'format-conversion': 'missing' })[0].offering.id).toBe(forward.id);
+    expect(processingSourceSteps(states, [{ id: 'format-conversion' }], ['format-conversion'], offerings, task, asset, { 'format-conversion': 'local/second' })[0].offering.id).toBe(forward.id);
+    expect(processingSourceSteps(states, [{ id: 'format-conversion' }], ['format-conversion'], offerings, task, asset, { 'format-conversion': 'missing' })[0].offering.id).toBe(forward.id);
   });
 });
 
@@ -294,25 +305,25 @@ describe('a step the current model cannot feed (#321 E)', () => {
   const capabilities = [{ id: 'remesh' }, { id: 'retexture' }];
 
   it('does not bring in a prerequisite step that cannot run on the model either', () => {
-    expect(processingPrerequisite('retexture', capabilities, offerings, rodin, big)).toBeNull();
+    expect(processingPrerequisite(states, 'retexture', capabilities, offerings, rodin, big)).toBeNull();
   });
 
   it('still brings in a prerequisite that runs on the model and feeds the step', () => {
     const rigging: OfferingWire = { ...offering([{ name: 'source_asset', label: 'model', type: 'asset', semantic: 'source-asset', max_bytes: 200 }]), id: 'rig', capability: 'rigging', provider_id: 'meshy',
       outputs: [{ role: 'model', variant: 'glb', minimum: 1, media_types: ['model/gltf-binary'], max_bytes: 100 }] };
     const animation: OfferingWire = { ...offering([{ name: 'source_task', label: 'task', type: 'task', semantic: 'source-task', same_provider: true, task_capabilities: ['rigging'] }]), id: 'anim', capability: 'animation', provider_id: 'meshy' };
-    expect(processingPrerequisite('animation', [{ id: 'rigging' }, { id: 'animation' }], { rigging: [rigging], animation: [animation] }, task, asset)).toBe('rigging');
+    expect(processingPrerequisite(states, 'animation', [{ id: 'rigging' }, { id: 'animation' }], { rigging: [rigging], animation: [animation] }, task, asset)).toBe('rigging');
     // A step the model feeds directly needs none.
-    expect(processingPrerequisite('rigging', [{ id: 'rigging' }, { id: 'animation' }], { rigging: [rigging], animation: [animation] }, task, asset)).toBeNull();
+    expect(processingPrerequisite(states, 'rigging', [{ id: 'rigging' }, { id: 'animation' }], { rigging: [rigging], animation: [animation] }, task, asset)).toBeNull();
   });
 
   it('names why each available service refuses the model', () => {
-    expect(sourceRefusals([retexture, hyper3dTexture, tripoTexture, { ...retexture, id: 'off', available: false }], rodin, big)).toEqual([
+    expect(sourceRefusals(states, [retexture, hyper3dTexture, tripoTexture, { ...retexture, id: 'off', available: false }], rodin, big)).toEqual([
       { offering: retexture, kind: 'too_large', limit: 62914560 },
       { offering: hyper3dTexture, kind: 'too_large', limit: 10485760 },
       { offering: tripoTexture, kind: 'needs_task', capabilities: ['text-to-3d', 'image-to-3d'] },
     ]);
-    expect(sourceRefusals([hyper3dTexture], rodin, { ...asset, mediaType: 'application/zip' })).toEqual([{ offering: hyper3dTexture, kind: 'media' }]);
+    expect(sourceRefusals(states, [hyper3dTexture], rodin, { ...asset, mediaType: 'application/zip' })).toEqual([{ offering: hyper3dTexture, kind: 'media' }]);
   });
 
   // #326: an expired Meshy Rigging result whose rigged character (105 MB) is over Meshy Rigging's 60 MB: animating it
@@ -326,18 +337,18 @@ describe('a step the current model cannot feed (#321 E)', () => {
     const character = { ...asset, size: 105_271_888 };
     const all = { rigging: [rigging], animation: [animation] };
     const caps = [{ id: 'rigging' }, { id: 'animation' }];
-    expect(processingPrerequisite('animation', caps, all, rig, character)).toBeNull();
-    expect(prerequisiteRefusal('animation', caps, all, rig, character)).toEqual({
+    expect(processingPrerequisite(states, 'animation', caps, all, rig, character)).toBeNull();
+    expect(prerequisiteRefusal(states, 'animation', caps, all, rig, character)).toEqual({
       capability: 'rigging', refusals: [{ offering: rigging, kind: 'too_large', limit: 62914560 }],
     });
     // A rigged character that fits is rigged again first, and there is nothing to explain.
     const small = { ...asset, size: 30_000_000 };
-    expect(processingPrerequisite('animation', caps, all, rig, small)).toBe('rigging');
-    expect(prerequisiteRefusal('animation', caps, all, rig, small)).toBeNull();
+    expect(processingPrerequisite(states, 'animation', caps, all, rig, small)).toBe('rigging');
+    expect(prerequisiteRefusal(states, 'animation', caps, all, rig, small)).toBeNull();
   });
 
   it('does not judge a step after one that cannot run by the first step\'s fallback', () => {
-    const steps = processingSourceSteps(capabilities, ['remesh', 'retexture'], offerings, rodin, big);
+    const steps = processingSourceSteps(states, capabilities, ['remesh', 'retexture'], offerings, rodin, big);
     expect(steps[0].route).toBeNull();
     expect(steps[1].route).toBeNull();
     expect(steps[1].choices).toEqual([]);
@@ -359,28 +370,28 @@ describe('an expired original task', () => {
   ]), provider_id: 'provider-a', capability: 'animation' };
 
   it('keeps the original task while it is fresh', () => {
-    expect(chooseProcessingSource(retexture, { ...task, created_at: created(47) }, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
-    expect(chooseProcessingSource(retexture, task, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, retexture, { ...task, created_at: created(47) }, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, retexture, task, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
   });
   it('uses the saved file once the original task is past its age, for generation and processing results alike', () => {
     for (const capability of ['text-to-3d', 'retexture']) {
-      expect(chooseProcessingSource(retexture, { ...task, capability, created_at: created(48) }, asset, now))
+      expect(chooseProcessingSource(states, retexture, { ...task, capability, created_at: created(48) }, asset, now))
         .toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
     }
   });
   // #326 N1: a recovered result's job is its failed source's, and a job the provider answered 404 for is gone.
   it('counts the age from the task that holds the job, and treats a gone job as expired', () => {
     const recovered = { ...task, created_at: created(30), upstream_job_created_at: created(60) };
-    expect(chooseProcessingSource(retexture, recovered, asset, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
+    expect(chooseProcessingSource(states, retexture, recovered, asset, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
     const gone = { ...task, created_at: created(1), upstream_job_gone: true };
-    expect(chooseProcessingSource(retexture, gone, asset, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
-    expect(chooseProcessingSource(animation, { ...gone, capability: 'rigging' }, asset, now)).toBeNull();
+    expect(chooseProcessingSource(states, retexture, gone, asset, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
+    expect(chooseProcessingSource(states, animation, { ...gone, capability: 'rigging' }, asset, now)).toBeNull();
   });
   it('refuses a service that takes only the original task and says the task expired', () => {
     const rig = { ...task, capability: 'rigging', created_at: created(120) };
-    expect(chooseProcessingSource(animation, rig, asset, now)).toBeNull();
-    expect(sourceRefusals([animation], rig, asset, now)).toEqual([{ offering: animation, kind: 'expired' }]);
-    expect(chooseProcessingSource(animation, { ...rig, created_at: created(1) }, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, animation, rig, asset, now)).toBeNull();
+    expect(sourceRefusals(states, [animation], rig, asset, now)).toEqual([{ offering: animation, kind: 'expired' }]);
+    expect(chooseProcessingSource(states, animation, { ...rig, created_at: created(1) }, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
   });
 });
 
@@ -408,24 +419,24 @@ describe('Meshy extension steps: task ID first, local file as fallback, Remesh b
   afterEach(() => { vi.useRealTimers(); });
 
   it('names a same-connection Meshy task by its ID, whatever the file size', () => {
-    expect(chooseProcessingSource(uv, meshyTask, big, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+    expect(chooseProcessingSource(states, uv, meshyTask, big, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
   });
   it('falls back to the saved file once the Meshy task is past its retention', () => {
-    expect(chooseProcessingSource(uv, meshyTask, big, Date.parse('2026-11-07T00:00:00Z'))).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
+    expect(chooseProcessingSource(states, uv, meshyTask, big, Date.parse('2026-11-07T00:00:00Z'))).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
   });
   it('inlines another provider\'s model up to the declared 70 MiB', () => {
-    expect(chooseProcessingSource(uv, { ...meshyTask, provider_id: 'tripo' }, big, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+    expect(chooseProcessingSource(states, uv, { ...meshyTask, provider_id: 'tripo' }, big, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
   });
   it('refuses a model over the face limit and brings in Remesh, not Retexture, first', () => {
     const dense = { ...big, triangles: 600000 };
-    expect(chooseProcessingSource(uv, meshyTask, dense, now)).toBeNull();
-    expect(sourceRefusals([uv], meshyTask, dense, now)).toEqual([{ offering: uv, kind: 'face_limit', limit: 40000, faces: 600000 }]);
-    expect(processingPrerequisite('uv-unwrap', capabilities, offerings, meshyTask, dense)).toBe('remesh');
-    const steps = processingSourceSteps(capabilities, ['remesh', 'uv-unwrap'], offerings, meshyTask, dense);
+    expect(chooseProcessingSource(states, uv, meshyTask, dense, now)).toBeNull();
+    expect(sourceRefusals(states, [uv], meshyTask, dense, now)).toEqual([{ offering: uv, kind: 'face_limit', limit: 40000, faces: 600000 }]);
+    expect(processingPrerequisite(states, 'uv-unwrap', capabilities, offerings, meshyTask, dense)).toBe('remesh');
+    const steps = processingSourceSteps(states, capabilities, ['remesh', 'uv-unwrap'], offerings, meshyTask, dense);
     expect(steps.map((step) => [step.capability, step.route?.sourceRole])).toEqual([['remesh', 'source_task'], ['uv-unwrap', 'source_task']]);
   });
   it('an unmeasured model is never refused for faces; the server measures it', () => {
-    expect(chooseProcessingSource(uv, meshyTask, big, now)).not.toBeNull();
+    expect(chooseProcessingSource(states, uv, meshyTask, big, now)).not.toBeNull();
   });
   it('starts Remesh at the most faces UV unwrap takes', () => {
     expect(faceBudgetDefaults(remesh, [uv], {})).toEqual({ target_polycount: 20000 });

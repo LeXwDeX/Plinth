@@ -250,7 +250,7 @@ export function ModelFormatsView({
     failed: message('ui.workspace.model_formats.load_failed'),
   });
   const footer = formatsFooter(coverage, rows);
-  const failed = coverage ? failedSteps(coverage) : [];
+  const failed = coverage ? failedSteps(schema.task_states, coverage) : [];
   const paused = coverage ? pausedSteps(coverage) : [];
   const rowList = (
     <ul className="flex flex-col gap-1">
@@ -260,7 +260,7 @@ export function ModelFormatsView({
           : '';
         // A start needs the completion route (onConvert); a retry is the plan's own and always available. A free
         // refetch needs its handler; without one the charged retry is what the row offers.
-        let offered = formatRowAction(coverage, row);
+        let offered = formatRowAction(schema.task_states, coverage, row);
         if (offered?.kind === 'refetch' && !onRefetch) offered = { ...offered, kind: 'retry' };
         const action = offered && (offered.kind !== 'start' || onConvert) ? offered : null;
         const texts = action ? rowActionTexts(schema, action, row.label) : null;

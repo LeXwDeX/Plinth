@@ -209,7 +209,7 @@ export function projectNotices(raw: unknown): TrackedNotice[] {
 
 /** 终态与状态展示只从 schema.task_states 判定；未知状态按非终态处理。 */
 export function findTaskState(
-  states: TaskStateSchema[],
+  states: readonly TaskStateSchema[],
   state: string,
 ): TaskStateSchema | null {
   return (

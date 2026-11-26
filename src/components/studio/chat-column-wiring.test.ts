@@ -103,24 +103,8 @@ describe('workspace chat message wiring', () => {
     );
   });
 
-  it('#665: a refused stop is said and the turn is still followed', () => {
-    expect(agentDialog).toMatch(
-      /chatClient\.cancelTurn\(sessionId\)\.then\(\s*\(\) => controllers\.current\.get\(sessionId\)\?\.abort\(\),\s*\(\) => toast\.error\(schemaText\(schema, 'ui\.chat\.toast\.stop_failed'\)\),/,
-    );
-    expect(agentDialog).not.toContain('cancelTurn(activeSessionId).catch(() => undefined)');
-  });
-
-  it('#665: a stage action waits for uploads instead of being dropped', () => {
-    expect(agentDialog).toMatch(
-      /if \(uploading \|\| attachmentsPending\(attachmentReads, captureSessionScope\(\)\)\) \{\s*toast\.message\(schemaText\(schema, 'ui\.chat\.toast\.stage_request_waiting'\)[\s\S]{0,120}return;\s*\}\s*clearTurnRequest\(\);/,
-    );
-  });
-
-  it('#665: a replayed stream does not repeat its side effects', () => {
-    expect(agentDialog).toContain("toast.error(event.content, { id: `chat-error:${sessionId}:${event.content}` });");
-    expect(agentDialog).toContain('coalesceReads.current(`approval:${sessionId}`');
-    expect(agentDialog).toContain('coalesceReads.current(`tool-calls:${sessionId}`');
-  });
+  // #665: the stop, stage-request and stream-error behaviour is tested in src/lib/chat/turn-signals.test.ts, the
+  // coalesced reads in src/lib/chat/coalesce.test.ts.
 
   it('keeps chat surfaces on the design tokens', () => {
     const hardcoded = chatMessage.match(
@@ -143,7 +127,7 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     // #134: the turn the server starts for an approved plan is followed by re-running the session recovery.
     const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
     expect(decidePlan).toMatch(/if \(result\.turnMessageId &&[\s\S]{0,120}\{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
-    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,200}return recoverChatSession\(/);
+    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,300}= recoverChatSession\(/);
     expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });

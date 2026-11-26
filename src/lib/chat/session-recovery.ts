@@ -6,8 +6,11 @@ import type { ChatBrowserClient } from './browser-client';
 const STREAM_RETRY_EVERY = 5;
 /** #665: the pause between reads doubles every STREAM_RETRY_EVERY reads, up to this many times the Schema's interval. */
 const MAX_POLL_BACKOFF = 8;
-/** #665: a reply still pending after this many reads is left as it is until the session is opened again. */
-const MAX_PENDING_POLLS = 40;
+/**
+ * #665: a reply still pending after this many reads is no longer read on its own; `onGaveUp` lets the page say so and
+ * offer to read again (opening the session again does too).
+ */
+export const MAX_PENDING_POLLS = 40;
 
 interface SessionRecoveryOptions {
   sessionId: string;
@@ -22,11 +25,13 @@ interface SessionRecoveryOptions {
   pollMilliseconds: number;
   onLoading(loading: boolean): void;
   onLoadError(): void;
+  /** #665: the reads of a reply that stays pending stopped (MAX_PENDING_POLLS); called once per recovery. */
+  onGaveUp?(): void;
 }
 
 /** Owns only the load/subscription for this selected session, until effect cleanup. */
 export function recoverChatSession(options: SessionRecoveryOptions): () => void {
-  const { sessionId, client, pageSize, connect, pollMilliseconds, onLoading, onLoadError } = options;
+  const { sessionId, client, pageSize, connect, pollMilliseconds, onLoading, onLoadError, onGaveUp } = options;
   const controller = new AbortController();
   let stopped = false;
   let closeStream: (() => void) | undefined;
@@ -47,8 +52,16 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
   // the reads stop after a bound: a message left pending by a turn that no longer runs is not read for ever.
   let parked = false;
   let pendingPolls = 0;
+  let gaveUp = false;
   const schedulePoll = () => {
-    if (!current() || pollTimer !== undefined || pendingPolls >= MAX_PENDING_POLLS) return;
+    if (!current() || pollTimer !== undefined) return;
+    if (pendingPolls >= MAX_PENDING_POLLS) {
+      if (!gaveUp) {
+        gaveUp = true;
+        onGaveUp?.();
+      }
+      return;
+    }
     const delay = pollMilliseconds * Math.min(2 ** Math.floor(pendingPolls / STREAM_RETRY_EVERY), MAX_POLL_BACKOFF);
     pendingPolls += 1;
     const retryStream = pendingPolls % STREAM_RETRY_EVERY === 0;
