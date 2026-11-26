@@ -8,9 +8,14 @@
 //   N3  经典滚动条下，任务管理列表的卡片宽度在点 X 删卡片前后一致，各行 X 的右边缘在同一条竖线上（#651；v1.9.1 上宽度会因
 //       滚动条出现或消失而变，每行 X 随之移动）。
 //
+//   N4  #633：三视图卡片标题随请求：只做三视图时卡片标题是「三视图」；点可选的右侧视图「继续生成」（四视图请求）后标题变成「四视图」，
+//       读屏标签同步。
+//   N5  #655：系统上下文写明「关键提醒用 **粗体**，其余不加粗，不用 HTML」（经 [[fake:system-contains …]] 读系统上下文）。
+//       模型是否照做要真实模型才能看出，不在 fake 验收范围。
+//
 // 用法（地址与 Agent 专用账号由 release-env.py 注入，凭据只在子进程环境里）：
 //   python3 scripts/release-env.py smoke dev-test -- node scripts/acceptance/release-1-9-2-notices.mjs
-// 环境变量：R192N_ITEMS=n1,n2,n3  只跑其中几项；OUT=<目录>  截图与 results.json 的位置（不要写进仓库）；
+// 环境变量：R192N_ITEMS=n1,n2,n3,n4,n5  只跑其中几项；OUT=<目录>  截图与 results.json 的位置（不要写进仓库）；
 //   PLAYWRIGHT_MODULE_PATH  Playwright 的位置。
 // 目标环境不是 fake 上游形态（ART_AI_UPSTREAM_SHAPE!=fake）时拒绝运行（退出码 2）。最后一行输出 `PASS=n FAIL=n`；有 FAIL 时退出码 1。
 import fs from 'node:fs';
@@ -23,7 +28,7 @@ const missing = ['BASE', 'AGENT_TEST_USERNAME', 'AGENT_TEST_PASSWORD'].filter((n
 if (missing.length) { console.error(`missing environment: ${missing.join(', ')}`); process.exit(2); }
 if (process.env.ART_AI_UPSTREAM_SHAPE !== 'fake') { console.error('refusing to run: the target upstream shape is not fake'); process.exit(2); }
 
-const ITEMS = (process.env.R192N_ITEMS || 'n1,n2,n3').split(',').map((item) => item.trim()).filter(Boolean);
+const ITEMS = (process.env.R192N_ITEMS || 'n1,n2,n3,n4,n5').split(',').map((item) => item.trim()).filter(Boolean);
 const tag = `r192n-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'plinth-acceptance-r192n-'));
 fs.mkdirSync(OUT, { recursive: true });
@@ -164,11 +169,57 @@ async function itemN3() {
   });
 }
 
+const text = async (key) => page.evaluate((name) => window.__ART_AI_PRODUCT_SCHEMA__?.content?.messages?.[name] ?? '', key);
+async function approvePending(sid) {
+  const [, schema] = await api('GET', '/api/v1/schema');
+  const decision = (schema.schema || schema)?.chat?.api?.fields?.decision || 'decision';
+  const [, pending] = await api('GET', `/api/v1/chat/sessions/${sid}/pending-approvals`);
+  for (const card of (pending.items || []).filter((item) => item.status === 'pending')) await api('PUT', `/api/v1/tasks/grants/${card.request_id}`, { [decision]: 'approve' });
+}
+async function itemN4() {
+  const [, session] = await api('POST', '/api/chat/sessions', { title: `${tag} 四视图标题` });
+  const sid = session.id;
+  await sendTurn(sid, '画一把剑 [[fake:tool:refine_image {"prompt":"a plain steel sword on a white background"}]]');
+  await waitFor(async () => (await tasksOf(sid)).some((task) => task.state === 'SUCCEEDED'), 150, 1500);
+  await openSession(sid);
+  const box = page.locator('[data-testid=studio-composer] textarea').first();
+  await box.fill('做三视图 [[fake:tool:create_three_view {"reference_handles":["@img1"]}]]');
+  await tid('composer-send').first().click();
+  await waitFor(async () => { await approvePending(sid); return await finalReplies(sid) >= 2; }, 150, 1500);
+  await openSession(sid);
+  const card = tid('three-view-card').last();
+  await card.waitFor({ timeout: 60000 });
+  const titleOf = async () => ({ header: (await card.locator('header span').first().innerText()).trim(), aria: await card.getAttribute('aria-label') });
+  const three = await titleOf();
+  await check('n4', '只做三视图（右侧视图没开始）：卡片标题是「三视图」', async () => {
+    const want = await text('ui.studio.three_view.title');
+    return { ok: three.header === want && three.aria === want, detail: `标题「${three.header}」读屏「${three.aria}」期望「${want}」` };
+  });
+  const start = card.locator('[data-testid=three-view-slot]').filter({ has: page.locator('[data-testid=three-view-optional]') }).locator('[data-testid=three-view-start]');
+  await start.first().click();
+  await waitFor(async () => { await approvePending(sid); return false; }, 6, 1500);
+  await check('n4', '点右侧视图「继续生成」（四视图请求）：卡片标题变成「四视图」', async () => {
+    const want = await text('ui.studio.three_view.title_four');
+    const four = await waitFor(async () => { const t = await titleOf(); return t.header === want ? t : null; }, 30, 1000) || await titleOf();
+    const file = await shot('n4', 'four-view-title');
+    return { ok: four.header === want && four.aria === want, detail: `标题「${four.header}」读屏「${four.aria}」期望「${want}」 截图 ${file}` };
+  });
+}
+async function itemN5() {
+  const [, session] = await api('POST', '/api/chat/sessions', { title: `${tag} 提示词` });
+  const sid = session.id;
+  for (const marker of ['关键提醒用', '其余不加粗，不用']) {
+    await sendTurn(sid, `你好 [[fake:system-contains ${marker}]]`);
+    const reply = String([...(await messagesOf(sid))].reverse().find((m) => m.role === 'assistant')?.content || '');
+    await check('n5', `系统上下文含「${marker}」`, async () => ({ ok: reply.includes(`present: ${marker}`), detail: `回复「${reply.slice(0, 80)}」` }));
+  }
+}
+
 const login = await ctx.request.post(`${base}/api/auth/login`, { data: { username: process.env.AGENT_TEST_USERNAME, password: process.env.AGENT_TEST_PASSWORD }, headers: ORIGIN });
 if (login.status() !== 200) { console.error(`login failed: HTTP ${login.status()}`); await browser.close(); process.exit(1); }
 const [, version] = await api('GET', '/api/version');
 console.log(`target ${base} version=${version.version || '?'} expect=${process.env.EXPECT_SHA || '?'} out=${OUT} tag=${tag}`);
-const runners = { n1: itemN1, n2: itemN2, n3: itemN3 };
+const runners = { n1: itemN1, n2: itemN2, n3: itemN3, n4: itemN4, n5: itemN5 };
 try {
   for (const item of ITEMS) {
     const runner = runners[item];
