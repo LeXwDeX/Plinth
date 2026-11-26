@@ -750,6 +750,12 @@ func validateRuntime(schema RuntimeSchema) error {
 			frontend.Toaster.Position,
 		)
 	}
+	if frontend.Toaster.DurationMilliseconds <= 0 {
+		return fmt.Errorf(
+			"frontend.toaster.duration_milliseconds 无效: %d",
+			frontend.Toaster.DurationMilliseconds,
+		)
+	}
 	if frontend.TaskAPIPrefix != "" &&
 		!strings.HasPrefix(frontend.TaskAPIPrefix, "/") {
 		return fmt.Errorf(

@@ -477,6 +477,8 @@ describe('Go Product Schema frontend projection', () => {
     expect(schema.runtime.frontend.display_locale).toBe('zh-CN');
     expect(schema.runtime.frontend.toaster.position).toBe('top-right');
     expect(schema.runtime.frontend.toaster.rich_colors).toBe(true);
+    // #651: every notice stays 3 seconds, failure notices included; the number lives in the Schema only.
+    expect(schema.runtime.frontend.toaster.duration_milliseconds).toBe(3000);
     expect(schema.runtime.frontend.spinner_frame_milliseconds).toBe(80);
     expect(schema.runtime.frontend.percentage_multiplier).toBe(100);
     expect(schema.runtime.frontend.percentage_suffix).toBe('%');
@@ -492,6 +494,11 @@ describe('Go Product Schema frontend projection', () => {
     expect(source).not.toContain('lang="zh-CN"');
     expect(source).not.toContain('position="top-right"');
     expect(source).not.toContain('<Toaster position="');
+    expect(source).toContain('duration={schema.runtime.frontend.toaster.duration_milliseconds}');
+    expect(source).not.toMatch(/duration=\{\s*\d/);
+    const notice = readFileSync(new URL('../hooks/use-task-completion-notice.ts', import.meta.url), 'utf8');
+    expect(notice).toContain('duration: schema.runtime.frontend.toaster.duration_milliseconds');
+    expect(notice).not.toContain('Infinity');
   });
 
   it('selects the advanced model form through Offering features', () => {

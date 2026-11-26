@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { scanTasks, type NoticeTask } from '@/lib/workspace/completion-notice';
 import type { TrackedTaskProjection } from '@/lib/workspace/task-projection';
 import { useCanvasStore } from './canvas-store';
 import { useMaskStore } from './mask-store';
@@ -230,5 +231,43 @@ describe('retired generation model notice (#329)', () => {
     state = useWorkspaceStore.getState();
     expect(state.retiredModelNotice['model-3d']).toBeUndefined();
     state.setModel('model-3d', null);
+  });
+});
+
+describe('failure notice after a reload (#651)', () => {
+  const failedProjection: TrackedTaskProjection = {
+    state: 'FAILED', progress: 0, terminal: true, failure: { code: 'upstream_auth', detail: 'x' } as any,
+    assets: [], downloadables: [], resources: [], resourcesPending: false,
+  };
+
+  // The notice hook scans the store after every change, so replay its scan after each store write.
+  function announcedAfter(register: () => void, apply: () => void): string[] {
+    let previous = new Set<string>();
+    const announced: string[] = [];
+    const unsubscribe = useWorkspaceStore.subscribe((state) => {
+      const scan = scanTasks(previous, state.trackedTasks as unknown as NoticeTask[]);
+      previous = scan.active;
+      for (const { task, outcome } of scan.finished) if (outcome === 'failed') announced.push(task.taskId);
+    });
+    register();
+    apply();
+    unsubscribe();
+    return announced;
+  }
+
+  it('does not announce an already failed task that the reload restores from the server list', () => {
+    const announced = announcedAfter(
+      () => useWorkspaceStore.getState().registerTask({ taskId: 'old', capability: 'image-to-image', progressMaximum: 100, autoPreview: false, restored: true }),
+      () => useWorkspaceStore.getState().applyTaskDetail('old', failedProjection, null),
+    );
+    expect(announced).toEqual([]);
+  });
+
+  it('announces a task this page submitted when it fails right away', () => {
+    const announced = announcedAfter(
+      () => useWorkspaceStore.getState().registerTask({ taskId: 'live', capability: 'image-to-image', progressMaximum: 100 }),
+      () => useWorkspaceStore.getState().applyTaskDetail('live', failedProjection, null),
+    );
+    expect(announced).toEqual(['live']);
   });
 });

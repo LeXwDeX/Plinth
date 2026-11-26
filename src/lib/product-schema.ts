@@ -548,6 +548,8 @@ export interface ProductSchema {
           | 'bottom-center'
           | 'bottom-right';
         rich_colors: boolean;
+        /** How long every notice stays on screen, failure notices included (#651). */
+        duration_milliseconds: number;
       };
     };
   };

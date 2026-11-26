@@ -389,7 +389,7 @@ export function TaskDrawer() {
   };
 
   const taskList = (
-    <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-3">
+    <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-3 [scrollbar-gutter:stable]">
       {noticeControl}
       <div role="group" aria-label={text('ui.workspace.tasks.filter.label')} className="flex gap-1" data-testid="workspace-task-filter">
         {TASK_FILTERS.map((value: TaskFilter) => (
@@ -502,6 +502,9 @@ export function TaskDrawer() {
                       {chip.label}
                     </span>
                   ) : null}
+                  {/* #651: one fixed slot for the cancel or dismiss button, so the buttons of every row sit on one vertical
+                      line whatever the state (running, finished, no button) and whatever sits to their left. */}
+                  <span className="flex size-6 shrink-0 items-center justify-center" data-testid="workspace-task-action-slot">
                   {running ? (
                     <HintTooltip name={ui.cancel} className="pointer-events-auto">
                       <Action
@@ -531,6 +534,7 @@ export function TaskDrawer() {
                       </Action>
                     </HintTooltip>
                   ) : null}
+                  </span>
                 </div>
               </header>
 

@@ -50,6 +50,7 @@ if (!window.__PLINTH_UNSUPPORTED_BROWSER__) {
           <Toaster
             position={schema.runtime.frontend.toaster.position}
             richColors={schema.runtime.frontend.toaster.rich_colors}
+            duration={schema.runtime.frontend.toaster.duration_milliseconds}
           />
         </ProductSchemaProvider>
       </SWRConfig>

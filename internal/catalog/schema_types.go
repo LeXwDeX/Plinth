@@ -7730,6 +7730,8 @@ type TaskProgressRuntimeSchema struct {
 type ToasterRuntimeSchema struct {
 	Position   string `json:"position"`
 	RichColors bool   `json:"rich_colors"`
+	// DurationMilliseconds is how long every notice stays on screen, failure notices included (#651).
+	DurationMilliseconds int `json:"duration_milliseconds"`
 }
 
 // CapabilityPresentation is the public presentation of one capability. Icon is a lucide kebab-case name for

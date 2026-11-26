@@ -47,7 +47,7 @@ export function useTaskCompletionNotice(): void {
       const scan = scanTasks(previousActive, state.trackedTasks);
       previousActive = scan.active;
       if (scan.finished.length === 0) return;
-      // In view: failures surface once as a manual-dismiss toast. Hidden: the tab title and, when allowed,
+      // In view: failures surface once as a toast that stays as long as every other notice (Schema toaster duration, #651). Hidden: the tab title and, when allowed,
       // the browser notification below — never both for the same failure.
       if (document.visibilityState === 'visible') {
         for (const { task, outcome } of scan.finished) {
@@ -59,7 +59,7 @@ export function useTaskCompletionNotice(): void {
           toast.error(text('ui.workspace.notice.failed'), {
             id: `task-failed-${task.taskId}`,
             description: task.prompt ? `${task.prompt} · ${reason}` : `${capability} · ${reason}`,
-            duration: Infinity,
+            duration: schema.runtime.frontend.toaster.duration_milliseconds,
             closeButton: true,
             action: { label: text('ui.workspace.tasks.open'), onClick: () => useStudioStore.getState().setTaskDrawerOpen(true) },
           });

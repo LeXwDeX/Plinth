@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.10.50",
+    "revision": "2026-11-26.10.51",
     "terminology": {
       "user_facing": [
         {
@@ -2712,7 +2712,8 @@
         },
         "toaster": {
           "position": "top-right",
-          "rich_colors": true
+          "rich_colors": true,
+          "duration_milliseconds": 3000
         },
         "harness_refresh_milliseconds": 4000,
         "harness_save_debounce_milliseconds": 500,
