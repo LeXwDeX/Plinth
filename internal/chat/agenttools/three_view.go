@@ -137,7 +137,8 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			return chat.ToolResult{NoSubmission: true}, err
 		}
 		defer releaseSource()
-		if active, found, err := e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0]); err != nil {
+		active, found, superseded, err := e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0])
+		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
 		} else if found {
 			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
@@ -151,6 +152,17 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
 			command.Call.ID, command.PriorGenerationCalls) {
 			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+		}
+		// An earlier group's approved view whose turn ended is no longer
+		// running, but a person could still continue it from the panel while
+		// the new group pays for the same views. The new group replaces it:
+		// the system denies that approval (AbandonedActor, audited), which
+		// releases what it held; the person can still restart that view.
+		for _, grant := range superseded {
+			if err := e.skillRuntime.Grants.AbandonRefusedGrant(ctx, grant.OwnerID, grant.RequestID); err != nil {
+				e.forgetGenerationCall(e.scopeKey(command), command.AssistantMessageID, command.Call.ID)
+				return chat.ToolResult{NoSubmission: true}, err
+			}
 		}
 		release = releaseSource
 		// The frame of every view follows the source subject's shape instead
@@ -347,10 +359,12 @@ func (e *Executor) lockThreeViewSession(ctx context.Context, owner, session stri
 // still use it, or being claimed, or whose Task has not ended; or a group
 // between two views whose continuation turn is still going. A finished,
 // failed or paused group, and one whose card belongs to a stopped turn, is
-// not active: asking again for it starts a new group as before.
+// not active: asking again for it starts a new group as before. Without an
+// active group it also returns the approved, unsubmitted grants of those
+// groups whose turn ended (superseded): a new group replaces them.
 func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
 	source generation.AssetID,
-) (skillrun.Run, bool, error) {
+) (skillrun.Run, bool, []executiongrant.Grant, error) {
 	owner := generation.OwnerID(command.OwnerID)
 	limit := e.threeView.MaximumListed
 	if limit <= 0 {
@@ -358,31 +372,35 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 	}
 	runs, err := e.skillRuntime.List(ctx, owner, command.SessionID, "", limit)
 	if err != nil {
-		return skillrun.Run{}, false, err
+		return skillrun.Run{}, false, nil, err
 	}
 	key := threeViewRunKey(command)
+	var superseded []executiongrant.Grant
 	for _, run := range runs {
 		if run.RecipeID != recipeID || run.SourceAssetID != source || run.IdempotencyKey == key {
 			continue
 		}
 		for _, step := range run.Steps {
-			active, err := e.threeViewStepActive(ctx, owner, step)
+			active, idle, err := e.threeViewStepActive(ctx, owner, step)
 			if err != nil {
-				return skillrun.Run{}, false, err
+				return skillrun.Run{}, false, nil, err
 			}
 			if active {
-				return run, true, nil
+				return run, true, nil, nil
+			}
+			if idle.RequestID != "" {
+				superseded = append(superseded, idle)
 			}
 		}
 		active, err := e.threeViewBetweenViews(ctx, owner, run)
 		if err != nil {
-			return skillrun.Run{}, false, err
+			return skillrun.Run{}, false, nil, err
 		}
 		if active {
-			return run, true, nil
+			return run, true, nil, nil
 		}
 	}
-	return skillrun.Run{}, false, nil
+	return skillrun.Run{}, false, superseded, nil
 }
 
 // threeViewTurnStopped reports whether the grant's trigger turn was stopped.
@@ -414,22 +432,26 @@ func (e *Executor) threeViewTurnOver(ctx context.Context, grant executiongrant.G
 	return ended, err
 }
 
-func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, error) {
-	taskActive := func(id generation.TaskID) (bool, error) {
+// threeViewStepActive reports whether a view keeps its group active. A view
+// that does not, but holds an approval its ended turn never submitted, returns
+// that grant as idle: a person could still continue it from the panel.
+func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, executiongrant.Grant, error) {
+	none := executiongrant.Grant{}
+	taskActive := func(id generation.TaskID) (bool, executiongrant.Grant, error) {
 		task, err := e.skillRuntime.Generation.Get(ctx, owner, id)
 		if err != nil {
-			return false, err
+			return false, none, err
 		}
-		return !task.State.Terminal(), nil
+		return !task.State.Terminal(), none, nil
 	}
 	switch step.Phase {
 	case skillrun.GrantPending:
 		if step.GrantRequestID == "" {
-			return false, nil
+			return false, none, nil
 		}
 		grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), step.GrantRequestID)
 		if err != nil {
-			return false, err
+			return false, none, err
 		}
 		switch grant.Status {
 		case executiongrant.Pending, executiongrant.Approved:
@@ -438,11 +460,11 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 			// its turn was stopped: nobody can approve or claim it then. A
 			// grant the kernel refused for good is denied by SubmitStep.
 			if grant.Status == executiongrant.Pending && e.skillRuntime.Grants.Expired(grant) {
-				return false, nil
+				return false, none, nil
 			}
 			stopped, err := e.threeViewTurnStopped(ctx, grant)
 			if err != nil || stopped {
-				return false, err
+				return false, none, err
 			}
 			if grant.Status == executiongrant.Approved {
 				// An approval is submitted by its turn when it replays the
@@ -453,11 +475,17 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 				// can still continue the view from the panel. A turn a crash
 				// left running is ended by the turn recovery.
 				over, err := e.threeViewTurnOver(ctx, grant)
-				return !over, err
+				if err != nil {
+					return false, none, err
+				}
+				if over {
+					return false, grant, nil
+				}
+				return true, none, nil
 			}
-			return true, nil
+			return true, none, nil
 		case executiongrant.Claimed:
-			return true, nil
+			return true, none, nil
 		case executiongrant.Bound:
 			return taskActive(generation.TaskID(grant.TaskID))
 		}
@@ -466,7 +494,7 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 			return taskActive(step.TaskID)
 		}
 	}
-	return false, nil
+	return false, none, nil
 }
 
 // threeViewBetweenViews reports a group the server continues by itself that
