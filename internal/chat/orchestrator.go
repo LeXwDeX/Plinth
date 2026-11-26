@@ -416,7 +416,9 @@ type Orchestrator struct {
 	// key was still running and had not registered its wait yet (#665): the
 	// assistant message ID it was for. suspendForConsent consumes it right
 	// after registering, so the decision wakes the turn at once instead of
-	// after consent_wait_timeout. Guarded by suspendMu.
+	// after consent_wait_timeout. A tool round drops it before its tools run:
+	// a decision from before then was not for the consent those tools ask
+	// for. Guarded by suspendMu.
 	wakePending map[string]string
 
 	// panicked are the turns whose processing panicked in this process
@@ -2113,6 +2115,10 @@ func (orchestrator *Orchestrator) Process(
 			orchestrator.appendDone(ctx, command.SessionID)
 			return err
 		}
+		// #665: a wake token left before this round's tools run came from a
+		// decision on another card; the round's own consent request comes
+		// from these tools, so only a decision after it may wake its wait.
+		orchestrator.clearWakePending(turnKey)
 		results := turnResults(assistant, boundTasks)
 		// Tool pictures share the request's vision budget (#247): the base
 		// request's pictures spend first, and every round of this turn keeps

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -311,5 +312,61 @@ func TestCanceledAutomaticCompactionDoesNotBackOff(t *testing.T) {
 	defer fixture.agent.mu.Unlock()
 	if len(fixture.agent.summaries) == tried {
 		t.Fatal("a canceled compaction started the failure backoff")
+	}
+}
+
+// decidingAgent stands for a decision on another card landing while the
+// model writes its round: it wakes the session before the round's own tool
+// asks for consent.
+type decidingAgent struct {
+	orchestrator *chat.Orchestrator
+	owner        string
+	session      string
+	streams      int
+}
+
+func (agent *decidingAgent) Stream(context.Context, agents.Request, func(agents.Delta) error) (agents.Completion, error) {
+	agent.streams++
+	if agent.streams > 1 {
+		return agents.Completion{Content: "idle"}, nil
+	}
+	agent.orchestrator.ResumeConsentWait(agent.owner, agent.session)
+	return agents.Completion{ToolCalls: []agents.ToolCall{{ID: "call-consent", Name: "wait_for_approval",
+		Arguments: []byte(`{}`)}}}, nil
+}
+
+func (*decidingAgent) Complete(context.Context, agents.Request) (agents.Completion, error) {
+	return agents.Completion{}, errors.New("complete unused")
+}
+
+// #665: a decision that lands before a round's tools run is not for the
+// suspension that round's tool asks for: the wait it registers waits for its
+// own decision instead of waking at once into an extra replay.
+func TestEarlierDecisionDoesNotWakeTheNextSuspension(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
+	schema := suspendSchema(t)
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &decidingAgent{owner: "owner-a", session: session.ID}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model", Agent: agent,
+		Tools: &suspendConsentToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.orchestrator = orchestrator
+	command := chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID,
+		AssistantMessageID: startTurnFor(t, service, "owner-a", session.ID, "paint")}
+	t.Cleanup(func() { orchestrator.ResumeConsentWait("owner-a", session.ID) })
+	if err := orchestrator.Process(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if orchestrator.PendingConsentWaits() != 1 {
+		t.Fatal("the earlier decision woke the round's own consent wait")
 	}
 }
