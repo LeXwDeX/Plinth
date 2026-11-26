@@ -56,3 +56,44 @@ func TestAgentToolArgumentsAreCheckedAgainstTheDeclaration(t *testing.T) {
 		}
 	}
 }
+
+// #665 (wave 2): a string enum value is trimmed of whitespace before it is
+// checked, and the tool runs with the trimmed value; a value outside the enum
+// is refused with the Schema's text listing the allowed values.
+func TestAgentToolEnumArgumentsAreTrimmedAndListTheChoices(t *testing.T) {
+	h := newHungTurn(t, func(schema *catalog.ChatSchema) {
+		configuredRejectionTexts(schema)
+		schema.Presentation.Messages.ToolArgumentsSchemaInvalid = "configured {tool}: {reason}"
+		schema.Presentation.Messages.ToolArgumentNotAllowed = "{field} one of {choices}"
+		for index := range schema.AgentTools {
+			if schema.AgentTools[index].Name == "get_task" {
+				schema.AgentTools[index].Parameters = json.RawMessage(`{"type":"object","additionalProperties":false,
+					"properties":{"task_id":{"type":"string"},"mode":{"type":"string","enum":["fast","full"]}},
+					"required":["task_id"]}`)
+			}
+		}
+	})
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{ToolCalls: []agents.ToolCall{
+			{ID: "enum-1", Name: "get_task", Arguments: json.RawMessage(`{"task_id":"t1","mode":" full\n"}`)},
+			{ID: "enum-2", Name: "get_task", Arguments: json.RawMessage(`{"task_id":"t1","mode":"slow"}`)},
+		}},
+		{Content: "configured reply"},
+	}}
+	tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 4)}
+	if _, err := h.run(agent, tools); err != nil {
+		t.Fatalf("Process = %v", err)
+	}
+	close(tools.commands)
+	var ran []string
+	for command := range tools.commands {
+		ran = append(ran, string(command.Call.Arguments))
+	}
+	if len(ran) != 1 || ran[0] != `{"mode":"full","task_id":"t1"}` {
+		t.Fatalf("executed = %q", ran)
+	}
+	results := toolResults(h.schema, agent.requests[1])
+	if len(results) != 2 || results[1].Content != "configured get_task: mode one of fast, full" {
+		t.Fatalf("tool results = %#v", results)
+	}
+}

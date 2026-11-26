@@ -42,8 +42,9 @@ const MaxWaivedCheckpoints = 1
 // step of a plan again (#665): each retry is a new paid attempt, and the plan
 // was approved for one attempt per step plus the declared repairs. The person's
 // own Retry from the panel is not counted. The Schema's
-// processing.plan.revision.max_agent_retries_per_step (the plan tool) is
-// aligned with it.
+// processing.plan.revision.max_agent_retries_per_step (the plan tool) sets the
+// bound in force (Service.WithAgentStepRetries); this is the default when the
+// Schema declares none.
 const MaxAgentStepRetries = 2
 
 // MaxRevisionReasonCharacters bounds the Agent's revision reason; the Chat

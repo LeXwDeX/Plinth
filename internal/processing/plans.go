@@ -265,6 +265,26 @@ type Service struct {
 	// sizedTextureEdge names the deliverables a purpose sized, which a
 	// checkpoint's texture_size judges instead of the native file (#292).
 	sizedTextureEdge SizedTextureEdge
+	// agentStepRetries is the Schema's
+	// processing.plan.revision.max_agent_retries_per_step; see
+	// WithAgentStepRetries.
+	agentStepRetries int
+}
+
+// WithAgentStepRetries sets how often the Agent's revise retry may start one
+// step again (catalog.ProcessingAgentStepRetries). Zero or less keeps
+// MaxAgentStepRetries, the bound of a plan tool that declares none.
+func (s *Service) WithAgentStepRetries(limit int) *Service {
+	s.agentStepRetries = limit
+	return s
+}
+
+// maxAgentStepRetries is the retry bound in force.
+func (s *Service) maxAgentStepRetries() int {
+	if s.agentStepRetries > 0 {
+		return s.agentStepRetries
+	}
+	return MaxAgentStepRetries
 }
 
 // WithGrants enables approval by session policy for plan steps. The grant is

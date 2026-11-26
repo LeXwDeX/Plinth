@@ -43,7 +43,13 @@ func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command 
 		// A tool this reply cannot run, or one its scope refuses, keeps the
 		// answer that says so; its arguments are not the problem.
 		_, offered := registry.resolve(call.Name, false)
+		trimmed := false
 		if !invalid && offered && !orchestrator.scopeRefuses(registry, call.Name, command.Options.AgentScope, false) {
+			// The tool runs with the enum values the declaration names, so a
+			// value written with surrounding whitespace is kept trimmed.
+			if normalized, changed := trimAgentToolEnums(registry, call); changed {
+				arguments, call.Arguments, trimmed = normalized, normalized, true
+			}
 			if reason := agentToolArgumentsViolation(registry, call); reason != "" {
 				malformed = append(malformed, call.ID)
 				orchestrator.logger.Warn(
@@ -69,7 +75,7 @@ func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command 
 				"arguments_bytes", len(call.Arguments),
 			)
 		}
-		if !invalid && (arguments == nil) == (call.Arguments == nil) {
+		if !invalid && !trimmed && (arguments == nil) == (call.Arguments == nil) {
 			continue
 		}
 		if !cloned {
@@ -100,33 +106,75 @@ func vetArguments(raw json.RawMessage) (json.RawMessage, bool) {
 // tool is not an Agent tool, or the registry does not know it. The reason
 // names the path and the rule, never a value the model wrote.
 func agentToolArgumentsViolation(registry *toolRegistry, call agents.ToolCall) string {
-	if registry == nil {
+	violation := agentToolArgumentsError(registry, call)
+	if violation == nil {
 		return ""
 	}
-	tool, known := registry.byName[call.Name]
-	if !known || tool.generation != nil {
-		return ""
-	}
-	schema, err := toolschema.Parse(tool.parameters, catalog.AgentToolArgumentOptions)
-	if err != nil {
-		// A frozen declaration from before #665 may not parse; it keeps the
-		// lenient handling it was written for.
-		return ""
+	return violationField(violation) + " " + violation.Message
+}
+
+// agentToolArgumentsError is the first place a call's arguments break the
+// declaration of the Agent tool it names, or nil (see
+// agentToolArgumentsViolation). A string an enum constrains is compared
+// without its surrounding whitespace (#665), as the tool receives it.
+func agentToolArgumentsError(registry *toolRegistry, call agents.ToolCall) *toolschema.ValidationError {
+	schema := agentToolDeclaration(registry, call.Name)
+	if schema == nil {
+		return nil
 	}
 	openObjects(schema)
 	arguments := bytes.TrimSpace(call.Arguments)
 	if len(arguments) == 0 {
 		arguments = []byte(`{}`)
 	}
+	arguments, _ = schema.TrimEnumStrings(arguments)
 	var violation *toolschema.ValidationError
 	if err := schema.Validate(arguments); errors.As(err, &violation) {
-		field := strings.TrimPrefix(strings.TrimPrefix(violation.Path, "$"), ".")
-		if field == "" {
-			return "the arguments " + violation.Message
-		}
-		return field + " " + violation.Message
+		return violation
 	}
-	return ""
+	return nil
+}
+
+// agentToolDeclaration is the parsed parameter declaration of the Agent tool
+// the registry names, or nil when it is not an Agent tool, the registry does
+// not know it, or the declaration does not parse.
+func agentToolDeclaration(registry *toolRegistry, name string) *toolschema.Schema {
+	if registry == nil {
+		return nil
+	}
+	tool, known := registry.byName[name]
+	if !known || tool.generation != nil {
+		return nil
+	}
+	schema, err := toolschema.Parse(tool.parameters, catalog.AgentToolArgumentOptions)
+	if err != nil {
+		// A frozen declaration from before #665 may not parse; it keeps the
+		// lenient handling it was written for.
+		return nil
+	}
+	return schema
+}
+
+// trimAgentToolEnums is the call's arguments with the whitespace around every
+// string an enum of the Agent tool's declaration constrains removed, and
+// whether that changed them (#665). Only whitespace goes; a value that is
+// still not a declared one is refused by agentToolArgumentsViolation.
+func trimAgentToolEnums(registry *toolRegistry, call agents.ToolCall) (json.RawMessage, bool) {
+	schema := agentToolDeclaration(registry, call.Name)
+	if schema == nil || len(bytes.TrimSpace(call.Arguments)) == 0 {
+		return call.Arguments, false
+	}
+	return schema.TrimEnumStrings(call.Arguments)
+}
+
+// violationField is the argument a violation names, or "the arguments" for
+// the whole object.
+func violationField(violation *toolschema.ValidationError) string {
+	field := strings.TrimPrefix(strings.TrimPrefix(violation.Path, "$"), ".")
+	if field == "" {
+		return "the arguments"
+	}
+	return field
 }
 
 // openObjects drops additionalProperties: false from a parsed declaration, so
@@ -151,7 +199,14 @@ func openObjects(schema *toolschema.Schema) {
 func (orchestrator *Orchestrator) toolArgumentsInvalidText(ctx context.Context, call agents.ToolCall) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if template := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(template) != "" {
-		if reason := agentToolArgumentsViolation(orchestrator.turnRegistry(ctx), call); reason != "" {
+		if violation := agentToolArgumentsError(orchestrator.turnRegistry(ctx), call); violation != nil {
+			reason := violationField(violation) + " " + violation.Message
+			// #665: a value outside an enum names the allowed ones in the
+			// Schema's words.
+			if choices := messages.ToolArgumentNotAllowed; len(violation.Allowed) > 0 && strings.TrimSpace(choices) != "" {
+				reason = strings.NewReplacer("{field}", violationField(violation),
+					"{choices}", toolschema.EnumChoices(violation.Allowed)).Replace(orchestrator.text(ctx, choices))
+			}
 			return strings.NewReplacer("{tool}", call.Name, "{reason}", reason).
 				Replace(orchestrator.text(ctx, template))
 		}

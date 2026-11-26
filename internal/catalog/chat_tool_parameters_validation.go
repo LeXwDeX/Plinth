@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -19,20 +20,45 @@ var AgentToolArgumentOptions = toolschema.Options{RootObject: true, ClosedObject
 // the shape of the declaration is checked, not that every object is closed.
 var generationToolArgumentOptions = toolschema.Options{RootObject: true}
 
+// toolParametersError words a parse failure of a chat tool's declaration. A
+// keyword outside the toolschema subset names the tool, the parameter and the
+// keyword (#665).
+func toolParametersError(section string, index int, tool string, err error) error {
+	var unsupported *toolschema.UnsupportedKeywordError
+	if errors.As(err, &unsupported) {
+		parameter := unsupported.Parameter()
+		if parameter == "" {
+			parameter = "（根对象）"
+		}
+		return fmt.Errorf("%s[%d] %q 的参数 %s 使用了工具参数子集之外的关键字 %q（%s）",
+			section, index, tool, parameter, unsupported.Keyword, unsupported.Path)
+	}
+	return fmt.Errorf("%s[%d] %q parameters: %w", section, index, tool, err)
+}
+
 // validateChatToolParameters parses every chat tool's parameter declaration
 // (#665). Before, a declaration only had to be valid JSON: a required name
 // that is not a property, a malformed enum or bound, or an open object a
 // strict decoder refuses all reached the model unnoticed.
 func validateChatToolParameters(schema ChatSchema) error {
+	// Compatibility (#665): a generation tool's arguments are never checked
+	// against its declaration (they are mapped onto the Offering's parameters,
+	// which check them), so a keyword outside the subset that a Catalog written
+	// before #665 declares there enforces nothing either way and does not stop
+	// the Catalog from loading; any other defect still does. An Agent tool's
+	// declaration is enforced on every call and its implementation_key binds it
+	// to this binary, so a keyword the server would not enforce is refused.
 	for index, tool := range schema.Tools {
-		if _, err := toolschema.Parse(tool.Parameters, generationToolArgumentOptions); err != nil {
-			return fmt.Errorf("tools[%d] %q parameters: %w", index, tool.Name, err)
+		_, err := toolschema.Parse(tool.Parameters, generationToolArgumentOptions)
+		var unsupported *toolschema.UnsupportedKeywordError
+		if err != nil && !errors.As(err, &unsupported) {
+			return toolParametersError("tools", index, tool.Name, err)
 		}
 	}
 	for index, tool := range schema.AgentTools {
 		parsed, err := toolschema.Parse(tool.Parameters, AgentToolArgumentOptions)
 		if err != nil {
-			return fmt.Errorf("chat.agent_tools[%d] %q parameters: %w", index, tool.Name, err)
+			return toolParametersError("chat.agent_tools", index, tool.Name, err)
 		}
 		// The notes tool's length is the Schema's bound, so the model sees the
 		// limit the service enforces instead of a refusal after the fact.
@@ -49,7 +75,7 @@ func validateChatToolParameters(schema ChatSchema) error {
 
 // validateThreeViewToolParameters ties create_three_view's arguments to the
 // three-view declaration: its purpose enum is exactly the declared purposes,
-// and the four-view switch the Skills name exists (#665).
+// and the four-view switch the Skills name is a boolean (#665).
 func validateThreeViewToolParameters(schema ChatSchema) error {
 	var tool *ChatAgentToolSchema
 	for index := range schema.AgentTools {
@@ -89,9 +115,10 @@ func validateThreeViewToolParameters(schema ChatSchema) error {
 			return fmt.Errorf("%s.purpose 的 enum %v 必须与 three_view.purposes %v 一致", tool.Name, got, want)
 		}
 	}
-	right, declared := parsed.Properties["include_right"]
-	if !declared || !slices.Equal(right.Types, []string{"boolean"}) {
-		return fmt.Errorf("%s 必须声明布尔参数 include_right（四视图）", tool.Name)
+	// include_right (the four-view switch) is optional, so a Catalog written
+	// before the four-view Skill still loads; declared, it is a boolean.
+	if right, declared := parsed.Properties["include_right"]; declared && !slices.Equal(right.Types, []string{"boolean"}) {
+		return fmt.Errorf("%s.include_right（四视图）必须是布尔参数", tool.Name)
 	}
 	for _, name := range []string{"reference_image_indices", "reference_handles"} {
 		if reference, declared := parsed.Properties[name]; declared &&

@@ -47,7 +47,7 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 			"approval mode (Auto, Budget or Strict",
 			"In the Strict mode the capabilities the policy lists",
 			"any step whose own credit estimate reaches the server's threshold",
-			"In budget mode a step the approved plan covers runs within its remaining budget without a card",
+			"In the Budget mode a step the approved plan covers runs within its remaining budget without a card",
 			"unrelated to the Agent scope", "Never tell the person to switch the Agent scope or the approval mode")
 		// #521: only an Agent's own step is held for its extra credits alone
 		// (RequiresHumanForExtraSpend on AgentPending grants); a plan step is

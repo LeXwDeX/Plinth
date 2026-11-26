@@ -269,7 +269,7 @@ func (s *Service) reviseRetry(ctx context.Context, plan *Plan, command ReviseCom
 	}
 	// Every retry is a new paid attempt: the Agent may start one step again
 	// only so often; after that the person decides (#665).
-	if plan.Steps[command.StepIndex].Retry >= MaxAgentStepRetries {
+	if plan.Steps[command.StepIndex].Retry >= s.maxAgentStepRetries() {
 		return Plan{}, ErrRevisionRetryPerson
 	}
 	return s.retryStep(ctx, plan, command.StepIndex, plan.Steps[command.StepIndex].Revision)
