@@ -350,6 +350,17 @@ func (checkpoint *TurnCheckpoint) recordGenerationUnits(callID string, units int
 	checkpoint.GenerationUnits[callID] = units
 }
 
+// takeBackGenerationUnits drops the call's entry: the tool took the call back
+// out of the turn's generation count (#665). An explicit removal, unlike a
+// result that counted nothing, so a count an earlier suspension persisted is
+// not added back for later calls.
+func (checkpoint *TurnCheckpoint) takeBackGenerationUnits(callID string) {
+	delete(checkpoint.GenerationUnits, callID)
+	if len(checkpoint.GenerationUnits) == 0 {
+		checkpoint.GenerationUnits = nil
+	}
+}
+
 // priorGenerationUnits is the turn's generation count before callID: the
 // recorded units of every other call, and one for each other task-bound call
 // without a record (a checkpoint of an earlier version, or a count lost

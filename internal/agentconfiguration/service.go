@@ -98,6 +98,11 @@ type Management struct {
 	Tools           []Tool        `json:"tools"`
 	MCPPresets      []MCPPreset   `json:"mcp_presets"`
 	History         []History     `json:"history"`
+	// SkippedSkills names the packaged Skills of the published version that
+	// fail the current Schema and are left out of every turn (#665). The log
+	// warns once per Skill per process; this keeps the skip in front of the
+	// administrator for as long as it lasts. Empty when nothing is skipped.
+	SkippedSkills []string `json:"skipped_skills,omitempty"`
 }
 type MCPPreset struct {
 	Available       bool     `json:"available"`
@@ -276,18 +281,24 @@ func clone(c Configuration) Configuration {
 
 // Snapshot reads the latest version as the effective configuration.
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
+	snapshot, _, err := s.snapshot(ctx)
+	return snapshot, err
+}
+
+// snapshot is Snapshot with the packaged Skills the read left out.
+func (s *Service) snapshot(ctx context.Context) (Snapshot, []catalog.SkillSchema, error) {
 	v, err := s.store.LatestAgentConfiguration(ctx)
 	if errors.Is(err, ErrNotFound) {
-		return Snapshot{"0", clone(s.defaults)}, nil
+		return Snapshot{"0", clone(s.defaults)}, nil, nil
 	}
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, nil, err
 	}
-	stored, _, err := s.tolerant(v.Revision, s.resolve(v))
+	stored, skipped, err := s.tolerant(v.Revision, s.resolve(v))
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, nil, err
 	}
-	return Snapshot{v.Revision, s.project(stored)}, nil
+	return Snapshot{v.Revision, s.project(stored)}, skipped, nil
 }
 
 // tolerant validates a stored configuration. A Schema upgrade may tighten
@@ -439,7 +450,7 @@ func (s *Service) splitInvalidSkills(c Configuration) (Configuration, []catalog.
 }
 
 func (s *Service) Management(ctx context.Context) (Management, error) {
-	v, err := s.Snapshot(ctx)
+	v, skipped, err := s.snapshot(ctx)
 	if err != nil {
 		return Management{}, err
 	}
@@ -461,6 +472,9 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 	}
 	for _, h := range history {
 		result.History = append(result.History, History{h.Revision, h.CreatedAt, h.ActorID, h.Source})
+	}
+	for _, skill := range skipped {
+		result.SkippedSkills = append(result.SkippedSkills, skill.ID)
 	}
 	return result, nil
 }

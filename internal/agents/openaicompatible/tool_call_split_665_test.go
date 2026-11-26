@@ -82,3 +82,35 @@ func TestAdapterSplitsANewCallAfterOneThatIsNotWhole665(t *testing.T) {
 		}
 	}
 }
+
+// #665 final review: a gateway without an index that streams an OpenAI-format
+// ID in pieces while every piece repeats the name is one call, not two; the
+// rest of the ID does not carry the "call_" prefix and the first piece is
+// shorter than such an ID. Two calls whose IDs share the prefix, short ones
+// included, and a whole ID followed by an ID of another format still split.
+func TestAdapterJoinsAnIDStreamedInPiecesWithTheNameRepeated665(t *testing.T) {
+	const whole = "call_Ab12Cd34Ef56Gh78Ij90Kl12"
+	fragment := func(id, arguments string) string {
+		return "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"" + id +
+			"\",\"function\":{\"name\":\"refine_image\",\"arguments\":\"" + arguments + "\"}}]}}]}\n\n"
+	}
+	for name, tc := range map[string]struct {
+		body string
+		want []string
+	}{
+		"id in pieces, name in every piece": {fragment("call_Ab12", "") + fragment("Cd34Ef56Gh78Ij90Kl12", "{}"),
+			[]string{whole}},
+		"two short ids of one prefix":   {fragment("call_1", "{}") + fragment("call_2", "{}"), []string{"call_1", "call_2"}},
+		"whole id, then another format": {fragment(whole, "{}") + fragment("toolu_02", "{}"), []string{whole, "toolu_02"}},
+	} {
+		got := streamWithTools(t, tc.body+"data: [DONE]\n\n", "refine_image").ToolCalls
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: calls = %#v", name, got)
+		}
+		for i := range got {
+			if got[i].ID != tc.want[i] || got[i].Name != "refine_image" || string(got[i].Arguments) != "{}" {
+				t.Fatalf("%s: call %d = %#v, want ID %s", name, i, got[i], tc.want[i])
+			}
+		}
+	}
+}

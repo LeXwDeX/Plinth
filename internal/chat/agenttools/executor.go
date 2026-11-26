@@ -1017,6 +1017,10 @@ func (e *Executor) generateWithParams(
 	// first paid-gate layer runs for a fresh operation and for its
 	// already-prepared replay: both are one new submission here.
 	if result, refused := e.submissionRefused(ctx, command); refused {
+		// Nothing was submitted: a replay of a call an earlier suspension
+		// counted takes its persisted units back too (#665).
+		e.forgetGenerationCall(scope, command.AssistantMessageID, command.Call.ID)
+		result.GenerationUnitsTakenBack = true
 		return result, nil
 	}
 	alreadyPrepared := false
@@ -1052,7 +1056,10 @@ func (e *Executor) generateWithParams(
 		// The generation tool refused the call itself (invalid arguments, a
 		// refused input) after it was counted: nothing proceeded to submit,
 		// so it uses none of the turn's generations (#665).
+		// The take-back also reaches the turn checkpoint: a suspension
+		// persisted the call's units, and a later call must not add them back.
 		e.forgetGenerationCall(scope, command.AssistantMessageID, command.Call.ID)
+		result.GenerationUnitsTakenBack = true
 	}
 	return result, err
 }

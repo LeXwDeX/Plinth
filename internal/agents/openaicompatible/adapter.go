@@ -524,10 +524,36 @@ func wholeToolCall(call *agents.ToolCall, declared map[string]bool) bool {
 // look complete: two complete IDs are two calls, while a piece of an ID ("a"
 // after "call-") continues the current one.
 func startsNewToolCall(call *agents.ToolCall, nextID string, declared map[string]bool) bool {
+	if toolCallIDPiece(call.ID, nextID) {
+		return false
+	}
 	if wholeToolCall(call, declared) {
 		return true
 	}
 	return (call.Name != "" || len(call.Arguments) > 0) && completeToolCallID(call.ID) && completeToolCallID(nextID)
+}
+
+// toolCallIDLengths is the shortest whole ID of the call ID formats whose
+// length is fixed by their issuer (OpenAI "call_" plus 24 characters,
+// Anthropic "toolu_" plus 24). It is wire parsing, not product policy.
+var toolCallIDLengths = map[string]int{"call_": 29, "toolu_": 30}
+
+// toolCallIDPiece reports whether nextID is the next piece of the current ID
+// rather than another call's ID (#665): the current ID has one of the known
+// prefixes but is still shorter than an ID of that format, and nextID does not
+// start with the same prefix. The calls of one answer come from one issuer and
+// share its prefix, so a gateway that streams the ID in pieces while every
+// piece repeats the name ("call_Ab12", then "Cd34...") is not split into two
+// calls. A format outside the table, or a gateway that issues shorter IDs of a
+// known prefix and streams them in pieces, is not recognised (known limit):
+// the rules of startsNewToolCall apply unchanged.
+func toolCallIDPiece(current, nextID string) bool {
+	for prefix, length := range toolCallIDLengths {
+		if strings.HasPrefix(current, prefix) {
+			return len(current) < length && !strings.HasPrefix(nextID, prefix)
+		}
+	}
+	return false
 }
 
 // completeToolCallID reports whether an ID has the shape of a whole call ID:

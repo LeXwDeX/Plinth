@@ -144,6 +144,12 @@ type ToolResult struct {
 	// checkpoint so a later call after a restart starts from the same count
 	// (#665).
 	GenerationUnits int `json:"-"`
+	// GenerationUnitsTakenBack says the tool took this call back out of the
+	// turn's generation count (refused before anything was submitted, for
+	// example after its approval was denied on a replay). The orchestrator
+	// then drops the call's units from the turn checkpoint, so an entry an
+	// earlier suspension persisted no longer counts for later calls (#665).
+	GenerationUnitsTakenBack bool `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -3483,7 +3489,11 @@ func (orchestrator *Orchestrator) executeTools(
 		)
 		// Before any branch below: a suspended, queued or discarded result
 		// still counted against the turn (#665).
-		turn.Checkpoint.recordGenerationUnits(call.ID, result.GenerationUnits)
+		if result.GenerationUnitsTakenBack {
+			turn.Checkpoint.takeBackGenerationUnits(call.ID)
+		} else {
+			turn.Checkpoint.recordGenerationUnits(call.ID, result.GenerationUnits)
+		}
 		if err != nil && !result.NoSubmission && result.TaskID == "" && paidTool(tool.Execution) {
 			// Task acceptance may have committed while the response or chat
 			// binding was lost. Keep this call outside Checkpoint.Completed so
@@ -3537,7 +3547,15 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			if len(inflight) > 0 || result.GenerationUnits > 0 {
 				if saveErr := persist(orchestrator.service.TurnRunningState()); saveErr != nil {
-					return results, imageURLs, taskBindings, saveErr
+					// 只为落库生成单位而写、且不是输给另一个写入方时，写入失败
+					// 不让回合失败：批准卡已经发出，照常挂起；进程在等待时重启
+					// 的话，单位按旧规则重建（已准备的调用重放时按全量权重重新
+					// 计入，#665）。同批有在途调用时等待项必须落库，仍按失败处理。
+					if len(inflight) > 0 || errors.Is(saveErr, ErrTurnCheckpointConflict) {
+						return results, imageURLs, taskBindings, saveErr
+					}
+					orchestrator.logger.Warn("挂起调用的生成单位落库失败，照常挂起",
+						"session_id", command.SessionID, "call_id", call.ID, "error", saveErr)
 				}
 			}
 			return results, imageURLs, taskBindings, ErrTurnSuspended

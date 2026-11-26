@@ -171,3 +171,32 @@ func TestNonSkillFailureIsReportedBeforeSkills665(t *testing.T) {
 		t.Fatalf("error = %v, want the tool selection's reason only", err)
 	}
 }
+
+// #665 final review: a packaged Skill the read leaves out is not only one
+// warning per process: the administrator's view of the configuration names it
+// for as long as it is skipped, and names nothing when no Skill is skipped.
+func TestManagementNamesTheSkippedPackagedSkills665(t *testing.T) {
+	ctx := context.Background()
+	retired, err := catalog.RetiredBuiltInSkills()
+	if err != nil || len(retired) == 0 {
+		t.Fatalf("retired built-in Skills: %v", err)
+	}
+	id := retired[0].ID
+	f := newFollowFixture(t)
+	before, err := f.service.Management(ctx)
+	if err != nil || len(before.SkippedSkills) != 0 {
+		t.Fatalf("skipped before = %v err=%v, want none", before.SkippedSkills, err)
+	}
+	stored := withSkills(before.Configuration, catalog.SkillSchema{ID: id, Name: "Packaged",
+		Category: "category-retired-by-an-upgrade", Prompt: "an older release's prompt of this Skill"})
+	storeConfiguration(t, f, before.Revision, stored)
+	for range 2 {
+		management, err := f.service.Management(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(management.SkippedSkills) != 1 || management.SkippedSkills[0] != id || hasSkill(management.Configuration, id) {
+			t.Fatalf("skipped = %v, want [%s] left out of the configuration", management.SkippedSkills, id)
+		}
+	}
+}
