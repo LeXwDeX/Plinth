@@ -103,3 +103,35 @@ func TestDispatchRecoversAPanicAndRetiresTheTurn(t *testing.T) {
 		panic("background bug")
 	}()
 }
+
+// endedTurnRepository answers GetTurn with an ended turn; every other call
+// panics (stubRepository), so a dispatch that ends the turn again shows.
+type endedTurnRepository struct {
+	stubRepository
+	state string
+}
+
+func (repository endedTurnRepository) GetTurn(_ context.Context, ownerID, sessionID, assistantID string) (Turn, error) {
+	return Turn{OwnerID: ownerID, SessionID: sessionID, AssistantMessageID: assistantID, State: repository.state}, nil
+}
+
+// #665: a command that reaches a panicked turn after its ending was written
+// (a leftover consent timer, a duplicate stop) does not end it again: no
+// reply rewrite, no error or done event on a stream that may be the next
+// turn's. The panicked mark goes with it.
+func TestDispatchLeavesAnEndedPanickedTurnAlone(t *testing.T) {
+	orchestrator := robustnessOrchestrator(t)
+	orchestrator.service.repository = endedTurnRepository{state: "internal-turn-error"}
+	command := ProcessTurn{OwnerID: "owner", SessionID: "session", AssistantMessageID: "message-ended"}
+	orchestrator.notePanicked(command.AssistantMessageID)
+	if !orchestrator.markQueued(command.AssistantMessageID) {
+		t.Fatal("markQueued")
+	}
+	orchestrator.dispatch(context.Background(), command)
+	if orchestrator.turnPanicked(command.AssistantMessageID) {
+		t.Fatal("the ended turn was ended again (its writes panicked) or kept its mark")
+	}
+	if orchestrator.isQueued(command.AssistantMessageID) {
+		t.Fatal("the command still holds its queued mark")
+	}
+}

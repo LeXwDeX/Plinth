@@ -1265,8 +1265,16 @@ func (orchestrator *Orchestrator) dispatch(ctx context.Context, command ProcessT
 		}
 	}()
 	if orchestrator.turnPanicked(command.AssistantMessageID) {
-		// Its first ending could not be written: end it again, never run it.
-		orchestrator.failPanickedTurn(context.WithoutCancel(ctx), command)
+		// Never run it again. A turn whose ending is already written is left
+		// as it is (#665): ending it again would rewrite its reply and append
+		// error and done events to the session's stream, which may be the
+		// next turn's by now. One whose first ending could not be written is
+		// ended again.
+		if orchestrator.panickedTurnEnded(context.WithoutCancel(ctx), command) {
+			orchestrator.clearPanicked(command.AssistantMessageID)
+		} else {
+			orchestrator.failPanickedTurn(context.WithoutCancel(ctx), command)
+		}
 		orchestrator.unmarkQueued(command.AssistantMessageID)
 		return
 	}

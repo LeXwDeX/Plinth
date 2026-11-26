@@ -29,6 +29,27 @@ func (orchestrator *Orchestrator) notePanicked(assistantMessageID string) {
 	orchestrator.panicked[assistantMessageID] = struct{}{}
 }
 
+// clearPanicked drops the mark of a turn that has ended (#665): a later
+// command with its ID (a leftover consent timer, a duplicate stop) then
+// finds the ended turn and does nothing, instead of ending it again and
+// closing the session's next stream early.
+func (orchestrator *Orchestrator) clearPanicked(assistantMessageID string) {
+	orchestrator.panickedMu.Lock()
+	defer orchestrator.panickedMu.Unlock()
+	delete(orchestrator.panicked, assistantMessageID)
+}
+
+// panickedTurnEnded reports whether a panicked turn already has its ending:
+// its row is in a terminal state, or gone with its session or message. A read
+// failure is not an ending.
+func (orchestrator *Orchestrator) panickedTurnEnded(ctx context.Context, command ProcessTurn) bool {
+	turn, err := orchestrator.service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return true
+	}
+	return err == nil && orchestrator.service.TurnStateTerminal(turn.State)
+}
+
 func (orchestrator *Orchestrator) turnPanicked(assistantMessageID string) bool {
 	orchestrator.panickedMu.Lock()
 	defer orchestrator.panickedMu.Unlock()
@@ -56,6 +77,10 @@ func (orchestrator *Orchestrator) failPanickedTurn(ctx context.Context, command 
 	err = errors.Join(err,
 		orchestrator.service.FinishStream(ctx, command.SessionID, command.AssistantMessageID, true),
 		orchestrator.service.FinishTurn(ctx, command.AssistantMessageID, true))
+	if err == nil {
+		// The ending is written: the turn is an ended one now.
+		orchestrator.clearPanicked(command.AssistantMessageID)
+	}
 	if err != nil {
 		orchestrator.logger.Error("崩溃轮次收尾失败",
 			"session_id", command.SessionID,
