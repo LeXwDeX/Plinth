@@ -11,3 +11,9 @@ func (s *Service) MarkPackagedForTest(skill catalog.SkillSchema) {
 	}
 	s.packagedFingerprints[skill.ID] = fingerprint
 }
+
+// TolerantForTest runs the read-side tolerance of a stored configuration.
+func (s *Service) TolerantForTest(c Configuration) error {
+	_, _, err := s.tolerant("test", c)
+	return err
+}

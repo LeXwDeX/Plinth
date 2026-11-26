@@ -83,8 +83,8 @@ func TestInvalidPackagedSkillIsSkippedKeptAndWarnedOnce665(t *testing.T) {
 }
 
 // #665: a Skill an administrator wrote, including one that reuses a packaged
-// ID with edited content, is never dropped: an invalid one fails the read and
-// startup, naming it.
+// ID and whose recorded origin says it was edited, is never dropped: an
+// invalid one fails the read and startup, naming it.
 func TestInvalidAdministratorSkillFailsLoudly665(t *testing.T) {
 	ctx := context.Background()
 	retired, err := catalog.RetiredBuiltInSkills()
@@ -98,7 +98,9 @@ func TestInvalidAdministratorSkillFailsLoudly665(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			storeWithSkill(t, f, base.Revision, base.Configuration,
+			c := base.Configuration
+			c.SkillOrigins = map[string]string{retired[0].ID: agentconfiguration.SkillOriginEdited}
+			storeWithSkill(t, f, base.Revision, c,
 				catalog.SkillSchema{ID: id, Name: "Mine", Category: "category-retired-by-an-upgrade", Prompt: "x"})
 			if _, err := f.service.Snapshot(ctx); err == nil || !strings.Contains(err.Error(), id) {
 				t.Fatalf("snapshot error = %v, want one naming %s", err, id)
