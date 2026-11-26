@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.61",
+    "revision": "2026-11-27.10.62",
     "terminology": {
       "user_facing": [
         {
@@ -4975,6 +4975,8 @@
         "ui.studio.chat.queued_cancel": "取消排队",
         "ui.studio.chat.queued_list": "排队中的消息",
         "ui.studio.chat.queued_restored": "排队的消息没能发出，已放回输入框。",
+        "ui.studio.chat.queued_other_tab": "另一个标签页正在这个对话里发送，排队的消息已放回输入框，稍后再发即可。",
+        "ui.studio.chat.send_key_refused": "这条消息没有发出，请再发送一次。",
         "ui.studio.task.progress_title": "{capability}进行中",
         "ui.studio.task.elapsed": "已用 {time}",
         "ui.studio.task.failed_title": "{capability}没有完成",
@@ -19786,6 +19788,8 @@
             "ui.studio.chat.queued_cancel": "Cancel queued message",
             "ui.studio.chat.queued_list": "Queued messages",
             "ui.studio.chat.queued_restored": "The queued message couldn't be sent and was put back in the input box.",
+            "ui.studio.chat.queued_other_tab": "Another tab is sending in this conversation. The queued message was put back in the input box; send it again in a moment.",
+            "ui.studio.chat.send_key_refused": "This message wasn't sent. Please send it again.",
             "ui.studio.task.progress_title": "{capability} in progress",
             "ui.studio.task.elapsed": "Elapsed {time}",
             "ui.studio.task.failed_title": "{capability} didn't finish",

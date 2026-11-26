@@ -107,8 +107,10 @@ import {
 import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
-import { turnFailureText } from '@/lib/chat/turn-error-text';
-import { newSendKey, sendKeyFor, sendSignature, type UncertainSend } from '@/lib/chat/send-key';
+import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
+import { createUncertainSendStore, newSendKey, sendSignature, sendUnderKey } from '@/lib/chat/send-key';
+import { idempotencyRefused } from '@/lib/chat/send-error-codes';
+import { activeLocale } from '@/lib/i18n/locale';
 import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
@@ -494,8 +496,9 @@ export function ChatColumn() {
   // #665: the session whose queued turn this page is claiming or sending, or null.
   const drainingRef = useRef<string | null>(null);
   const startedTurnsRef = useRef(0);
-  // #665: the last send whose answer never came, until a send of another request or an answered one replaces it.
-  const uncertainSend = useRef<UncertainSend | null>(null);
+  // #665: per session, the last send whose answer never came, until a send of another request or an answered one
+  // replaces it; kept in the tab's sessionStorage so a reload keeps it.
+  const [uncertainSends] = useState(() => createUncertainSendStore(() => (typeof window === 'undefined' ? undefined : window.sessionStorage)));
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
@@ -1032,7 +1035,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1389,12 +1392,18 @@ export function ChatColumn() {
               ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
             };
             // #665: the same request as a send whose answer never came goes out under that send's key, so the server
-            // answers the turn it may already have started; any other send gets a key of its own.
-            const signature = sendSignature(sessionId, text, turnOptions);
-            const uncertain = { signature, key: sendKeyFor(uncertainSend.current, signature, extra?.idempotencyKey) };
-            uncertainSend.current = uncertain;
-            await chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: uncertain.key }, controller.signal);
-            if (uncertainSend.current === uncertain) uncertainSend.current = null;
+            // answers the turn it may already have started; any other send gets a key of its own. The locale is part
+            // of the request (the server's fingerprint has it), and so is a queued message's id: two queued messages
+            // with the same words are two requests. A key the server refuses is dropped and the send goes once more
+            // under a fresh one (sendUnderKey).
+            const locale = activeLocale(schema);
+            const queuedId = extra?.queuedId;
+            await sendUnderKey(uncertainSends, {
+              sessionId,
+              signature: sendSignature(sessionId, text, turnOptions, { locale, ...(queuedId ? { queuedId } : {}) }),
+              ...(queuedId ? { typedSignature: sendSignature(sessionId, text, turnOptions, { locale }) } : {}),
+              ...(extra?.idempotencyKey ? { preferred: extra.idempotencyKey } : {}),
+            }, (key) => chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: key }, controller.signal), idempotencyRefused);
             sent = true;
             extra?.onSent?.();
             // A one-shot Skill (declared in the Schema) is spent once the server has the turn; a failed send keeps it.
@@ -1450,11 +1459,19 @@ export function ChatColumn() {
             // or the message had waited in the queue), so they go back, not lost.
             const restore = !sent && (replaced || queued) && isCurrentSessionScope(scope) && !controller.signal.aborted;
             if ((error as Error).name !== 'AbortError') {
-              toast.error(
-                restore && queued
-                  ? schemaText(schema, 'ui.studio.chat.queued_restored')
-                  : turnFailureText(error, [schema.chat.presentation.messages.sse_interrupted], ui.sendFailed),
-              );
+              if (restore && queued && turnActiveRefusal(error)) {
+                // #665: another tab's turn of the session runs (it sent first): nothing failed, the words wait in the box.
+                toast.info(schemaText(schema, 'ui.studio.chat.queued_other_tab'));
+              } else if (idempotencyRefused(error)) {
+                // #665: the key was refused twice; the message was not sent and the key is gone.
+                toast.error(schemaText(schema, 'ui.studio.chat.send_key_refused'));
+              } else {
+                toast.error(
+                  restore && queued
+                    ? schemaText(schema, 'ui.studio.chat.queued_restored')
+                    : turnFailureText(error, [schema.chat.presentation.messages.sse_interrupted], ui.sendFailed),
+                );
+              }
             }
             if (restore) {
               setInput((current) => (current === '' ? written : current));
@@ -1576,6 +1593,7 @@ export function ChatColumn() {
       refreshChoices,
       refreshNotes,
       ui.sendFailed,
+      uncertainSends,
       uploading,
     ],
   );
@@ -1658,7 +1676,7 @@ export function ChatColumn() {
         return;
       }
       const started = startedTurnsRef.current;
-      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
         drainingRef.current = null;
         if (startedTurnsRef.current === started) {
           if (useChatStore.getState().activeSessionId === sessionId) {

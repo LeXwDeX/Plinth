@@ -1,5 +1,6 @@
 import type { ProductSchema } from '@/lib/product-schema';
 import { isApprovalMode } from '@/lib/chat/approval-modes';
+import { IDEMPOTENCY_REFUSAL_CODES } from '@/lib/chat/send-error-codes';
 import { parseLineage, type LineageGraph } from '@/lib/workspace/lineage';
 import { parseThreeViewGroup, parseThreeViews, type ThreeViewAction, type ThreeViewGroup } from '@/lib/workspace/three-view';
 import {
@@ -424,6 +425,8 @@ export class ChatBrowserError extends Error {
    * or proxy's (a 404 page during a deploy). Set by the reads that need to tell them apart.
    */
   serverAnswered = false;
+  /** #665: the problem code of the server's refusal, when it answered with one (see send-error-codes.ts); else ''. */
+  code = '';
 
   constructor(message: string, status: number, requestId = '', retryAfterSeconds?: number) {
     super(message);
@@ -1388,16 +1391,20 @@ export function createChatBrowserClient(
       }
       const payload = await responseObject(response);
       if (!response.ok) {
-        const problemError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid' ||
-          payload.code === 'idempotency_conflict' || payload.code === 'idempotency_key_invalid';
+        const code = typeof payload.code === 'string' ? payload.code : '';
+        const problemError = code === 'attachment_purpose_invalid' || code === 'attachment_purpose_attachment_invalid' ||
+          IDEMPOTENCY_REFUSAL_CODES.includes(code);
         const message = problemError ? payload.detail : payload[responseFields.error];
-        throw new ChatBrowserError(
+        const failure = new ChatBrowserError(
           typeof message === 'string'
             ? message
             : schema.chat.presentation.messages.internal_error,
           response.status,
           responseRequestId(response, payload),
         );
+        // #665: a refusal of the Idempotency-Key is told apart by its code (the caller drops the key and sends anew).
+        if (problemError) failure.code = code;
+        throw failure;
       }
       return {
         assistantMessageID: String(

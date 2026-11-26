@@ -136,6 +136,11 @@ export function parseSendHold(raw: string | null, now?: number): SendHold | null
 export const MAX_TURN_LOCK_REFUSALS = 6;
 /** #665: the longest wait between two claims refused by another tab's turn lock. */
 export const MAX_TURN_LOCK_RETRY_MS = SEND_HOLD_MS * 4;
+/**
+ * #665: a refusal count whose last wait ended longer ago than this is over: the session's next refusal starts a new
+ * count from the first wait (and a tab counted out as frozen is waited for again).
+ */
+export const TURN_LOCK_REFUSALS_END_MS = MAX_TURN_LOCK_RETRY_MS;
 
 /**
  * #665: how long the drain waits before it claims again after the `refusals`-th refusal in a row by another tab's turn
