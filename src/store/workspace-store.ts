@@ -178,6 +178,8 @@ interface WorkspaceState {
   applyTaskLive: (taskId: string, patch: TaskLivePatch) => void;
   markTaskNotFound: (taskId: string) => void;
   dismissTask: (taskId: string) => void;
+  /** #665: a deleted session's tasks are no longer tracked. */
+  forgetSessionTasks: (sessionId: string) => void;
   clearTrackedTasks: () => void;
 }
 
@@ -205,6 +207,21 @@ function emptyTask(
     ...(input.formatOf ? { formatOf: input.formatOf } : {}),
     ...(input.restored ? { restored: true } : {}),
   };
+}
+
+/** #665: tracked tasks kept for the page; past it the oldest ended ones go (running tasks always stay). */
+export const MAX_TRACKED_TASKS = 200;
+
+function capTrackedTasks(tasks: TrackedTask[]): TrackedTask[] {
+  let excess = tasks.length - MAX_TRACKED_TASKS;
+  if (excess <= 0) return tasks;
+  return tasks.filter((task) => {
+    if (excess > 0 && (task.terminal || task.notFound)) {
+      excess -= 1;
+      return false;
+    }
+    return true;
+  });
 }
 
 function patchTask(
@@ -348,7 +365,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         };
       }
       return {
-        trackedTasks: [...state.trackedTasks, emptyTask(input)],
+        trackedTasks: capTrackedTasks([...state.trackedTasks, emptyTask(input)]),
         pendingPreviewTaskId: input.autoPreview === false
           ? state.pendingPreviewTaskId
           : input.taskId,
@@ -443,6 +460,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       ),
     }));
   },
+  forgetSessionTasks: (sessionId) => set((state) => (state.trackedTasks.some((task) => task.sessionId === sessionId)
+    ? { trackedTasks: state.trackedTasks.filter((task) => task.sessionId !== sessionId) }
+    : state)),
   clearTrackedTasks: () => set({
     trackedTasks: [],
     currentObject: null,

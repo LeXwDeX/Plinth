@@ -5,6 +5,7 @@ import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import { clearDraft } from '@/lib/chat/composer-draft';
 import { forgetLastObject } from '@/lib/workspace/last-object';
 import { useSendQueueStore } from '@/store/send-queue-store';
+import { forgetSessionContext } from '@/store/session-context-store';
 import type { NativeQuote, PriceTotal } from '@/lib/pricing';
 import type { SessionBudget } from '@/lib/chat/budget';
 import type { ProductionBrief } from '@/lib/chat/production-brief';
@@ -148,6 +149,27 @@ export interface StreamingBuffer {
   turn: number;
 }
 
+/** #665: the message lists kept for sessions opened earlier; past it the least recently opened ones are read again. */
+export const MAX_CACHED_SESSIONS = 20;
+// Sessions in the order they were last opened, oldest first.
+const visitedSessions = new Set<string>();
+
+function evictMessageCaches(state: Pick<ChatStore, 'messagesBySession' | 'olderCursorBySession' | 'streamingBuffers'>, keep: string | null) {
+  const cached = Object.keys(state.messagesBySession);
+  if (cached.length <= MAX_CACHED_SESSIONS) return {};
+  const order = [...cached.filter((id) => !visitedSessions.has(id)), ...[...visitedSessions].filter((id) => id in state.messagesBySession)];
+  const doomed = new Set<string>();
+  for (const id of order) {
+    if (cached.length - doomed.size <= MAX_CACHED_SESSIONS) break;
+    if (id !== keep && !state.streamingBuffers[id]) doomed.add(id);
+  }
+  if (doomed.size === 0) return {};
+  return {
+    messagesBySession: Object.fromEntries(Object.entries(state.messagesBySession).filter(([id]) => !doomed.has(id))),
+    olderCursorBySession: Object.fromEntries(Object.entries(state.olderCursorBySession).filter(([id]) => !doomed.has(id))),
+  };
+}
+
 // #665: turn numbers are unique for the page; the newest turn started per session decides whether a settle is stale.
 let nextStreamTurn = 0;
 const latestTurnBySession = new Map<string, number>();
@@ -256,7 +278,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setActiveSession: (id) => set((state) => {
     if (state.activeSessionId === id) return state;
     useWorkspaceStore.getState().clearSessionContext();
-    return { activeSessionId: id, activeSessionRevision: state.activeSessionRevision + 1 };
+    if (id) {
+      visitedSessions.delete(id);
+      visitedSessions.add(id);
+    }
+    return { activeSessionId: id, activeSessionRevision: state.activeSessionRevision + 1, ...evictMessageCaches(state, id) };
   }),
   addSession: (session) =>
     set((s) => {
@@ -282,6 +308,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       useSendQueueStore.getState().forgetSession(id);
       clearDraft(id);
       forgetLastObject(id);
+      forgetSessionContext(id);
+      useWorkspaceStore.getState().forgetSessionTasks(id);
+      visitedSessions.delete(id);
       if (s.activeSessionId === id) useWorkspaceStore.getState().clearSessionContext();
       return {
         sessions: s.sessions.filter((ss) => ss.id !== id).map((ss) => ss.parentSessionId === id ? { ...ss, parentDeleted: true } : ss),

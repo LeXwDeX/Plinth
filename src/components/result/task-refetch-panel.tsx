@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { Action } from '@/components/ui/button';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
+import { schemaCountMessage, schemaMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { fetchRefetchEligibility, refetchUnavailableText, startRefetch, type RefetchEligibility } from '@/lib/workspace/task-refetch';
 import { unavailableLabel } from '@/lib/unavailable';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -93,7 +93,7 @@ function ScopedRefetchPanel({ taskId, sessionId, capability, prompt, onOpenTask 
     <section className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-3" aria-label={t('ui.task.refetch.action')} data-testid="task-refetch-panel">
       <p className="text-xs text-muted-foreground">
         {existing ? null : charged}
-        {existing ? t(view.refetchState === 'SUCCEEDED' ? 'ui.task.refetch.succeeded' : 'ui.task.refetch.in_progress') : t('ui.task.refetch.description')}
+        {existing ? t(view.refetchState && taskStatePresentation(schema, view.refetchState).outcome === 'success' ? 'ui.task.refetch.succeeded' : 'ui.task.refetch.in_progress') : t('ui.task.refetch.description')}
       </p>
       {error ? <p className="text-xs text-destructive" role="alert" data-testid="task-refetch-error">{error}</p> : null}
       {existing ? (
