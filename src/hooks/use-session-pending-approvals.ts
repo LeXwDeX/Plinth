@@ -10,9 +10,9 @@ import {
   DecisionLedger,
   decidePendingCard,
   displayedApprovals,
-  fetchPendingApprovals,
   PendingApprovalError,
   pendingApprovalsRoute,
+  readPendingApprovals,
   retainExpired,
   type PendingApproval,
   type PendingApprovalDecision,
@@ -47,7 +47,7 @@ export function useSessionPendingApprovals(sessionId: string | null) {
     enabled ? ['pending-approvals', sessionId] : null,
     async ([, id]: readonly [string, string]) => {
       const startedAt = Date.now();
-      return { startedAt, items: await fetchPendingApprovals(schema, id) };
+      return { startedAt, ...await readPendingApprovals(schema, id) };
     },
     { refreshInterval, revalidateOnFocus: true, keepPreviousData: false },
   );
@@ -70,7 +70,8 @@ export function useSessionPendingApprovals(sessionId: string | null) {
     previous.current = { sessionId, items: visible };
     setRetained((state) => {
       const base = state.sessionId === sessionId ? state.items : [];
-      const next = retainExpired(seen, visible, base, Date.now());
+      // #665: expiry is judged on the server's clock.
+      const next = retainExpired(seen, visible, base, Date.now() + (data.clockOffset ?? 0));
       const unchanged = next.length === base.length && next.every((item, index) => item === base[index]);
       return unchanged && state.sessionId === sessionId ? state : { sessionId, items: next };
     });
@@ -94,5 +95,6 @@ export function useSessionPendingApprovals(sessionId: string | null) {
       void mutate();
     }
   }, [mutate, schema, sessionId]);
-  return { items, pendingCount: countPending(items, Date.now()), refresh: () => mutate(), decide };
+  const clockOffset = data?.clockOffset ?? 0;
+  return { items, pendingCount: countPending(items, Date.now() + clockOffset), clockOffset, refresh: () => mutate(), decide };
 }

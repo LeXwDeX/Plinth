@@ -35,3 +35,22 @@ export function prependOlderPage<Message extends { id: string }>(
   return { messages: [...older, ...loaded.messages], olderCursor: page.nextCursor };
 }
 
+
+/**
+ * #665: a deletion the server refused puts the one message back into the list as it is now, after the message it
+ * followed, instead of restoring the whole list as it was before: pages read since (a turn's reply, older pages)
+ * stay. A message the list already has again is left as it is.
+ */
+export function restoreRemovedMessage<Message extends { id: string }>(
+  current: readonly Message[],
+  before: readonly Message[],
+  removed: Message,
+): Message[] {
+  if (current.some((message) => message.id === removed.id)) return [...current];
+  const position = before.findIndex((message) => message.id === removed.id);
+  for (let index = position - 1; index >= 0; index -= 1) {
+    const anchor = current.findIndex((message) => message.id === before[index].id);
+    if (anchor >= 0) return [...current.slice(0, anchor + 1), removed, ...current.slice(anchor + 1)];
+  }
+  return [removed, ...current];
+}

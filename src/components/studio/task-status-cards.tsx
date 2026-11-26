@@ -11,7 +11,7 @@ import { useTaskRetry } from '@/hooks/use-task-retry';
 import { canRetryTask } from '@/lib/workspace/task-retry';
 import { resolveErrorText } from '@/lib/workspace/task-projection';
 import {
-  chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, nextSessionTaskBatches, progressPercent, taskBatchProgress,
+  chatTaskCards, elapsedClockNeeded, elapsedSeconds, forgetUntrackedTasks, formatElapsed, nextSessionTaskBatches, progressPercent, taskBatchProgress,
 } from '@/lib/workspace/task-progress';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
@@ -44,6 +44,7 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
   for (const task of tracked) {
     if (!task.terminal && !task.notFound && !seen.current.has(task.taskId)) seen.current.set(task.taskId, Date.now());
   }
+  forgetUntrackedTasks(seen.current, tracked);
   const watched = useMemo(() => new Set(seen.current.keys()), [tracked]); // eslint-disable-line react-hooks/exhaustive-deps -- `seen` is filled above on every render
   const cards = useMemo(() => chatTaskCards(tracked, sessionId, watched, dismissed), [tracked, sessionId, watched, dismissed]);
   // The tasks the block counts as one "x/y": all seen running since none ran (nextTaskBatch); kept like `seen`, per

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatBrowserError, type ChatBrowserClient, type ChatContextUsage, type ChatReasoning } from '@/lib/chat/browser-client';
 import {
   compactSessionContext,
+  forgetSessionContext,
   loadSessionContext,
   loadSessionReasoning,
   switchSessionReasoning,
@@ -46,6 +47,30 @@ describe('session thinking level state (#322)', () => {
     expect(await switchSessionReasoning(client, 'a', 'max')).toBe(false);
     expect(useSessionContextStore.getState().reasoning.a.effort).toBe('high');
     expect(useSessionContextStore.getState().reasoningBusy.a).toBeFalsy();
+  });
+});
+
+describe('overlapping thinking level switches (#665)', () => {
+  it('takes one switch at a time, so a refused first switch cannot overwrite the level', async () => {
+    let refuse!: (error: Error) => void;
+    const setReasoning = vi.fn()
+      .mockImplementationOnce(() => new Promise<ChatReasoning>((_, reject) => { refuse = reject; }))
+      .mockImplementation(async () => reasoning('low'));
+    const client = fakeClient({ setReasoning });
+    useSessionContextStore.setState({ reasoning: { a: reasoning('high') } });
+    const first = switchSessionReasoning(client, 'a', 'max');
+    expect(await switchSessionReasoning(client, 'a', 'low')).toBe(false);
+    expect(setReasoning).toHaveBeenCalledTimes(1);
+    refuse(new ChatBrowserError('no', 400));
+    expect(await first).toBe(false);
+    expect(useSessionContextStore.getState().reasoning.a.effort).toBe('high');
+  });
+
+  it('forgets a deleted session', () => {
+    useSessionContextStore.setState({ reasoning: { a: reasoning('high'), b: reasoning('low') }, context: { a: usage(1) } });
+    forgetSessionContext('a');
+    expect(Object.keys(useSessionContextStore.getState().reasoning)).toEqual(['b']);
+    expect(useSessionContextStore.getState().context).toEqual({});
   });
 });
 

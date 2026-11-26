@@ -5,6 +5,7 @@ import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ChatBrowserError, createChatBrowserClient } from '@/lib/chat/browser-client';
+import { reasonOf } from '@/lib/problem-reference';
 import { schemaText } from '@/lib/product-schema';
 import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
 import { forgetPendingAdvance, rememberPendingAdvance, settlePendingAdvances } from '@/lib/workspace/three-view-pending';
@@ -17,6 +18,28 @@ import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
 const NONE: ThreeViewGroup[] = [];
+
+/**
+ * #665: the views of "generate remaining views", one after another, while the session they were started in is still
+ * the one in view: a switch (or unmount) stops the paid starts that have not gone out yet.
+ */
+export async function startEachRemaining<Slot>(
+  slots: readonly Slot[],
+  start: (slot: Slot) => Promise<string | null>,
+  stillCurrent: () => boolean,
+): Promise<string | null> {
+  for (const slot of slots) {
+    if (!stillCurrent()) return null;
+    const message = await start(slot);
+    if (message) return message;
+  }
+  return null;
+}
+
+/** #665: only the server's own refusal text is shown; a network failure ("Failed to fetch") reads as the Schema's text. */
+export function threeViewErrorText(error: unknown, fallback: string): string {
+  return error instanceof ChatBrowserError && error.message ? error.message : reasonOf(error) || fallback;
+}
 
 /** The gate every useThreeViews consumer shares, so one change asks for one read (as for the version chain). */
 const claimThreeViewRefresh = createLineageRefreshGate();
@@ -86,15 +109,18 @@ export function useThreeViews() {
   }, [sessionId]);
 
   /** Returns an error message, or null when the server took the request. */
-  const advance = useCallback(async (group: ThreeViewGroup, slot: ThreeViewSlot): Promise<string | null> => {
+  const advance = useCallback(async (
+    group: ThreeViewGroup, slot: ThreeViewSlot, bound?: AbortController | null,
+  ): Promise<string | null> => {
     const action = slotAction(slot);
     if (!sessionId || !action) return null;
     const limitMs = threeViewQueueLimitMs(schema);
     // Schema 没有声明排队时限时不提交：没有兜底时长，直接告诉用户不可用。
     if (limitMs === null) return schemaText(schema, 'ui.studio.three_view.queue_unavailable');
     const busyKey = `${group.runId}:${slot.key}`;
-    const controller = aborter.current;
-    if (!controller) return null;
+    // #665: a caller that started in an earlier session passes that session's controller, never the new session's.
+    const controller = bound === undefined ? aborter.current : bound;
+    if (!controller || controller.signal.aborted) return null;
     setBusy(busyKey);
     const pending = { sessionId, runId: group.runId, slotKey: slot.key };
     try {
@@ -126,7 +152,7 @@ export function useThreeViews() {
       return null;
     } catch (error) {
       void mutate();
-      return error instanceof Error ? error.message : schema.chat.presentation.messages.internal_error;
+      return threeViewErrorText(error, schema.chat.presentation.messages.internal_error);
     } finally {
       setBusy((current) => (current === busyKey ? null : current));
       setQueued((current) => {
@@ -143,12 +169,14 @@ export function useThreeViews() {
    * approval) each, in the group's order. It stops at the first refusal and returns its message.
    */
   const startRemaining = useCallback(async (group: ThreeViewGroup): Promise<string | null> => {
-    for (const slot of remainingSlots(group)) {
-      const message = await advance(group, slot);
-      if (message) return message;
-    }
-    return null;
-  }, [advance]);
+    const controller = aborter.current;
+    const owner = sessionId;
+    return startEachRemaining(
+      remainingSlots(group),
+      (slot) => advance(group, slot, controller),
+      () => controller !== null && !controller.signal.aborted && useChatStore.getState().activeSessionId === owner,
+    );
+  }, [advance, sessionId]);
 
   /**
    * #65: puts a picture the person dropped or chose in place of one view. The picture becomes their input asset
@@ -165,7 +193,7 @@ export function useThreeViews() {
       return null;
     } catch (error) {
       void mutate();
-      return error instanceof Error && error.message ? error.message : schemaText(schema, 'ui.studio.three_view.replace_failed');
+      return threeViewErrorText(error, schemaText(schema, 'ui.studio.three_view.replace_failed'));
     } finally {
       setBusy((current) => (current === busyKey ? null : current));
     }

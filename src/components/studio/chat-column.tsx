@@ -101,6 +101,10 @@ import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import { createCoalescer } from '@/lib/chat/coalesce';
+import { restoreRemovedMessage } from '@/lib/chat/message-pages';
+import { turnFailureText } from '@/lib/chat/turn-error-text';
+import { useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
@@ -144,7 +148,6 @@ import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
-import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
@@ -469,7 +472,9 @@ export function ChatColumn() {
   const draftEpoch = useRef(0);
   // Messages sent while a turn runs wait here ("排队中") and go out when it ends. Kept per
   // session, so switching away and back does not lose them.
-  const [queue, setQueue] = useState<QueueBySession>({});
+  // #665: the queue is kept in this browser (a reload does not lose a queued message) and leaves with its session.
+  const queue: QueueBySession = useSendQueueStore((state) => state.queue);
+  const setQueue = useSendQueueStore((state) => state.update);
   const queuedTurns = queuedFor(queue, activeSessionId);
   const [drainTick, setDrainTick] = useState(0);
   // #154: the session's saved style lock and this turn's exemption. The exemption never outlives its turn.
@@ -752,6 +757,7 @@ export function ChatColumn() {
     return result;
   }, [messages, optimisticUser, schema, streamBuf]);
 
+  const coalesceReads = useRef(createCoalescer());
   const processEvent = useCallback(
     (sessionId: string, event: ChatSemanticEvent) => {
       // #285: thinking, tool status and progress share one status slot.
@@ -765,14 +771,14 @@ export function ChatColumn() {
       }
       // #275: a status event follows each round's tool calls being saved on the assistant message, so
       // the count in the saved message is read again then; it only ever rises during a reply.
+      // #665: a replayed stream repeats every status; the reads are coalesced per session.
       if (event.type === 'status') {
-        chatClient
+        coalesceReads.current(`tool-calls:${sessionId}`, () => chatClient
           .listMessagePage(sessionId, { limit: 4 })
           .then((page) => {
             const count = latestToolCallCount(page.messages);
             if (count !== undefined) useChatStore.getState().observeToolCallCount(sessionId, count);
-          })
-          .catch(() => {});
+          }));
       }
       switch (event.type) {
         case 'text':
@@ -793,7 +799,8 @@ export function ChatColumn() {
           updateSessionTitle(sessionId, event.content);
           break;
         case 'error':
-          toast.error(event.content);
+          // #665: the same error replayed on a reattach updates its toast instead of stacking another one.
+          toast.error(event.content, { id: `chat-error:${sessionId}:${event.content}` });
           break;
         case 'taskRegistered':
           // P0 契约：agent 会话按任务隔离，任务注册即绑定；
@@ -809,8 +816,8 @@ export function ChatColumn() {
           { const step = paidStepFromTaskRegistered(event);
             if (step) addStreamPaidStep(sessionId, step);
           }
-          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值。
-          void refreshApproval();
+          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值（#665：重放时合并为一次读取）。
+          coalesceReads.current(`approval:${sessionId}`, async () => { await refreshApproval(); });
           break;
         case 'taskUpdate': {
           const trackedId = event.finalTaskID || event.taskID;
@@ -1288,7 +1295,7 @@ export function ChatColumn() {
           const starting = { sessionId, text };
           startingRef.current = starting;
           setPreparingSession(null);
-          initStreaming(sessionId, {
+          const turn = initStreaming(sessionId, {
             content: text,
             images: images.map((url) => ({ url, taskId: '' })),
           });
@@ -1382,9 +1389,7 @@ export function ChatColumn() {
               toast.error(
                 restore && queued
                   ? schemaText(schema, 'ui.studio.chat.queued_restored')
-                  : error instanceof Error && error.message !== ''
-                    ? withErrorReference(error.message, error)
-                    : ui.sendFailed,
+                  : turnFailureText(error, [schema.chat.presentation.messages.sse_interrupted], ui.sendFailed),
               );
             }
             if (restore) {
@@ -1401,14 +1406,15 @@ export function ChatColumn() {
             // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
             let settled = false;
             const settleFallback = window.setTimeout(() => {
-              if (!settled) finishStreaming(sessionId);
+              if (!settled) finishStreaming(sessionId, turn);
             }, STREAM_SETTLE_FALLBACK_MILLISECONDS);
             chatClient
               .listMessagePage(sessionId, { limit: messagePageSize })
               .then((page) => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                settleStreaming(sessionId, page);
+                // #665: a read that comes back after a later turn started is that earlier turn's: it is dropped.
+                if (!settleStreaming(sessionId, page, turn)) return;
                 const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
                 // #605: the server ended this turn's tasks with it; read them now and with the rereads below rather
                 // than leave them running (and the branch disabled) until the next task poll.
@@ -1448,7 +1454,7 @@ export function ChatColumn() {
               .catch(() => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                finishStreaming(sessionId);
+                finishStreaming(sessionId, turn);
               });
             void refreshApproval();
             void pending.refresh();
@@ -1523,11 +1529,20 @@ export function ChatColumn() {
   // 会写明基础积分、额外积分和用途，批准才算同意。
   useEffect(() => {
     if (!turnRequest) return;
+    if (useChatStore.getState().activeSessionId === null) {
+      clearTurnRequest();
+      return;
+    }
+    // #665: a send refuses while attachments upload; the request is kept (and said to wait) instead of being dropped,
+    // and goes out when the upload ends (this effect runs again then).
+    if (uploading || attachmentsPending(attachmentReads, captureSessionScope())) {
+      toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
+      return;
+    }
     clearTurnRequest();
-    if (useChatStore.getState().activeSessionId === null) return;
     void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
       turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
-  }, [turnRequest, clearTurnRequest]);
+  }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
   // 输入框，不让用户的话丢掉。
@@ -1723,11 +1738,15 @@ export function ChatColumn() {
       if (!activeSessionId) return;
       const sessionId = activeSessionId;
       const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
+      const removed = previous.find((message) => message.id === messageId);
       deleteMessage(sessionId, messageId);
       try {
         await chatClient.deleteMessage(sessionId, messageId);
       } catch {
-        setMessages(sessionId, previous);
+        // #665: only the removed message goes back; pages read since the deletion started are kept.
+        if (removed) {
+          setMessages(sessionId, restoreRemovedMessage(useChatStore.getState().messagesBySession[sessionId] ?? [], previous, removed));
+        }
         toast.error(
           schemaText(schema, 'ui.chat.toast.delete_message_retry'),
         );
@@ -2061,7 +2080,7 @@ export function ChatColumn() {
         flush: () => flushPendingEdits(sessionId), isCurrent: () => useChatStore.getState().activeSessionId === sessionId,
         clear: clearTrackedTasks, select: addSession, remember: useChatStore.getState().rememberSession,
         done: (copied) => toast.success(schemaText(schema, 'ui.studio.message.branch_done'), branchCopiedCurrentState(copied) ? { description: schemaText(schema, 'ui.chat.branch_canvas_current') } : undefined),
-        failed: (error) => toast.error(error instanceof Error && error.message ? withErrorReference(error.message, error) : schemaText(schema, 'ui.studio.message.branch_failed')),
+        failed: (error) => toast.error(turnFailureText(error, [], schemaText(schema, 'ui.studio.message.branch_failed'))),
       });
     } finally {
       branchBusyRef.current = false;
@@ -2260,9 +2279,13 @@ export function ChatColumn() {
 
   const stopTurn = () => {
     // 真停止：请求服务端取消轮次（含在飞生成任务），再断开本地 SSE；失败时仍退回仅断开连接。
+    // #665: a cancel the server did not take is said, and the turn is still followed (it still runs).
     if (activeSessionId) {
-      void chatClient.cancelTurn(activeSessionId).catch(() => undefined);
-      controllers.current.get(activeSessionId)?.abort();
+      const sessionId = activeSessionId;
+      chatClient.cancelTurn(sessionId).then(
+        () => controllers.current.get(sessionId)?.abort(),
+        () => toast.error(schemaText(schema, 'ui.chat.toast.stop_failed')),
+      );
     }
   };
   // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting
@@ -2281,9 +2304,7 @@ export function ChatColumn() {
   const stopInBackground = () => {
     if (!activeSessionId) return;
     void chatClient.continueTurnInBackground(activeSessionId).catch((error: unknown) => {
-      toast.error(error instanceof Error && error.message !== ''
-        ? withErrorReference(error.message, error)
-        : schema.chat.presentation.messages.internal_error);
+      toast.error(turnFailureText(error, [], schema.chat.presentation.messages.internal_error));
     });
   };
 
@@ -2525,7 +2546,7 @@ export function ChatColumn() {
                     key={card.requestId}
                     model={card}
                     busy={card.source === 'turn' ? consentBusy : decisionBusy.has(card.requestId)}
-                    now={now}
+                    now={now + (pending.clockOffset ?? 0)}
                     error={decisionError[card.requestId] ?? null}
                     onDecide={(approved) => {
                       if (card.source === 'turn') void decideTurnConsent(approved);

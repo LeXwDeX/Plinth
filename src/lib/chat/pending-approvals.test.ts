@@ -11,7 +11,9 @@ import {
   hasExpired,
   parsePendingApprovals,
   PendingApprovalError,
+  readPendingApprovals,
   retainExpired,
+  serverClockOffset,
   type PendingApproval,
 } from '@/lib/chat/pending-approvals';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -60,6 +62,32 @@ describe('expired approval cards', () => {
     const items = displayedApprovals([approval('r1', past), approval('r2', future)], []);
     expect(countPending(items, now)).toBe(1);
     expect(items).toHaveLength(2);
+  });
+});
+
+describe('expiry on the server clock (#665)', () => {
+  it('reads the server clock lead from the Date header, 0 without one', () => {
+    const response = new Response(null, { headers: { Date: new Date(now).toUTCString() } });
+    expect(serverClockOffset(response, now + 10 * 60_000)).toBe(-10 * 60_000);
+    expect(serverClockOffset(new Response(null), now)).toBe(0);
+  });
+
+  it('a browser clock running ahead does not turn a decided card into an expired one to re-request', async () => {
+    const soon = '2026-10-09T10:05:00Z';
+    const browserNow = now + 10 * 60_000; // ten minutes fast
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
+      status: 200, headers: { Date: new Date(now).toUTCString() },
+    }));
+    const schema = { runtime: { http: { routes: { chat_session_pending_approvals: '/s/{sessionID}/approvals' } } } } as unknown as ProductSchema;
+    vi.spyOn(Date, 'now').mockReturnValue(browserNow);
+    try {
+      const read = await readPendingApprovals(schema, 's1', undefined, fetcher as unknown as typeof fetch);
+      // The card was decided in another tab, so the server no longer lists it; on the server it is not yet due.
+      expect(retainExpired([approval('r1', soon)], read.items, [], browserNow + read.clockOffset)).toEqual([]);
+      expect(countPending([approval('r2', soon)], browserNow + read.clockOffset)).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

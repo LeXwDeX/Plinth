@@ -303,7 +303,7 @@ export interface ChatBrowserClient {
     signal?: AbortSignal,
   ): Promise<AcceptedChatTurn>;
   // cancelTurn 请求服务端停止当前轮次（中断 LLM 与工具执行并尽力
-  // 取消已绑定的生成任务），返回是否有轮次被中断。
+  // 取消已绑定的生成任务），返回是否有轮次被中断；服务端拒绝时抛出 ChatBrowserError（#665）。
   cancelTurn(sessionID: string, signal?: AbortSignal): Promise<boolean>;
   /**
    * #137: whether the session's waiting turn may stop waiting while its Task keeps running. False
@@ -1381,7 +1381,10 @@ export function createChatBrowserClient(
         }),
         { method: 'POST', signal },
       );
-      if (!response.ok) return false;
+      // #665: a refused cancel is an error, not "nothing to cancel": the turn may still run.
+      if (!response.ok) {
+        throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status, responseRequestId(response));
+      }
       const payload = await responseObject(response);
       return payload[fields.turn_canceled] === true;
     },
@@ -1749,6 +1752,10 @@ export function createChatBrowserClient(
       // got no frame since. One timer is armed at a time: the first-frame timeout until the first
       // frame, then the silence window after every frame.
       let lastEventID: number | undefined;
+      // #665: without any event id the reconnect starts again from the original cursor and the server replays what was
+      // already delivered; that many events of the replay are skipped so no text or picture arrives twice.
+      let delivered = 0;
+      let replayed = 0;
       let reconnects = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;
       type StreamSource = ReturnType<typeof eventSourceFactory>;
@@ -1796,6 +1803,11 @@ export function createChatBrowserClient(
           }
           const event = decodeEvent(schema, parsed);
           if (event === null) return;
+          if (replayed > 0) {
+            replayed -= 1;
+            return;
+          }
+          delivered += 1;
           options.onEvent(event);
           if (event.type === 'done') finish();
         };
@@ -1816,6 +1828,7 @@ export function createChatBrowserClient(
         reconnects += 1;
         source.close();
         try {
+          replayed = lastEventID === undefined ? delivered : 0;
           source = open(lastEventID === undefined ? fromID : lastEventID + 1);
         } catch {
           fail();
