@@ -1907,7 +1907,9 @@ func (orchestrator *Orchestrator) Process(
 		}
 	}
 	// B4 工具循环：模型（例如同意获批后）可在同一轮内继续调用
-	// 工具，调用次数不设上限（#553），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
+	// 工具，单轮调用个数不设上限（#553），轮次数受
+	// chat.agent.max_tool_rounds_per_turn 约束（#665，重放的已落库计划
+	// 不再计数），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
 	// 累积在 assistant 消息上（停止可取消全部在飞任务）。
 	// 恢复路径的 completion 来自已落库计划（ID 已定型、内容已剥离
 	// DSML），标记 parsed 跳过重新解析与改写。
@@ -1929,6 +1931,12 @@ func (orchestrator *Orchestrator) Process(
 		startRound = turn.Checkpoint.Round
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) - startRound
 	}
+	// replayingPlan is set when round 0 replays a stored plan without a
+	// checkpoint (#665): its calls were planned, and counted against
+	// chat.agent.max_tool_rounds_per_turn, when the model wrote them. A new
+	// round after it is round effectiveRound-1 of the turn: the call IDs of
+	// that path skip one number past the stored rounds.
+	replayingPlan := resumingPlan && !checkpointResuming
 	// followUpErr is the follow-up request's failure that ended the loop, if
 	// any; a reply left empty by it is told from it.
 	var followUpErr error
@@ -1987,14 +1995,18 @@ func (orchestrator *Orchestrator) Process(
 				)
 				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil
 			}
+			planRound := effectiveRound
+			if replayingPlan {
+				planRound--
+			}
 			if limit := orchestrator.schema.Agent.MaxToolRoundsPerTurn; limit > 0 &&
-				effectiveRound >= limit && len(completion.ToolCalls) > 0 {
+				!(replayingPlan && round == 0) && planRound >= limit && len(completion.ToolCalls) > 0 {
 				// #665: the model kept calling tools past the turn's bound; the
 				// round past it does not run, and the reply says why it ended.
 				orchestrator.logger.Warn("对话回合工具轮次达到上限，本轮到此为止",
 					"session_id", command.SessionID,
 					"assistant_message_id", command.AssistantMessageID,
-					"rounds", effectiveRound,
+					"rounds", planRound,
 					"limit", limit,
 				)
 				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil

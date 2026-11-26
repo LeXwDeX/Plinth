@@ -218,3 +218,33 @@ func TestFailedAutomaticCompactionBacksOff(t *testing.T) {
 		t.Fatalf("summary calls = %d after the backoff started at %d", len(fixture.agent.summaries), tried)
 	}
 }
+
+// #665: a plan replayed after a consent wake or a restart is not counted
+// again against chat.agent.max_tool_rounds_per_turn: its stored calls (the
+// last at round limit-1) run and stay in the reply; only a round the model
+// plans after them is past the bound.
+func TestOrchestratorReplayedPlanIsNotCappedAgain(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
+	schema := configuredChatSchema(t)
+	schema.Agent.MaxToolRoundsPerTurn = 2
+	tool := schema.Tools[0].Name
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{Content: "r2", ToolCalls: []agents.ToolCall{budgetCall("r2", tool, "r2")}},
+		{Content: "r3"},
+	}}
+	tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}
+	reply := runBudgetTurn(t, service, schema, agent, tools, nil, func(assistant *chat.Message) {
+		assistant.Content = "planned"
+		assistant.ToolCalls = []chat.ToolCall{
+			{ID: assistant.ID + "_tool_0", Name: tool, Arguments: []byte(`{"prompt":"r0"}`)},
+			{ID: assistant.ID + "_r1_tool_0", Name: tool, Arguments: []byte(`{"prompt":"r1"}`)},
+		}
+	})
+	if executed := drainPrompts(tools); executed != "r0,r1" {
+		t.Fatalf("executed %q, want the replayed plan only", executed)
+	}
+	note := strings.ReplaceAll(schema.Presentation.Messages.ToolRoundsCapped, "{limit}", "2")
+	if len(reply.ToolCalls) != 2 || !strings.HasSuffix(reply.Content, note) {
+		t.Fatalf("reply = %q with %d calls", reply.Content, len(reply.ToolCalls))
+	}
+}
