@@ -35,6 +35,8 @@ interface ChatMessageProps {
   message: ChatMessageType;
   /** #546: the turn's task progress, drawn after the reply text and above its credit line (the newest reply only). */
   taskProgress?: ReactNode;
+  /** #641: the status bubble below the list already shows the running spinner, so the streaming reply does not draw its own. */
+  statusBubbleShown?: boolean;
   sessionId?: string | null;
   onDelete?: (msgId: string) => void;
   /** 更早的用户消息：把文字和图片放回输入框，不直接发送。 */
@@ -195,7 +197,7 @@ function ChatModelCards({ cards, sessionId, selfChecks }: {
  * chunk, and only the streaming message (and a message whose own tasks changed) receives new props.
  */
 export const ChatMessage = memo(function ChatMessage({
-  message, taskProgress, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, rejectedAssets, onReject, handleReferences,
+  message, taskProgress, statusBubbleShown, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, rejectedAssets, onReject, handleReferences,
 }: ChatMessageProps) {
   const { schema } = useProductSchema();
   const isUser = message.role === 'user';
@@ -273,7 +275,7 @@ export const ChatMessage = memo(function ChatMessage({
     trackedTasks.filter((task) => task.sessionId === sessionId),
   );
 
-  const spinner = message.isStreaming ? (
+  const spinner = message.isStreaming && !statusBubbleShown ? (
     <BrailleSpinner
       className="ml-1 text-inherit"
       speed={schema.runtime.frontend.spinner_frame_milliseconds}

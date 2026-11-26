@@ -2376,6 +2376,7 @@ export function ChatColumn() {
                   <ChatMessage
                     message={item.message}
                     taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}
+                    statusBubbleShown={statusBubbleShown(isStreaming, statusText, runningTaskCount)}
                     sessionId={activeSessionId}
                     onImageClick={openImageDetail}
                     handleReferences={sessionHandleReferences}
