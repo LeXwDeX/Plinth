@@ -55,7 +55,8 @@
 //     F630  #630：卡片上推进完视角后，3D 轮次的系统上下文含本组运行 ID；Agent 传视角 Task ID 时拒绝文案点名运行 ID
 //           （经 [[fake:echo-tool-results]] 读工具结果）；传运行 ID 时多视图 3D 提交成功。
 //     F631  #631：v1 是画板上唯一一层时单击版本条 v1、经 @画布 发 refine（reference_handles ["@img1"]）：新版本只连到 v1、
-//           提示词含「image 1:」不含「image 2」、详情来源「来自 v1」；对照组画板两层时快照仍在前（image 2 是 v1）。
+//           提示词含「image 1:」不含「image 2」、详情来源「来自 v1」；对照组把 v1 对齐进虚线框、框内两层（快照声明 2 层）
+//           时快照仍在前（image 2 是 v1；#648）。
 //     F632  #632：中文会话里 inspect_image、inspect_model、record_self_check 交回给模型的结果没有连续 6 个以上英文单词
 //           （标识符、数字、句柄不算词，同 #407 评测口径；经 [[fake:echo-tool-results]] 读工具结果）。
 //     F644  #644：当前图在画板上、「以画板为主」默认关时发 refine 不带画布来源、不上传快照；打开开关再发带画布来源，
@@ -3030,6 +3031,10 @@ async function itemF631() {
 
   // Control: with a second picture on the board the board is more than the named version, and #266 still leads
   // with the snapshot: the named version is image 2.
+  // #648: opening the session places the newest picture (the canteen) in the empty dashed frame, and putting v1 on
+  // the board places it next to the frame (#284), so the frame showed one layer: the canteen. The 1.9.1 #631 rule
+  // then sends that one-layer board as the canteen version (no snapshot) and the control failed. The control now
+  // moves v1 into the frame with the align buttons (one layer aligns to the frame), so the frame shows both.
   const control = await batchHSession(`${tag} 版本条两层画板`);
   await turn(control, '画一个皮质小袋 [[fake:tool:refine_image {"prompt":"a small leather pouch on a white background"}]]');
   await turn(control, '再画一个水壶 [[fake:tool:create_concept_sketch {"prompt":"a metal canteen on a white background"}]]');
@@ -3037,20 +3042,29 @@ async function itemF631() {
   const [c1, c2] = await handleTasks(control);
   if (!c1 || !c2) throw new Error('the control pictures have no handles');
   await openSession(control);
-  await onBoard(c1);
+  const c1Name = await onBoard(c1);
   await onBoard(c2);
+  await layerRow(c1Name).click();
+  await page.waitForTimeout(500);
+  for (const mode of ['hcenter', 'vcenter']) {
+    await tid('canvas-align-bar').first().getByRole('button', { name: await text(`ui.canvas.options.align_${mode}`) }).click();
+    await page.waitForTimeout(300);
+  }
+  await page.waitForTimeout(1200);
   await tileThumb(`n:${c1.id}`).click();
   await page.waitForTimeout(1500);
-  await check('#631', '对照：画板两层（v1 与另一张）时单击 v1 经 @画布 refine：快照仍在前（入边为上传快照与 v1），v1 是 image 2', async () => {
+  await check('#631', '对照：画板两层（v1 对齐进虚线框、与另一张同在框内）时单击 v1 经 @画布 refine：快照声明 2 层且在前（入边为上传快照与 v1），v1 是 image 2', async () => {
     const layers = await layerNames();
     const result = await refine(control, c1);
     const file = await shot('631', 'two-layers');
+    // The snapshot claim's layer count (Schema field canvas_layers): both pictures are inside the frame.
+    const claimed = Number((JSON.stringify(result.sent.body).match(/[Ll]ayers"\s*:\s*(\d+)/) || [])[1] || 0);
     return {
       // The snapshot has no purpose of its own, so only the named version's line shows, numbered 2; the lineage
       // has the snapshot upload and the version.
-      ok: Boolean(result.made) && /image 2:/.test(result.prompt) && result.sources.length === 2
+      ok: Boolean(result.made) && claimed === 2 && /image 2:/.test(result.prompt) && result.sources.length === 2
         && result.sources.some((source) => source.startsWith('upload:')) && result.sources.some((source) => source.includes(c1.id)),
-      detail: `画布图层=${JSON.stringify(layers)} POST ${field}=${JSON.stringify(result.sent.body[field] ?? null)} 新任务=${result.made?.id || '无'} `
+      detail: `画布图层=${JSON.stringify(layers)} 快照声明层数=${claimed} POST ${field}=${JSON.stringify(result.sent.body[field] ?? null)} 新任务=${result.made?.id || '无'} `
         + `入边来源=${JSON.stringify(result.sources)} 提示词「${result.prompt.slice(0, 200)}」 截图 ${file}`,
     };
   });

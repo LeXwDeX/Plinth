@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import defaultCatalog from '../../../internal/catalog/default_catalog.json';
+import { alignUpdates } from './align';
 import { artboardDiffersFromObject, canvasSnapshotClaim, currentObjectSource } from './current-object';
+import { imageNodePlacement } from './image-placement';
+import type { CanvasProductSchema } from '@/lib/product-schema';
 import type { CanvasNode } from '@/store/canvas-store';
+
+const frontend = (defaultCatalog.application.canvas as unknown as CanvasProductSchema).frontend;
 
 const artboard = { x: 0, y: 0, width: 512, height: 512 };
 const image = (id: string, extra: Partial<CanvasNode> = {}): CanvasNode => ({
@@ -104,5 +110,26 @@ describe('artboard snapshot claim (#272)', () => {
 
   it('claims no count for an empty artboard', () => {
     expect(canvasSnapshotClaim('/s', [image('far', { x: 2000 })], artboard)).toEqual({ kind: 'image', url: '/s' });
+  });
+
+  // #648: the dev-test geometry. The newest picture fills the empty frame; the version put on the board after it is
+  // placed next to the frame (#284), so the snapshot is one layer (the board the person sees), not two. Aligned
+  // into the frame (one layer aligns to the frame), it is counted.
+  it('counts what the dashed frame shows: a picture placed next to it is not in the snapshot until moved in', () => {
+    const frame = { x: -424, y: -624, width: 2048, height: 2048 };
+    const blank: CanvasNode = { ...image('blank'), ...frame, imageUrl: '', taskId: 'upload', blank: true, zIndex: 0 };
+    const canteen = image('canteen', { x: -88, y: 16, width: 1376, height: 768 });
+    const placed = imageNodePlacement([blank, canteen], { width: 2048, height: 1143 }, frontend, frame);
+    const pouch = image('pouch', { ...placed, zIndex: 2 });
+    expect(pouch.x).toBeGreaterThanOrEqual(frame.x + frame.width);
+    expect(canvasSnapshotClaim('/s', [blank, canteen, pouch], frame))
+      .toEqual({ kind: 'image', url: '/s', canvasLayers: 1, canvasSources: ['/a/canteen'] });
+    let nodes = [blank, canteen, pouch];
+    for (const mode of ['hcenter', 'vcenter'] as const) {
+      const updates = alignUpdates(nodes, ['pouch'], mode, frame);
+      nodes = nodes.map((node) => ({ ...node, ...updates.find((update) => update.id === node.id) }));
+    }
+    expect(canvasSnapshotClaim('/s', nodes, frame))
+      .toEqual({ kind: 'image', url: '/s', canvasLayers: 2, canvasSources: ['/a/canteen', '/a/pouch'] });
   });
 });
