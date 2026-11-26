@@ -5,7 +5,7 @@ import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { requestPermissionFromGesture } from '@/lib/workspace/completion-notice';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
-const application = defaultCatalog.application as unknown as { content: { messages: Record<string, string> }; capabilities: unknown[]; runtime: { frontend: { percentage_multiplier: number } } };
+const application = defaultCatalog.application as unknown as { content: { messages: Record<string, string> }; capabilities: unknown[]; runtime: { frontend: { percentage_multiplier: number; toaster: { duration_milliseconds: number } } } };
 const englishMessages = (defaultCatalog.application as unknown as {
   localization: { bundles: { en: { messages: Record<string, string> } } };
 }).localization.bundles.en.messages;
