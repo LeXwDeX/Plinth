@@ -479,16 +479,24 @@ func (e *Executor) threeViewSubjectType(requested string) (string, string) {
 		Replace(e.threeView.Messages.SubjectInvalid)
 }
 
-// continueThreeView advances a budget continuation after one view's Task
-// finished (#243): it settles and reviews that view, submits the next required
-// one the plan covers, and ends the tool call only when the group is complete
+// continueThreeView advances a continuation (the budget plan's, #243, or the
+// auto mode's, #663) after one view's Task finished: it settles and reviews
+// that view, submits the next view the basis covers, and ends the tool call
+// only when the group is complete
 // or paused for a person. Accepted views travel to the Agent as same-turn
 // pictures so it can check clothing and colors.
 func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
-	result, err := e.threeViewService.Continue(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID)
+	// The call replays with the arguments it was made with: a four-view request
+	// (include_right) also makes the right view when the session approves every
+	// paid step (#663).
+	var args struct {
+		IncludeRight bool `json:"include_right"`
+	}
+	_ = json.Unmarshal(command.Call.Arguments, &args)
+	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, command.AssistantMessageID, args.IncludeRight)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}
