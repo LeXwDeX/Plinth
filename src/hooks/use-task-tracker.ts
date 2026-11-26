@@ -50,7 +50,7 @@ export function useTaskTracker(): void {
       progressMaximum: schema.runtime.frontend.percentage_multiplier,
       signal: controller.signal,
       register: (input) => {
-        if (!controller.signal.aborted) useWorkspaceStore.getState().registerTask({ ...input, restored: true });
+        if (!controller.signal.aborted) useWorkspaceStore.getState().registerTask(input);
       },
     }).catch(() => {
       // 服务端任务列表不可用时保持静默：对话内 SSE 恢复仍是主路径。

@@ -67,8 +67,8 @@ describe('the canvas is a ratio (#653)', () => {
     const limits = { minimum_dimension: 64, maximum_dimension: 8192 };
     expect(canvasPixelsForRatio('16:9', { width: 2048, height: 2048 }, artboard, limits)).toEqual({ width: 2048, height: 1152 });
     expect(canvasPixelsForRatio('9:16', { width: 2048, height: 1152 }, artboard, limits)).toEqual({ width: 1152, height: 2048 });
-    // A larger canvas keeps its long edge; a small one grows to the default's.
-    expect(canvasPixelsForRatio('4:3', { width: 4096, height: 4096 }, artboard, limits)).toEqual({ width: 4096, height: 3072 });
+    // Any canvas takes the default long edge: a large legacy canvas can be made smaller, a small one grows.
+    expect(canvasPixelsForRatio('4:3', { width: 4096, height: 4096 }, artboard, limits)).toEqual({ width: 2048, height: 1536 });
     expect(canvasPixelsForRatio('1:1', { width: 512, height: 512 }, artboard, limits)).toEqual({ width: 2048, height: 2048 });
     for (const ratio of canvasRatioOptions(ratioPixels)) {
       expect(canvasShapeOf(canvasPixelsForRatio(ratio, null, artboard, limits)!, ratioPixels).label).toBe(ratio);

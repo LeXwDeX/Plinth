@@ -287,8 +287,9 @@ export function canvasRatioOptions(tables: RatioTables): string[] {
 }
 
 /**
- * The canvas pixels for a ratio the person picks (#653): the long edge stays (at least the Schema default's), so
- * content keeps its pixel size; the short edge follows the ratio, within the Schema's canvas range.
+ * The canvas pixels for a ratio the person picks (#653): the long edge is the Schema default's, so picking a ratio
+ * also brings a canvas that was saved much larger (or smaller) back to the default size; the short edge follows the
+ * ratio, within the Schema's canvas range. The resize is one undo step.
  */
 export function canvasPixelsForRatio(
   ratio: string,
@@ -300,7 +301,7 @@ export function canvasPixelsForRatio(
   if (parts.length !== 2 || !(parts[0] > 0) || !(parts[1] > 0)) return null;
   const [width, height] = parts;
   const clamp = (value: number) => Math.min(limits.maximum_dimension, Math.max(limits.minimum_dimension, Math.round(value)));
-  const long = clamp(Math.max(current ? Math.max(current.width, current.height) : 0, artboard.default_width, artboard.default_height));
+  const long = clamp(Math.max(artboard.default_width, artboard.default_height));
   return width >= height ? { width: long, height: clamp(long * height / width) } : { width: clamp(long * width / height), height: long };
 }
 

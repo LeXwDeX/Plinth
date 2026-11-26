@@ -109,6 +109,8 @@ describe('group state', () => {
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded')])).toBe(false);
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('running', true)])).toBe(true);
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('failed', true)])).toBe(true);
+    // A right view the person denied was never started: the card stays a three-view.
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('denied', true)])).toBe(false);
   });
 });
 
