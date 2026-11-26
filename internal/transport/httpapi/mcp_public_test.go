@@ -510,7 +510,7 @@ func TestMCPFailedTaskCarriesTheAttributionAndTheAdvice(t *testing.T) {
 	failure := retry.structured["task"].(map[string]any)["failure"].(map[string]any)
 	blockFailure := retry.status(t)["failure"].(map[string]any)
 	if failure["category"] != "upstream_capacity" || failure["next_action"] != "retry_later" || failure["retryable"] != true ||
-		failure["user_decision_required"] != false || !strings.Contains(failure["advice"].(string), "retry later") ||
+		failure["user_decision_required"] != false || !strings.Contains(failure["advice"].(string), "再重试") ||
 		blockFailure["task_id"] != string(busy.ID) || blockFailure["category"] != "upstream_capacity" || blockFailure["next_action"] != "retry_later" {
 		t.Fatalf("failure = %v block = %v", failure, blockFailure)
 	}

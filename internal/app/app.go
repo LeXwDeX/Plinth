@@ -1278,6 +1278,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
 		ConsentReconcileContent:   applicationSchema.Chat.Agent.ConsentReconcileContent,
 		ConsentLimitContent:       applicationSchema.Chat.Agent.ConsentLimitContent,
+		Texts:                     texts,
 		TaskObservationTimeout:    time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
 		Projection: func(capability, model string) json.RawMessage {
 			return buildAgentOfferingsProjection(

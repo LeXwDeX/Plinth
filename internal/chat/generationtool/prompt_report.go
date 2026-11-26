@@ -113,7 +113,7 @@ func (executor *Executor) promptReport(
 	model := executor.localized(command, OfferingModelName(offering))
 	label := func(id string) string {
 		if text := labels[id]; text != "" {
-			return text
+			return executor.localized(command, text)
 		}
 		return id
 	}
@@ -137,7 +137,7 @@ func (executor *Executor) promptReport(
 				"{length}", fmt.Sprint(utf8.RuneCountInString(trace.Final)+trace.Truncated),
 				"{maximum}", fmt.Sprint(trace.MaxLength),
 				"{excess}", fmt.Sprint(trace.Truncated),
-				"{unit}", "characters",
+				"{unit}", executor.promptUnit(command),
 			).Replace(executor.localized(command, template))
 			note.Layers = append(note.Layers, promptNoteLayer{Layer: label(promptLayerTruncation), Text: text})
 		}
@@ -188,9 +188,18 @@ func (executor *Executor) promptOverLimitFailure(
 		"{length}", fmt.Sprint(length),
 		"{maximum}", fmt.Sprint(maximum),
 		"{excess}", fmt.Sprint(length-maximum),
-		"{unit}", "characters",
+		"{unit}", executor.promptUnit(command),
 	).Replace(executor.localized(command, template))
 	return executor.refusal(command, refusalPromptTooLong, message)
+}
+
+// promptUnit is the {unit} word of the prompt length texts in the turn's
+// locale (#632); a Catalog without unit_text keeps "characters".
+func (executor *Executor) promptUnit(command chat.ToolCommand) string {
+	if unit := executor.chat.Agent.PromptReport.UnitText; unit != "" {
+		return executor.localized(command, unit)
+	}
+	return "characters"
 }
 
 // defaultNegativePromptValue is the default negative prompt a tool injects

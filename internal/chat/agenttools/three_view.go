@@ -124,7 +124,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// reach here and is not counted again.
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
 			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitContent, NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
 		// The frame of every view follows the source subject's shape instead
 		// of the Offering's default square (#283), or the source picture's own
@@ -435,7 +435,7 @@ func (e *Executor) TaskIdentityForCall(ctx context.Context, command chat.ToolCom
 func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offering generation.Offering, err error) (chat.ToolResult, error) {
 	deadline := e.threeViewWaitUntil(command, offering)
 	if !time.Now().Before(deadline) {
-		return chat.ToolResult{TaskID: taskID, Error: e.reconcileContent}, err
+		return chat.ToolResult{TaskID: taskID, Error: e.reconcileText(command)}, err
 	}
 	return chat.ToolResult{TaskID: taskID, AwaitTask: true, WaitUntil: deadline}, err
 }

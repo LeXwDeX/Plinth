@@ -5623,6 +5623,9 @@ type ChatPromptReportSchema struct {
 	// TooLongTemplate is the refusal when OverLimit is "refuse". Fields:
 	// {model}, {length}, {maximum}, {excess}, {unit}.
 	TooLongTemplate string `json:"too_long_template"`
+	// UnitText is the {unit} word of both templates, in the default locale
+	// (#632). Empty keeps the historical "characters".
+	UnitText string `json:"unit_text,omitempty"`
 	// Layers labels each layer id. The layer ids are reference_template,
 	// previous_prompt_template, purposes_template, skill_template,
 	// style_lock, negative_prompt, truncation and prepared_input.

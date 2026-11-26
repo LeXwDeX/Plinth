@@ -355,7 +355,7 @@ func TestAgentReconcileContentIsRequiredAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const value = `"consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request"`
+	const value = `"consent_reconcile_content": "上一次付费提交的结果未知；在任何新的付费生成之前，先恢复或核实原来那次调用，不要再提交新的付费请求"`
 	mutated := bytes.Replace(document, []byte(value), []byte(`"consent_reconcile_content": ""`), 1)
 	if bytes.Equal(mutated, document) {
 		t.Fatal("default catalog reconcile content not found")

@@ -236,6 +236,9 @@ type Config struct {
 	// consent_reconcile_content).
 	ConsentLimitContent     string
 	ConsentReconcileContent string
+	// Texts gives both consent texts in the turn's locale (#632); nil keeps
+	// the default-locale copy.
+	Texts *catalog.TextLocalizer
 }
 
 type Executor struct {
@@ -299,6 +302,16 @@ type Executor struct {
 	// generation call limit and an unknown three-view submission outcome.
 	limitContent     string
 	reconcileContent string
+	texts            *catalog.TextLocalizer
+}
+
+// limitText and reconcileText are the consent texts in the turn's locale.
+func (e *Executor) limitText(command chat.ToolCommand) string {
+	return e.texts.Text(command.Options.Locale, e.limitContent)
+}
+
+func (e *Executor) reconcileText(command chat.ToolCommand) string {
+	return e.texts.Text(command.Options.Locale, e.reconcileContent)
 }
 
 type SkillReferenceResolver interface {
@@ -424,6 +437,7 @@ func New(config Config) (*Executor, error) {
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
 		limitContent:           config.ConsentLimitContent,
 		reconcileContent:       config.ConsentReconcileContent,
+		texts:                  config.Texts,
 	}, nil
 }
 
@@ -956,7 +970,7 @@ func (e *Executor) generateWithParams(
 	}
 	if !alreadyPrepared && e.generationLimitReachedForCall(scope, command.AssistantMessageID,
 		command.Call.ID, command.PriorGenerationCalls) {
-		return chat.ToolResult{AgentContent: e.limitContent, NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
 	command.Options = e.mergedOptions(scope, command)
