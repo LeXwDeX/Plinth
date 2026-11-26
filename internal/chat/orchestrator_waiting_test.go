@@ -22,7 +22,7 @@ func (a waitingAgent) Stream(_ context.Context, request agents.Request, _ func(a
 		}
 	}
 	return agents.Completion{ToolCalls: []agents.ToolCall{
-		{ID: "control", Name: a.control, Arguments: []byte(`{"params":{}}`)},
+		{ID: "control", Name: a.control, Arguments: []byte(`{"offering_id":"configured","params":{}}`)},
 		{ID: "paid", Name: a.generate, Arguments: []byte(`{"prompt":"paint"}`)},
 	}}, nil
 }

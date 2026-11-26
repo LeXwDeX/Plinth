@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/schema/toolschema"
 )
 
 // vetToolArguments makes the arguments of a completion's tool calls safe to
@@ -22,11 +25,37 @@ import (
 // decides what that means, as before; only the bytes are normalised so that
 // they always encode. The calls slice is not modified; a copy is returned
 // when something had to change.
-func (orchestrator *Orchestrator) vetToolArguments(command ProcessTurn, calls []agents.ToolCall) ([]agents.ToolCall, []string) {
+//
+// #665: valid JSON for an Agent tool must also match the tool's declared
+// parameters (required, type, enum, length, item and number bounds) in the
+// registry the turn runs from. A property the declaration does not name is
+// left to the tool, as before: most tools ignore it, and a strict one names it
+// in its own refusal. Such a call is not run either; its arguments are kept,
+// and its result names the field (toolArgumentsInvalidText). Generation tools
+// keep their lenient decoding: their arguments are mapped onto Offering
+// parameters, which check them.
+func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command ProcessTurn, calls []agents.ToolCall) ([]agents.ToolCall, []string) {
 	var malformed []string
 	vetted, cloned := calls, false
+	registry := orchestrator.turnRegistry(ctx)
 	for index, call := range calls {
 		arguments, invalid := vetArguments(call.Arguments)
+		// A tool this reply cannot run, or one its scope refuses, keeps the
+		// answer that says so; its arguments are not the problem.
+		_, offered := registry.resolve(call.Name, false)
+		if !invalid && offered && !orchestrator.scopeRefuses(registry, call.Name, command.Options.AgentScope, false) {
+			if reason := agentToolArgumentsViolation(registry, call); reason != "" {
+				malformed = append(malformed, call.ID)
+				orchestrator.logger.Warn(
+					"模型给 Agent 工具的参数不符合工具定义，该调用不执行，改以工具错误交还模型",
+					"session_id", command.SessionID,
+					"assistant_message_id", command.AssistantMessageID,
+					"call_id", call.ID,
+					"tool", call.Name,
+					"reason", reason,
+				)
+			}
+		}
 		if invalid {
 			malformed = append(malformed, call.ID)
 			// The log names the call and the size, never the text: the
@@ -66,10 +95,68 @@ func vetArguments(raw json.RawMessage) (json.RawMessage, bool) {
 	}
 }
 
-// toolArgumentsInvalidText is the tool result of a call whose arguments were
-// not valid JSON, in the turn's locale.
-func (orchestrator *Orchestrator) toolArgumentsInvalidText(ctx context.Context) string {
-	return orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.ToolArgumentsInvalid)
+// agentToolArgumentsViolation is where a call's arguments break the declared
+// parameters of the Agent tool it names (#665), or "" when they match, the
+// tool is not an Agent tool, or the registry does not know it. The reason
+// names the path and the rule, never a value the model wrote.
+func agentToolArgumentsViolation(registry *toolRegistry, call agents.ToolCall) string {
+	if registry == nil {
+		return ""
+	}
+	tool, known := registry.byName[call.Name]
+	if !known || tool.generation != nil {
+		return ""
+	}
+	schema, err := toolschema.Parse(tool.parameters, catalog.AgentToolArgumentOptions)
+	if err != nil {
+		// A frozen declaration from before #665 may not parse; it keeps the
+		// lenient handling it was written for.
+		return ""
+	}
+	openObjects(schema)
+	arguments := bytes.TrimSpace(call.Arguments)
+	if len(arguments) == 0 {
+		arguments = []byte(`{}`)
+	}
+	var violation *toolschema.ValidationError
+	if err := schema.Validate(arguments); errors.As(err, &violation) {
+		field := strings.TrimPrefix(strings.TrimPrefix(violation.Path, "$"), ".")
+		if field == "" {
+			return "the arguments " + violation.Message
+		}
+		return field + " " + violation.Message
+	}
+	return ""
+}
+
+// openObjects drops additionalProperties: false from a parsed declaration, so
+// only the declared properties' own rules are enforced (see vetToolArguments).
+func openObjects(schema *toolschema.Schema) {
+	if schema == nil {
+		return
+	}
+	if schema.AdditionalProperties != nil && !*schema.AdditionalProperties {
+		schema.AdditionalProperties = nil
+	}
+	openObjects(schema.Items)
+	openObjects(schema.AdditionalSchema)
+	for _, property := range schema.Properties {
+		openObjects(property)
+	}
+}
+
+// toolArgumentsInvalidText is the tool result of a call that was not run
+// because of its arguments, in the turn's locale: invalid JSON, or (#665)
+// arguments that break the Agent tool's declaration, naming the field.
+func (orchestrator *Orchestrator) toolArgumentsInvalidText(ctx context.Context, call agents.ToolCall) string {
+	messages := orchestrator.schema.Presentation.Messages
+	if template := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(template) != "" {
+		if reason := agentToolArgumentsViolation(orchestrator.turnRegistry(ctx), call); reason != "" {
+			return strings.NewReplacer("{tool}", call.Name, "{reason}", reason).
+				Replace(orchestrator.text(ctx, template))
+		}
+	}
+	return orchestrator.text(ctx, messages.ToolArgumentsInvalid)
 }
 
 // toolUnavailableText is the tool result of a call to a tool this reply

@@ -148,3 +148,38 @@ func TestFreeFormObjectsAreDeliberateAndNarrow(t *testing.T) {
 		t.Fatal("a free-form object was accepted without FreeFormObjects")
 	}
 }
+
+// #665: the chat Agent tools declare strict bounds and typed maps; both are
+// parsed and enforced, never silently ignored.
+func TestExclusiveBoundsAndTypedMapsAreEnforced(t *testing.T) {
+	schema, err := Parse(json.RawMessage(`{"type":"object","properties":{
+		"width":{"type":"number","exclusiveMinimum":0,"maximum":1},
+		"labels":{"type":"object","additionalProperties":{"type":"string","maxLength":3}}
+	},"additionalProperties":false}`), Options{RootObject: true, ClosedObjects: true, FreeFormObjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]string{
+		`{"width":0.5,"labels":{"a":"xy"}}`: "",
+		`{"width":0}`:                       "$.width: must be above 0",
+		`{"labels":{"a":"long"}}`:           "$.labels.a: must have at most 3 characters",
+		`{"labels":{"a":1}}`:                "$.labels.a: must be of type string",
+	} {
+		got := ""
+		if err := schema.Validate(json.RawMessage(raw)); err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Fatalf("%s: got %q, want %q", raw, got, want)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"number","exclusiveMinimum":1,"exclusiveMaximum":1}`,
+		`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":{"type":"string"}}`,
+		`{"type":"string","exclusiveMinimum":1}`,
+	} {
+		if _, err := Parse(json.RawMessage(raw), Options{}); err == nil {
+			t.Fatalf("%s: parsed, want a refusal", raw)
+		}
+	}
+}

@@ -49,7 +49,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 				return chat.ToolResult{NoSubmission: true}, stopErr
 			}
 			if stopped {
-				return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+				return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 			}
 			return e.continueThreeView(ctx, command, run, observe)
 		}
@@ -63,7 +63,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return chat.ToolResult{NoSubmission: true}, stopErr
 	}
 	if stopped {
-		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 	}
 	created := false
 	// release ends the duplicate guard's lock of a new group (#665).
@@ -82,7 +82,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			IncludeRight          json.RawMessage `json:"include_right"`
 		}
 		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
-			return chat.ToolResult{Error: "invalid three-view arguments", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ArgumentsInvalid, NoSubmission: true}, nil
 		}
 		// A four-view request must say so with a JSON boolean: a string "true"
 		// silently made three views before (#665).
@@ -108,7 +108,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		}
 		selected := e.threeViewModel(command, toolDomain)
 		if selected.ID == "" {
-			return chat.ToolResult{AgentContent: "所选模型没有可用的三视图图生图 Offering。", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ModelUnavailable, NoSubmission: true}, nil
 		}
 		urls, handleErr := e.threeViewImages(command, args.ReferenceImageIndices, args.ReferenceHandles)
 		if handleErr != "" {
@@ -121,7 +121,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			Owner: generation.OwnerID(command.OwnerID), SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
 		}, urls)
 		if err != nil || len(assets) != 1 || assets[0] == "" {
-			return chat.ToolResult{AgentContent: "所选图片不可用，请重新选择。", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ImageUnavailable, NoSubmission: true}, nil
 		}
 		revision := e.skillRecipes[purpose.RecipeID]
 		if revision == "" {
@@ -204,7 +204,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	case executiongrant.Pending:
 		return chat.ToolResult{Suspend: true, NoSubmission: true}, nil
 	case executiongrant.Denied:
-		return chat.ToolResult{AgentContent: "三视图生成未获批准；任务没有提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.Denied, NoSubmission: true}, nil
 	case executiongrant.Claimed:
 		return chat.ToolResult{Suspend: true}, nil
 	case executiongrant.Bound:
@@ -218,7 +218,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	if stopped {
-		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 	}
 	run, accepted, err := e.skillRuntime.SubmitStep(context.WithoutCancel(ctx), generation.OwnerID(command.OwnerID), run.ID, stepKey)
 	if err != nil {
@@ -786,10 +786,18 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 	if grant.ApprovedByPolicy() || grant.ApprovedByBudget() {
 		approval = messages.ApprovalPolicy
 	}
+	// #665: a run the server continues (the same predicate as continuationRun
+	// in createThreeView) says so; the other receipt tells the Agent the views
+	// wait on the card.
+	template := messages.AgentStarted
+	if grant.BudgetEligible && messages.AgentStartedContinuing != "" &&
+		e.threeViewService != nil && e.threeViewService.ContinuationEnabled() {
+		template = messages.AgentStartedContinuing
+	}
 	return chat.ToolResult{TaskID: grant.TaskID, AgentContent: strings.NewReplacer(
 		"{run}", run.ID, "{view}", execution.Step.Spec.Label, "{approval}", approval,
 		"{credits}", threeViewPriceText(task), "{task}", string(task.ID),
-	).Replace(messages.AgentStarted)}, nil
+	).Replace(template)}, nil
 }
 
 // threeViewImages picks the source picture: handles (and the selection alias)

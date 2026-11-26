@@ -1973,7 +1973,7 @@ func (orchestrator *Orchestrator) Process(
 			// a call whose arguments are not valid JSON is not run, and the
 			// model gets the error instead. A checkpoint being resumed was
 			// vetted when it was written.
-			completion.ToolCalls, malformedCalls = orchestrator.vetToolArguments(command, completion.ToolCalls)
+			completion.ToolCalls, malformedCalls = orchestrator.vetToolArguments(ctx, command, completion.ToolCalls)
 			cutReply = completion.FinishReason
 			if cutReply != "" && len(completion.ToolCalls) > 0 {
 				// #665: a round the upstream cut is not whole. Its calls' arguments
@@ -3258,7 +3258,7 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			results = append(results, agents.Message{
 				Role:       orchestrator.schema.Roles.Tool,
-				Content:    orchestrator.toolArgumentsInvalidText(ctx),
+				Content:    orchestrator.toolArgumentsInvalidText(ctx, call),
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])

@@ -786,6 +786,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			}
 		}
 	}
+	if err := validateChatToolParameters(schema); err != nil {
+		return err
+	}
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
@@ -2025,6 +2028,10 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
+		// #665: the recovery texts of a call that submits nothing.
+		"turn_stopped": messages.TurnStopped, "model_unavailable": messages.ModelUnavailable,
+		"image_unavailable": messages.ImageUnavailable, "arguments_invalid": messages.ArgumentsInvalid,
+		"denied": messages.Denied,
 	}
 	if schema.Continuation.Enabled || subjectTemplates || len(schema.SubjectTypes) > 0 {
 		required["agent_completed"] = messages.AgentCompleted
@@ -2057,6 +2064,10 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
+		}
+		if continuing := messages.AgentStartedContinuing; strings.TrimSpace(continuing) != "" &&
+			!strings.Contains(continuing, field) {
+			return fmt.Errorf("three_view.messages.agent_started_continuing 必须包含 %s", field)
 		}
 	}
 	for _, required := range []struct {
@@ -2767,6 +2778,10 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 func validateToolRejectionTexts(messages ChatMessageTexts) error {
 	if strings.TrimSpace(messages.ToolArgumentsInvalid) == "" {
 		return errors.New("presentation.tool_arguments_invalid 不能为空")
+	}
+	if text := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{tool}") || !strings.Contains(text, "{reason}")) {
+		return errors.New("presentation.tool_arguments_schema_invalid 须含 {tool} 与 {reason}")
 	}
 	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
 		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")
