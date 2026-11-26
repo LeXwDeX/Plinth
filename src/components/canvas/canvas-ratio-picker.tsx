@@ -19,7 +19,7 @@ export function CanvasRatioPicker({ sessionId, delivery, disabled = false }: { s
   const label = schemaText(schema, 'ui.canvas.size.ratio_label');
   const options = canvasRatioOptions(artboard).map((value) => ({ value, label: value }));
   const choose = (ratio: string) => {
-    const pixels = canvasPixelsForRatio(ratio, delivery.pixels, artboard, schema.canvas.limits);
+    const pixels = canvasPixelsForRatio(ratio, artboard, schema.canvas.limits);
     if (pixels && !samePixels(pixels, delivery.pixels)) applyCanvasResize(schema, sessionId, pixels);
   };
   return (

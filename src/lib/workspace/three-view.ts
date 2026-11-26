@@ -165,7 +165,7 @@ export function requestedView(slot: Pick<ThreeViewSlot, 'optional' | 'status'>):
  * title instead of "三视图". The group's own label is the Schema's one fixed three-view name.
  */
 export function fourViewRequested(slots: readonly Pick<ThreeViewSlot, 'optional' | 'status'>[]): boolean {
-  return slots.some((slot) => slot.optional && requestedView(slot));
+  return slots.some((slot) => slot.optional && slot.status !== 'denied' && requestedView(slot));
 }
 
 /** Finished and asked-for views of a group, the one count the card and the version strip both show (#633). */
