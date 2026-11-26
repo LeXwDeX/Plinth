@@ -43,7 +43,10 @@ func (store *briefStoreFake) UpdateProductionBrief(
 		next[name] = value
 	}
 	for name, value := range patch {
-		if trimmed := strings.TrimSpace(string(value)); trimmed == "" || trimmed == "null" {
+		switch strings.TrimSpace(string(value)) {
+		case "", "null":
+			continue // kept as stored, like chat.Service
+		case `""`:
 			delete(next, name)
 			continue
 		}

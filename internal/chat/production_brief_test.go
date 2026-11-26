@@ -427,9 +427,27 @@ func TestUpdateProductionBriefKeepsFieldsTheChoiceCardReplayOmits(t *testing.T) 
 	if value, ok := stored.Integer("triangle_budget"); !ok || value != 40000 {
 		t.Fatalf("triangle budget after the replay = %d %v", value, ok)
 	}
-	// A present empty value clears only that field.
+	// #665 (wave 3): null is an omitted field, as the tool-argument
+	// validation treats it, so a model writing null for every optional field
+	// keeps the confirmed style, rig flag and budget.
 	_, stored, err = service.UpdateProductionBrief(ctx, "owner-a", "session-a", map[string]json.RawMessage{
-		"style": json.RawMessage(`null`),
+		"purpose":         json.RawMessage(`"render"`),
+		"style":           json.RawMessage(`null`),
+		"needs_rig":       json.RawMessage(`null`),
+		"triangle_budget": json.RawMessage(`null`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Text("style") != "写实" || !stored.Flag("needs_rig") {
+		t.Fatalf("a null argument cleared a stored field: %+v", stored)
+	}
+	if value, ok := stored.Integer("triangle_budget"); !ok || value != 40000 {
+		t.Fatalf("a null triangle budget cleared it: %d %v", value, ok)
+	}
+	// A present empty string clears only that field.
+	_, stored, err = service.UpdateProductionBrief(ctx, "owner-a", "session-a", map[string]json.RawMessage{
+		"style": json.RawMessage(`""`),
 	})
 	if err != nil {
 		t.Fatal(err)
