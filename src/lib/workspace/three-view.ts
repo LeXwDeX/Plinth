@@ -160,6 +160,14 @@ export function requestedView(slot: Pick<ThreeViewSlot, 'optional' | 'status'>):
   return !slot.optional || slot.status !== 'not_started';
 }
 
+/**
+ * Whether the group was asked for the right view too (a four-view request starts it, #633): the card says so in its
+ * title instead of "三视图". The group's own label is the Schema's one fixed three-view name.
+ */
+export function fourViewRequested(slots: readonly Pick<ThreeViewSlot, 'optional' | 'status'>[]): boolean {
+  return slots.some((slot) => slot.optional && requestedView(slot));
+}
+
 /** Finished and asked-for views of a group, the one count the card and the version strip both show (#633). */
 export function groupProgress(slots: readonly Pick<ThreeViewSlot, 'optional' | 'status'>[]): { done: number; total: number } {
   const requested = slots.filter(requestedView);
