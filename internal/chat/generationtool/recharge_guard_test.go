@@ -109,7 +109,7 @@ func TestRechargeGuardForcesTheCardWhateverTheApprovalMode(t *testing.T) {
 			if recharge != "task_old" {
 				t.Fatalf("recharge task = %q", recharge)
 			}
-			if !strings.Contains(content, "task_old") || !strings.Contains(content, "charges again") {
+			if !strings.Contains(content, "task_old") || !strings.Contains(content, "再次扣费") {
 				t.Fatalf("the Agent is not told why the card waits: %q", content)
 			}
 		})
