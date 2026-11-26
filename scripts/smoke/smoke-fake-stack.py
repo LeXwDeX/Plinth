@@ -2868,7 +2868,7 @@ def scenario_multiview_text(work, api, offerings):
     session = new_session(api)
     # #548: the resident craft keeps only the route; the four-view rule itself
     # lives in the system four-view Skill, which the Agent reads with use_skill.
-    route = "先 use_skill 读对应 Skill"
+    route = "否则先 use_skill 读"
     ask = f"生成一个圣母玛丽亚的4视图 [[fake:system-contains {route}]]"
     if not _visual_anchor_turn(api, session, ask, domain="image"):
         record("multiview-text: the four-view route reaches the Agent", False, "turn did not finish")
