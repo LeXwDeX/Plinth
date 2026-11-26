@@ -48,7 +48,7 @@ const hintOf = (html: string, testId: string) => {
 beforeEach(() => { mock.schema = catalog; });
 afterEach(() => {
   useChatStore.setState({ activeSessionId: null, streamingBuffers: {}, toolCallCounts: {}, messagesBySession: {} });
-  useSessionContextStore.setState({ context: {}, compacting: {} });
+  useSessionContextStore.setState({ context: {}, compacting: {}, reasoning: {} });
 });
 
 describe('the context meter (#322)', () => {
@@ -153,6 +153,22 @@ describe('the context meter (#322)', () => {
 });
 
 describe('the tool call counter (#553: this turn only, no limit)', () => {
+  it('names the thinking level the next turn sends before the count, in capitals, without "this turn" (#639)', () => {
+    open({ tokens: 22_500, window: 1_000_000, compactions: [] });
+    useChatStore.setState({ messagesBySession: { s1: [{ id: 'm1', role: 'assistant' as const, content: 'ok', createdAt: 1, toolCallCount: 11 }] } });
+    useSessionContextStore.setState({ reasoning: { s1: { effort: 'high', levels: ['low', 'high'], defaultLevel: 'low' } } });
+    const html = renderToStaticMarkup(<ContextMeter />);
+    const shown = html.match(/data-testid="composer-tool-calls"[^>]*>([^<]*)</)?.[1] ?? '';
+    expect(shown).toBe('思考强度：high，工具调用次数：11');
+    expect(tag(html, 'composer-tool-calls')).toContain(PICKER_UPPERCASE_CLASS);
+    expect(shown).not.toContain('本轮对话');
+    // No pick falls back to the model's own default; a model without levels shows the count alone.
+    useSessionContextStore.setState({ reasoning: { s1: { effort: '', levels: ['low', 'high'], defaultLevel: 'low' } } });
+    expect(renderToStaticMarkup(<ContextMeter />)).toContain('思考强度：low，工具调用次数：11');
+    useSessionContextStore.setState({ reasoning: { s1: { effort: '', levels: [], defaultLevel: '' } } });
+    expect(renderToStaticMarkup(<ContextMeter />)).toContain('>工具调用次数：11<');
+  });
+
   const assistant = (toolCallCount: number | undefined) => ({ id: 'm1', role: 'assistant' as const, content: 'ok', createdAt: 1, ...(toolCallCount === undefined ? {} : { toolCallCount }) });
   const render = () => renderToStaticMarkup(<ContextMeter />);
   const text = (count: number) => messages['ui.studio.tool_calls.turn'].replace('{count}', String(count));
@@ -164,8 +180,8 @@ describe('the tool call counter (#553: this turn only, no limit)', () => {
   });
 
   it('reads "this turn" from the Schema with the count alone: no slash, no limit', () => {
-    expect(messages['ui.studio.tool_calls.turn']).toBe('本轮对话 工具调用次数：{count}');
-    expect(defaultCatalog.application.localization.bundles.en.messages['ui.studio.tool_calls.turn']).toBe('Tool calls this turn: {count}');
+    expect(messages['ui.studio.tool_calls.turn']).toBe('工具调用次数：{count}');
+    expect(defaultCatalog.application.localization.bundles.en.messages['ui.studio.tool_calls.turn']).toBe('Tool calls: {count}');
     useChatStore.setState({ messagesBySession: { s1: [assistant(120)] } });
     const shown = counter(render());
     expect(shown).toBe(text(120));
