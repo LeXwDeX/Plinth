@@ -48,6 +48,11 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			)
 		}
 	}
+	// #645: a refused last-turn replacement must say why.
+	if strings.TrimSpace(schema.API.Fields.LastTurn) != "" &&
+		strings.TrimSpace(schema.Presentation.Messages.NotLastTurn) == "" {
+		return errors.New("chat.api.fields.last_turn 已声明时 chat.presentation.messages.not_last_turn 不能为空")
+	}
 	required := map[string]string{
 		"api.fields.approval_mode":         schema.API.Fields.ApprovalMode,
 		"api.fields.agent_scope":           schema.API.Fields.AgentScope,

@@ -37,6 +37,7 @@ func TestAskChoiceBuildsAnAgentProposalCardWithoutWriting(t *testing.T) {
 		OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{visualAnchorChoiceKind()}
 	})

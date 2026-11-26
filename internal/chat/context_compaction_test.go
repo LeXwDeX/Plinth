@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -506,6 +507,12 @@ type openChoiceStore struct {
 
 func (store openChoiceStore) ListChoices(context.Context, string, string, int) ([]chat.Choice, error) {
 	return []chat.Choice{store.choice}, nil
+}
+
+// SupersedeChoicesBefore keeps the card open: the end of a turn (#645) is not
+// what this test reads.
+func (openChoiceStore) SupersedeChoicesBefore(context.Context, string, string, string, time.Time) error {
+	return nil
 }
 
 // handleAgent calls the first tool with the handle the newest user message

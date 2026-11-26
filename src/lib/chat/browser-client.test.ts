@@ -995,6 +995,33 @@ describe('ChatBrowserClient', () => {
     expect(requestedMethod).toBe('DELETE');
   });
 
+  // #645: replacing the last turn names the turn's messages still to delete in the Schema's repeated query member;
+  // the server's 409 for a stale page reaches the caller with its words.
+  it('names the last turn of a replacing deletion and surfaces the 409 of a stale page', async () => {
+    const schema = schemaFixture();
+    schema.chat.api.fields.last_turn = 'lastTurn';
+    const requested: string[] = [];
+    let status = 204;
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input) => {
+        requested.push(String(input));
+        return status === 204
+          ? new Response(null, { status })
+          : new Response(JSON.stringify({ [schema.chat.api.response_fields.error]: '对话已有更新，请刷新后再试' }), { status });
+      },
+    });
+
+    await client.deleteMessage('s', 'reply-2', ['reply-2', 'user-2']);
+    await client.deleteMessage('s', 'other');
+    expect(requested[0]).toMatch(/\/messages\/reply-2\?lastTurn=reply-2&lastTurn=user-2$/);
+    expect(requested[1]).toMatch(/\/messages\/other$/);
+
+    status = 409;
+    await expect(client.deleteMessage('s', 'reply-1', ['reply-1', 'user-1'])).rejects.toMatchObject({
+      status: 409, message: '对话已有更新，请刷新后再试',
+    });
+  });
+
   it('deletes a session through the Schema-configured item route', async () => {
     const schema = schemaFixture();
     schema.runtime.http.legacy_routes.chat_session =

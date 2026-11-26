@@ -29,6 +29,7 @@ func TestConceptQuantityCardDrivesTheDirectionCard(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1", "turn-2")
 	quantityKind := catalog.ChatChoiceKindSchema{ID: "concept_quantity", OptionSource: "concept_quantities",
 		ToolName: "create_concept_sketch", Question: "这次想先看几张概念图？", Message: "请选择数量。"}
 	conceptKind := catalog.ChatChoiceKindSchema{ID: "concept_direction", OptionSource: "agent",
@@ -145,6 +146,7 @@ func TestConceptQuantityOneRefusesTheDirectionCard(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1", "turn-2")
 	quantityKind := catalog.ChatChoiceKindSchema{ID: "concept_quantity", OptionSource: "concept_quantities",
 		ToolName: "create_concept_sketch", Question: "这次想先看几张概念图？", Message: "请选择数量。"}
 	conceptKind := catalog.ChatChoiceKindSchema{ID: "concept_direction", OptionSource: "agent",

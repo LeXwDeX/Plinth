@@ -278,9 +278,14 @@ export interface ChatBrowserClient {
   getSession(sessionID: string, signal?: AbortSignal): Promise<ChatSession>;
   listSessions(signal?: AbortSignal): Promise<ChatSession[]>;
   listSessionPage(query: { search: string; cursor?: string; limit: number }, signal?: AbortSignal): Promise<{ sessions: ChatSession[]; nextCursor: string; total: number }>;
+  /**
+   * #645: `lastTurn`, when given, names the messages of the last turn still to delete (this one included); the
+   * server deletes only while they are exactly its last turn and answers 409 otherwise.
+   */
   deleteMessage(
     sessionID: string,
     messageID: string,
+    lastTurn?: readonly string[],
   ): Promise<boolean>;
   /**
    * One page of the conversation, oldest first: the newest `limit` messages, or those just before
@@ -1236,14 +1241,18 @@ export function createChatBrowserClient(
         total,
       };
     },
-    async deleteMessage(sessionID, messageID) {
-      const response = await fetcher(
-        route(schema.runtime.http.legacy_routes.chat_message, {
-          sessionID,
-          messageID,
-        }),
-        { method: 'DELETE' },
-      );
+    async deleteMessage(sessionID, messageID, lastTurn) {
+      const path = route(schema.runtime.http.legacy_routes.chat_message, {
+        sessionID,
+        messageID,
+      });
+      const lastTurnField = schema.chat.api.fields.last_turn;
+      const query = new URLSearchParams();
+      if (lastTurnField && lastTurn && lastTurn.length > 0) {
+        for (const id of lastTurn) query.append(lastTurnField, id);
+      }
+      const encoded = query.toString();
+      const response = await fetcher(encoded ? `${path}?${encoded}` : path, { method: 'DELETE' });
       if (response.status === 404) return false;
       if (!response.ok) {
         const payload = await responseObject(response);

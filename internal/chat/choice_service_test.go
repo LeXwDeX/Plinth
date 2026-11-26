@@ -32,6 +32,7 @@ func TestATurnAnswersItsSessionsChoiceCardOnce(t *testing.T) {
 	}
 	service := newChatService(t, repo)
 	service.SetChoices(repo, 20)
+	seedReplies(t, repo, "owner-a", "session-a", "turn-0")
 	card, err := repo.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-0",
 		CallID: "call-0", ToolName: "process_model", Capability: "mesh-segmentation", StepIndex: -1,
 		Options: []chat.ChoiceOption{
@@ -133,6 +134,7 @@ func TestATurnAnswersANextStepCardOnceWithoutADefault(t *testing.T) {
 	}
 	service := newChatService(t, repo)
 	service.SetChoices(repo, 20)
+	seedReplies(t, repo, "owner-a", "session-a", "turn-0")
 	card, err := repo.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-0",
 		CallID: "call-0", Kind: "next_step", Capability: "next_step", StepIndex: -1, Options: nextStepCardOptions()})
 	if err != nil {

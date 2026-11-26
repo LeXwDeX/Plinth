@@ -20,7 +20,11 @@ const send = column.slice(column.indexOf('const send = useCallback('), column.in
 
 describe('a failed replace says why (#403)', () => {
   it('shows the server reason of a 409 and the general text for anything else', () => {
-    const replace = send.slice(send.indexOf('for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);'));
+    const loop = send.indexOf('for (const [index, id] of replaceIds.entries()) {');
+    expect(loop).toBeGreaterThan(0);
+    const replace = send.slice(loop);
+    // #645: each deletion names the turn's messages still to delete, so the server refuses a stale page with a 409.
+    expect(replace).toContain('await chatClient.deleteMessage(sessionId, id, replaceIds.slice(index));');
     expect(replace.indexOf('replaceFailureMessage(')).toBeGreaterThan(0);
     expect(replace).toMatch(/\} catch \(error\) \{[\s\S]{0,400}replaceFailureMessage\(error, schemaText\(schema, 'ui\.chat\.toast\.turn_replace_failed'\)\)/);
     // The list is still read again and the old round kept as it was.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -58,6 +59,10 @@ func (*modelCardStore) AnswerChoice(context.Context, string, string, string, cha
 }
 
 func (*modelCardStore) ReopenChoice(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (*modelCardStore) SupersedeChoicesBefore(context.Context, string, string, string, time.Time) error {
 	return nil
 }
 
