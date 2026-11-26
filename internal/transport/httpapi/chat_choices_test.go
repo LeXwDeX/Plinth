@@ -33,6 +33,7 @@ func TestChatChoiceCardsAreOwnerScopedAndAnsweredOnce(t *testing.T) {
 		{ID: "hyper3d/bang/local-model", ProviderName: "Hyper3D", ModelName: "Bang", Arguments: json.RawMessage(`{"offering_id":"hyper3d/bang/local-model","secret_next":"x"}`)},
 		{ID: "hyper3d/bang/rodin-task", ProviderName: "Hyper3D", ModelName: "Bang Rodin", Arguments: json.RawMessage(`{"offering_id":"hyper3d/bang/rodin-task"}`)},
 	}
+	seedChoiceReply(t, repository, sessionID, "turn-1")
 	card, err := repository.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-1",
 		CallID: "call-1", ToolName: "process_model", Capability: "mesh-segmentation", StepIndex: -1, Options: options,
 		DefaultOptionID: options[0].ID, AllowDefault: true, DefaultArguments: json.RawMessage(`{"use_default_offering":true}`), CreatedAt: now})
@@ -123,6 +124,7 @@ func TestGenericChoiceCardsCarryTheSchemaQuestion(t *testing.T) {
 			Arguments: json.RawMessage(`{"purpose":"game_character"}`)},
 		{ID: "display", Label: "展示/渲染", Arguments: json.RawMessage(`{"purpose":"display"}`)},
 	}
+	seedChoiceReply(t, repository, sessionID, "turn-2")
 	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
 		OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-2", CallID: "call-2",
 		ToolName: "update_production_brief", Kind: "usage_profile", Capability: "usage_profile", StepIndex: -1,
@@ -184,6 +186,7 @@ func TestNextStepChoiceCardCarriesOptionActionsOnTheWire(t *testing.T) {
 			Step: &chat.ChoiceStep{Tool: "retexture_model", Capability: "retexture"}, CreditsMetered: true, EstimatedCredits: 15},
 		{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{}`)},
 	}
+	seedChoiceReply(t, repository, sessionID, "turn-3")
 	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
 		OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-3", CallID: "call-3",
 		Kind: "next_step", Capability: "next_step", StepIndex: -1, Options: options, CreatedAt: time.Now().UTC(),

@@ -89,7 +89,7 @@ import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, latestReplies, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
 import { runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
@@ -1267,7 +1267,11 @@ export function ChatColumn() {
           if (replaceIds && replaceIds.length > 0) {
             const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
             try {
-              for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);
+              // #645: each deletion names the turn's messages still to delete; the server deletes only while they
+              // are its last turn, so a page that missed a newer turn gets a 409 and nothing is deleted.
+              for (const [index, id] of replaceIds.entries()) {
+                await chatClient.deleteMessage(sessionId, id, replaceIds.slice(index));
+              }
             } catch (error) {
               const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
               if (page) applyNewestMessagePage(sessionId, page);
@@ -1606,9 +1610,11 @@ export function ChatColumn() {
 
   const timeline = useMemo(() => interleaveGroups(displayMessages, threeViews), [displayMessages, threeViews]);
   // #321: each choice card follows the assistant message that asked; an open one not on the page goes last.
+  // #645: an open card of a reply before the latest user message is not drawn (the person typed instead).
   const choicePlacement = useMemo(
-    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id)),
-    [sessionChoices.cards, displayMessages],
+    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id),
+      latestReplies(displayMessages, schema.chat.frontend.optimistic_assistant_message_id), answeringChoice),
+    [sessionChoices.cards, displayMessages, schema, answeringChoice],
   );
   // #327: a production list follows the message that proposed it; every other list goes to the end.
   const assetListCards = useMemo(

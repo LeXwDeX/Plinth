@@ -23,7 +23,9 @@ import (
 
 // ChoiceState is the lifecycle of a card: pending until answered, answered
 // once (on the card, or by the Agent mapping a typed reply), or superseded
-// when a newer card of the same session replaced it unanswered.
+// when a newer card of the same session replaced it unanswered, or when the
+// turn of a typed message ended without the Agent mapping it to the card
+// (#645).
 type ChoiceState string
 
 const (
@@ -209,6 +211,10 @@ type ChoiceStore interface {
 	// ReopenChoice undoes an answer recorded for a turn that then failed to
 	// start: only the answer bound to that message is reverted.
 	ReopenChoice(ctx context.Context, ownerID, sessionID, choiceID, messageID string) error
+	// SupersedeChoicesBefore supersedes the session's cards still pending that
+	// were created no later than before and not by the reply keep (#645): the
+	// cards a typed message left unanswered when its turn ended.
+	SupersedeChoicesBefore(ctx context.Context, ownerID, sessionID, keep string, before time.Time) error
 }
 
 // ChoiceRecord is what AnswerChoice stores.

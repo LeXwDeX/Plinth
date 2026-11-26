@@ -4981,6 +4981,11 @@ type ChatAPIFields struct {
 	Multiview    string `json:"multiview,omitempty"`
 	FromID       string `json:"from_id"`
 	TurnCanceled string `json:"turn_canceled"`
+	// LastTurn is the repeated query member of a message deletion that
+	// replaces the last turn (#645, regenerate or edit and resend): the IDs
+	// of the turn's messages still to delete, this one included. The server
+	// deletes only when they are exactly the session's last turn now.
+	LastTurn string `json:"last_turn,omitempty"`
 	// TurnBackgrounded is the response member of the background-continue
 	// request (#137): true once the waiting turn was set to end without
 	// cancelling its Tasks. TurnBackgroundAvailable is the member of the
@@ -6576,6 +6581,9 @@ type ChatMessageTexts struct {
 	// ChoiceRejected one whose option the card does not offer (#321).
 	ChoiceAnswered string `json:"choice_answered"`
 	ChoiceRejected string `json:"choice_rejected"`
+	// NotLastTurn answers 409 to a last-turn replacement whose messages are no
+	// longer the session's last turn (#645): the page is out of date.
+	NotLastTurn string `json:"not_last_turn,omitempty"`
 	// BudgetPlanInactive answers 409 when a continuation is asked of a plan
 	// that is no longer the session's active one (#410): it was replaced by a
 	// newer plan, refused, or already completed. Empty falls back to

@@ -627,15 +627,25 @@ func (s *Server) legacyDeleteChatMessage(
 	route := s.application.Runtime.HTTP.LegacyRoutes.ChatMessage
 	sessionID := configuredPathValue(request, route, 0)
 	messageID := configuredPathValue(request, route, 1)
-	err := s.chat.DeleteMessage(
-		request.Context(),
-		principal.ID(),
-		sessionID,
-		messageID,
-	)
+	var err error
+	// #645: a deletion that replaces the last turn names the turn's messages
+	// still to delete; the server deletes only when they are its last turn.
+	if field := s.application.Chat.API.Fields.LastTurn; field != "" && request.URL.Query().Has(field) {
+		err = s.chat.DeleteLastTurnMessage(request.Context(), principal.ID(), sessionID, messageID,
+			request.URL.Query()[field])
+	} else {
+		err = s.chat.DeleteMessage(
+			request.Context(),
+			principal.ID(),
+			sessionID,
+			messageID,
+		)
+	}
 	switch {
 	case errors.Is(err, chat.ErrTurnActive):
 		s.writeChatError(writer, http.StatusConflict, s.application.Chat.Presentation.Messages.TurnActive)
+	case errors.Is(err, chat.ErrNotLastTurn):
+		s.writeChatError(writer, http.StatusConflict, s.application.Chat.Presentation.Messages.NotLastTurn)
 	case errors.Is(err, chat.ErrSessionNotFound):
 		s.writeChatError(
 			writer,

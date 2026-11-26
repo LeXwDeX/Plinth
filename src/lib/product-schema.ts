@@ -1694,6 +1694,8 @@ export interface ChatProductSchema {
       selection_mask?: string;
       from_id: string;
       turn_canceled: string;
+      /** #645: the repeated query member naming the last turn's messages still to delete when it is replaced. */
+      last_turn?: string;
       /** #137: the background-continue response and availability members. */
       turn_backgrounded?: string;
       turn_background_available?: string;

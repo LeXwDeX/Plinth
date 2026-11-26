@@ -1606,6 +1606,12 @@ func (orchestrator *Orchestrator) Process(
 		if err := finishErr; processErr == nil && err != nil {
 			processErr = err
 		}
+		// #645: the cards of an earlier reply the Agent did not map this
+		// turn's typed message to are no longer open.
+		if err := orchestrator.service.SupersedeStaleChoices(finishCtx, turn); err != nil && orchestrator.logger != nil {
+			orchestrator.logger.Warn("收尾时失效旧选项卡失败", "session_id", command.SessionID,
+				"assistant_message_id", command.AssistantMessageID, "error", err)
+		}
 	}()
 	// #137: the person stopped waiting and let the Tasks run on. This comes
 	// before the stop check: the choice committed before any later stop.

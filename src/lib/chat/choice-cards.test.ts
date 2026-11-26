@@ -17,6 +17,7 @@ import {
   fetchChoiceCards,
   parseChoiceCards,
   heldChoiceRelease,
+  latestReplies,
   radioKeyTarget,
   type ChoiceCardModel,
 } from './choice-cards';
@@ -201,6 +202,54 @@ describe('choice cards (#321)', () => {
     const placement = choiceCardPlacement([shown, elsewhere, closedElsewhere], ['user-1', 'assistant-1']);
     expect(placement.byMessage.get('assistant-1')?.map((item) => item.id)).toEqual(['choice_1']);
     expect(placement.loose.map((item) => item.id)).toEqual(['choice_2']);
+  });
+
+  // #645: the person typed a new message instead of answering. While that turn runs, and after it, the earlier
+  // reply's open card is not drawn; the card the new turn opens is.
+  describe('only the latest turn draws its open card (#645)', () => {
+    const optimistic = 'optimistic-assistant';
+    const older = card({ id: 'choice_old', assistantMessageId: 'assistant-1', createdAt: '2026-11-26T02:44:00Z' });
+    const placed = (cards: ChoiceCardModel[], messages: { id: string; role: string }[], answering?: string) => {
+      const placement = choiceCardPlacement(cards, messages.map((message) => message.id), latestReplies(messages, optimistic), answering);
+      return { byMessage: [...placement.byMessage.values()].flat().map((item) => item.id), loose: placement.loose.map((item) => item.id) };
+    };
+    const earlier = [{ id: 'user-1', role: 'user' }, { id: 'assistant-1', role: 'assistant' }];
+
+    it('draws the open card of the latest reply', () => {
+      expect(placed([older], earlier)).toEqual({ byMessage: ['choice_old'], loose: [] });
+    });
+
+    it('draws no earlier open card while the typed turn streams, before or after its reply is named', () => {
+      const unnamed = [...earlier, { id: 'optimistic-user', role: 'user' }, { id: optimistic, role: 'assistant' }];
+      expect(placed([older], unnamed)).toEqual({ byMessage: [], loose: [] });
+      const named = [...earlier, { id: 'user-2', role: 'user' }, { id: 'assistant-2', role: 'assistant' }];
+      expect(placed([older], named)).toEqual({ byMessage: [], loose: [] });
+    });
+
+    it('draws the card the running turn opens, also while its reply is unnamed', () => {
+      const fresh = card({ id: 'choice_new', assistantMessageId: 'assistant-2', createdAt: '2026-11-26T02:52:00Z' });
+      const named = [...earlier, { id: 'user-2', role: 'user' }, { id: 'assistant-2', role: 'assistant' }];
+      expect(placed([older, fresh], named)).toEqual({ byMessage: ['choice_new'], loose: [] });
+      const unnamed = [...earlier, { id: 'optimistic-user', role: 'user' }, { id: optimistic, role: 'assistant' }];
+      expect(placed([older, fresh], unnamed)).toEqual({ byMessage: [], loose: ['choice_new'] });
+    });
+
+    it('keeps the record of an answered or superseded card under its reply once the turn ended', () => {
+      const ended = [...earlier, { id: 'user-2', role: 'user' }, { id: 'assistant-2', role: 'assistant' }];
+      const superseded = { ...older, state: 'superseded' as const };
+      expect(placed([superseded], ended)).toEqual({ byMessage: ['choice_old'], loose: [] });
+      const answered = { ...older, state: 'answered' as const };
+      expect(placed([answered], ended)).toEqual({ byMessage: ['choice_old'], loose: [] });
+    });
+
+    it('does not hide the card the person is answering on the card', () => {
+      const answering = [...earlier, { id: 'optimistic-user', role: 'user' }, { id: optimistic, role: 'assistant' }];
+      expect(placed([older], answering, 'choice_old')).toEqual({ byMessage: ['choice_old'], loose: [] });
+    });
+
+    it('keeps the old placement when no user message is shown', () => {
+      expect(latestReplies([{ id: 'assistant-1', role: 'assistant' }], optimistic)).toBeUndefined();
+    });
   });
 });
 

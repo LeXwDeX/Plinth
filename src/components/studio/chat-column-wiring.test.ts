@@ -172,7 +172,8 @@ describe('regenerate and edit-and-resend wiring', () => {
 
   it('replaces the old round only after validation and keeps the text if the new turn never starts', () => {
     // Deletion sits after the model/skill checks and before the streaming placeholder.
-    expect(agentDialog).toMatch(/for \(const id of replaceIds\) await chatClient\.deleteMessage\(sessionId, id\);/);
+    // #645: each deletion names the messages of the turn still to delete, so a stale page is refused (409).
+    expect(agentDialog).toMatch(/for \(const \[index, id\] of replaceIds\.entries\(\)\) \{\s*await chatClient\.deleteMessage\(sessionId, id, replaceIds\.slice\(index\)\);/);
     expect(agentDialog).toMatch(/ui\.chat\.toast\.turn_replace_failed/);
     expect(agentDialog).toMatch(/restoreAttachments\(images, claims\)/);
     expect(chatMessage).toContain("'ui.chat.message.regenerate'");
