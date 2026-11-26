@@ -75,7 +75,11 @@ func (scope *AgentReadScope) TaskReadable(ctx context.Context, command ToolComma
 
 // InputAssetReadable reports whether the command's session may read an owned
 // input asset: one its history or selection carries, a Task output of a Task
-// the session may read, an item reference or a project registration.
+// the session may read, an item reference or a project registration. An asset
+// with a Task is readable when either its Task is in scope or the asset itself
+// is (a list item or the project names the asset): a planning session reads
+// the asset its item's sub-session made when the item or project names it,
+// whichever session made its Task (#328, #665).
 func (scope *AgentReadScope) InputAssetReadable(ctx context.Context, command ToolCommand, asset generation.InputAsset) (bool, error) {
 	if asset.ID == "" || command.OwnerID == "" || asset.OwnerID != generation.OwnerID(command.OwnerID) {
 		return false, nil
@@ -87,7 +91,13 @@ func (scope *AgentReadScope) InputAssetReadable(ctx context.Context, command Too
 		if command.SessionID != "" && asset.SessionID == command.SessionID {
 			return true, nil
 		}
-		return scope.taskIDReadable(ctx, command, asset.TaskID)
+		if commandCarriesTask(command, string(asset.TaskID)) {
+			return true, nil
+		}
+		allowed, err := scope.taskIDReadable(ctx, command, asset.TaskID)
+		if err != nil || allowed {
+			return allowed, err
+		}
 	}
 	for _, reference := range command.Options.AssetListReferences {
 		if reference.InputAssetID == string(asset.ID) {

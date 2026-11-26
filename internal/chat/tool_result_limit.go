@@ -7,6 +7,16 @@ package chat
 // (an array result is wrapped). Anything else, or JSON that still does not
 // fit, keeps its beginning as plain text. The cut never splits a rune. The
 // note is the Schema's presentation.messages.tool_result_truncated.
+//
+// A printable ASCII string without whitespace and shorter than
+// toolResultTokenMaximum (an ID, a handle, a URL) is a token: a cut one is useless to the model, so free text is
+// cut first, then list items with the tokens whole; only when that still does
+// not fit are tokens cut like free text. Lists are cut the same way at every
+// level (the first n entries of each), so the entries of a result's
+// PresentedEntries array and its handle list keep the same first n: a handle
+// is written into its entry before the bound applies and leaves with it. The
+// pictures attached to the tool message are not cut; the note says entries
+// were cut.
 
 import (
 	"bytes"
@@ -26,6 +36,9 @@ const (
 	// lists are cut instead.
 	toolResultStringFloor = 80
 	toolResultEllipsis    = "…"
+	// toolResultTokenMaximum is the length (characters) below which a string
+	// without whitespace is kept whole while anything else can be cut.
+	toolResultTokenMaximum = 2000
 )
 
 // toolResultCut names what was cut, so the note can say it.
@@ -92,32 +105,51 @@ func shortenJSONToolResult(content string, limit int, note func(toolResultCut) s
 	if decoder.Decode(&value) != nil {
 		return "", 0, false
 	}
-	maxString, maxItems := jsonExtent(value)
-	encode := func(stringLimit, itemLimit int, cut toolResultCut) (string, bool) {
-		encoded, err := encodeToolResult(withTruncationNote(cutJSON(value, stringLimit, itemLimit), note(cut)))
-		if err != nil {
-			return "", false
+	// Tokens whole first (keepTokens), then everything as free text.
+	for _, keepTokens := range []bool{true, false} {
+		maxString, maxItems := jsonExtent(value, keepTokens)
+		encode := func(stringLimit, itemLimit int, cut toolResultCut) (string, bool) {
+			encoded, err := encodeToolResult(withTruncationNote(cutJSON(value, stringLimit, itemLimit, keepTokens), note(cut)))
+			if err != nil {
+				return "", false
+			}
+			return encoded, utf8.RuneCountInString(encoded) <= limit
 		}
-		return encoded, utf8.RuneCountInString(encoded) <= limit
-	}
-	// Long strings first: every entry of every list stays visible.
-	if maxString > toolResultStringFloor {
-		if best, found := largestFitting(toolResultStringFloor, maxString, func(n int) bool {
-			_, fits := encode(n, maxItems, toolResultCutStrings)
+		// Long strings first: every entry of every list stays visible.
+		if maxString > toolResultStringFloor {
+			if best, found := largestFitting(toolResultStringFloor, maxString, func(n int) bool {
+				_, fits := encode(n, maxItems, toolResultCutStrings)
+				return fits
+			}); found {
+				encoded, _ := encode(best, maxItems, toolResultCutStrings)
+				return encoded, toolResultCutStrings, true
+			}
+		}
+		if best, found := largestFitting(0, maxItems, func(n int) bool {
+			_, fits := encode(toolResultStringFloor, n, toolResultCutItems)
 			return fits
 		}); found {
-			encoded, _ := encode(best, maxItems, toolResultCutStrings)
-			return encoded, toolResultCutStrings, true
+			encoded, _ := encode(toolResultStringFloor, best, toolResultCutItems)
+			return encoded, toolResultCutItems, true
 		}
 	}
-	if best, found := largestFitting(0, maxItems, func(n int) bool {
-		_, fits := encode(toolResultStringFloor, n, toolResultCutItems)
-		return fits
-	}); found {
-		encoded, _ := encode(toolResultStringFloor, best, toolResultCutItems)
-		return encoded, toolResultCutItems, true
-	}
 	return "", 0, false
+}
+
+// toolResultToken reports whether a string value is a token (an ID, a handle,
+// a URL): printable ASCII without whitespace, shorter than
+// toolResultTokenMaximum characters. Text in a script written without spaces
+// (Chinese) is free text, not a token.
+func toolResultToken(text string) bool {
+	if text == "" || len(text) >= toolResultTokenMaximum {
+		return false
+	}
+	for index := 0; index < len(text); index++ {
+		if text[index] <= ' ' || text[index] >= 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // largestFitting finds the largest n in [low, high] with fits(n), assuming fits
@@ -137,21 +169,25 @@ func largestFitting(low, high int, fits func(int) bool) (int, bool) {
 	return low, true
 }
 
-// jsonExtent reports the longest string value (in characters) and the longest
-// list of a decoded JSON value.
-func jsonExtent(value any) (longestString, longestList int) {
+// jsonExtent reports the longest string value that may be cut (in
+// characters; tokens are left out when keepTokens) and the longest list of a
+// decoded JSON value.
+func jsonExtent(value any, keepTokens bool) (longestString, longestList int) {
 	switch typed := value.(type) {
 	case string:
+		if keepTokens && toolResultToken(typed) {
+			return 0, 0
+		}
 		return utf8.RuneCountInString(typed), 0
 	case []any:
 		longestList = len(typed)
 		for _, child := range typed {
-			s, l := jsonExtent(child)
+			s, l := jsonExtent(child, keepTokens)
 			longestString, longestList = max(longestString, s), max(longestList, l)
 		}
 	case map[string]any:
 		for _, child := range typed {
-			s, l := jsonExtent(child)
+			s, l := jsonExtent(child, keepTokens)
 			longestString, longestList = max(longestString, s), max(longestList, l)
 		}
 	}
@@ -160,10 +196,13 @@ func jsonExtent(value any) (longestString, longestList int) {
 
 // cutJSON copies a decoded JSON value with every string value cut to at most
 // maxString characters (plus an ellipsis) and every list to maxItems entries.
-// Object keys are never cut.
-func cutJSON(value any, maxString, maxItems int) any {
+// Object keys are never cut, nor tokens when keepTokens.
+func cutJSON(value any, maxString, maxItems int, keepTokens bool) any {
 	switch typed := value.(type) {
 	case string:
+		if keepTokens && toolResultToken(typed) {
+			return typed
+		}
 		if utf8.RuneCountInString(typed) > maxString {
 			return runePrefix(typed, maxString) + toolResultEllipsis
 		}
@@ -172,13 +211,13 @@ func cutJSON(value any, maxString, maxItems int) any {
 		count := min(len(typed), maxItems)
 		result := make([]any, 0, count)
 		for _, child := range typed[:count] {
-			result = append(result, cutJSON(child, maxString, maxItems))
+			result = append(result, cutJSON(child, maxString, maxItems, keepTokens))
 		}
 		return result
 	case map[string]any:
 		result := make(map[string]any, len(typed))
 		for key, child := range typed {
-			result[key] = cutJSON(child, maxString, maxItems)
+			result[key] = cutJSON(child, maxString, maxItems, keepTokens)
 		}
 		return result
 	}

@@ -81,6 +81,39 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		}
 		return result, err
 	}
+	// resumed: the call's own run exists, but its first view never got a grant:
+	// the call failed, or the process restarted, between creating the run and
+	// requesting the grant. The replay finishes that start as a new run does
+	// (#665): under the session lock it runs the duplicate guard again for the
+	// run's own recipe and source, counts the call (once per call ID), weighs
+	// the continuation, replaces the ended groups' approvals and requests the
+	// grant. Before, it requested a plain grant only: the old approval stayed,
+	// the auto mode or plan did not continue it and the count was lost.
+	resumed := false
+	if err == nil && grant.RequestID == "" && command.BoundTaskID == "" {
+		releaseSource, lockErr := e.lockThreeViewSession(ctx, command.OwnerID, command.SessionID)
+		if lockErr != nil {
+			return chat.ToolResult{NoSubmission: true}, lockErr
+		}
+		defer releaseSource()
+		active, found, ended, guardErr := e.activeThreeViewForSource(ctx, command, run.RecipeID, run.SourceAssetID)
+		if guardErr != nil {
+			return chat.ToolResult{NoSubmission: true}, guardErr
+		}
+		// A refusal here leaves the run without a grant (inert: no card, not
+		// active for the guard); it takes back what an earlier attempt of the
+		// call may have left counted.
+		if found {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
+				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
+		}
+		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
+			command.Call.ID, command.PriorGenerationCalls) {
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
+				GenerationUnitsTakenBack: true}, nil
+		}
+		superseded, counted, resumed, release = ended, true, true, releaseSource
+	}
 	if errors.Is(err, skillrun.ErrMissing) {
 		// Mutable model/reference/recipe selection applies only to a new run.
 		// Existing runs keep their original recipe and frozen source.
@@ -158,6 +191,16 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
 				NoSubmission: true}, nil
 		}
+		// A grant to replace that a person continued since the guard read it
+		// (claimed or bound) means that group runs again: answer duplicate_run
+		// before creating anything, so the new run is not left without a grant.
+		// The denial below reads back again for the short window after this.
+		if moved, err := e.supersededMovedOn(ctx, superseded); err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		} else if moved != "" {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", moved),
+				NoSubmission: true}, nil
+		}
 		// A new run is one paid generation of the turn, counted against
 		// max_generation_calls_per_turn like generateWithParams (#563); the
 		// same call back on its own run (recovery, observation) does not
@@ -196,7 +239,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return takeBack(chat.ToolResult{NoSubmission: true}, skillrun.ErrConflict)
 	}
 	canContinue := false
-	if e.threeViewService != nil && e.threeViewService.ContinuationEnabled() && (created || grant.BudgetEligible) {
+	if e.threeViewService != nil && e.threeViewService.ContinuationEnabled() && (created || resumed || grant.BudgetEligible) {
 		canContinue, err = e.threeViewService.CanContinue(ctx, command.OwnerID, command.SessionID, run.ID)
 		if err != nil {
 			return takeBack(chat.ToolResult{NoSubmission: true}, err)
@@ -206,14 +249,19 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	if _, _, err := e.skillRuntime.PrepareStep(ctx, generation.OwnerID(command.OwnerID), run.ID, stepKey); err != nil {
 		return takeBack(chat.ToolResult{NoSubmission: true}, err)
 	}
-	if created {
+	if created || resumed {
 		// The new group is created and its first view prepared; only now does
 		// it replace the earlier groups' approved views whose turn ended (a
 		// person could still continue one from the panel while the new group
 		// pays for the same views). A failure to create or prepare leaves
-		// those approvals as they were. A grant that moved on since the guard
-		// read it (the person continued it: claimed or bound) is not denied:
-		// that group runs again, so the new one requests no grant (#665).
+		// those approvals as they were; the replay of the call finishes the
+		// start (resumed above). A grant that moved on since the check before
+		// Create (the person continued it: claimed or bound) is not denied:
+		// that group runs again, so the new one requests no grant and its run
+		// stays without one (inert: no card, not active for the guard; the
+		// SkillRun store has no way to abandon a run). The approvals denied
+		// before it are replaced by the group the person continued, which
+		// renders the same views (#665).
 		if replaced, err := e.replaceEndedThreeViewGrants(ctx, superseded); err != nil {
 			return takeBack(chat.ToolResult{NoSubmission: true}, err)
 		} else if replaced != "" {
@@ -447,6 +495,23 @@ func (e *Executor) replaceEndedThreeViewGrants(ctx context.Context, superseded [
 			return "", err
 		}
 		if after.Status != executiongrant.Denied {
+			return entry.runID, nil
+		}
+	}
+	return "", nil
+}
+
+// supersededMovedOn reads the grants to replace again and returns the run of
+// one that is no longer approved: a person continued it after the guard read
+// it, so its group runs again. A grant already denied (nothing to replace) does
+// not count.
+func (e *Executor) supersededMovedOn(ctx context.Context, superseded []supersededThreeViewGrant) (string, error) {
+	for _, entry := range superseded {
+		now, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, entry.grant.OwnerID, entry.grant.RequestID)
+		if err != nil {
+			return "", err
+		}
+		if now.Status != executiongrant.Approved && now.Status != executiongrant.Denied {
 			return entry.runID, nil
 		}
 	}

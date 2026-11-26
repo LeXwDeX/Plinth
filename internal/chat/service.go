@@ -1597,6 +1597,14 @@ func (service *Service) startTurnOnce(
 	answeredChoice := ""
 	if command.ChoiceAnswer != nil {
 		if err := service.answerChoice(ctx, command, user.ID, now); err != nil {
+			if errors.Is(err, ErrChoiceClosed) {
+				// Another server process may have taken the same keyed send
+				// after the reads above: it answered the card and started the
+				// key's turn. Answer that turn, not "card closed" (#665).
+				if replayed, found, replayErr := service.replayTurnKey(ctx, command); found {
+					return Message{}, &turnReplay{assistant: replayed, err: replayErr}
+				}
+			}
 			return Message{}, err
 		}
 		answeredChoice = command.ChoiceAnswer.ChoiceID

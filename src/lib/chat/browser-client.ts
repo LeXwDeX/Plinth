@@ -1389,7 +1389,7 @@ export function createChatBrowserClient(
       const payload = await responseObject(response);
       if (!response.ok) {
         const problemError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid' ||
-          payload.code === 'idempotency_conflict' || payload.code === 'idempotency_key_required';
+          payload.code === 'idempotency_conflict' || payload.code === 'idempotency_key_invalid';
         const message = problemError ? payload.detail : payload[responseFields.error];
         throw new ChatBrowserError(
           typeof message === 'string'

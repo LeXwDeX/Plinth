@@ -421,7 +421,7 @@ func (s *Server) legacySendChatMessage(
 	if idempotencyKey != "" {
 		rule := idempotencyKeyRule{minimum: 1, maximum: s.application.Chat.API.TurnIdempotency.MaximumKeyBytes}
 		if refusal := rule.refusal(idempotencyKey); refusal != nil {
-			writeProblem(writer, http.StatusBadRequest, idempotencyKeyRequiredCode, s.message(idempotencyKeyRequiredMessage), refusal)
+			writeProblem(writer, http.StatusBadRequest, idempotencyKeyInvalidCode, s.message(idempotencyKeyRequiredMessage), refusal)
 			return
 		}
 	}

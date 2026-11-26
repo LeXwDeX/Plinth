@@ -207,7 +207,9 @@ func TestChatSendIdempotencyKeyTooLongIsRefused665(t *testing.T) {
 	_, handler, _ := newHTTPHarnessWithChatScheduler(t, scheduler, nil)
 	sessionID := newKeyedChatSession(t, handler)
 	response := keyedChatSend(handler, "local-user", sessionID, strings.Repeat("k", 201), `{"content":"draw a cat"}`)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "idempotency_key_required") {
+	// The header is optional on this route: an unusable key is invalid, not
+	// "required" (#665).
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"idempotency_key_invalid"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
 	if scheduler.scheduled() != 0 {

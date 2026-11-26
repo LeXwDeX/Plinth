@@ -2,12 +2,15 @@ package chat_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -257,5 +260,75 @@ func TestKeyedSendWithoutRetentionKeepsNoKey665(t *testing.T) {
 	}
 	if _, found, _ := repository.TurnKey(context.Background(), "owner-a", session.ID, "send-1", time.Now()); found {
 		t.Fatal("a service without retention stored the key")
+	}
+}
+
+// hiddenTurnKeys answers the first reads of the turn key as not found: they
+// came before another server process committed the key's turn.
+type hiddenTurnKeys struct {
+	*sqlite.Repository
+	hide int
+}
+
+func (r *hiddenTurnKeys) TurnKey(ctx context.Context, owner, session, key string, now time.Time) (chat.TurnKey, bool, error) {
+	if r.hide > 0 {
+		r.hide--
+		return chat.TurnKey{}, false, nil
+	}
+	return r.Repository.TurnKey(ctx, owner, session, key, now)
+}
+
+// #665: two server processes take one keyed send that answers a choice card.
+// The first answers the card and starts the key's turn after the second has
+// read the key; the second then finds the card closed. It answers the first's
+// turn instead of "card closed", and the card keeps the first's answer.
+func TestKeyedSendAnsweringACardReplaysTheOtherProcessesTurn665(t *testing.T) {
+	ctx := context.Background()
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	now := time.Now().UTC()
+	if _, err := repo.CreateSession(ctx, chat.Session{ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a",
+		CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	seedReplies(t, repo, "owner-a", "session-a", "turn-0")
+	card, err := repo.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-0",
+		CallID: "call-0", ToolName: "process_model", Capability: "mesh-segmentation", StepIndex: -1,
+		Options: []chat.ChoiceOption{{ID: "first", ProviderName: "P", ModelName: "One",
+			Arguments: json.RawMessage(`{"offering_id":"first"}`)}}, DefaultOptionID: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := func(repository chat.Repository, prefix string) *chat.Service {
+		sequence := 0
+		service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+			config.TurnKeyRetention = turnKeyRetention
+			config.NewID = func(kind string) string {
+				sequence++
+				return prefix + kind + "-" + time.Duration(sequence).String()
+			}
+		})
+		service.SetChoices(repo, 20)
+		return service
+	}
+	first := instance(repo, "a-")
+	second := instance(&hiddenTurnKeys{Repository: repo, hide: 2}, "b-")
+	send := chat.StartTurn{OwnerID: "owner-a", SessionID: "session-a", Content: "选择：P · One",
+		ChoiceAnswer: &chat.ChoiceAnswer{ChoiceID: card.ID, OptionID: "first"}, IdempotencyKey: "send-1",
+		RequestFingerprint: "digest-a"}
+	started, replayed, err := first.StartKeyedTurn(ctx, send)
+	if err != nil || replayed {
+		t.Fatalf("first process: %+v replayed=%v err=%v", started, replayed, err)
+	}
+	answer, replayed, err := second.StartKeyedTurn(ctx, send)
+	if err != nil || !replayed || answer.ID != started.ID {
+		t.Fatalf("second process: %+v replayed=%v err=%v; want the first's turn %q", answer, replayed, err, started.ID)
+	}
+	choice, err := repo.GetChoice(ctx, "owner-a", "session-a", card.ID)
+	if err != nil || choice.State != chat.ChoiceAnswered || !strings.HasPrefix(choice.AnswerMessageID, "a-") {
+		t.Fatalf("card = %+v err=%v; want the first's answer", choice, err)
 	}
 }

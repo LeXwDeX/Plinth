@@ -308,6 +308,17 @@ func (service *Service) OpenPicture(ctx context.Context, owner string, attachmen
 	return service.read(ctx, owner, chat.ResolvedAttachment{Attachment: attachment, URL: url})
 }
 
+// PictureReadFailure is a picture that could not be read for a reason other
+// than the session scope (a storage or scope-read fault). Its text is generic
+// and distinct from the scope refusal; the cause stays for the server log.
+type PictureReadFailure struct{ Cause error }
+
+func (failure *PictureReadFailure) Error() string {
+	return "the picture could not be read right now; try again later"
+}
+
+func (failure *PictureReadFailure) Unwrap() error { return failure.Cause }
+
 // OpenAgentPicture reads a picture the Agent names by its input asset ID
 // rather than by a handle of the session (compare_model_reference, #665). The
 // asset must be readable from the command's session: one its history or
@@ -323,7 +334,12 @@ func (service *Service) OpenAgentPicture(ctx context.Context, command chat.ToolC
 	owner := generation.OwnerID(command.OwnerID)
 	asset, body, err := service.inputs.OpenOwned(ctx, owner, generation.AssetID(assetID))
 	if err != nil {
-		return nil, refusal
+		// A missing or foreign asset is the scope refusal; a storage fault is
+		// not: it is a failure to read, which says nothing about the ID (#665).
+		if generation.IsCode(err, generation.ErrNotFound) || generation.IsCode(err, generation.ErrForbidden) {
+			return nil, refusal
+		}
+		return nil, &PictureReadFailure{Cause: err}
 	}
 	defer body.Close()
 	if service.scope != nil {
@@ -332,7 +348,10 @@ func (service *Service) OpenAgentPicture(ctx context.Context, command chat.ToolC
 			asset.OwnerID = owner
 		}
 		allowed, err := service.scope.InputAssetReadable(ctx, command, asset)
-		if err != nil || !allowed {
+		if err != nil {
+			return nil, &PictureReadFailure{Cause: err}
+		}
+		if !allowed {
 			return nil, refusal
 		}
 	}

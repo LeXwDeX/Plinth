@@ -101,3 +101,33 @@ func TestAgentReadScopeAllowsTheSessionChainAndProjectOnly665(t *testing.T) {
 		t.Fatalf("nil scope refusal = %q", refusal.Message)
 	}
 }
+
+// #665: an asset with a Task is readable when its Task is in scope or the
+// asset itself is: a planning session reads the output its list item's
+// sub-session made when the item names the asset, or the project registers it,
+// and an asset whose Task the session carries. Neither named: refused.
+func TestAgentReadScopeReadsATaskAssetTheItemOrProjectNames665(t *testing.T) {
+	scope := testReadScope(nil, map[string][]project.Reference{"prj-1": {{InputAssetID: "out-registered"}}})
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "planning"}
+	command.Options.ProjectID = "prj-1"
+	command.Options.AssetListReferences = []project.Reference{{InputAssetID: "out-item"}}
+	command.History = []chat.Message{{Attachments: []chat.Attachment{{TaskID: "task-attached", AssetID: "other"}}}}
+	asset := func(id, task string) generation.InputAsset {
+		return generation.InputAsset{ID: generation.AssetID(id), OwnerID: "owner-a",
+			TaskID: generation.TaskID(task), SessionID: "item-child"}
+	}
+	for name, test := range map[string]struct {
+		asset generation.InputAsset
+		want  bool
+	}{
+		"item names the asset":        {asset("out-item", "task-child"), true},
+		"project registers the asset": {asset("out-registered", "task-child"), true},
+		"session carries its task":    {asset("out-attached", "task-attached"), true},
+		"named by neither":            {asset("out-loose", "task-child"), false},
+	} {
+		got, err := scope.InputAssetReadable(context.Background(), command, test.asset)
+		if err != nil || got != test.want {
+			t.Errorf("%s = %v err=%v want %v", name, got, err, test.want)
+		}
+	}
+}

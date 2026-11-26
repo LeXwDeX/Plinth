@@ -17,13 +17,18 @@ import (
 type scopedInputs struct {
 	assets map[generation.AssetID]generation.InputAsset
 	data   []byte
+	fault  error
 }
 
 func (inputs scopedInputs) OpenOwned(_ context.Context, owner generation.OwnerID,
 	id generation.AssetID) (generation.InputAsset, io.ReadCloser, error) {
+	if inputs.fault != nil {
+		return generation.InputAsset{}, nil, inputs.fault
+	}
 	asset, found := inputs.assets[id]
 	if !found || owner != "owner" {
-		return generation.InputAsset{}, nil, errors.New("not found")
+		// As the input asset service answers a missing or foreign asset.
+		return generation.InputAsset{}, nil, &generation.Error{Code: generation.ErrNotFound, Operation: "get_input_asset"}
 	}
 	asset.ID, asset.OwnerID = id, owner
 	return asset, io.NopCloser(bytes.NewReader(inputs.data)), nil
@@ -69,6 +74,36 @@ func TestOpenAgentPictureReadsOnlyTheSessionScope665(t *testing.T) {
 		if !errors.As(err, &refusal) || refusal.Message != "读不到 "+id {
 			t.Fatalf("%s: err = %v, want the scope refusal", id, err)
 		}
+	}
+}
+
+// #665: a storage fault is not the scope refusal: the Agent reads a generic
+// failure to read, distinct from "out of scope", and the cause stays wrapped.
+func TestOpenAgentPictureReportsAStorageFaultApartFromTheScope665(t *testing.T) {
+	fault := errors.New("disk gone")
+	svc := service(t, scopedInputs{data: picture(t), fault: &generation.Error{Code: generation.ErrUnavailable,
+		Operation: "open_authorized_input_asset", Cause: fault}}, nil)
+	svc.scope = scopeTestScope()
+	command := chat.ToolCommand{OwnerID: "owner", SessionID: "branch"}
+	_, err := svc.OpenAgentPicture(context.Background(), command, "out-own")
+	var refusal *chat.ReadScopeRefusal
+	var failure *PictureReadFailure
+	if errors.As(err, &refusal) || !errors.As(err, &failure) || !errors.Is(err, fault) {
+		t.Fatalf("err = %v, want a read failure apart from the scope refusal", err)
+	}
+	if strings.Contains(err.Error(), "读不到") || strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("failure text = %q", err.Error())
+	}
+	// A fault of the scope read itself is a failure too, not a refusal.
+	svc = service(t, scopedInputs{data: picture(t), assets: map[generation.AssetID]generation.InputAsset{
+		"out-x": {TaskID: "task-x", SessionID: "other"}}}, nil)
+	svc.scope = scopeTestScope()
+	svc.scope.TaskInSession = func(context.Context, generation.OwnerID, string, generation.TaskID) (bool, error) {
+		return false, fault
+	}
+	if _, err := svc.OpenAgentPicture(context.Background(), command, "out-x"); errors.As(err, &refusal) ||
+		!errors.Is(err, fault) {
+		t.Fatalf("scope read fault: err = %v", err)
 	}
 }
 
