@@ -100,7 +100,9 @@ async function autoViews(item, includeRight) {
   const seenPending = [];
   const replied = await waitFor(async () => {
     for (const card of await pendingOf(sid)) seenPending.push(`${card.kind}:${card.capability || ''}`);
-    return (await finalReplies(sid)) > repliesBefore;
+    // A placeholder assistant message exists while the turn runs: the turn ends when the composer's stop button is gone.
+    const streaming = await tid('composer-stop').count();
+    return streaming === 0 && (await finalReplies(sid)) > repliesBefore;
   }, 300, 1500);
   const group = await groupOf(sid);
   const turns = (await userTurns(sid)) - usersBefore;
