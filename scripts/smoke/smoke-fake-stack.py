@@ -2161,7 +2161,110 @@ def _send_chat(api, session, body, seconds=45):
 
 def scenario_three_view(work, api, offerings):
     _three_view_budget_and_strict(work, api, offerings)
+    _three_view_auto(work, api, offerings)
     _three_view_heavy_front(work, api, offerings)
+
+
+def _three_view_auto_arm(work, api, picture_url, label, include_right):
+    """One auto-mode session: a single create_three_view call (with include_right for
+    the four-view request) finishes every asked-for view in the same turn, with no
+    click and no approval card. Returns the group, or None when the arm stopped."""
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    if status != 200:
+        record(f"{label}: auto approval mode", False, f"PUT {status}")
+        return None
+    args = {"reference_image_indices": [1], "subject_type": "humanoid"}
+    if include_right:
+        args["include_right"] = True
+    marker = "[[fake:tool:create_three_view " + json.dumps(args, separators=(",", ":")) + "]]"
+    words = "生成四视图 " if include_right else "生成三视图 "
+    status, _ = _send_chat(api, session, {"content": words + marker, "creative_domain": "image",
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record(f"{label}: start the views", False, f"send {status}")
+        return None
+    keys = FOUR_VIEW_KEYS if include_right else ("front", "left", "back")
+    # Watch for an approval card the whole time the views run, not only at the end.
+    seen_pending = []
+    end = time.time() + 180
+    group = None
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        seen_pending.extend((item.get("kind"), item.get("capability")) for item in pending)
+        group = _three_view_group(api, session)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots and all(slots.get(key, {}).get("status") in
+                         ("succeeded", "failed", "rejected", "denied", "canceled") for key in keys):
+            break
+        time.sleep(0.3)
+    done = _quality_turn_done(api, session, timeout=60)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    statuses = {key: slot.get("status") for key, slot in slots.items()}
+    # The count the card shows (#633): every required view plus a started optional one.
+    asked = [slot for slot in slots.values() if not slot.get("optional") or slot.get("status") != "not_started"]
+    finished = [slot for slot in asked if slot.get("status") == "succeeded"]
+    want = len(keys)
+    record(f"{label}: one turn finishes {'front, left, back and right' if include_right else 'front, left and back'}"
+           f" without a click, group {want}/{want}",
+           bool(group) and group.get("complete") is True and len(asked) == want and len(finished) == want
+           and all(statuses.get(key) == "succeeded" for key in keys)
+           and (statuses.get("right") == "succeeded" if include_right else statuses.get("right") == "not_started"),
+           f"progress {len(finished)}/{len(asked)} complete={group.get('complete') if group else None} slots={statuses}")
+    image_tasks = [task for task in session_tasks(api, session)
+                   if task.get("capability") == "image-to-image" and task.get("state") != "CANCELED"]
+    record(f"{label}: exactly {want} image tasks run" + ("" if include_right else ", the optional right view does not"),
+           len(image_tasks) == want, f"image tasks {[t.get('state') for t in image_tasks]}")
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    record(f"{label}: no approval card appears while the views run or after",
+           not seen_pending and not pending, f"seen {sorted(set(seen_pending))} left {len(pending)}")
+    calls = _tool_call_arguments(work, "main", session, "create_three_view")
+    turns = _session_turn_count(work, "main", session)
+    record(f"{label}: one create_three_view call in one turn, and the turn ends by itself",
+           len(calls) == 1 and bool(calls[0].get("include_right")) == include_right and turns == 1 and done,
+           f"calls={json.dumps(calls, ensure_ascii=False)[:200]} turns={turns} done={done}")
+    front_asset = (slots.get("front") or {}).get("output_asset_id") or ""
+    prepared = _prepared_inputs(work, "main", session)
+    fed_front = {}
+    needles = [("clean left view", "left"), ("clean back view", "back")]
+    if include_right:
+        needles.append(("clean right view", "right"))
+    for needle, key in needles:
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        assets = _prepared_reference_assets(match) if match else []
+        fed_front[key] = bool(front_asset) and bool(assets) and assets[0] == front_asset
+    record(f"{label}: the later views' frozen inputs use the front output as their source",
+           bool(front_asset) and all(fed_front.get(key) for _, key in needles),
+           f"front asset {front_asset or 'none'}, fed front {fed_front}")
+    return group
+
+
+def _session_turn_count(work, stack, session):
+    """How many chat turns the session holds (go_chat_turns rows), or -1 when unreadable."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        row = db.execute("SELECT COUNT(*) FROM go_chat_turns WHERE session_id=?", (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return -1
+    return row[0] if row else -1
+
+
+def _three_view_auto(work, api, offerings):
+    """#663: in the auto approval mode one create_three_view call makes every view
+    in the same turn (the server continues as a person clicking each view would);
+    a four-view request (include_right) also makes the right view, so the group
+    reads 4/4. No click, no approval card."""
+    picture = upload_asset(api, "auto-reference.png",
+                           make_picture(96, 192, (255, 255, 255), [((32, 24, 64, 168), (52, 58, 70))]), "image/png")
+    if not picture:
+        record("three-view auto: upload the reference picture", False, "upload refused")
+        return
+    picture_url = f"/api/v1/assets/{picture}"
+    _three_view_auto_arm(work, api, picture_url, "three-view auto", False)
+    _three_view_auto_arm(work, api, picture_url, "four-view auto", True)
 
 
 def _three_view_budget_and_strict(work, api, offerings):
