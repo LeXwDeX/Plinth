@@ -47,7 +47,7 @@ func TestCanvasLayoutTextsAreRequired(t *testing.T) {
 		{"selection_canvas_note", " ", "画板版面文案"},
 		{"image.canvas", `\n[图片 句柄 {handle}：画板版面]`, "画板版面文案"},
 		{"canvas_output_size_template", "输出尺寸设为 {size}。", "canvas_output_size_template"},
-		{"canvas_output_size_nearest_template", "所选模型给不了画板尺寸 {canvas}。", "canvas_output_size_nearest_template"},
+		{"canvas_output_size_nearest_template", "所选模型没有画板比例 {ratio}。", "canvas_output_size_nearest_template"},
 		{"canvas_layers", "", "api.attachment.canvas_layers"},
 		{"canvas_image_detail", "", "context.canvas_image_detail"},
 	} {

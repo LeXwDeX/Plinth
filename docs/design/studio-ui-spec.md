@@ -120,7 +120,7 @@
 
 ### 7.1 画布像素尺寸（#246 阶段 1）
 
-- 虚线框就是画布：世界坐标 1 单位 = 1 像素，画布以 Schema 锚点为中心。虚线框内左上角的小字写“工作区：宽×高，比例”（#282，`ui.canvas.size.label`），衬一块半透明底板（Schema `artboard.label` 的 `padding_pixels`、`background_token`、`background_opacity`），离框 `offset_pixels`，随缩放保持屏幕字号，超出框的部分裁掉，不接收指针。
+- 虚线框就是画布：世界坐标 1 单位 = 1 像素，画布以 Schema 锚点为中心。虚线框内左上角的小字写“画布比例：比例”（#282，`ui.canvas.size.label`；#653 起不再写像素），衬一块半透明底板（Schema `artboard.label` 的 `padding_pixels`、`background_token`、`background_opacity`），离框 `offset_pixels`，随缩放保持屏幕字号，超出框的部分裁掉，不接收指针。
 - 虚线框保持居中（#282）：框中心在可视区中心（1 像素容差）时，滚轮、捏合、缩放工具绕可视区中心缩放，绘图区尺寸变化时平移量补偿一半的尺寸差；框被用户平移开后，这些缩放回到以指针为中心，尺寸变化不再补偿。
 - 适应屏幕不被浮动控件遮挡（#246）：适应屏幕、Ctrl+0、进入舞台、回到画布和缩放到选区都按 `stageFitInsets(railExpanded)`（左侧工具栏收起 64、展开 138，上 56，右 16，下 64）留白；为了保持 #282 的居中，左右各取两侧较宽的一条，上下同理，框中心仍在绘图区正中。
 - 虚线框的线宽和虚线段是屏幕像素（Schema `artboard.frame_stroke_width`、`frame_line_dash`，关闭描边缩放后由 Konva 按屏幕像素绘制），任何画布尺寸和缩放下看起来一样。

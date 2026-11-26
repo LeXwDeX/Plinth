@@ -1733,8 +1733,9 @@ func validateCanvasLayout(context ChatContextSchema) error {
 		"canvas_output_size_template":         context.CanvasOutputSizeTemplate,
 		"canvas_output_size_nearest_template": context.CanvasOutputSizeNearestTemplate,
 	} {
-		if !strings.Contains(template, "{canvas}") || !strings.Contains(template, "{size}") {
-			return fmt.Errorf("context.%s 必须包含 {canvas} 与 {size}", name)
+		// #653: the canvas is a ratio; the note names it, not its pixels.
+		if !strings.Contains(template, "{ratio}") || !strings.Contains(template, "{size}") {
+			return fmt.Errorf("context.%s 必须包含 {ratio} 与 {size}", name)
 		}
 	}
 	return nil

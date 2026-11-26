@@ -86,7 +86,7 @@ import { createRecenterGesture, isEditableTarget } from '@/lib/canvas/recenter-k
 import { onHeldKeysLost } from '@/lib/canvas/held-keys';
 import { panelShortcutTabs } from '@/lib/workspace/panel-tabs';
 import { ownsNavigationKeys } from '@/lib/workspace/stage-keys';
-import { artboardRatioLabel } from '@/lib/canvas/artboard';
+import { canvasShapeOf } from '@/lib/workspace/canvas-size';
 import { isResizeAnchor, snapBypassed, snapRect, snapResize, type SnapGuide } from '@/lib/canvas/snapping';
 import { dragUpdates, movedUnion, snapTargetsFor, startDragSession, type DragSession } from '@/lib/canvas/multi-drag';
 import { canvasMenuItems, layerShortcut, nodeMenuItems, selectableNodeIds, type CanvasMenuItemId } from '@/lib/canvas/context-menu';
@@ -376,15 +376,12 @@ export function CanvasBoard({
     () => readCanvasToken(labelSchema.background_token, palette.canvasBackground),
     [labelSchema.background_token, palette],
   );
-  // #246/#282: the label inside the frame names the canvas pixels and its ratio ("工作区：2048×2048，1:1"),
-  // the size every export has.
+  // #653: the label inside the frame names the canvas ratio ("画布比例：1:1"); its pixels are only editing precision.
   const artboardRatio = artboard
-    ? artboardRatioLabel(artboard.width, artboard.height, labelSchema.common_ratios)
+    ? canvasShapeOf({ width: Math.round(artboard.width), height: Math.round(artboard.height) }, canvasSchema.frontend.artboard).label
     : '';
   const artboardLabel = artboard && artboardRatio
-    ? formatSchemaText(schemaText(schema, 'ui.canvas.size.label'), {
-      width: Math.round(artboard.width), height: Math.round(artboard.height), ratio: artboardRatio,
-    })
+    ? formatSchemaText(schemaText(schema, 'ui.canvas.size.label'), { ratio: artboardRatio })
     : '';
   const artboardLabelWidth = useMemo(
     () => labelTextWidth(artboardLabel, labelSchema.font_size_pixels),
