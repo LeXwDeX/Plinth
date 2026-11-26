@@ -1269,8 +1269,13 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 			if errors.Is(err, generation.ErrConversionInProgress) {
 				// Another active run of this exact conversion (a direct Agent
 				// run or another step) owns the source and formats. Nothing
-				// was submitted; pause and let the user continue after it ends.
-				return s.stop(ctx, plan, step, Paused, ReasonPrepareUnavailable)
+				// was submitted and nothing was charged: the step stays queued
+				// (shown as queued, no timeout) and the background submits it
+				// again under the same key once that run has ended.
+				until := time.Now().UTC().Add(generation.ConversionRetryAfter)
+				step.QueuedUntil = &until
+				plan.UpdatedAt = time.Now().UTC()
+				return s.savePlan(ctx, plan)
 			}
 			if generation.IsCode(err, generation.ErrForbidden) {
 				step.AuthorizationRef = ""

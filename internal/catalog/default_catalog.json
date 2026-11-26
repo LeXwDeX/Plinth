@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.62",
+    "revision": "2026-11-27.10.63",
     "terminology": {
       "user_facing": [
         {
@@ -7067,7 +7067,6 @@
         },
         "consent_wait_timeout_seconds": 120,
         "max_generation_calls_per_turn": 20,
-        "max_tool_rounds_per_turn": 100,
         "max_tool_result_characters": 64000,
         "max_parallel_generation_submissions": 8,
         "parallel_tool_calls": true,
