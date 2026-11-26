@@ -170,6 +170,28 @@ func (s Service) AbandonBudgetReservation(ctx context.Context, ownerID, requestI
 	return releaser.ReleaseUnboundBudgetReservation(ctx, ownerID, requestID)
 }
 
+// RefusedGrantStore denies an approved grant the kernel refused for good
+// before writing a Task, whoever approved it, and releases what it held.
+type RefusedGrantStore interface {
+	AbandonRefusedExecutionGrant(ctx context.Context, ownerID, requestID string) error
+}
+
+// AbandonRefusedGrant is AbandonBudgetReservation for a grant whose submit
+// the kernel refused for good (#665): the grant is denied
+// (AbandonedActor) even when it holds no reservation or step, for example
+// one the auto mode or a person approved, so the step that holds it is no
+// longer counted as in flight and can be started again. A store without the
+// capability falls back to AbandonBudgetReservation.
+func (s Service) AbandonRefusedGrant(ctx context.Context, ownerID, requestID string) error {
+	if ownerID == "" || requestID == "" {
+		return ErrInvalid
+	}
+	if store, ok := s.Grants.(RefusedGrantStore); ok {
+		return store.AbandonRefusedExecutionGrant(ctx, ownerID, requestID)
+	}
+	return s.AbandonBudgetReservation(ctx, ownerID, requestID)
+}
+
 // BudgetNoticeStore records which exhausted or expired plan already posted its
 // one chat notice. The notice follows the state transition, so a failed post is
 // retried by a later sweep until the date is recorded (#103 review B3).

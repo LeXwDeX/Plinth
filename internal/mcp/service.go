@@ -106,6 +106,9 @@ func New(presets []catalog.AgentMCPPresetSchema, policy catalog.AgentMCPPolicySc
 			if err := validateSchema(tool.Parameters); err != nil {
 				return nil, err
 			}
+			if err := validateStringBounds(tool.Parameters, policy.MaxStringArgumentCharacters); err != nil {
+				return nil, err
+			}
 			s.byName[tool.Name] = preset.ID
 		}
 		// Copy declarations so callers cannot mutate the tool allowlist.
@@ -177,6 +180,9 @@ func (s *Service) Call(ctx context.Context, scope Scope, name string, arguments 
 		}
 	}
 	if err := validateArguments(declaration.Parameters, arguments); err != nil {
+		return nil, err
+	}
+	if err := validateStringArgumentLengths(arguments, s.policy.MaxStringArgumentCharacters); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(s.policy.TimeoutMilliseconds)*time.Millisecond)
@@ -301,6 +307,48 @@ func validateSchema(data json.RawMessage) error {
 	}
 	return nil
 }
+// validateStringBounds refuses a peer tool whose declared string maxLength
+// exceeds the Schema's MCP policy bound (#665). Zero disables the check.
+func validateStringBounds(data json.RawMessage, maximum int) error {
+	if maximum <= 0 {
+		return nil
+	}
+	schema, err := parseSchema(data)
+	if err != nil {
+		return err
+	}
+	for _, raw := range schema.Properties {
+		property, err := parseSchema(raw)
+		if err != nil {
+			return err
+		}
+		if property.Type == "string" && property.MaxLength != nil && *property.MaxLength > maximum {
+			return ErrToolDenied
+		}
+	}
+	return nil
+}
+
+// validateStringArgumentLengths refuses any string argument longer than the
+// Schema's MCP policy bound (#665), so a parameter declared without maxLength
+// cannot carry unbounded text to the peer. Zero disables the check.
+func validateStringArgumentLengths(data json.RawMessage, maximum int) error {
+	if maximum <= 0 {
+		return nil
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(data, &values) != nil {
+		return ErrInvalidArguments
+	}
+	for _, raw := range values {
+		var value string
+		if json.Unmarshal(raw, &value) == nil && len([]rune(value)) > maximum {
+			return ErrInvalidArguments
+		}
+	}
+	return nil
+}
+
 func validateArguments(schemaJSON, data json.RawMessage) error {
 	schema, err := parseSchema(schemaJSON)
 	if err != nil {

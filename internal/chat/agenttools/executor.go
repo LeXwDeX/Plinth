@@ -17,6 +17,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/processing"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
 	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
@@ -308,7 +309,17 @@ type Executor struct {
 	// threeViewSources serializes the start of new three-view groups of one
 	// session, so two parallel calls on the same source picture cannot both
 	// pass the duplicate guard (#665). Keys are owner and session.
-	threeViewSources sync.Map
+	threeViewSources threeViewLocks
+	// threeViewTurnEnded reports whether a turn finished (done or error); the
+	// duplicate guard uses it for a group between two views (#665). Nil
+	// leaves such a group inactive, as before.
+	threeViewTurnEnded func(ctx context.Context, owner, session, turn string) (bool, error)
+}
+
+// SetThreeViewTurnEnded wires the turn-state read the three-view duplicate
+// guard needs for a group between two views (#665).
+func (e *Executor) SetThreeViewTurnEnded(ended func(ctx context.Context, owner, session, turn string) (bool, error)) {
+	e.threeViewTurnEnded = ended
 }
 
 // limitText and reconcileText are the consent texts in the turn's locale.
@@ -481,6 +492,12 @@ func (e *Executor) Execute(
 	case ToolReviseProcessingPlan:
 		if e.reviseProcessingPlan == nil {
 			return chat.ToolResult{Error: "processing plan revision unavailable", NoSubmission: true}, nil
+		}
+		// A revision that adds a paid attempt (insert, retry) is one more
+		// generation of the turn (#665); replace, skip and waive add none.
+		if revisionAddsPaidStep(command) && e.generationLimitReachedForCall(e.scopeKey(command),
+			command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls) {
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
 		return e.reviseProcessingPlan(ctx, command)
 	case ToolUpdateSessionNotes:
@@ -984,8 +1001,8 @@ func (e *Executor) generateWithParams(
 			return chat.ToolResult{AgentContent: message, NoSubmission: true}, nil
 		}
 	}
-	if !alreadyPrepared && e.generationLimitReachedForCall(scope, command.AssistantMessageID,
-		command.Call.ID, command.PriorGenerationCalls) {
+	if !alreadyPrepared && e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
+		command.Call.ID, command.PriorGenerationCalls, processingPlanWeight(command)) {
 		return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
@@ -994,6 +1011,17 @@ func (e *Executor) generateWithParams(
 }
 
 func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior int) bool {
+	return e.generationLimitReachedForCallWeighted(scope, turn, callID, prior, 1)
+}
+
+// generationLimitReachedForCallWeighted counts one call as weight paid
+// generations (#665): a processing plan counts each of its paid steps when it
+// is created. The call is refused when its weight does not fit the rest of
+// the turn's max_generation_calls_per_turn; a call already counted is free.
+func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID string, prior, weight int) bool {
+	if weight < 1 {
+		weight = 1
+	}
 	if e.maxGeneration <= 0 {
 		return false
 	}
@@ -1014,11 +1042,11 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 	if current.count < prior {
 		current.count = prior
 	}
-	if current.count >= e.maxGeneration {
+	if current.count+weight > e.maxGeneration {
 		e.usage[scope] = current
 		return true
 	}
-	current.count++
+	current.count += weight
 	if current.calls == nil {
 		current.calls = map[string]struct{}{}
 	}
@@ -1075,4 +1103,35 @@ func (e *Executor) mergedOptions(scope string, command chat.ToolCommand) chat.Tu
 // scopeKey 组合 owner+session 作为参数存储和生成次数的键，保证按用户隔离。
 func (e *Executor) scopeKey(command chat.ToolCommand) string {
 	return agentparams.ScopeKey(command.OwnerID, command.SessionID)
+}
+
+// processingPlanWeight is the number of paid steps a processing plan call
+// proposes (#665), read from the plan tool's Schema-declared steps argument;
+// any other call weighs one.
+func processingPlanWeight(command chat.ToolCommand) int {
+	if command.Tool.Processing == nil || command.Tool.Processing.Plan == nil ||
+		command.Tool.Processing.Plan.StepsArgument == "" {
+		return 1
+	}
+	var arguments map[string]json.RawMessage
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil {
+		return 1
+	}
+	var steps []json.RawMessage
+	if json.Unmarshal(arguments[command.Tool.Processing.Plan.StepsArgument], &steps) != nil || len(steps) == 0 {
+		return 1
+	}
+	return len(steps)
+}
+
+// revisionAddsPaidStep reports whether a revise_processing_plan call inserts a
+// step or retries one: both are a new paid attempt.
+func revisionAddsPaidStep(command chat.ToolCommand) bool {
+	var arguments struct {
+		Operation string `json:"operation"`
+	}
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil {
+		return false
+	}
+	return arguments.Operation == processing.OperationInsert || arguments.Operation == processing.OperationRetry
 }

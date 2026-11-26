@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strconv"
 	"strings"
@@ -262,9 +263,47 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	stored := s.resolve(v)
 	if err = s.Validate(stored); err != nil {
-		return Snapshot{}, err
+		// A Schema upgrade may tighten what a packaged Skill must satisfy;
+		// that must not stop every new turn (#665). Packaged Skills that no
+		// longer pass are skipped with a log; anything else still invalid
+		// (an administrator's or a corrupted configuration) fails as before.
+		cleaned, skipped := s.withoutInvalidBuiltInSkills(stored)
+		if len(skipped) == 0 || s.Validate(cleaned) != nil {
+			return Snapshot{}, err
+		}
+		slog.Warn("Agent 配置中的内置 Skill 未通过当前 Schema 校验，已跳过",
+			"revision", v.Revision, "skills", skipped, "error", err)
+		stored = cleaned
 	}
 	return Snapshot{v.Revision, s.project(stored)}, nil
+}
+
+// withoutInvalidBuiltInSkills drops the packaged Skills (the default
+// catalog's, or retired built-ins) that fail validation on their own, and
+// returns their IDs. A Skill an administrator or a person wrote is kept.
+func (s *Service) withoutInvalidBuiltInSkills(c Configuration) (Configuration, []string) {
+	builtIn := map[string]bool{}
+	for _, skill := range s.defaults.Skills {
+		builtIn[skill.ID] = true
+	}
+	for id := range s.retiredBuiltIns {
+		builtIn[id] = true
+	}
+	kept := make([]catalog.SkillSchema, 0, len(c.Skills))
+	var skipped []string
+	for _, skill := range c.Skills {
+		if builtIn[skill.ID] {
+			alone := c
+			alone.Skills = []catalog.SkillSchema{skill}
+			if s.Validate(alone) != nil {
+				skipped = append(skipped, skill.ID)
+				continue
+			}
+		}
+		kept = append(kept, skill)
+	}
+	c.Skills = kept
+	return c, skipped
 }
 func (s *Service) Management(ctx context.Context) (Management, error) {
 	v, err := s.Snapshot(ctx)

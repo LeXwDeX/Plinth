@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
@@ -139,7 +140,10 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// re-ask while the earlier group waits on its card or runs would start
 		// a second front view, charge it and raise a second card. The lock is
 		// held until this call's own first grant is recorded on its run.
-		releaseSource := e.lockThreeViewSession(command.OwnerID, command.SessionID)
+		releaseSource, err := e.lockThreeViewSession(ctx, command.OwnerID, command.SessionID)
+		if err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
 		defer releaseSource()
 		if active, found, err := e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0]); err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
@@ -274,21 +278,75 @@ func threeViewIncludeRight(raw json.RawMessage) (bool, error) {
 	return value, nil
 }
 
-// lockThreeViewSession serializes the start of new groups in one session and
-// returns an idempotent release.
-func (e *Executor) lockThreeViewSession(owner, session string) func() {
-	value, _ := e.threeViewSources.LoadOrStore(owner+"\x00"+session, &sync.Mutex{})
-	lock := value.(*sync.Mutex)
-	lock.Lock()
+// threeViewLocks is a keyed lock with reference counts: an entry lives only
+// while a call holds or waits for it, so sessions do not accumulate mutexes
+// (#665). A waiter gives up when its context ends.
+type threeViewLocks struct {
+	mu      sync.Mutex
+	entries map[string]*threeViewLock
+}
+
+type threeViewLock struct {
+	held chan struct{}
+	refs int
+}
+
+func (l *threeViewLocks) acquire(ctx context.Context, key string) (func(), error) {
+	l.mu.Lock()
+	if l.entries == nil {
+		l.entries = map[string]*threeViewLock{}
+	}
+	entry := l.entries[key]
+	if entry == nil {
+		entry = &threeViewLock{held: make(chan struct{}, 1)}
+		l.entries[key] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+	select {
+	case entry.held <- struct{}{}:
+	case <-ctx.Done():
+		l.drop(key, entry)
+		return nil, ctx.Err()
+	}
 	var once sync.Once
-	return func() { once.Do(lock.Unlock) }
+	return func() {
+		once.Do(func() {
+			<-entry.held
+			l.drop(key, entry)
+		})
+	}, nil
+}
+
+func (l *threeViewLocks) drop(key string, entry *threeViewLock) {
+	l.mu.Lock()
+	entry.refs--
+	if entry.refs == 0 && l.entries[key] == entry {
+		delete(l.entries, key)
+	}
+	l.mu.Unlock()
+}
+
+// size is the number of keys held or waited for; tests read it.
+func (l *threeViewLocks) size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.entries)
+}
+
+// lockThreeViewSession serializes the start of new groups in one session and
+// returns an idempotent release. It gives up when ctx ends.
+func (e *Executor) lockThreeViewSession(ctx context.Context, owner, session string) (func(), error) {
+	return e.threeViewSources.acquire(ctx, owner+"\x00"+session)
 }
 
 // activeThreeViewForSource finds another group of the session, of the same
 // recipe and source picture, that still waits on a card or has a view in
-// flight (#665): a view whose grant is pending, approved or being claimed, or
-// whose Task has not ended. A finished, failed or paused group is not active:
-// asking again for it starts a new group as before.
+// flight (#665): a view whose grant is pending or approved while its turn can
+// still use it, or being claimed, or whose Task has not ended; or a group
+// between two views whose continuation turn is still going. A finished,
+// failed or paused group, and one whose card belongs to a stopped turn, is
+// not active: asking again for it starts a new group as before.
 func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
 	source generation.AssetID,
 ) (skillrun.Run, bool, error) {
@@ -315,8 +373,30 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 				return run, true, nil
 			}
 		}
+		active, err := e.threeViewBetweenViews(ctx, owner, run)
+		if err != nil {
+			return skillrun.Run{}, false, err
+		}
+		if active {
+			return run, true, nil
+		}
 	}
 	return skillrun.Run{}, false, nil
+}
+
+// threeViewTurnStopped reports whether the grant's trigger turn was stopped.
+// Such a grant can never be claimed (a three-view card is never detached from
+// its turn), so it does not keep its group active. A turn that no longer
+// exists is not a stop.
+func (e *Executor) threeViewTurnStopped(ctx context.Context, grant executiongrant.Grant) (bool, error) {
+	if grant.TriggerTurnID == "" || e.skillTurnStopped == nil {
+		return false, nil
+	}
+	stopped, err := e.skillTurnStopped(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return false, nil
+	}
+	return stopped, err
 }
 
 func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, error) {
@@ -337,9 +417,17 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 			return false, err
 		}
 		switch grant.Status {
-		case executiongrant.Pending:
-			return !e.skillRuntime.Grants.Expired(grant), nil
-		case executiongrant.Approved, executiongrant.Claimed:
+		case executiongrant.Pending, executiongrant.Approved:
+			// A pending card waits until it expires; an approved grant counts
+			// only while the step can still submit with it. Neither counts once
+			// its turn was stopped: nobody can approve or claim it then. A
+			// grant the kernel refused for good is denied by SubmitStep.
+			if grant.Status == executiongrant.Pending && e.skillRuntime.Grants.Expired(grant) {
+				return false, nil
+			}
+			stopped, err := e.threeViewTurnStopped(ctx, grant)
+			return !stopped, err
+		case executiongrant.Claimed:
 			return true, nil
 		case executiongrant.Bound:
 			return taskActive(generation.TaskID(grant.TaskID))
@@ -350,6 +438,48 @@ func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.Own
 		}
 	}
 	return false, nil
+}
+
+// threeViewBetweenViews reports a group the server continues by itself that
+// sits between two views (#665): an earlier view is finished and a later
+// required view is still planned, while the turn that approved the latest
+// view on the continuation basis (a production plan or the auto mode) is
+// still going and was not stopped. That turn submits the next view when it
+// replays the call. A group whose turn ended or stopped is paused.
+func (e *Executor) threeViewBetweenViews(ctx context.Context, owner generation.OwnerID, run skillrun.Run) (bool, error) {
+	if e.threeViewTurnEnded == nil {
+		return false, nil
+	}
+	latest, planned := "", false
+	for _, step := range run.Steps {
+		switch {
+		case step.Phase == skillrun.OutputReady && step.GrantRequestID != "":
+			latest = step.GrantRequestID
+		case (step.Phase == skillrun.Planned || step.Phase == skillrun.Prepared) && !step.Spec.Optional &&
+			step.ReplacementAssetID == "":
+			planned = true
+		}
+	}
+	if latest == "" || !planned {
+		return false, nil
+	}
+	grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), latest)
+	if err != nil {
+		return false, err
+	}
+	continued := grant.BudgetEligible && (grant.ApprovedByBudget() ||
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto)
+	if !continued || grant.TriggerTurnID == "" {
+		return false, nil
+	}
+	if stopped, err := e.threeViewTurnStopped(ctx, grant); err != nil || stopped {
+		return false, err
+	}
+	ended, err := e.threeViewTurnEnded(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return false, nil
+	}
+	return !ended, err
 }
 
 func threeViewRunKey(command chat.ToolCommand) string {

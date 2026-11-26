@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
@@ -156,8 +157,10 @@ func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskI
 }
 
 // startedOnPolicy reports whether the group's first required view was approved
-// by the session policy (the auto mode), so a four-view request was made on
-// the auto basis.
+// by the auto mode's policy actor, so a four-view request was made on the auto
+// basis. The strict and budget modes approve cheap views by policy too
+// (policy:manual, policy:budget); such a group never had the right view on
+// that basis and finishes as a three-view group (#665).
 func (s *Service) startedOnPolicy(ctx context.Context, run skillrun.Run, required []skillrun.Step) (bool, error) {
 	if len(required) == 0 || required[0].GrantRequestID == "" {
 		return false, nil
@@ -166,7 +169,8 @@ func (s *Service) startedOnPolicy(ctx context.Context, run skillrun.Run, require
 	if err != nil {
 		return false, err
 	}
-	return grant.ApprovedByPolicy(), nil
+	return grant.Status != executiongrant.Pending &&
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto, nil
 }
 
 // autoBasis reports whether the session approves every paid step by itself, the
