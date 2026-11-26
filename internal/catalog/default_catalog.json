@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.10.54",
+    "revision": "2026-11-26.10.55",
     "terminology": {
       "user_facing": [
         {
@@ -5385,6 +5385,7 @@
         "ui.studio.stage.older_version": "旧版本",
         "ui.studio.continue.armed": "下一次的要求会从 {label} 继续，结果会成为它的分支。",
         "ui.studio.three_view.title": "三视图",
+        "ui.studio.three_view.title_four": "四视图",
         "ui.studio.three_view.progress": "已完成 {done} / {total}",
         "ui.studio.three_view.complete": "必需视图都已完成",
         "ui.studio.three_view.slots": "三个视图",
@@ -20152,6 +20153,7 @@
             "ui.studio.stage.older_version": "Older version",
             "ui.studio.continue.armed": "Your next request will continue from {label}, and the result will become a branch of it.",
             "ui.studio.three_view.title": "Three views",
+            "ui.studio.three_view.title_four": "Four views",
             "ui.studio.three_view.progress": "{done} / {total} completed",
             "ui.studio.three_view.complete": "Required views completed",
             "ui.studio.three_view.slots": "Three views",

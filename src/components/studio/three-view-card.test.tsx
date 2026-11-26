@@ -232,6 +232,27 @@ describe('three-view card with a multiview model', () => {
     expect(html).not.toContain('已完成 3 / 3');
   });
 
+  // #633: the card title follows the request: a four-view request (right view started) is 「四视图」, while a group whose
+  // right view nobody started stays 「三视图」 (the server's one fixed group label).
+  it('titles the card by what was asked for', () => {
+    const header = (html: string) => html.match(/<article[^>]*aria-label="([^"]*)"/)?.[1] ?? '';
+    const threeViews = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'not_started', startable: true },
+      { status: 'not_started', startable: true },
+      { status: 'not_started', startable: true },
+    ]));
+    expect(header(threeViews)).toBe(messages['ui.studio.three_view.title']);
+    const fourViews = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'running', task_id: 't4' },
+    ]));
+    expect(header(fourViews)).toBe(messages['ui.studio.three_view.title_four']);
+    expect(fourViews).toContain(`>${messages['ui.studio.three_view.title_four']}</span>`);
+  });
+
   // #633: a three-view group (right view never started) is done at 3 / 3 and keeps 可选 on the right view; a
   // four-view request (right view started) counts four, drops 可选 and is not 「必需视图都已完成」 until it is done.
   it('matches the denominator and the 可选 mark to what was asked for', () => {
