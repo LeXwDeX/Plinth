@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
@@ -210,7 +211,7 @@ type agentTaskReader interface {
 }
 
 // newAgentTaskReader 以 owner 作用域读取 Task；跨 owner 与不存在的 Task
-// 同样返回错误，工具层统一收敛为 "task not readable"。
+// 同样返回错误。get_task 经 newSessionAgentTaskReader 再加会话范围（#665）。
 func newAgentTaskReader(
 	tasks agentTaskReader,
 	chatSchema catalog.ChatSchema,
@@ -222,15 +223,52 @@ func newAgentTaskReader(
 		if err != nil {
 			return nil, err
 		}
-		locale := catalog.LocaleFrom(ctx)
-		view := buildAgentTaskViewIn(task, chatSchema, texts, locale)
-		if refetcher, ok := tasks.(agentTaskRefetcher); ok && task.State == generation.TaskFailed {
-			if eligibility, err := refetcher.RefetchEligibility(ctx, task.OwnerID, task.ID); err == nil {
-				view.ResultRecovery = agentRecoveryView(eligibility, chatSchema, messages, texts, locale)
-			}
-		}
-		return json.Marshal(view)
+		return agentTaskViewJSON(ctx, tasks, task, chatSchema, messages, texts)
 	}
+}
+
+// newSessionAgentTaskReader backs get_task (#665): only a Task of the
+// command's session, of an ancestor of its branch, of its production-list
+// item or registered in its project. Another session of the same owner and a
+// Task that does not exist get the same Schema refusal (chat.ReadScopeRefusal),
+// so the answer never says whether the ID exists.
+func newSessionAgentTaskReader(
+	tasks agentTaskReader,
+	scope *chat.AgentReadScope,
+	chatSchema catalog.ChatSchema,
+	messages map[string]string,
+	texts *catalog.TextLocalizer,
+) func(context.Context, chat.ToolCommand, string) (json.RawMessage, error) {
+	return func(ctx context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error) {
+		refusal := scope.Refusal(command, taskID, "task not readable")
+		task, err := tasks.Get(ctx, generation.OwnerID(command.OwnerID), generation.TaskID(taskID))
+		if generation.IsCode(err, generation.ErrNotFound) || generation.IsCode(err, generation.ErrForbidden) {
+			return nil, refusal
+		}
+		if err != nil {
+			return nil, err
+		}
+		allowed, err := scope.TaskReadable(ctx, command, task)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, refusal
+		}
+		return agentTaskViewJSON(ctx, tasks, task, chatSchema, messages, texts)
+	}
+}
+
+func agentTaskViewJSON(ctx context.Context, tasks agentTaskReader, task generation.Task,
+	chatSchema catalog.ChatSchema, messages map[string]string, texts *catalog.TextLocalizer) (json.RawMessage, error) {
+	locale := catalog.LocaleFrom(ctx)
+	view := buildAgentTaskViewIn(task, chatSchema, texts, locale)
+	if refetcher, ok := tasks.(agentTaskRefetcher); ok && task.State == generation.TaskFailed {
+		if eligibility, err := refetcher.RefetchEligibility(ctx, task.OwnerID, task.ID); err == nil {
+			view.ResultRecovery = agentRecoveryView(eligibility, chatSchema, messages, texts, locale)
+		}
+	}
+	return json.Marshal(view)
 }
 
 // buildAgentTaskViewIn writes the failure reason in the turn's locale. The

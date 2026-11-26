@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.59",
+    "revision": "2026-11-27.10.60",
     "terminology": {
       "user_facing": [
         {
@@ -7062,6 +7062,7 @@
         "consent_wait_timeout_seconds": 120,
         "max_generation_calls_per_turn": 20,
         "max_tool_rounds_per_turn": 100,
+        "max_tool_result_characters": 64000,
         "max_parallel_generation_submissions": 8,
         "parallel_tool_calls": true,
         "max_listed_models": 20,
@@ -10932,6 +10933,11 @@
           "agent_reply_truncated": "对话模型这一轮写到了输出长度上限，回复在这里被截断；如果截断时正在写工具调用，这个调用没有执行。如果还有没做完的步骤，请点「重新生成」或把需求拆小后重新发送。",
           "agent_reply_filtered": "对话模型服务的内容过滤中止了这一轮回复，下面没有更多内容。请调整描述后重新发送，或换一个对话模型。",
           "tool_rounds_capped": "这一轮回复已经连续调用了 {limit} 轮工具，为避免无止境地循环，本轮到此为止。已经提交的生成任务不受影响，可以在任务中心查看；如果还有没做完的步骤，请发送消息让我继续。",
+          "tool_result_truncated": "【平台说明：{tool} 的结果有 {size} 个字符，超过了交给你的上限 {limit} 个字符，{cut}。上面不是完整结果，不要把缺的部分当作不存在。需要被截掉的内容时，请缩小请求范围后再调用：例如列可用模型时只问一种能力（capability）或一个模型（model），get_task 一次只查一个任务，列表类工具按句柄或 ID 只取需要的那一项。】",
+          "tool_result_cut_strings": "较长的文本字段只保留了开头",
+          "tool_result_cut_items": "较长的文本字段只保留了开头，列表只保留了前面的条目",
+          "tool_result_cut_text": "只保留了开头部分（结果已不再是完整的 JSON）",
+          "agent_read_out_of_scope": "读不到 {id}：它不存在，或者不属于本会话（只能读本会话、本会话所分支自的上级会话，以及本项目登记的任务和图片，不能读同一账号其他会话的内容）。没有读取任何内容，也没有扣积分。请改用本会话里的句柄或任务 ID；需要别的会话里的图或模型时，请用户把它加到本项目或在本会话里重新上传。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_image_invalid": "这次请求里的图片没有被模型接受：模型能读图，是这张图不符合要求。请重新生成这张图、换一张，或裁剪后再试。",
           "agent_image_invalid_reasons": "上游指出的问题：{reasons}。",
@@ -22071,6 +22077,11 @@
             "chat.presentation.messages.agent_reply_truncated": "The chat model reached its output length limit in this round, so the reply is cut off here; a tool call that was being written when it was cut off did not run. If steps are left undone, click Regenerate or split the request and send it again.",
             "chat.presentation.messages.agent_reply_filtered": "The chat model service's content filter ended this reply; nothing more follows. Please adjust the description and send it again, or switch to another chat model.",
             "chat.presentation.messages.tool_rounds_capped": "This reply has already called tools for {limit} rounds in a row, so it stops here to avoid an endless loop. Generation tasks already submitted are unaffected and can be found in the Task Center; if steps are left undone, send a message to let me continue.",
+            "chat.presentation.messages.tool_result_truncated": "[Platform note: the result of {tool} has {size} characters, more than the limit of {limit} characters handed to you, so {cut}. What is above is not the whole result; do not treat the missing part as absent. When you need what was cut, narrow the request and call again: for example list the available models for one capability or one model only, read one task per get_task call, and have list tools return only the one item you need by handle or ID.]",
+            "chat.presentation.messages.tool_result_cut_strings": "long text fields keep only their beginning",
+            "chat.presentation.messages.tool_result_cut_items": "long text fields keep only their beginning and lists keep only their first items",
+            "chat.presentation.messages.tool_result_cut_text": "only the beginning is kept (the result is no longer complete JSON)",
+            "chat.presentation.messages.agent_read_out_of_scope": "{id} cannot be read: it does not exist, or it does not belong to this session (only this session, the sessions this branch came from, and the tasks and pictures registered in this project can be read, not other sessions of the same account). Nothing was read and no credits were spent. Use a handle or task ID of this session; when a picture or model of another session is needed, ask the user to add it to this project or upload it again in this session.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
             "chat.presentation.messages.agent_image_invalid": "The model did not accept the picture in this request: it does read images, but this picture does not meet its limits. Generate the picture again, use another one, or crop it and try again.",
             "chat.presentation.messages.agent_image_invalid_reasons": "The upstream named this problem: {reasons}.",

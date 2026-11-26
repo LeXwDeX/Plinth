@@ -46,6 +46,9 @@ type Config struct {
 	// Offerings names the models that reach a purpose's minimum short edge in
 	// the hint of a failed resolution check. Nil names none.
 	Offerings OfferingLookup
+	// Scope bounds a picture the Agent names by asset ID instead of a handle
+	// of the session (OpenAgentPicture, #665). Nil keeps the owner-only read.
+	Scope *chat.AgentReadScope
 }
 
 type Service struct {
@@ -56,6 +59,7 @@ type Service struct {
 	usage      catalog.ChatImage2DUsageSchema
 	imageField string
 	offerings  OfferingLookup
+	scope      *chat.AgentReadScope
 }
 
 func New(config Config) (*Service, error) {
@@ -65,6 +69,7 @@ func New(config Config) (*Service, error) {
 	return &Service{
 		context: config.Context, review: config.Review, inputs: config.Inputs, tasks: config.Tasks,
 		usage: config.Usage, imageField: config.Brief.FieldNameOfType("image_profile"), offerings: config.Offerings,
+		scope: config.Scope,
 	}, nil
 }
 
@@ -301,6 +306,37 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 // is the same one Inspect applies to a handle or an asset id.
 func (service *Service) OpenPicture(ctx context.Context, owner string, attachment chat.Attachment, url string) ([]byte, error) {
 	return service.read(ctx, owner, chat.ResolvedAttachment{Attachment: attachment, URL: url})
+}
+
+// OpenAgentPicture reads a picture the Agent names by its input asset ID
+// rather than by a handle of the session (compare_model_reference, #665). The
+// asset must be readable from the command's session: one its history or
+// selection carries, an output of a Task of the session or of an ancestor of
+// its branch, a reference of its list item or one its project registers.
+// Another session's asset and an ID that does not exist get the same Schema
+// refusal (*chat.ReadScopeRefusal), so the answer never says which.
+func (service *Service) OpenAgentPicture(ctx context.Context, command chat.ToolCommand, assetID string) ([]byte, error) {
+	refusal := service.scope.Refusal(command, assetID, "asset is not readable")
+	if service.inputs == nil || strings.TrimSpace(assetID) == "" || command.OwnerID == "" {
+		return nil, refusal
+	}
+	owner := generation.OwnerID(command.OwnerID)
+	asset, body, err := service.inputs.OpenOwned(ctx, owner, generation.AssetID(assetID))
+	if err != nil {
+		return nil, refusal
+	}
+	defer body.Close()
+	if service.scope != nil {
+		if asset.OwnerID == "" {
+			// OpenOwned has checked the owner.
+			asset.OwnerID = owner
+		}
+		allowed, err := service.scope.InputAssetReadable(ctx, command, asset)
+		if err != nil || !allowed {
+			return nil, refusal
+		}
+	}
+	return readLimited(body, service.review.Limits.MaxBytes)
 }
 
 // ReviewAttachment inspects one already-resolved attachment with a named

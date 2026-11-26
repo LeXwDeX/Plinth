@@ -56,6 +56,9 @@ type ImageReviewer interface {
 // returned bytes are bounded by the caller.
 type PictureReader interface {
 	OpenPicture(context.Context, string, chat.Attachment, string) ([]byte, error)
+	// OpenAgentPicture reads a picture named by asset ID instead of a handle
+	// of the session; it refuses one outside the session scope (#665).
+	OpenAgentPicture(ctx context.Context, command chat.ToolCommand, assetID string) ([]byte, error)
 }
 
 // ModelSource is the view of a three-view group that a 3D model made from the

@@ -114,8 +114,10 @@ type Config struct {
 	// chat.context); a policy without a bound leaves the tool unavailable.
 	HistoryLookup chat.HistoryLookupPolicy
 	// ReadTask 读取 owner 自己的公开 Task 事实（状态、进度、公开失败与
-	// 已落盘 Asset），不得包含上游 remote ID、Opaque 或取证字段。
-	ReadTask func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	// 已落盘 Asset），不得包含上游 remote ID、Opaque 或取证字段。#665 起只读
+	// 本会话范围内的 Task（本会话、分支祖先、清单项引用与本项目登记），范围外
+	// 与不存在的 Task 都返回 *chat.ReadScopeRefusal。
+	ReadTask func(ctx context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error)
 	// RecoverTask starts (or returns) the no-charge refetch of a failed Task's
 	// accepted upstream result for the command's own owner and session (#295)
 	// and returns the result the Agent reads.
@@ -260,7 +262,7 @@ type Executor struct {
 	submissionGate        func(ctx context.Context, command chat.ToolCommand) string
 	projection            func(capability, model string) json.RawMessage
 	historyLookup         chat.HistoryLookupPolicy
-	readTask              func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	readTask              func(ctx context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error)
 	recoverTask           func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
 	listModels            func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	readProcessingPlan    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -714,8 +716,14 @@ func (e *Executor) readTaskState(
 	if err := json.Unmarshal(command.Call.Arguments, &args); err != nil || args.TaskID == "" {
 		return chat.ToolResult{Error: "invalid task_id"}
 	}
-	state, err := e.readTask(ctx, command.OwnerID, args.TaskID)
+	state, err := e.readTask(ctx, command, args.TaskID)
 	if err != nil {
+		// #665: a Task outside the session scope, or one that does not exist,
+		// is refused in the Schema's words without saying which.
+		var refusal *chat.ReadScopeRefusal
+		if errors.As(err, &refusal) && refusal.Message != "" {
+			return chat.ToolResult{Error: refusal.Message, NoSubmission: true}
+		}
 		return chat.ToolResult{Error: "task not readable"}
 	}
 	return chat.ToolResult{AgentContent: string(state)}

@@ -3596,6 +3596,8 @@ func (orchestrator *Orchestrator) executeTools(
 		imagesBefore := len(produced.ImageURLs)
 		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
 		content = orchestrator.withPresentedHandles(content, result, *produced, imagesBefore, handles)
+		// #665: the result text the model reads is bounded by the Schema.
+		content = orchestrator.capToolResult(ctx, call.Name, content)
 		// #246: the self-check record stores the pictures a check produced by
 		// their attachment handles, once the reply has named them.
 		orchestrator.attachSelfCheckHandles(ctx, command.OwnerID, command.SessionID, result.Summary, handles)

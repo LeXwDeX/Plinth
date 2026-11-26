@@ -5516,6 +5516,12 @@ type ChatAgentSchema struct {
 	// above a legitimate long turn (#553 keeps tool calls unbounded per round);
 	// 0 or absent: no bound.
 	MaxToolRoundsPerTurn int `json:"max_tool_rounds_per_turn,omitempty"`
+	// MaxToolResultCharacters bounds the text of one executed Agent tool's
+	// result that goes back to the model, in characters (Unicode code points,
+	// #665). A longer result is shortened (a JSON result keeps valid JSON:
+	// long strings, then trailing list items are cut) and carries
+	// presentation.messages.tool_result_truncated. 0 or absent: no bound.
+	MaxToolResultCharacters int `json:"max_tool_result_characters,omitempty"`
 	// MaxParallelGenerationSubmissions bounds how many paid generation calls
 	// of one tool round are submitted before the turn waits for their Tasks
 	// together (in-flight steps of the round); calls beyond it form the next
@@ -6820,6 +6826,24 @@ type ChatMessageTexts struct {
 	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
 	// Optional: without it the reply ends without a note.
 	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
+	// ToolResultTruncated is the note on a tool result shortened to
+	// chat.agent.max_tool_result_characters (#665): {tool} is the tool name,
+	// {size} the original length and {limit} the bound, both in characters,
+	// and {cut} one of the ToolResultCut* phrases saying what was cut. The
+	// note asks the Agent to narrow the request. Required while the bound is
+	// set.
+	ToolResultTruncated  string `json:"tool_result_truncated,omitempty"`
+	ToolResultCutStrings string `json:"tool_result_cut_strings,omitempty"`
+	ToolResultCutItems   string `json:"tool_result_cut_items,omitempty"`
+	ToolResultCutText    string `json:"tool_result_cut_text,omitempty"`
+	// AgentReadOutOfScope answers get_task, and a picture compare_model_reference
+	// names by ID, when the Task or asset is not readable from the session:
+	// another session of the owner (not an ancestor of this branch, not
+	// registered in the session's project) or one that does not exist. The
+	// same words for both, so the answer never says whether the ID exists
+	// (#665); {id} is the named ID. Optional: without it the tools keep their
+	// generic refusal.
+	AgentReadOutOfScope string `json:"agent_read_out_of_scope,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -550,6 +551,28 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds < 0 ||
 		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
 		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
+	}
+	// #665: a bounded tool result needs the note that tells the Agent what
+	// was cut and how to narrow the request.
+	if limit := schema.Agent.MaxToolResultCharacters; limit < 0 {
+		return errors.New("agent 的 max_tool_result_characters 不能为负")
+	} else if limit > 0 {
+		messages := schema.Presentation.Messages
+		for name, value := range map[string]string{
+			"tool_result_truncated":   messages.ToolResultTruncated,
+			"tool_result_cut_strings": messages.ToolResultCutStrings,
+			"tool_result_cut_items":   messages.ToolResultCutItems,
+			"tool_result_cut_text":    messages.ToolResultCutText,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("设置了 agent.max_tool_result_characters 时必须声明 presentation.messages.%s", name)
+			}
+		}
+		// The note itself must fit well inside the bound, or every shortened
+		// result would be only the note.
+		if utf8.RuneCountInString(messages.ToolResultTruncated) >= limit/2 {
+			return errors.New("agent.max_tool_result_characters 必须大于 tool_result_truncated 文案长度的两倍")
+		}
 	}
 	if schema.Agent.MaxListedModels <= 0 {
 		return errors.New("agent 的 max_listed_models 必须为正数")

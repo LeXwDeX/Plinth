@@ -630,6 +630,76 @@ func (r *ProjectRepository) RegisteredPicture(
 	return projectReferenceMatches(decodeProjectReferences(guide), taskID, assetID), nil
 }
 
+// RegisteredReference reports whether the owner's project stores the reference
+// among its assets' pictures and models or its style guide (#665): the Agent's
+// read-only tools may read another session's Task or upload only then. An
+// InputAssetID matches that input asset; a TaskID matches that Task's exact
+// asset, or any of its assets when AssetID is empty.
+func (r *ProjectRepository) RegisteredReference(
+	ctx context.Context,
+	ownerID, projectID string,
+	wanted project.Reference,
+) (bool, error) {
+	if ownerID == "" || projectID == "" || (wanted.InputAssetID == "" && wanted.TaskID == "") {
+		return false, nil
+	}
+	matches := func(references []project.Reference) bool {
+		for _, reference := range references {
+			if wanted.InputAssetID != "" {
+				if reference.InputAssetID == wanted.InputAssetID {
+					return true
+				}
+				continue
+			}
+			if reference.InputAssetID == "" && reference.TaskID == wanted.TaskID &&
+				(wanted.AssetID == "" || reference.AssetID == wanted.AssetID) {
+				return true
+			}
+		}
+		return false
+	}
+	var owned int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT 1 FROM projects WHERE id = ? AND owner_id = ?`,
+		projectID, ownerID).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check project owner: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT images_json, models_json FROM project_assets WHERE project_id = ? AND owner_id = ?`,
+		projectID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("read project asset references: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var images, models string
+		if err := rows.Scan(&images, &models); err != nil {
+			return false, err
+		}
+		if matches(decodeProjectReferences(images)) || matches(decodeProjectReferences(models)) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	var guide string
+	err = r.db.QueryRowContext(ctx, `
+		SELECT references_json FROM project_style_guides WHERE project_id = ?`,
+		projectID).Scan(&guide)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read project style references: %w", err)
+	}
+	return matches(decodeProjectReferences(guide)), nil
+}
+
 func projectReferenceMatches(references []project.Reference, taskID, assetID string) bool {
 	for _, reference := range references {
 		if reference.TaskID == taskID && reference.AssetID == assetID {

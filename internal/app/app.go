@@ -1103,11 +1103,23 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// #251: the acceptance wording is frozen in the proposal turn's language.
 	// Text takes the turn locale; an empty locale would never translate.
 	chatService.SetProductionPlanLocalizer(texts.Text)
+	// #665: the read-only Agent tools (get_task, compare_model_reference's
+	// pictures named by ID) read only the session's scope: its own Tasks, a
+	// branch's ancestors, its list item's references and its project.
+	agentReadScope := &chat.AgentReadScope{
+		TaskInSession: module.TaskInSession,
+		Refused:       applicationSchema.Chat.Presentation.Messages.AgentReadOutOfScope,
+		Texts:         texts,
+	}
+	if applicationSchema.Project != nil {
+		agentReadScope.ProjectReference = repository.ProjectRepository().RegisteredReference
+	}
 	imageReview, err := imagereview.New(imagereview.Config{
 		Context: applicationSchema.Chat.Context,
 		Review:  applicationSchema.Chat.ImageReview,
 		Inputs:  inputAssetService,
 		Tasks:   module,
+		Scope:   agentReadScope,
 		// #282/#284/#287: the delivery checklist judges a picture against the
 		// session's 2D purpose, and names the Offerings that can reach its
 		// minimum resolution from the Catalog.
@@ -1263,7 +1275,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
 		Params:                paramsStore,
 		Generate:              toolExecutor,
-		ReadTask:              newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		ReadTask:              newSessionAgentTaskReader(module, agentReadScope, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		RecoverTask:           newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:            toolExecutor.ListSessionModels,
 		ReadProcessingPlan:    toolExecutor.ReadProcessingPlan,
