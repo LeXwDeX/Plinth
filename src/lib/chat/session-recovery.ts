@@ -27,11 +27,13 @@ interface SessionRecoveryOptions {
   onLoadError(): void;
   /** #665: the reads of a reply that stays pending stopped (MAX_PENDING_POLLS); called once per recovery. */
   onGaveUp?(): void;
+  /** #665: a read of the newest page was applied (the send queue waits for one after another tab's send). */
+  onRead?(): void;
 }
 
 /** Owns only the load/subscription for this selected session, until effect cleanup. */
 export function recoverChatSession(options: SessionRecoveryOptions): () => void {
-  const { sessionId, client, pageSize, connect, pollMilliseconds, onLoading, onLoadError, onGaveUp } = options;
+  const { sessionId, client, pageSize, connect, pollMilliseconds, onLoading, onLoadError, onGaveUp, onRead } = options;
   const controller = new AbortController();
   let stopped = false;
   let closeStream: (() => void) | undefined;
@@ -93,6 +95,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
       } else {
         useChatStore.getState().applyNewestMessagePage(sessionId, page);
       }
+      onRead?.();
       if (page.messages.some((message) => message.isPending)) schedulePoll();
       else pendingPolls = 0;
     } catch {
@@ -135,6 +138,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
       // AbortSignal alone cannot protect already-resolved responses or custom clients.
       if (!current() || streaming()) return;
       useChatStore.getState().applyNewestMessagePage(sessionId, page);
+      onRead?.();
       if (page.messages.some((message) => message.isPending)) {
         if (tryStream) reconnect();
         else schedulePoll();

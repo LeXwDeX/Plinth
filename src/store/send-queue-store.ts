@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 
-import { cancelQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import {
+  cancelQueuedTurn, claimStoredTurn, foreignHold, parseQueue, parseSendHold, SEND_HOLD_MS, SEND_HOLD_PREFIX,
+  SEND_QUEUE_KEY, sendHoldKey, writeQueue, type QueueBySession, type SendHold,
+} from '@/lib/chat/send-queue';
 
 /**
  * #665: the messages queued while a turn runs, kept in this browser so a reload or leaving the page does not lose
@@ -9,21 +12,18 @@ import { cancelQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
  *
  * Every tab of the browser shares the stored queue: each change is made on the stored queue as it is now (not on this
  * tab's copy, which another tab may have changed), the other tabs follow it through the `storage` event, and a queued
- * turn is claimed (taken out of the stored queue) before it is sent, so two tabs never both send it.
+ * turn is claimed (taken out of the stored queue) before it is sent, so two tabs never both send it. The claim also
+ * sets this tab's hold of the session's send (claimStoredTurn), refreshed while the turn it sent runs and released
+ * when it ends; another tab does not drain that session while the hold lives, and re-reads the session first after
+ * it changes (foreignChanges).
  */
-export const SEND_QUEUE_KEY = 'plinth.queuedTurns';
+export { SEND_QUEUE_KEY };
 
-function parse(raw: string | null): QueueBySession {
-  try {
-    const parsed: unknown = JSON.parse(raw ?? '{}');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(
-      (entry): entry is [string, QueueBySession[string]] => Array.isArray(entry[1]) && entry[1].length > 0,
-    ));
-  } catch {
-    return {};
-  }
-}
+/** This tab, as the owner of the holds it sets. */
+const TAB_ID = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+/** The sessions whose send this tab holds. */
+const heldSessions = new Set<string>();
 
 // Set once a write was refused (a full or read-only storage): the stored queue no longer follows this page's.
 let writesRefused = false;
@@ -37,13 +37,12 @@ function readStored(): QueueBySession | null {
   } catch {
     return null;
   }
-  return parse(raw);
+  return parseQueue(raw);
 }
 
 function write(queue: QueueBySession): void {
   try {
-    if (Object.keys(queue).length === 0) localStorage.removeItem(SEND_QUEUE_KEY);
-    else localStorage.setItem(SEND_QUEUE_KEY, JSON.stringify(queue));
+    writeQueue(localStorage, queue);
   } catch {
     // No storage: the queue lives for this page.
     writesRefused = true;
@@ -54,10 +53,18 @@ interface SendQueueState {
   queue: QueueBySession;
   update: (change: (queue: QueueBySession) => QueueBySession) => void;
   /**
-   * Takes the queued turn out of the queue before it is sent. False when it is no longer queued (another tab sent or
-   * cancelled it): the caller must not send it.
+   * Takes the queued turn out of the queue before it is sent, and holds the session's send for this tab. False when it
+   * is no longer queued (another tab sent or cancelled it) or another tab holds the send: the caller must not send it.
    */
-  claim: (sessionId: string, id: string) => boolean;
+  claim: (sessionId: string, id: string) => Promise<boolean>;
+  /** Keeps this tab's hold of the session's send alive (every third of SEND_HOLD_MS while its turn runs). */
+  refreshHold: (sessionId: string) => void;
+  /** Ends this tab's hold once the turn it sent is over. */
+  releaseHold: (sessionId: string) => void;
+  /** Another tab's live hold of the session's send, or null. */
+  foreignHold: (sessionId: string) => SendHold | null;
+  /** #665: per session, how many times another tab's hold changed; a change means this tab's messages may be stale. */
+  foreignChanges: Readonly<Record<string, number>>;
   forgetSession: (sessionId: string) => void;
   /** Keeps only the queues of these sessions; see pruneQueuedSessions. */
   forgetSessionsExcept: (keep: (sessionId: string) => boolean) => void;
@@ -72,14 +79,61 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
     if (next !== base) write(next);
     if (next !== get().queue) set({ queue: next });
   },
-  claim: (sessionId, id) => {
-    let claimed = false;
-    get().update((queue) => {
-      if (!(queue[sessionId] ?? []).some((turn) => turn.id === id)) return queue;
-      claimed = true;
-      return cancelQueuedTurn(queue, sessionId, id);
-    });
-    return claimed;
+  foreignChanges: {},
+  claim: async (sessionId, id) => {
+    const claimLocally = () => {
+      let claimed = false;
+      get().update((queue) => {
+        if (!(queue[sessionId] ?? []).some((turn) => turn.id === id)) return queue;
+        claimed = true;
+        return cancelQueuedTurn(queue, sessionId, id);
+      });
+      return claimed;
+    };
+    if (readStored() === null) return claimLocally();
+    const claimStored = () => {
+      try {
+        const result = claimStoredTurn(localStorage, sessionId, id, TAB_ID, Date.now());
+        if (result === 'claimed') heldSessions.add(sessionId);
+        followStored();
+        return result === 'claimed';
+      } catch {
+        writesRefused = true;
+        return claimLocally();
+      }
+    };
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    if (locks && typeof locks.request === 'function') {
+      try {
+        return await locks.request(`${SEND_QUEUE_KEY}:claim`, claimStored);
+      } catch {
+        // A lock the browser refuses (an opaque origin): claim without it.
+      }
+    }
+    return claimStored();
+  },
+  refreshHold: (sessionId) => {
+    if (!heldSessions.has(sessionId)) return;
+    try {
+      localStorage.setItem(sendHoldKey(sessionId), JSON.stringify({ owner: TAB_ID, expiresAt: Date.now() + SEND_HOLD_MS } satisfies SendHold));
+    } catch {
+      // No storage: no other tab reads the hold either.
+    }
+  },
+  releaseHold: (sessionId) => {
+    if (!heldSessions.delete(sessionId)) return;
+    try {
+      if (parseSendHold(localStorage.getItem(sendHoldKey(sessionId)))?.owner === TAB_ID) localStorage.removeItem(sendHoldKey(sessionId));
+    } catch {
+      // No storage: nothing to release.
+    }
+  },
+  foreignHold: (sessionId) => {
+    try {
+      return foreignHold(parseSendHold(localStorage.getItem(sendHoldKey(sessionId))), TAB_ID, Date.now());
+    } catch {
+      return null;
+    }
   },
   forgetSession: (sessionId) => get().update((queue) => {
     if (!(sessionId in queue)) return queue;
@@ -113,8 +167,21 @@ export function reloadSendQueue(): void {
  */
 export function onSendQueueStorage(event: Pick<StorageEvent, 'key'>): void {
   if (event.key === SEND_QUEUE_KEY || event.key === null) followStored();
+  // Another tab claimed a turn of the session or its turn ended: this tab's messages may not show it yet.
+  if (event.key?.startsWith(SEND_HOLD_PREFIX)) {
+    const sessionId = event.key.slice(SEND_HOLD_PREFIX.length);
+    useSendQueueStore.setState((state) => ({
+      foreignChanges: { ...state.foreignChanges, [sessionId]: (state.foreignChanges[sessionId] ?? 0) + 1 },
+    }));
+  }
+}
+
+/** A tab that goes away releases its holds at once instead of letting them lapse. */
+export function releaseAllHolds(): void {
+  for (const sessionId of [...heldSessions]) useSendQueueStore.getState().releaseHold(sessionId);
 }
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('storage', onSendQueueStorage);
+  window.addEventListener('pagehide', releaseAllHolds);
 }
