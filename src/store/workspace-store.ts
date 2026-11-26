@@ -129,6 +129,10 @@ interface WorkspaceState {
   rememberMergeBase: (mergedObjectId: string, base: CurrentObject) => void;
   /** 发送到对话动作排队的附件，由对话列的输入区消费并清空。 */
   pendingChatAttachments: string[];
+  /** #644：画布「发送到对话」要求下一条消息以画板为主；值为发起的会话，由对话列的输入区消费并清空。 */
+  boardModeRequest: string | null;
+  requestBoardMode: (sessionId: string) => void;
+  clearBoardModeRequest: () => void;
   /** 已排队附件的来源声明，按 URL 索引；发送后由对话面板清理。 */
   attachmentSources: Record<string, AttachmentSource>;
   pendingPreviewTaskId: string | null;
@@ -238,6 +242,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   mergeBases: {},
   rememberMergeBase: (mergedObjectId, base) => set((state) => ({ mergeBases: { ...state.mergeBases, [mergedObjectId]: base } })),
   pendingChatAttachments: [],
+  boardModeRequest: null,
+  requestBoardMode: (boardModeRequest) => set({ boardModeRequest }),
+  clearBoardModeRequest: () => set({ boardModeRequest: null }),
   attachmentSources: {},
   pendingPreviewTaskId: null,
   pendingResult: null,
@@ -278,6 +285,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       canvasReference: null,
       mergeBases: {},
       pendingChatAttachments: [],
+      boardModeRequest: null,
       attachmentSources: {},
       pendingPreviewTaskId: null,
       pendingResult: null,

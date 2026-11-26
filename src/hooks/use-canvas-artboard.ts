@@ -1,10 +1,8 @@
 import { useMemo } from 'react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useGenerationParams, type GenerationParams } from '@/hooks/use-generation-params';
 import { canvasArtboard, type CanvasArtboard, type CanvasPixels } from '@/lib/canvas/artboard';
-import { currentObjectSource } from '@/lib/canvas/current-object';
 import { canvasSizeFit, canvasTurnOutput, initialCanvasPixels, type CanvasSizeFit, type CanvasTurnOutput, type ReferenceTurnOutput } from '@/lib/workspace/canvas-size';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { useCanvasStore } from '@/store/canvas-store';
@@ -23,12 +21,12 @@ export interface CanvasDelivery {
   /** How the chosen 2D model's output size relates to the canvas size. */
   fit: CanvasSizeFit;
   /**
-   * #284: the output size the next turn really sends when the artboard is its source (it holds the current
-   * picture and the composer still carries it): the server then sets the size from the canvas (#272), not from `fit`'s settings.
+   * #284: the output size the next turn really sends when the artboard is its source (a canvas turn, #644):
+   * the server then sets the size from the canvas (#272), not from `fit`'s settings.
    * Null when the artboard is not the source or the model has no output-size setting the canvas sets.
    */
   turn: CanvasTurnOutput | null;
-  /** The artboard is the next turn's source (it holds the current picture's layer, the chip was not dismissed; #610). */
+  /** The artboard is the next turn's source: the composer sends a canvas turn (#644). */
   source: boolean;
   /**
    * #296: when the artboard is not the source and the composer carries one picture, the size an edit of that
@@ -47,16 +45,12 @@ export interface CanvasDelivery {
  */
 export function useCanvasArtboard(sessionId: string | null, referenceContext?: boolean): CanvasDelivery {
   const { schema } = useProductSchema();
-  const { proxyAssetUrl } = useAssetURLRewriter();
   const context = useStudioStore((state) => state.generationReferenceContext);
   const object = selectionForSession(useWorkspaceStore((state) => state.currentObject), sessionId);
   // The composer supplies attachments/pinned/skipped context. Without a composer, only a session-owned stage image counts.
   const hasReference = referenceContext ?? (context?.sessionId === sessionId ? context.hasReference : object?.kind === 'image');
   const generation = useGenerationParams('image', sessionId, hasReference);
   const saved = useCanvasStore((state) => (sessionId ? state.canvasSizeBySession[sessionId] : undefined));
-  const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession?.[sessionId] : undefined));
-  // The object was deselected with the composer chip's ✕ (#557): the turn does not carry the artboard.
-  const skipped = context?.sessionId === sessionId && context.objectDeselected === true;
   const anchor = schema.canvas.frontend.artboard;
   const { offering, model, values, parameterStates } = generation.nextTurn;
   const sizeParams = model.sizeParams;
@@ -73,10 +67,9 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
     artboard: canvasArtboard(anchor, { width, height }),
     pixels: { width, height },
   }), [anchor, height, width]);
-  // The same rule as the composer (currentObjectSource): an artboard that holds the current picture's layer is
-  // the turn's source (#610: other pictures alone, or no current picture, are not).
-  const boardIsSource = !skipped && nodes !== undefined
-    && currentObjectSource(nodes, geometry.artboard, object, proxyAssetUrl) === 'canvas';
+  // #644: the board is the turn's source only on a canvas turn, as the composer decides it (以画板为主, a selection
+  // or mask, `@画布`); a picture on the board alone no longer makes it one.
+  const boardIsSource = context?.sessionId === sessionId && context.boardTurn === true;
   const turn = useMemo(
     () => (boardIsSource ? canvasTurnOutput(offering, values, { width, height }, anchor, parameterStates) : null),
     [anchor, boardIsSource, height, offering, parameterStates, values, width],

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.10.30",
+    "revision": "2026-11-26.10.31",
     "terminology": {
       "user_facing": [
         {
@@ -5037,6 +5037,10 @@
         "ui.studio.chat.title": "对话",
         "ui.studio.composer.chip.canvas": "画布",
         "ui.studio.composer.chip.deselect": "取消选中",
+        "ui.studio.composer.board_mode.label": "以画板为主",
+        "ui.studio.composer.board_mode.hint_off": "关闭：这条消息只用对话里的素材和产出，画板不参与。打开后这条消息把画板（虚线框里的内容）作为输入。",
+        "ui.studio.composer.board_mode.hint_on": "打开：这条消息把画板（虚线框里的内容）作为输入发送；发出后自动关闭。",
+        "ui.studio.composer.board_mode.hint_forced": "画板上有选区或蒙版，或消息里点名了画布：这条消息按画板发送。",
         "ui.studio.composer.hint": "Enter 发送，Shift+Enter 换行",
         "ui.studio.composer.placeholder_with_keys": "{placeholder}（{keys}）",
         "ui.studio.composer.expand_editor": "展开编辑",
@@ -19798,6 +19802,10 @@
             "ui.studio.chat.title": "Chat",
             "ui.studio.composer.chip.canvas": "Canvas",
             "ui.studio.composer.chip.deselect": "Deselect",
+            "ui.studio.composer.board_mode.label": "Canvas first",
+            "ui.studio.composer.board_mode.hint_off": "Off: this message uses only the pictures and results in the conversation; the canvas takes no part. Turn it on to send the canvas (what is inside the dashed frame) as this message's input.",
+            "ui.studio.composer.board_mode.hint_on": "On: this message sends the canvas (what is inside the dashed frame) as its input; it turns off again once sent.",
+            "ui.studio.composer.board_mode.hint_forced": "The canvas has a selection or mask, or the message names the canvas: this message is sent from the canvas.",
             "ui.studio.composer.hint": "Enter to send, Shift+Enter for a new line",
             "ui.studio.composer.placeholder_with_keys": "{placeholder} ({keys})",
             "ui.studio.composer.expand_editor": "Expand editor",

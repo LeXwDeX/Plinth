@@ -53,6 +53,8 @@ export interface GenerationReferenceContext {
   hasReference: boolean;
   /** The object on the stage was deselected (#557): the turn carries neither it nor the artboard. */
   objectDeselected?: boolean;
+  /** #644: the next message is a canvas turn (以画板为主, a selection or mask, `@画布`): the board is its source. */
+  boardTurn?: boolean;
 }
 
 interface StudioPrefs {

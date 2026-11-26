@@ -22,7 +22,9 @@ describe('the painted selection travels with a canvas turn', () => {
     expect(chat).toContain('const geometry = inpaintGeometry(artboard, deliveryPixels);');
     expect(chat).toContain('paintMask(maskContext, geometry, maskDraftNow.strokes, \'#000000\');');
     expect(chat).toContain('selectionMask = { maskAssetId };');
-    expect(chat).toContain("const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard, sessionObject, proxyAssetUrl);");
+    // #644: the mask makes the message a canvas turn whatever the 以画板为主 toggle says.
+    expect(chat).toContain('chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,');
+    expect(chat).toContain('if (!queuedSelection && boardTurn && artboard) {');
     expect(chat).toContain('...(selectionMask ? { selectionMask } : {}),');
   });
 
