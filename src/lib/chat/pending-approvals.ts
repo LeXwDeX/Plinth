@@ -232,6 +232,17 @@ export function retainExpired(
 export interface PolledApprovals {
   startedAt: number;
   items: PendingApproval[];
+  /**
+   * #665: how far the server's clock is ahead of this browser's (ms), from the response's Date header; 0 when unknown.
+   * Expiry is the server's instant, so it is compared with the server's time, not with a fast or slow local clock.
+   */
+  clockOffset?: number;
+}
+
+/** #665: the server clock's lead over the browser's, read from a response's Date header; 0 when it has none. */
+export function serverClockOffset(response: Pick<Response, 'headers'>, receivedAt: number): number {
+  const date = Date.parse(response.headers?.get('Date') ?? '');
+  return Number.isFinite(date) ? date - receivedAt : 0;
 }
 
 /**
@@ -292,11 +303,22 @@ export async function fetchPendingApprovals(
   signal?: AbortSignal,
   fetcher: typeof fetch = fetch,
 ): Promise<PendingApproval[]> {
+  return (await readPendingApprovals(schema, sessionId, signal, fetcher)).items;
+}
+
+/** The list with the server clock's lead over this browser's (see PolledApprovals.clockOffset). */
+export async function readPendingApprovals(
+  schema: ProductSchema,
+  sessionId: string,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<{ items: PendingApproval[]; clockOffset: number }> {
   const route = pendingApprovalsRoute(schema, sessionId);
-  if (!route) return [];
+  if (!route) return { items: [], clockOffset: 0 };
   const response = await fetcher(route, { signal });
   if (!response.ok) throw new Error(`pending approvals ${response.status}`);
-  return parsePendingApprovals(await response.json().catch(() => null));
+  const clockOffset = serverClockOffset(response, Date.now());
+  return { items: parsePendingApprovals(await response.json().catch(() => null)), clockOffset };
 }
 
 export class PendingApprovalError extends Error {

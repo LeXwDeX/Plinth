@@ -38,6 +38,7 @@ describe('rewinding the stream buffer of a turn that is followed again', () => {
       paidSteps: [],
       isStreaming: true,
       genState: { statusText: '', progress: null },
+      turn: expect.any(Number),
     });
   });
 

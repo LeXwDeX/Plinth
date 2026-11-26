@@ -300,6 +300,19 @@ describe('dismissed tasks stay dismissed after the history is read again (#651)'
     expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['gone']);
   });
 
+  it('#665: a running task cleared with X is not brought back by the reload of running tasks, an uncleared one still notifies', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 'cleared', capability: 'image-to-image', progressMaximum: 100 });
+    store.dismissTask('cleared');
+    store.registerTask({ taskId: 'cleared', capability: 'image-to-image', progressMaximum: 100, listed: true });
+    store.registerTask({ taskId: 'kept', capability: 'image-to-image', progressMaximum: 100, listed: true });
+    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['kept']);
+    // The listed task is not a restored placeholder: it counts as seen running, so a failure is announced.
+    const kept = useWorkspaceStore.getState().trackedTasks[0] as unknown as NoticeTask;
+    const { active } = scanTasks(new Set(), [kept]);
+    expect(active.has('kept')).toBe(true);
+  });
+
   it('works without storage: dismissing does not throw, and the task stays cleared for this page', () => {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: () => { throw new Error('blocked'); } });
     const store = useWorkspaceStore.getState();
@@ -308,5 +321,38 @@ describe('dismissed tasks stay dismissed after the history is read again (#651)'
     store.registerTask({ taskId: 'x', capability: 'image-to-image', progressMaximum: 100, restored: true });
     // Only a reload loses it: the list lives in memory for the page, in storage for the next one.
     expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
+  });
+});
+
+describe('live task updates against the task detail (#665)', () => {
+  const failedLive = { state: 'FAILED', error: 'error.upstream_failed' };
+
+  it('a stream replayed from its first event does not move an ended task back', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 't', sessionId: 's', capability: 'image-to-3d', progressMaximum: 100 });
+    store.applyTaskDetail('t', completedModel, 's');
+    store.applyTaskLive('t', { state: 'RUNNING', progress: 10 });
+    store.applyTaskLive('t', failedLive);
+    const task = useWorkspaceStore.getState().trackedTasks[0];
+    expect(task.state).toBe('SUCCEEDED');
+    expect(task.progress).toBe(100);
+    expect(task.liveError).toBe('');
+  });
+
+  it('a replayed older progress never lowers the progress shown', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 't', capability: 'image-to-3d', progressMaximum: 100 });
+    store.applyTaskLive('t', { state: 'RUNNING', progress: 60 });
+    store.applyTaskLive('t', { state: 'RUNNING', progress: 20 });
+    expect(useWorkspaceStore.getState().trackedTasks[0].progress).toBe(60);
+  });
+
+  it('a task whose detail says it succeeded no longer carries an earlier live error', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 't', sessionId: 's', capability: 'image-to-3d', progressMaximum: 100 });
+    store.applyTaskLive('t', failedLive);
+    expect(useWorkspaceStore.getState().trackedTasks[0].liveError).toBe('error.upstream_failed');
+    store.applyTaskDetail('t', completedModel, 's');
+    expect(useWorkspaceStore.getState().trackedTasks[0].liveError).toBe('');
   });
 });

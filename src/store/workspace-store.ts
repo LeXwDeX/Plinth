@@ -115,6 +115,11 @@ export interface RegisterTaskInput {
   formatOf?: string;
   /** The task comes back from the server's task list (a reload or a history switch), not from this page submitting it (#651). */
   restored?: boolean;
+  /**
+   * #665: the task was read from the server's list of running tasks after a reload. A task the person cleared with X
+   * stays cleared, but unlike `restored` it counts as seen running, so its end is still announced.
+   */
+  listed?: boolean;
 }
 
 export interface TaskLivePatch {
@@ -327,7 +332,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   registerTask: (input) =>
     set((state) => {
       // A task the person cleared with X stays cleared when the history is read again (#651).
-      if (input.restored && isDismissedTask(input.taskId)) return state;
+      if ((input.restored || input.listed) && isDismissedTask(input.taskId)) return state;
       const known = state.trackedTasks.find((task) => task.taskId === input.taskId);
       if (known) {
         // #375: the first registration wins, except for the session. A task the history
@@ -384,6 +389,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         progress: projection.progress,
         terminal: projection.terminal,
         failure: projection.failure,
+        // #665: a live error of an attempt the task got past is not its outcome: a task the detail says ended without
+        // failure no longer reads as failed.
+        liveError: projection.terminal && projection.failure === null ? '' : task.liveError,
         assets: projection.assets,
         downloadables: projection.downloadables,
         resources: projection.resources,
@@ -401,16 +409,23 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       };
     }),
   applyTaskLive: (taskId, patch) =>
-    set((state) => ({
-      trackedTasks: patchTask(state.trackedTasks, taskId, (task) => ({
-        ...task,
-        state: patch.state ?? task.state,
-        progress: patch.progress ?? task.progress,
-        liveError: patch.error ?? task.liveError,
-        terminal: patch.terminal ?? task.terminal,
-        updatedAt: Date.now(),
-      })),
-    })),
+    set((state) => {
+      const known = state.trackedTasks.find((task) => task.taskId === taskId);
+      // #665: the task detail (its state read with the Schema's task_states) is the authority once it says the task
+      // ended; a stream replayed from its first event cannot move it back.
+      if (!known || known.terminal) return state;
+      return {
+        trackedTasks: patchTask(state.trackedTasks, taskId, (task) => ({
+          ...task,
+          state: patch.state ?? task.state,
+          // A replayed older event never lowers the progress already shown.
+          progress: patch.progress === undefined ? task.progress : Math.max(task.progress, patch.progress),
+          liveError: patch.error ?? task.liveError,
+          terminal: patch.terminal ?? task.terminal,
+          updatedAt: Date.now(),
+        })),
+      };
+    }),
   markTaskNotFound: (taskId) =>
     set((state) => ({
       trackedTasks: patchTask(state.trackedTasks, taskId, (task) => ({

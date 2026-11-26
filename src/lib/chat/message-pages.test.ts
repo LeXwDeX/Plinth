@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeNewestPage, prependOlderPage } from './message-pages';
+import { mergeNewestPage, prependOlderPage, restoreRemovedMessage } from './message-pages';
 
 const ids = (messages: Array<{ id: string }>) => messages.map((message) => message.id);
 const m = (...names: string[]) => names.map((id) => ({ id }));
@@ -51,5 +51,20 @@ describe('conversation pages', () => {
     expect(joined.messages[2].content).toBe('done');
     const whole = mergeNewestPage(loaded, { messages: [{ id: 'a', content: 'one' }, { id: 'b', content: 'two' }, { id: 'c', content: '' }], nextCursor: '' });
     expect(whole.messages).toBe(loaded.messages);
+  });
+});
+
+describe('a refused deletion (#665)', () => {
+  const m = (id: string) => ({ id });
+  it('puts the message back after the one it followed and keeps what arrived since', () => {
+    const before = [m('a'), m('b'), m('c')];
+    // b was removed optimistically; meanwhile the turn's reply d arrived.
+    const now = [m('a'), m('c'), m('d')];
+    expect(restoreRemovedMessage(now, before, m('b')).map((item) => item.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('leaves a list that already has it again, and puts a first message first', () => {
+    expect(restoreRemovedMessage([m('a'), m('b')], [m('a'), m('b')], m('b')).map((item) => item.id)).toEqual(['a', 'b']);
+    expect(restoreRemovedMessage([m('b')], [m('a'), m('b')], m('a')).map((item) => item.id)).toEqual(['a', 'b']);
   });
 });

@@ -99,8 +99,27 @@ describe('workspace chat message wiring', () => {
 
   it('restores the server message list when deletion fails', () => {
     expect(agentDialog).toMatch(
-      /setMessages\(sessionId, previous\);[\s\S]{0,200}ui\.chat\.toast\.delete_message_retry/,
+      /setMessages\(sessionId, restoreRemovedMessage\([\s\S]{0,200}ui\.chat\.toast\.delete_message_retry/,
     );
+  });
+
+  it('#665: a refused stop is said and the turn is still followed', () => {
+    expect(agentDialog).toMatch(
+      /chatClient\.cancelTurn\(sessionId\)\.then\(\s*\(\) => controllers\.current\.get\(sessionId\)\?\.abort\(\),\s*\(\) => toast\.error\(schemaText\(schema, 'ui\.chat\.toast\.stop_failed'\)\),/,
+    );
+    expect(agentDialog).not.toContain('cancelTurn(activeSessionId).catch(() => undefined)');
+  });
+
+  it('#665: a stage action waits for uploads instead of being dropped', () => {
+    expect(agentDialog).toMatch(
+      /if \(uploading \|\| attachmentsPending\(attachmentReads, captureSessionScope\(\)\)\) \{\s*toast\.message\(schemaText\(schema, 'ui\.chat\.toast\.stage_request_waiting'\)[\s\S]{0,120}return;\s*\}\s*clearTurnRequest\(\);/,
+    );
+  });
+
+  it('#665: a replayed stream does not repeat its side effects', () => {
+    expect(agentDialog).toContain("toast.error(event.content, { id: `chat-error:${sessionId}:${event.content}` });");
+    expect(agentDialog).toContain('coalesceReads.current(`approval:${sessionId}`');
+    expect(agentDialog).toContain('coalesceReads.current(`tool-calls:${sessionId}`');
   });
 
   it('keeps chat surfaces on the design tokens', () => {
@@ -259,10 +278,12 @@ describe('the conversation is read a page at a time', () => {
   it('swaps the stored turn in before ending the live buffer (#177)', () => {
     // Clearing the buffer first dropped the whole turn for a frame: the list shrank and the view jumped.
     expect(column).toContain('let settled = false;');
-    expect(column).toContain('settleStreaming(sessionId, page);');
+    // #665: the settle names its turn; a later turn's buffer is not touched by it.
+    expect(column).toContain('if (!settleStreaming(sessionId, page, turn)) return;');
+    expect(column).toContain('finishStreaming(sessionId, turn);');
     expect(column).toContain('STREAM_SETTLE_FALLBACK_MILLISECONDS');
     const settle = column.slice(column.indexOf('let settled = false;'), column.indexOf('void refreshApproval();', column.indexOf('let settled = false;')));
-    expect(settle).not.toContain('finishStreaming(sessionId);\n            chatClient');
+    expect(settle).not.toContain('finishStreaming(sessionId, turn);\n            chatClient');
   });
 
   it('routes every stream event through the one status slot and marks the thinking status (#285)', () => {

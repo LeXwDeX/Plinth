@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { mergeNewestPage, prependOlderPage } from '@/lib/chat/message-pages';
 import { latestToolCallCount } from '@/lib/chat/tool-call-count';
+import { clearDraft } from '@/lib/chat/composer-draft';
+import { forgetLastObject } from '@/lib/workspace/last-object';
+import { useSendQueueStore } from '@/store/send-queue-store';
 import type { NativeQuote, PriceTotal } from '@/lib/pricing';
 import type { SessionBudget } from '@/lib/chat/budget';
 import type { ProductionBrief } from '@/lib/chat/production-brief';
@@ -138,7 +141,16 @@ export interface StreamingBuffer {
   isStreaming: boolean;
   /** 生成状态（非 null 表示正在生成） */
   genState: GenState | null;
+  /**
+   * #665: which turn the buffer belongs to (unique for the page). A slow end-of-turn read of an earlier turn names
+   * its own turn, so it can neither remove a later turn's buffer nor merge its older page over that turn.
+   */
+  turn: number;
 }
+
+// #665: turn numbers are unique for the page; the newest turn started per session decides whether a settle is stale.
+let nextStreamTurn = 0;
+const latestTurnBySession = new Map<string, number>();
 
 // ── Store ─────────────────────────────────────────────
 
@@ -194,20 +206,22 @@ interface ChatStore {
    * Ends a streaming reply by putting the stored newest page in place of the live buffer in one update
    * (#177): clearing the buffer first would drop the whole turn for a frame and make the list jump.
    */
-  settleStreaming: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }) => void;
+  settleStreaming: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }, turn?: number) => boolean;
   /** An earlier page the person asked for: goes in front of the loaded messages. */
   applyOlderMessagePage: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }) => void;
   deleteMessage: (sessionId: string, id: string) => void;
   clearSessionMessages: (sessionId: string) => void;
 
   // 流式缓冲操作
-  initStreaming: (sessionId: string, userMsg: { content: string; images?: ChatImage[] }) => void;
+  /** Starts a turn's buffer and returns its turn number (see StreamingBuffer.turn). */
+  initStreaming: (sessionId: string, userMsg: { content: string; images?: ChatImage[] }) => number;
   setAssistantDbId: (sessionId: string, dbId: string) => void;
   appendStreamText: (sessionId: string, text: string) => void;
   addStreamImages: (sessionId: string, images: ChatImage[]) => void;
   addStreamPaidStep: (sessionId: string, step: ChatPaidStep) => void;
   updateStreamGenState: (sessionId: string, statusText: string, progress: number | null, thinking?: boolean) => void;
-  finishStreaming: (sessionId: string) => void;
+  /** Drops the session's buffer; with `turn`, only when the buffer is still that turn's (#665). */
+  finishStreaming: (sessionId: string, turn?: number) => void;
   /**
    * #403: the turn's stream is followed again from its first event, so what the broken stream delivered is
    * dropped (the replay delivers it again). The sent words and the message they follow stay as they were.
@@ -226,7 +240,7 @@ function countsAfterRead(state: ChatStore, sessionId: string, messages: readonly
   return { ...state.toolCallCounts, [sessionId]: count };
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
+export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   activeSessionRevision: 0,
@@ -263,6 +277,11 @@ export const useChatStore = create<ChatStore>((set) => ({
       const { [id]: _c, ...restCursors } = s.olderCursorBySession;
       const { [id]: _b, ...restBuffers } = s.streamingBuffers;
       const { [id]: _t, ...restCounts } = s.toolCallCounts;
+      latestTurnBySession.delete(id);
+      // #665: messages queued in a deleted session never go out; its draft and remembered object are swept with it.
+      useSendQueueStore.getState().forgetSession(id);
+      clearDraft(id);
+      forgetLastObject(id);
       if (s.activeSessionId === id) useWorkspaceStore.getState().clearSessionContext();
       return {
         sessions: s.sessions.filter((ss) => ss.id !== id).map((ss) => ss.parentSessionId === id ? { ...ss, parentDeleted: true } : ss),
@@ -330,7 +349,12 @@ export const useChatStore = create<ChatStore>((set) => ({
         toolCallCounts: countsAfterRead(s, sessionId, next.messages),
       };
     }),
-  settleStreaming: (sessionId, page) =>
+  settleStreaming: (sessionId, page, turn) => {
+    // #665: a turn's end-of-turn read that arrives after a later turn started is stale: its page predates that turn.
+    if (turn !== undefined) {
+      const buffer = get().streamingBuffers[sessionId];
+      if (buffer ? buffer.turn !== turn : latestTurnBySession.get(sessionId) !== turn) return false;
+    }
     set((s) => {
       const loaded = sessionId in s.messagesBySession
         ? { messages: s.messagesBySession[sessionId], olderCursor: s.olderCursorBySession[sessionId] ?? '' }
@@ -344,7 +368,9 @@ export const useChatStore = create<ChatStore>((set) => ({
         toolCallCounts: countsAfterRead({ ...s, streamingBuffers: restBuffers }, sessionId, next.messages),
         sessionListRevision: s.sessionListRevision + 1,
       };
-    }),
+    });
+    return true;
+  },
   applyOlderMessagePage: (sessionId, page) =>
     set((s) => {
       const next = prependOlderPage(
@@ -372,7 +398,10 @@ export const useChatStore = create<ChatStore>((set) => ({
     }),
 
   // ── 流式缓冲操作 ──
-  initStreaming: (sessionId, userMsg) =>
+  initStreaming: (sessionId, userMsg) => {
+    nextStreamTurn += 1;
+    const turn = nextStreamTurn;
+    latestTurnBySession.set(sessionId, turn);
     set((s) => ({
       streamingBuffers: {
         ...s.streamingBuffers,
@@ -385,11 +414,14 @@ export const useChatStore = create<ChatStore>((set) => ({
           paidSteps: [],
           isStreaming: true,
           genState: { statusText: '', progress: null },
+          turn,
         },
       },
       // Every new reply starts counting tool calls from 0 (#275).
       toolCallCounts: { ...s.toolCallCounts, [sessionId]: 0 },
-    })),
+    }));
+    return turn;
+  },
 
   setAssistantDbId: (sessionId, dbId) =>
     set((s) => {
@@ -451,8 +483,10 @@ export const useChatStore = create<ChatStore>((set) => ({
       };
     }),
 
-  finishStreaming: (sessionId) =>
+  finishStreaming: (sessionId, turn) =>
     set((s) => {
+      // #665: a stale finish (an earlier turn's fallback or failed read) leaves a later turn's buffer alone.
+      if (turn !== undefined && s.streamingBuffers[sessionId] && s.streamingBuffers[sessionId].turn !== turn) return s;
       const { [sessionId]: _, ...rest } = s.streamingBuffers;
       // The turn's messages moved the session's updated time, which orders the session list.
       return { streamingBuffers: rest, sessionListRevision: s.sessionListRevision + 1 };

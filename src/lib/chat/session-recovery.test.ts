@@ -153,4 +153,35 @@ describe('history session recovery', () => {
     stop();
     expect(useChatStore.getState().streamingBuffers['session-b']).toBeDefined();
   });
+  it('#665: a stream that throws when opened leaves no running buffer and is read again', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValueOnce(pending).mockResolvedValue(complete);
+    f.connect.mockImplementationOnce(() => { throw new Error('EventSource refused'); });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.listMessages).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().messagesBySession['session-a']).toEqual(complete);
+    stop();
+  });
+
+  it('#665: a reply left pending is read a bounded number of times and the stream is tried again', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValue(pending);
+    // Every stream ends at once without the turn ending (the turn no longer runs on the server).
+    f.connect.mockImplementation((_id: string, options: { onDone(): void; onError(): void }) => {
+      queueMicrotask(() => options.onError());
+      return f.closed;
+    });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    const reads = f.listMessages.mock.calls.length;
+    expect(f.connect.mock.calls.length).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(f.listMessages.mock.calls.length).toBe(reads);
+    expect(reads).toBeLessThan(60);
+    expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
+    stop();
+  });
 });
