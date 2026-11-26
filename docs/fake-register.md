@@ -19,15 +19,15 @@
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
 | `tripo/v3` | 27 | 23 | 2 | 52 | 2026-11-25 |
-| `openai/v1` | 5 | 11 | 0 | 16 | 2026-11-25 |
+| `openai/v1` | 5 | 15 | 0 | 20 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 4 | 7 | 1 | 12 | 2026-11-25 |
-| `gemini/images-v1` | 2 | 4 | 0 | 6 | 2026-10-29 |
+| `gemini/images-v1` | 2 | 4 | 2 | 8 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 5 | 0 | 7 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 84 | 97 | 3 | 184 | 2026-11-25 |
+| 合计 | 84 | 101 | 5 | 190 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -619,7 +619,7 @@
 #### `openai-v1/responses-unsampled-events` · state-machine · constructed
 
 - 端点：`POST /responses`
-- 行为：response.incomplete、response.failed、流内 error 事件、response.refusal.delta 与 response.refusal.done（[[fake:refusal]]：message 项的内容块为 {type: refusal, refusal}，delta/done 事件字段为 content_index、delta 或 refusal、item_id、output_index、sequence_number，按官方事件类型构造，2026-11-25 补上；此前登记表声称有而代码没有）、推理摘要事件与推理项后无后继项的 400。不再声称“超长流行”：行长界限是 Plinth Adapter 自己的 ScannerMaxBytes 设置，不是上游契约，fake 不产生超长行，Adapter 测试用脚本化 handler 构造（2026-11-25 更正）。incomplete 流在截断项后不发 .done 事件：官方文档无法确认，行为不变。
+- 行为：response.incomplete、response.failed、流内 error 事件、response.refusal.delta 与 response.refusal.done（[[fake:refusal]]：message 项的内容块为 {type: refusal, refusal}，delta/done 事件字段为 content_index、delta 或 refusal、item_id、output_index、sequence_number，按官方事件类型构造，2026-11-25 补上；此前登记表声称有而代码没有）、推理摘要事件与推理项后无后继项的 400。超长流行：行长界限是 Plinth Adapter 自己的 ScannerMaxBytes 设置，不是上游契约；2026-11-26 起 fake 只在 openai-v1/responses-self-image 与 openai-v1/responses-empty-completion 两种观察到的应答里产生超过 1 MiB 的行，其余超长行仍由 Adapter 测试的脚本化 handler 构造。incomplete 流在截断项后不发 .done 事件：官方文档无法确认，行为不变。
 - 依据：https://platform.openai.com/docs/api-reference/responses/create（Responses streaming events）
 - 依据：https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_delta_event.py（ResponseRefusalDeltaEvent）
 - 依据：https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_done_event.py（ResponseRefusalDoneEvent）
@@ -631,6 +631,41 @@
 - 端点：`POST /responses`
 - 行为：网关日配额耗尽答 HTTP 429：error.code 与 error.type 为 quota_exceeded，另带嵌套 quota 对象；quota-exceeded 场景复用此信封。
 - 样本：`internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json`（2026-11-20，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `openai-v1/responses-self-image` · response-shape · constructed
+
+- 端点：`POST /responses`
+- 行为：#638：[[fake:self-image]] 让 gpt-astra 在请求没声明 image_generation 工具时自己画图：先一个 reasoning 项，再一个 image_generation_call 项，没有 message 也没有 function_call（请求里的工具标记被忽略）。流内依次为该项的 response.output_item.added、response.image_generation_call.in_progress、.generating、.completed、response.output_item.done，再 response.completed。来源：2026-11-26 formal-test 真实运行观察（脱敏结构），确证的部分：三个 image_generation_call 进度事件类型；输出项 {type: image_generation_call, status, result}，result 是几 MB 的 base64 PNG；response.completed 的 tools 在请求自带工具之后回显 {type: image_generation, background: auto, model: gpt-image-2.6-sunburst, moderation: auto, n: 1, output_compression: 100, output_format: png, quality: auto, size: auto}；tool_usage 含 image_gen 的 token 计数与 web_search.num_requests 0；整条响应 6～9 MB、终结事件行超过 Plinth 1 MiB 行长上限。构造部分：项 id（ig_ 加 50 字符）、进度事件的 item_id 与 output_index、image_gen 的具体 token 数、没有 partial_image 事件、created/in_progress 响应对象也回显该工具、added 项的 result 为 null，以及图本身（fake 图按 picture-bytes 选择器或默认 3,000,000 字节 PNG 填充，done 项与终结事件合计约 8 MB）。真实一轮 80～125 秒：fake 默认不等待，[[fake:self-image:<毫秒>]] 或 X-Fake-Delay-Millis 在 .completed 前等待（上限 180 秒，客户端断开即停）。回归：fakeupstream openai/v1 的 observed_1126_test、openairesponses 的 fake_observed_1126_test（ErrInlineImageOutput、读到首个迹象即断流、经 agents.Retrying 只发一次）、chat 的 empty_reply_fake_638_test（回合以 inline_image 结束）。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（PROD 网关与 Plinth 日志，只读核对，不含密钥与用户内容）
+- 依据：https://platform.openai.com/docs/api-reference/responses/create（Responses streaming events（image_generation_call））
+- 核对日期：2026-11-26
+- 没有真实样本的原因：来源：2026-11-26 formal-test 真实运行观察（脱敏结构），没有做 wire 采集，没有入库的 wirefixture 样本，按规则只能记 constructed
+
+#### `openai-v1/responses-empty-completion` · state-machine · constructed
+
+- 端点：`POST /responses`
+- 行为：#638：[[fake:empty-completion]] 答一条只有 reasoning 项（带 encrypted_content）的流，response.completed 行超过 1 MiB 行长上限，读法跳过该行的 Adapter 拿不到 usage；没有 message 也没有 function_call。X-Fake-Fail-Times: n 时同一 API Key 只有前 n 次为空，之后按常规答文字，用来区分有界重试后仍为空与重试恢复。来源：2026-11-26 formal-test 真实运行观察（脱敏结构），确证的部分：输出项只有 reasoning（含 encrypted_content）、终结事件行太长被 Plinth 跳过、因此无 usage、没有 message/function_call。构造部分：终结行变长的原因（fake 把最终 reasoning 项的 encrypted_content 填充到 2 MiB；真实行的主体日志没记录）、done 项不超长、usage 照常放在终结行里。回归：observed_1126_test、openairesponses 的 fake_observed_1126_test（空完成、经 agents.Retrying 重发一次后仍空，或第二次恢复为文字）、chat 的 empty_reply_fake_638_test（回合以 empty_response 结束，共 2 次请求）。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（PROD 网关与 Plinth 日志，只读核对，不含密钥与用户内容）
+- 核对日期：2026-11-26
+- 没有真实样本的原因：来源：2026-11-26 formal-test 真实运行观察（脱敏结构），没有做 wire 采集，没有入库的 wirefixture 样本，按规则只能记 constructed
+
+#### `openai-v1/chat-data-inspection` · error-code-and-text · constructed
+
+- 端点：`POST /chat/completions`
+- 行为：百炼（DashScope 兼容 chat completions）内容审核：[[fake:data-inspection]] 在带图片的流式请求上答 HTTP 200 的 SSE，唯一一帧为 {"error":{"code":"data_inspection_failed","param":null,"message":"Output data may contain inappropriate content.","type":"data_inspection_failed"},"id":"chatcmpl-<uuid>"}；同一请求去掉图片则按常规作答。来源：2026-11-26 formal-test 真实运行观察（脱敏结构），确证的部分：HTTP 200、帧内 error 的四个成员与文案、顶层 id 的 chatcmpl- 前缀、带图请求约 3～9 秒后报出、去图重试正常。构造部分：错误帧前没有任何内容块、帧后直接结束流不发 [DONE]、uuid 值、等待时长（默认不等，X-Fake-Delay-Millis 指定，上限 30 秒）；非流式请求不受影响（未观测）。回归：observed_1126_test、openaicompatible 的 data_inspection_fake_test（读成 ContentRejection 而非瞬时故障、经 agents.Retrying 不重发、去图后得到常规回复；去图重试本身由 orchestrator streamAgent 的 pictureRefusalContent 分支执行）。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（PROD 网关与 Plinth 日志，只读核对，不含密钥与用户内容）
+- 依据：internal/agents/upstreamhttp/refusal.go（moderationCodes（data_inspection_failed））
+- 核对日期：2026-11-26
+- 没有真实样本的原因：来源：2026-11-26 formal-test 真实运行观察（脱敏结构），没有做 wire 采集，没有入库的 wirefixture 样本，按规则只能记 constructed
+
+#### `openai-v1/gateway-quota-mute` · rate-limit-concurrency · constructed
+
+- 端点：`POST /chat/completions`、`POST /responses`
+- 行为：#640：[[fake:gateway-mute]] 扮演网关（llms-proxy）额度熔断，带该标记的请求按 API Key 计数：第 1 次答 429 {"error":{"code":"quota_exceeded","type":"quota_exceeded","message":"Quota exceeded (weekly). Limit: $20.00, used: $20.24. Resets at <RFC3339>","quota":{"dimension":"weekly","group_name":…,"limit_usd":20,…}}}；之后每次答网关自己写的 503，交替为 all targets muted until <RFC3339>（静音 1、2、4 分钟，之后保持 4 分钟）与 all targets recovering (half-open probe in flight)。来源：2026-11-26 formal-test 真实运行观察（脱敏结构），确证的部分：429 的 code、文案格式、quota 的 dimension/group_name/limit_usd；随后同目标 503；两段响应片段文案；静音时长 1/2/4 分钟递增。构造部分：503 的信封（error.message 加 type upstream_unavailable，与 internal/app 既有脚本化测试一致）、muted 与 recovering 严格交替、4 分钟封顶、组名 fake-group 与重置时间、type 与 scope/used_usd/resets_at 沿用 2026-11-20 样本信封，以及只有带标记的请求才看到熔断（真实网关对该目标的所有请求熔断）；计数在 fake 进程内不复位。回归：observed_1126_test、openairesponses 的 fake_observed_1126_test（无额度记忆时 503 为瞬时）、internal/app 的 chat_quota_mute_fake_test（默认 Catalog 的 quota_mute 把 429 之后的 muted/recovering 读成同一额度不足，共 4 次请求无重试）。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（PROD 网关与 Plinth 日志，只读核对，不含密钥与用户内容）
+- 依据：internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json（quota_exceeded 信封）
+- 核对日期：2026-11-26
+- 没有真实样本的原因：来源：2026-11-26 formal-test 真实运行观察（脱敏结构），没有做 wire 采集，没有入库的 wirefixture 样本，按规则只能记 constructed
 
 ### `meshy/openapi-v1`
 
@@ -1399,8 +1434,8 @@
 - 行为：fake 图（OpenAI、Gemini、即梦共用）的像素是平铺色块，体积靠解码器跳过的填充撑大；Plinth 压缩时解码后的像素很简单，无损 PNG 一步就压到几 KB，耗时可忽略。真实 4K 图像素熵高，PROD 上同一条 Fit 同步压缩约 51 秒（#629），fake 模拟不了这段耗时，也走不到 JPEG 降质或压不下去的分支。
 - 依据：2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒（#629）
 - 核对日期：2026-11-26
-- 计划：压缩耗时只在 Go 单测里用可注入的仓库钩子模拟（internal/assets/input/fit_cancel_test.go 在重编码开始时取消请求、internal/adapters/sqlite/three_view_fitted_source_test.go 在压缩中断开），产品代码不加 sleep；若要在 fake 栈复现耗时或 JPEG 分支，需要一张真实 4K 图的脱敏像素统计（或经同意采集样本）后，再给 fake 加按尺寸生成的高熵像素模式。
-- Issue：#629
+- 计划：压缩耗时只在 Go 单测里用可注入的仓库钩子模拟（internal/assets/input/fit_cancel_test.go 在重编码开始时取消请求、internal/adapters/sqlite/three_view_fitted_source_test.go 在压缩中断开），产品代码不加 sleep；若要在 fake 栈复现耗时或 JPEG 分支，需要一张真实 4K 图的脱敏像素统计（或经同意采集样本）后，再给 fake 加按尺寸生成的高熵像素模式。2026-11-26 复核（#636）：「刷新落在压缩窗口内」要的压缩耗时同样在 Plinth 侧，fake 无法用确定性延迟替代；仍缺真实 4K 图的脱敏像素统计（压缩前后字节数、是否走到 JPEG 降质、各阶段耗时），有了再加高熵像素模式，fake 栈的浏览器回归才能复现该窗口。
+- Issue：#629、#636
 
 ### `gemini/images-v1`
 
@@ -1450,6 +1485,24 @@
 - 依据：2026-11-26 PROD 抽样（d68d1020）：Gemini 生成的三视图正面图 3072x5504 超过 Gemini 图生图 reference_assets 的 max_bytes 14,625,000 字节，点「继续生成」触发冻结前压缩（#276 的 Fit），约 51 秒（#629）
 - 核对日期：2026-11-26
 - 没有真实样本的原因：没有真实大图的字节样本：PROD 抽样只给出 Gemini 4K 图超过 14,625,000 字节这一量级，具体字节数由测试按需指定（fake 栈场景用 20,000,000），不是对真实上游体积的复刻；OpenAI 与即梦没有观测到的字节量级，按同一量级构造
+
+#### `gemini-images-v1/three-view-consistency-late-reject` · state-machine · gap
+
+- 端点：`POST /chat/completions`
+- 行为：#636：PROD 观察到三视图卡片先显示「必需视图都已完成」，约 2 分钟后才被一致性检查改判不一致（rejected）。这段时序不在上游：一致性检查是 Plinth 自己在视角 SUCCEEDED 之后对视角图做的检查（internal/imageinspect、internal/threeview），fake 只供图。fake 图的主体在每个视角都相同，一致性检查总是通过，也没有办法让检查晚到。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（#636 的 fake 缺口）
+- 核对日期：2026-11-26
+- 计划：缺两样：一是 PROD 那次检查记录里触发改判的具体指标与数值（哪一项一致性阈值不过、两视角图的尺寸与主体占比），有了才能给 fake 图加按视角变化主体的确定性变体，让检查在 fake 栈上改判；二是改判晚 2 分钟的原因，按现有证据在 Plinth 侧（检查排在视角物化、缩略图或大图压缩之后），要先在 Plinth 侧定位并用 Go 单测的可注入钩子复现，不应在 fake 里加等待去模拟。
+- Issue：#636
+
+#### `gemini-images-v1/image-to-image-4k-wire` · artifact-shape · gap
+
+- 端点：`POST /chat/completions`
+- 行为：本轮 formal-test 真实调用了 Gemini 3 Pro 图生图（9:16、4K、3072×5504、约 16 MB PNG），没有做 wire 采集；gemini/images-v1 最近一次入库真实样本仍是 2026-10-29。fake 对 4K 图生图的请求与应答结构沿用旧样本与 size-table，体积靠 generated-picture-byte-weight 的填充按需撑大，像素与真实不同。
+- 依据：2026-11-26 formal-test 真实运行观察（脱敏结构）（#636 的 fake 缺口：Gemini 3 Pro 图生图 9:16 4K）
+- 核对日期：2026-11-26
+- 计划：需经当次同意做一次 4K 图生图的 wire 采集（单次、小额）：请求体里参考图的传法与尺寸/比例字段、应答里 b64 data URI 的实际字节数与 MIME、usage 与耗时；采到后入库脱敏 candidate，把 size-table 与 chat-image-shape 的 4K 行改为 real，并核对 reference_assets 的 max_bytes 14,625,000 与真实 4K 输出体积的关系。没有样本前不编造 4K 应答。
+- Issue：#636
 
 ### `jimeng/api-v3`
 
