@@ -84,7 +84,11 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
   }
   const kind = source ? 'follows_nearest' : 'ratio_missing';
   const text = schemaMessage(schema, `ui.canvas.size.${kind}`, { ratio: plan.ratio, nearest: plan.outputRatio, output });
-  const adopt = canvasPixelsForRatio(plan.outputRatio, pixels, schema.canvas.frontend.artboard, schema.canvas.limits);
+  // Offer the switch only when the canvas does not already have that ratio: a canvas of the right shape but another
+  // size is not "wrong" here, and the offer would only resize it (#653).
+  const adopt = delivery.ratio.label === plan.outputRatio
+    ? null
+    : canvasPixelsForRatio(plan.outputRatio, pixels, schema.canvas.frontend.artboard, schema.canvas.limits);
   return (
     <div data-testid="canvas-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
       <SizeUnavailable schema={schema} detail={text} />
