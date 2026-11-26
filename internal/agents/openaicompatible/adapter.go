@@ -366,11 +366,13 @@ func (adapter *Adapter) Stream(
 				// #665: a fragment without an index continues the last call.
 				// A different call ID at the call being continued starts a
 				// new call only when the fragment also names a tool and the
-				// call so far is whole (a gateway that numbers parallel calls
-				// all 0, or leaves out the index); otherwise it is the next
-				// piece of an ID streamed in pieces and is appended. One that
-				// repeats the whole ID or name in each fragment does not
-				// double them.
+				// call so far is whole, or both IDs look complete on their own
+				// while the call so far already has a name or arguments (a
+				// gateway that numbers parallel calls all 0, or leaves out the
+				// index, after a call with an undeclared name or arguments
+				// that are not JSON); otherwise it is the next piece of an ID
+				// streamed in pieces and is appended. One that repeats the
+				// whole ID or name in each fragment does not double them.
 				position := len(calls) - 1
 				if fragment.Index != nil {
 					if known, found := byIndex[*fragment.Index]; found {
@@ -380,7 +382,7 @@ func (adapter *Adapter) Stream(
 					}
 				}
 				if position >= 0 && fragment.ID != "" && calls[position].ID != "" && fragment.ID != calls[position].ID &&
-					fragment.Function.Name != "" && wholeToolCall(calls[position], declared) {
+					fragment.Function.Name != "" && startsNewToolCall(calls[position], fragment.ID, declared) {
 					position = -1
 				}
 				if position < 0 {
@@ -505,14 +507,9 @@ func (adapter *Adapter) Complete(
 	return result, nil
 }
 
-// appendNameFragment adds a fragment of a call's name. A fragment that
-// repeats the whole name so far is a gateway resending it (#665) and is
-// dropped, unless it is a single character (a name streamed character by
-// character, as "l", "l") or the doubled name is a tool the request declares.
 // wholeToolCall reports whether a call assembled so far could end here: it
 // names a tool (a declared one, when the request declares tools) and its
-// arguments are empty or a complete JSON value. A fragment with a new call ID
-// after a call that is not whole continues that call.
+// arguments are empty or a complete JSON value.
 func wholeToolCall(call *agents.ToolCall, declared map[string]bool) bool {
 	if call.Name == "" || (len(declared) > 0 && !declared[call.Name]) {
 		return false
@@ -520,6 +517,41 @@ func wholeToolCall(call *agents.ToolCall, declared map[string]bool) bool {
 	return len(call.Arguments) == 0 || json.Valid(call.Arguments)
 }
 
+// startsNewToolCall reports whether a named fragment with a call ID other than
+// the current call's starts the next call (#665). A whole call ends there. A
+// call that is not whole (an undeclared or prefixed name, arguments that are
+// not JSON) also ends when it already has a name or arguments and both IDs
+// look complete: two complete IDs are two calls, while a piece of an ID ("a"
+// after "call-") continues the current one.
+func startsNewToolCall(call *agents.ToolCall, nextID string, declared map[string]bool) bool {
+	if wholeToolCall(call, declared) {
+		return true
+	}
+	return (call.Name != "" || len(call.Arguments) > 0) && completeToolCallID(call.ID) && completeToolCallID(nextID)
+}
+
+// completeToolCallID reports whether an ID has the shape of a whole call ID:
+// a letter prefix, a separator and a non-empty rest ("call_abc", "call-a",
+// "toolu_01", "chatcmpl-tool-9", "functions.name:0"), or a UUID. A piece of an
+// ID ("call-", "abc") does not.
+func completeToolCallID(id string) bool {
+	if len(id) == 36 && strings.Count(id, "-") == 4 {
+		return true
+	}
+	prefix := 0
+	for prefix < len(id) && (id[prefix] >= 'a' && id[prefix] <= 'z' || id[prefix] >= 'A' && id[prefix] <= 'Z') {
+		prefix++
+	}
+	if prefix == 0 || prefix+1 >= len(id) {
+		return false
+	}
+	return strings.ContainsRune("-_.:", rune(id[prefix]))
+}
+
+// appendNameFragment adds a fragment of a call's name. A fragment that
+// repeats the whole name so far is a gateway resending it (#665) and is
+// dropped, unless it is a single character (a name streamed character by
+// character, as "l", "l") or the doubled name is a tool the request declares.
 func appendNameFragment(value, fragment string, declared map[string]bool) string {
 	if fragment == "" {
 		return value
