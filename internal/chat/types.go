@@ -239,6 +239,11 @@ type TurnCheckpoint struct {
 	// as arguments, never the raw text; the round answers each of them with the
 	// Schema's error text instead of running the tool, also after a restart.
 	MalformedCalls []string `json:"malformed_calls,omitempty"`
+	// InvalidJSONCalls are the MalformedCalls whose arguments were not valid
+	// JSON at all (#665): their result says so instead of naming a field the
+	// empty object put in their place lacks. A checkpoint of an earlier
+	// version lacks the list; its calls get the declaration's text.
+	InvalidJSONCalls []string `json:"invalid_json_calls,omitempty"`
 	// UnexecutedCalls lists the calls of the whole turn, every round kept,
 	// that were answered with a result instead of running a tool (#501): a
 	// tool this reply is not offered, a scope refusal or invalid arguments.

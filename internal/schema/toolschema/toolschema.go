@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -342,8 +343,23 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Path + ": " + e.Message }
 
+// ValidateOptions tune what Validate accepts.
+type ValidateOptions struct {
+	// OptionalNullAbsent treats a JSON null under a property an object does
+	// not require as the property left out (#665): models often write
+	// "params": null for an optional parameter, which the tool's own decoding
+	// accepts. A required property that is null is still checked against its
+	// type.
+	OptionalNullAbsent bool
+}
+
 // Validate checks a JSON document against the schema.
 func (s *Schema) Validate(raw json.RawMessage) error {
+	return s.ValidateWith(raw, ValidateOptions{})
+}
+
+// ValidateWith checks a JSON document against the schema with options.
+func (s *Schema) ValidateWith(raw json.RawMessage, options ValidateOptions) error {
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -353,14 +369,14 @@ func (s *Schema) Validate(raw json.RawMessage) error {
 	if decoder.Decode(&struct{}{}) != io.EOF {
 		return &ValidationError{Path: "$", Message: "trailing content after the JSON value"}
 	}
-	return s.validate(value, "$")
+	return s.validate(value, "$", options)
 }
 
 func fail(path, format string, args ...any) error {
 	return &ValidationError{Path: path, Message: fmt.Sprintf(format, args...)}
 }
 
-func (s *Schema) validate(value any, path string) error {
+func (s *Schema) validate(value any, path string, options ValidateOptions) error {
 	if len(s.Types) > 0 {
 		matched := false
 		for _, name := range s.Types {
@@ -429,7 +445,7 @@ func (s *Schema) validate(value any, path string) error {
 		}
 		if s.Items != nil {
 			for index, item := range typed {
-				if err := s.Items.validate(item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				if err := s.Items.validate(item, fmt.Sprintf("%s[%d]", path, index), options); err != nil {
 					return err
 				}
 			}
@@ -452,13 +468,16 @@ func (s *Schema) validate(value any, path string) error {
 					return fail(path+"."+name, "is not an allowed property")
 				}
 				if s.AdditionalSchema != nil {
-					if err := s.AdditionalSchema.validate(typed[name], path+"."+name); err != nil {
+					if err := s.AdditionalSchema.validate(typed[name], path+"."+name, options); err != nil {
 						return err
 					}
 				}
 				continue
 			}
-			if err := child.validate(typed[name], path+"."+name); err != nil {
+			if options.OptionalNullAbsent && typed[name] == nil && !slices.Contains(s.Required, name) {
+				continue
+			}
+			if err := child.validate(typed[name], path+"."+name, options); err != nil {
 				return err
 			}
 		}

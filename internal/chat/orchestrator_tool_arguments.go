@@ -34,8 +34,12 @@ import (
 // and its result names the field (toolArgumentsInvalidText). Generation tools
 // keep their lenient decoding: their arguments are mapped onto Offering
 // parameters, which check them.
-func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command ProcessTurn, calls []agents.ToolCall) ([]agents.ToolCall, []string) {
-	var malformed []string
+//
+// The second list holds every call that is not run; the third the ones among
+// them whose arguments were not valid JSON, so their result says that rather
+// than what the empty object put in their place lacks.
+func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command ProcessTurn, calls []agents.ToolCall) ([]agents.ToolCall, []string, []string) {
+	var malformed, invalidJSON []string
 	vetted, cloned := calls, false
 	registry := orchestrator.turnRegistry(ctx)
 	for index, call := range calls {
@@ -58,6 +62,7 @@ func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command 
 		}
 		if invalid {
 			malformed = append(malformed, call.ID)
+			invalidJSON = append(invalidJSON, call.ID)
 			// The log names the call and the size, never the text: the
 			// arguments may carry the person's prompt.
 			orchestrator.logger.Warn(
@@ -77,7 +82,7 @@ func (orchestrator *Orchestrator) vetToolArguments(ctx context.Context, command 
 		}
 		vetted[index].Arguments = arguments
 	}
-	return vetted, malformed
+	return vetted, malformed, invalidJSON
 }
 
 // vetArguments is the arguments to keep for a call, and whether the model's
@@ -119,7 +124,9 @@ func agentToolArgumentsViolation(registry *toolRegistry, call agents.ToolCall) s
 		arguments = []byte(`{}`)
 	}
 	var violation *toolschema.ValidationError
-	if err := schema.Validate(arguments); errors.As(err, &violation) {
+	// #665: a null under an optional parameter is that parameter left out,
+	// as the tool's own decoding reads it; a required one stays refused.
+	if err := schema.ValidateWith(arguments, toolschema.ValidateOptions{OptionalNullAbsent: true}); errors.As(err, &violation) {
 		field := strings.TrimPrefix(strings.TrimPrefix(violation.Path, "$"), ".")
 		if field == "" {
 			return "the arguments " + violation.Message
@@ -146,11 +153,13 @@ func openObjects(schema *toolschema.Schema) {
 }
 
 // toolArgumentsInvalidText is the tool result of a call that was not run
-// because of its arguments, in the turn's locale: invalid JSON, or (#665)
-// arguments that break the Agent tool's declaration, naming the field.
-func (orchestrator *Orchestrator) toolArgumentsInvalidText(ctx context.Context, call agents.ToolCall) string {
+// because of its arguments, in the turn's locale: invalid JSON (invalidJSON:
+// its arguments are the empty object put in their place, whose violations
+// are not the model's), or (#665) arguments that break the Agent tool's
+// declaration, naming the field.
+func (orchestrator *Orchestrator) toolArgumentsInvalidText(ctx context.Context, call agents.ToolCall, invalidJSON bool) string {
 	messages := orchestrator.schema.Presentation.Messages
-	if template := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(template) != "" {
+	if template := messages.ToolArgumentsSchemaInvalid; !invalidJSON && strings.TrimSpace(template) != "" {
 		if reason := agentToolArgumentsViolation(orchestrator.turnRegistry(ctx), call); reason != "" {
 			return strings.NewReplacer("{tool}", call.Name, "{reason}", reason).
 				Replace(orchestrator.text(ctx, template))

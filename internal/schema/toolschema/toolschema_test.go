@@ -183,3 +183,29 @@ func TestExclusiveBoundsAndTypedMapsAreEnforced(t *testing.T) {
 		}
 	}
 }
+
+// #665: with OptionalNullAbsent a null under a property the object does not
+// require is the property left out; a required null is still checked, and
+// plain Validate keeps refusing both.
+func TestValidateWithOptionalNullAbsent(t *testing.T) {
+	schema, err := Parse(json.RawMessage(`{"type":"object","properties":{
+		"id":{"type":"string"},"params":{"type":"object","properties":{"n":{"type":"integer"}}}},
+		"required":["id"],"additionalProperties":false}`), Options{RootObject: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lenient := ValidateOptions{OptionalNullAbsent: true}
+	if err := schema.ValidateWith(json.RawMessage(`{"id":"a","params":null}`), lenient); err != nil {
+		t.Fatalf("optional null = %v", err)
+	}
+	if err := schema.ValidateWith(json.RawMessage(`{"id":"a","params":{"n":null}}`), lenient); err != nil {
+		t.Fatalf("nested optional null = %v", err)
+	}
+	var violation *ValidationError
+	if err := schema.ValidateWith(json.RawMessage(`{"id":null}`), lenient); !errors.As(err, &violation) || violation.Path != "$.id" {
+		t.Fatalf("required null = %v", err)
+	}
+	if err := schema.Validate(json.RawMessage(`{"id":"a","params":null}`)); !errors.As(err, &violation) || violation.Path != "$.params" {
+		t.Fatalf("strict optional null = %v", err)
+	}
+}

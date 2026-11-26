@@ -1934,7 +1934,7 @@ func (orchestrator *Orchestrator) Process(
 	var followUpErr error
 	// malformedCalls are the calls of this round whose arguments the model
 	// wrote as invalid JSON (#378); the checkpoint keeps them.
-	var malformedCalls []string
+	var malformedCalls, invalidJSONCalls []string
 	// cutReply is the finish reason of a round the upstream cut (#665): its
 	// output token limit or its content filter. roundsCapped is set when the
 	// model called tools past chat.agent.max_tool_rounds_per_turn.
@@ -1973,7 +1973,7 @@ func (orchestrator *Orchestrator) Process(
 			// a call whose arguments are not valid JSON is not run, and the
 			// model gets the error instead. A checkpoint being resumed was
 			// vetted when it was written.
-			completion.ToolCalls, malformedCalls = orchestrator.vetToolArguments(ctx, command, completion.ToolCalls)
+			completion.ToolCalls, malformedCalls, invalidJSONCalls = orchestrator.vetToolArguments(ctx, command, completion.ToolCalls)
 			cutReply = completion.FinishReason
 			if cutReply != "" && len(completion.ToolCalls) > 0 {
 				// #665: a round the upstream cut is not whole. Its calls' arguments
@@ -1985,7 +1985,7 @@ func (orchestrator *Orchestrator) Process(
 					"finish_reason", cutReply,
 					"calls", len(completion.ToolCalls),
 				)
-				completion.ToolCalls, malformedCalls = nil, nil
+				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil
 			}
 			if limit := orchestrator.schema.Agent.MaxToolRoundsPerTurn; limit > 0 &&
 				effectiveRound >= limit && len(completion.ToolCalls) > 0 {
@@ -1997,7 +1997,7 @@ func (orchestrator *Orchestrator) Process(
 					"rounds", effectiveRound,
 					"limit", limit,
 				)
-				completion.ToolCalls, malformedCalls = nil, nil
+				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil
 				roundsCapped = true
 			}
 		}
@@ -2038,7 +2038,7 @@ func (orchestrator *Orchestrator) Process(
 		if !checkpointResuming || round != startRound {
 			// The calls answered without running stay listed for the whole
 			// turn (#501): a stop in a later round still reconciles them.
-			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls,
+			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls, InvalidJSONCalls: invalidJSONCalls,
 				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls}
 			version, saveErr := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), turn,
 				orchestrator.service.TurnRunningState(), turn.Checkpoint, false)
@@ -3256,9 +3256,10 @@ func (orchestrator *Orchestrator) executeTools(
 			if len(inflight) > 0 {
 				break
 			}
+			invalidJSON := slices.Contains(turn.Checkpoint.InvalidJSONCalls, call.ID)
 			results = append(results, agents.Message{
 				Role:       orchestrator.schema.Roles.Tool,
-				Content:    orchestrator.toolArgumentsInvalidText(ctx, call),
+				Content:    orchestrator.toolArgumentsInvalidText(ctx, call, invalidJSON),
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])

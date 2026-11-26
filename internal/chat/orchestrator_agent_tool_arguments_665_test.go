@@ -56,3 +56,39 @@ func TestAgentToolArgumentsAreCheckedAgainstTheDeclaration(t *testing.T) {
 		}
 	}
 }
+
+// #665: a call whose arguments are not valid JSON is told so, not that the
+// empty object put in their place lacks a required field; a null under an
+// optional parameter is that parameter left out and the call runs, while a
+// null required parameter is still refused.
+func TestAgentToolArgumentsInvalidJSONAndOptionalNull(t *testing.T) {
+	h := newHungTurn(t, func(schema *catalog.ChatSchema) {
+		configuredRejectionTexts(schema)
+		schema.Presentation.Messages.ToolArgumentsSchemaInvalid = "configured {tool}: {reason}"
+	})
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{ToolCalls: []agents.ToolCall{
+			{ID: "raw-1", Name: "get_task", Arguments: json.RawMessage(`{"task_id":`)},
+			{ID: "raw-2", Name: "get_task", Arguments: json.RawMessage(`{"task_id":null}`)},
+			{ID: "raw-3", Name: "list_offerings", Arguments: json.RawMessage(`{"capability":null}`)},
+		}},
+		{Content: "configured reply"},
+	}}
+	tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}
+	if _, err := h.run(agent, tools); err != nil {
+		t.Fatalf("Process = %v", err)
+	}
+	close(tools.commands)
+	var ran []string
+	for command := range tools.commands {
+		ran = append(ran, command.Call.Name+string(command.Call.Arguments))
+	}
+	if len(ran) != 1 || ran[0] != `list_offerings{"capability":null}` {
+		t.Fatalf("executed = %q", ran)
+	}
+	results := toolResults(h.schema, agent.requests[1])
+	if len(results) != 3 || results[0].Content != "configured arguments invalid" ||
+		results[1].Content != "configured get_task: task_id must be of type string" {
+		t.Fatalf("tool results = %#v", results)
+	}
+}
