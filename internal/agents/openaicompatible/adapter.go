@@ -252,6 +252,8 @@ func (adapter *Adapter) Stream(
 	// frame, for a 200 answer that is not a stream at all.
 	ended, framed := false, false
 	plain := ""
+	// finish is the last finish_reason the stream reported (#665).
+	finish := ""
 	options := adapter.optionsFor(request)
 	var content, reasoning strings.Builder
 	// thinking is true from the first reasoning fragment until visible
@@ -318,6 +320,7 @@ func (adapter *Adapter) Stream(
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				ended = true
+				finish = *choice.FinishReason
 			}
 			if len(choice.Delta.Images) > 0 {
 				inlineImage = true
@@ -353,16 +356,24 @@ func (adapter *Adapter) Stream(
 						}
 					}
 				}
-				call, found := calls[fragment.Index]
+				// #665: a gateway that leaves out the index starts a new
+				// call with every new call ID and continues the last call
+				// otherwise; one that repeats the whole ID or name in each
+				// fragment does not double them.
+				index := len(callOrder) - 1
+				if fragment.Index != nil {
+					index = *fragment.Index
+				} else if index < 0 || fragment.ID != "" && calls[index].ID != "" && fragment.ID != calls[index].ID {
+					index = len(callOrder)
+				}
+				call, found := calls[index]
 				if !found {
 					call = &agents.ToolCall{}
-					calls[fragment.Index] = call
-					callOrder = append(callOrder, fragment.Index)
+					calls[index] = call
+					callOrder = append(callOrder, index)
 				}
-				if fragment.ID != "" {
-					call.ID += fragment.ID
-				}
-				call.Name += fragment.Function.Name
+				call.ID = appendFragment(call.ID, fragment.ID)
+				call.Name = appendFragment(call.Name, fragment.Function.Name)
 				call.Arguments = append(
 					call.Arguments,
 					fragment.Function.Arguments...,
@@ -384,7 +395,8 @@ func (adapter *Adapter) Stream(
 	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
 		return agents.Completion{}, agents.ErrInlineImageOutput
 	}
-	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage}
+	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage,
+		FinishReason: agents.FinishReasonOf(finish)}
 	for _, index := range callOrder {
 		result.ToolCalls = append(result.ToolCalls, *calls[index])
 	}
@@ -452,7 +464,7 @@ func (adapter *Adapter) Complete(
 		)
 	}
 	message := body.Choices[0].Message
-	result = agents.Completion{Content: message.Content}
+	result = agents.Completion{Content: message.Content, FinishReason: agents.FinishReasonOf(body.Choices[0].FinishReason)}
 	if body.Usage != nil {
 		usage = body.Usage.agentUsage()
 		result.Usage = usage
@@ -468,6 +480,16 @@ func (adapter *Adapter) Complete(
 		})
 	}
 	return result, nil
+}
+
+// appendFragment joins a streamed fragment of a call ID or name. A fragment
+// equal to what is already there is the whole value repeated by a gateway
+// that sends it with every chunk, not a second half (#665).
+func appendFragment(value, fragment string) string {
+	if fragment == "" || fragment == value {
+		return value
+	}
+	return value + fragment
 }
 
 func passback(options *ThinkingOptions) bool {
@@ -776,7 +798,8 @@ type streamChunk struct {
 			// delta.images); they are noticed, never kept.
 			Images    []json.RawMessage `json:"images"`
 			ToolCalls []struct {
-				Index    int    `json:"index"`
+				// Index is nil when a gateway leaves it out (#665).
+				Index    *int   `json:"index"`
 				ID       string `json:"id"`
 				Function struct {
 					Name      string `json:"name"`
@@ -790,7 +813,8 @@ type streamChunk struct {
 type completionBody struct {
 	Usage   *wireUsage `json:"usage"`
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {

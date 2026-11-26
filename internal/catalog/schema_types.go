@@ -3406,6 +3406,11 @@ type ChatContextCompactionSchema struct {
 	AutoMessageThreshold int `json:"auto_message_threshold"`
 	// RequestTimeoutSeconds bounds the summary call.
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
+	// AutoFailureBackoffSeconds is how long a session skips the automatic
+	// compaction after it failed (#665): a failing summary call would
+	// otherwise cost its whole timeout on every turn. 0 or absent: no
+	// backoff. A manual compaction is never held back.
+	AutoFailureBackoffSeconds int `json:"auto_failure_backoff_seconds,omitempty"`
 	// MaximumSummaryCharacters bounds the stored summary; a longer answer is cut.
 	MaximumSummaryCharacters int `json:"maximum_summary_characters"`
 	// ListLimit bounds how many compaction records one session read returns.
@@ -5478,6 +5483,13 @@ type ChatAgentSchema struct {
 	// MaxGenerationCallsPerTurn 限定单个对话轮次内付费生成工具的执行
 	// 次数上限（服务端硬约束，防止 LLM 一次输出大量工具调用连击扣费）。
 	MaxGenerationCallsPerTurn int `json:"max_generation_calls_per_turn"`
+	// MaxToolRoundsPerTurn bounds how many tool rounds one turn runs (#665):
+	// a model that keeps calling tools without ending its reply is stopped
+	// there, the round past the bound does not run, and the reply ends with
+	// presentation.messages.tool_rounds_capped. It is a soft guard far
+	// above a legitimate long turn (#553 keeps tool calls unbounded per round);
+	// 0 or absent: no bound.
+	MaxToolRoundsPerTurn int `json:"max_tool_rounds_per_turn,omitempty"`
 	// MaxParallelGenerationSubmissions bounds how many paid generation calls
 	// of one tool round are submitted before the turn waits for their Tasks
 	// together (in-flight steps of the round); calls beyond it form the next
@@ -6765,6 +6777,18 @@ type ChatMessageTexts struct {
 	// empty_response end reason instead of passing as completed. Optional:
 	// without it the no_result text is shown when the reply has nothing else.
 	AgentEmptyResponse string `json:"agent_empty_response,omitempty"`
+	// AgentReplyTruncated is appended to a reply whose model round stopped at
+	// its output token limit (finish_reason length, #665): the text may be cut
+	// and the round's tool calls, whose arguments may be cut, did not run.
+	// AgentReplyFiltered is appended when the upstream's content filter ended
+	// the round (finish_reason content_filter). Optional: without them the
+	// reply keeps what arrived and says nothing more.
+	AgentReplyTruncated string `json:"agent_reply_truncated,omitempty"`
+	AgentReplyFiltered  string `json:"agent_reply_filtered,omitempty"`
+	// ToolRoundsCapped ends a reply that reached
+	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
+	// Optional: without it the reply ends without a note.
+	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The

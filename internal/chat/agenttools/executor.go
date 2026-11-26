@@ -296,6 +296,7 @@ type Executor struct {
 	// 同一会话同时只有一个活动轮次，按 scope 覆盖即可。
 	usageMu       sync.Mutex
 	usage         map[string]generationUsage
+	usageClock    uint64
 	maxGeneration int
 
 	// limitContent and reconcileContent are the Schema's texts for a reached
@@ -381,7 +382,17 @@ type generationUsage struct {
 	turn  string
 	count int
 	calls map[string]struct{}
+	// used orders the scopes by their last call for the eviction below.
+	used uint64
 }
+
+// maxUsageScopes bounds the per-session generation counts this process keeps
+// (#665). It is a memory bound, not product policy: an evicted session loses
+// only the in-process dedup of its current turn's calls, whose count the
+// orchestrator hands back as PriorGenerationCalls from the durable reply. Far
+// above the sessions one process serves at once, so a running turn is never
+// the oldest entry in practice.
+const maxUsageScopes = 4096
 
 func New(config Config) (*Executor, error) {
 	if config.Params == nil || config.Generate == nil {
@@ -983,9 +994,14 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 	}
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
-	current := e.usage[scope]
+	current, known := e.usage[scope]
+	if !known && len(e.usage) >= maxUsageScopes {
+		e.evictOldestUsageLocked()
+	}
+	e.usageClock++
+	current.used = e.usageClock
 	if current.turn != turn {
-		current = generationUsage{turn: turn, calls: map[string]struct{}{}}
+		current = generationUsage{turn: turn, calls: map[string]struct{}{}, used: e.usageClock}
 	}
 	if _, seen := current.calls[callID]; seen {
 		return false
@@ -1004,6 +1020,21 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 	current.calls[callID] = struct{}{}
 	e.usage[scope] = current
 	return false
+}
+
+// evictOldestUsageLocked drops the scope whose last generation call is the
+// oldest (#665); the caller holds usageMu.
+func (e *Executor) evictOldestUsageLocked() {
+	oldest, found := "", false
+	var at uint64
+	for scope, usage := range e.usage {
+		if !found || usage.used < at {
+			oldest, at, found = scope, usage.used, true
+		}
+	}
+	if found {
+		delete(e.usage, oldest)
+	}
 }
 
 // explicitParameters retains provenance without changing Options or its hash.

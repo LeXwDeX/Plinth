@@ -1807,15 +1807,19 @@ func (r *Repository) UpdateTurnState(
 	state string,
 	endReason string,
 	updatedAt time.Time,
+	from ...string,
 ) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE go_chat_turns SET state = ?, end_reason = ?, updated_at = ?
-		WHERE assistant_message_id = ?`,
-		state,
-		endReason,
-		formatTime(updatedAt),
-		assistantMessageID,
-	)
+	query := `UPDATE go_chat_turns SET state = ?, end_reason = ?, updated_at = ?
+		WHERE assistant_message_id = ?`
+	arguments := []any{state, endReason, formatTime(updatedAt), assistantMessageID}
+	if len(from) > 0 {
+		// #665: the state guard and the write are one statement.
+		query += ` AND state IN (?` + strings.Repeat(`, ?`, len(from)-1) + `)`
+		for _, allowed := range from {
+			arguments = append(arguments, allowed)
+		}
+	}
+	result, err := r.db.ExecContext(ctx, query, arguments...)
 	if err != nil {
 		return fmt.Errorf("update chat turn state: %w", err)
 	}
@@ -1824,6 +1828,17 @@ func (r *Repository) UpdateTurnState(
 		return err
 	}
 	if affected == 0 {
+		if len(from) > 0 {
+			var found int
+			err := r.db.QueryRowContext(ctx, `SELECT 1 FROM go_chat_turns WHERE assistant_message_id = ?`,
+				assistantMessageID).Scan(&found)
+			if err == nil {
+				return chat.ErrTurnStateChanged
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		return chat.ErrMessageNotFound
 	}
 	return nil

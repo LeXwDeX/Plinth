@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1458,12 +1459,16 @@ func (r *memoryChatRepository) UpdateTurnState(
 	state string,
 	endReason string,
 	updatedAt time.Time,
+	from ...string,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, found := r.turns[assistantMessageID]
 	if !found {
 		return chat.ErrMessageNotFound
+	}
+	if len(from) > 0 && !slices.Contains(from, turn.State) {
+		return chat.ErrTurnStateChanged
 	}
 	turn.State = state
 	turn.EndReason = endReason

@@ -118,6 +118,41 @@ func (orchestrator *Orchestrator) lockCompaction(ownerID, sessionID string) func
 	}
 }
 
+// compactionBackingOff reports whether the session's last automatic
+// compaction failed within chat.context_compaction.
+// auto_failure_backoff_seconds (#665).
+func (orchestrator *Orchestrator) compactionBackingOff(key string) bool {
+	orchestrator.compactMu.Lock()
+	defer orchestrator.compactMu.Unlock()
+	until, found := orchestrator.compactFailedUntil[key]
+	if found && !time.Now().Before(until) {
+		delete(orchestrator.compactFailedUntil, key)
+		return false
+	}
+	return found
+}
+
+// noteCompactionOutcome starts the session's backoff after a failed automatic
+// compaction and ends it after one that worked (#665). Expired entries of
+// other sessions are dropped on the way, so the map holds only sessions
+// backing off now.
+func (orchestrator *Orchestrator) noteCompactionOutcome(key string, worked bool) {
+	backoff := time.Duration(orchestrator.schema.ContextCompaction.AutoFailureBackoffSeconds) * time.Second
+	orchestrator.compactMu.Lock()
+	defer orchestrator.compactMu.Unlock()
+	if worked || backoff <= 0 {
+		delete(orchestrator.compactFailedUntil, key)
+		return
+	}
+	now := time.Now()
+	for other, until := range orchestrator.compactFailedUntil {
+		if !now.Before(until) {
+			delete(orchestrator.compactFailedUntil, other)
+		}
+	}
+	orchestrator.compactFailedUntil[key] = now.Add(backoff)
+}
+
 // CompactContext compacts the session's context now, at the person's request.
 // It is refused while a turn of the session has not finished; a failed
 // summary call leaves the session as it was.
@@ -157,6 +192,9 @@ func (orchestrator *Orchestrator) CompactContext(ctx context.Context, ownerID, s
 		CompactionManual, turnModel{connection: model.ID, name: model.Model}); err != nil {
 		return ContextView{}, err
 	}
+	// A compaction the person asked for that worked ends the automatic one's
+	// backoff (#665).
+	orchestrator.noteCompactionOutcome(orchestrator.turnKey(ownerID, sessionID), true)
 	return orchestrator.service.SessionContextView(ctx, ownerID, sessionID)
 }
 
@@ -191,12 +229,22 @@ func (orchestrator *Orchestrator) autoCompact(ctx context.Context, command Proce
 			break
 		}
 	}
+	key := orchestrator.turnKey(command.OwnerID, command.SessionID)
+	if orchestrator.compactionBackingOff(key) {
+		// #665: the last automatic compaction of the session failed a moment
+		// ago; the turn goes on with the full context instead of waiting the
+		// summary call's whole timeout again.
+		orchestrator.logger.Debug("自动压缩上下文失败后退避中，本轮跳过", "session_id", command.SessionID)
+		return
+	}
 	unlock := orchestrator.lockCompaction(command.OwnerID, command.SessionID)
 	defer unlock()
 	status := orchestrator.schema.Presentation.Status
 	orchestrator.statusEvent(ctx, command.SessionID, status.Compacting)
 	_, err = orchestrator.compactHistory(ctx, command.OwnerID, command.SessionID, history[:current], state,
 		CompactionAuto, model)
+	orchestrator.noteCompactionOutcome(key, err == nil || errors.Is(err, ErrNothingToCompact) ||
+		errors.Is(err, ErrCompactionConflict))
 	switch {
 	case err == nil:
 		orchestrator.statusEvent(ctx, command.SessionID, status.Compacted)

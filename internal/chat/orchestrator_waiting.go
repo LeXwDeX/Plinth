@@ -83,14 +83,22 @@ func (orchestrator *Orchestrator) runWaitingScanner(ctx context.Context) {
 	reclaimEvery := orchestrator.consentWaitTimeout()
 	nextReclaim := time.Now().Add(reclaimEvery)
 	for {
-		if err := orchestrator.ScanWaitingTasks(ctx); err != nil && ctx.Err() == nil {
-			orchestrator.logger.Warn("等待任务扫描失败", "error", err)
-		}
+		// #665: a panic in one pass is recovered and logged; the scanner keeps
+		// its cadence instead of taking the process down.
+		func() {
+			defer orchestrator.recoverGoroutine("waiting-scanner")
+			if err := orchestrator.ScanWaitingTasks(ctx); err != nil && ctx.Err() == nil {
+				orchestrator.logger.Warn("等待任务扫描失败", "error", err)
+			}
+		}()
 		if now := time.Now(); !now.Before(nextReclaim) {
 			nextReclaim = now.Add(reclaimEvery)
-			if err := orchestrator.ReclaimStrandedTurns(ctx); err != nil && ctx.Err() == nil {
-				orchestrator.logger.Warn("回收无人持有的运行中回合失败", "error", err)
-			}
+			func() {
+				defer orchestrator.recoverGoroutine("stranded-turn-reclaim")
+				if err := orchestrator.ReclaimStrandedTurns(ctx); err != nil && ctx.Err() == nil {
+					orchestrator.logger.Warn("回收无人持有的运行中回合失败", "error", err)
+				}
+			}()
 		}
 		select {
 		case <-ctx.Done():
