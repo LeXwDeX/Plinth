@@ -1911,6 +1911,8 @@ export interface ChatProductSchema {
       stopped: string;
       background: string;
       error: string;
+      /** #638: a model round answered with nothing, also after its retry. */
+      empty_response: string;
     };
     placeholder_stale_milliseconds: number;
     failed_prompt_preview_characters: number;

@@ -1381,13 +1381,17 @@ func (service *Service) startTurn(
 	// The model is the session's choice while the administrator offers it,
 	// else the default (#322 Scope 5); the level falls back to what that
 	// model offers.
-	model, effort, err := service.TurnModel(ctx, command.OwnerID, command.SessionID)
+	model, effort, chosen, err := service.turnModelChoice(ctx, command.OwnerID, command.SessionID)
 	if err != nil {
 		return Message{}, err
 	}
 	command.Options.Model = model.Model
 	command.Options.ModelConnection = model.ID
 	command.Options.ReasoningEffort = effort
+	// The rounds after tool results think less unless the person chose the
+	// level (#638); frozen with the turn like the level itself.
+	profile, _ := service.models.Profile(model.Model)
+	command.Options.FollowUpReasoningEffort = profile.EffortForFollowUp(effort, chosen, model.EffortLevels)
 	// The thinking contract of the model is frozen with the turn for the same
 	// reason (#377): the reasoning of a tool loop is only ever sent back to the
 	// connection, model, wire and kind it came from, and a Catalog that changed

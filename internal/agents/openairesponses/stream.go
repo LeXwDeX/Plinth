@@ -1,6 +1,7 @@
 package openairesponses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -90,7 +91,7 @@ read:
 		}
 		if lines.Oversized() {
 			framed = true
-			state.skipOversized(event)
+			state.skipOversized(event, lines.Head())
 			event = ""
 			if state.terminal {
 				break
@@ -140,6 +141,12 @@ read:
 	}
 	result = state.outputs.completion(state.status == statusIncomplete)
 	usage = state.usage
+	// A picture the model drew itself has no place in the reply (#638): a
+	// round that said nothing else ends as the Chat Completions Adapter ends
+	// one with delta.images, not as an empty completion.
+	if state.inlineImage && result.Empty() {
+		return agents.Completion{}, agents.ErrInlineImageOutput
+	}
 	result.Usage = usage
 	// Text that was never streamed (an upstream that sends its message only in
 	// the done item) is delivered once, so the caller still sees it arrive.
@@ -150,6 +157,15 @@ read:
 	}
 	return result, nil
 }
+
+// The Responses wire's picture the model draws itself: the output item type
+// and the prefix of its progress events (response.image_generation_call.
+// in_progress, .generating, .partial_image, .completed). Per the documents; no
+// real sample yet (#638).
+const (
+	imageGenerationItem        = "image_generation_call"
+	imageGenerationEventPrefix = "response.image_generation_call."
+)
 
 // streamState is what a stream has told so far.
 type streamState struct {
@@ -164,11 +180,15 @@ type streamState struct {
 	// reports a call once however many fragments or calls follow (#431).
 	toolCalling bool
 	// emitted: some text delta was passed on.
-	emitted  bool
-	terminal bool
-	status   string
-	usage    *agents.Usage
-	failure  error
+	emitted bool
+	// inlineImage: the model drew a picture itself (an image_generation_call
+	// item, #638). The picture is dropped, and a round that said nothing else
+	// is ErrInlineImageOutput.
+	inlineImage bool
+	terminal    bool
+	status      string
+	usage       *agents.Usage
+	failure     error
 }
 
 // streamEvent decodes the members of the events the Adapter reads; each event
@@ -199,6 +219,10 @@ func (state *streamState) handle(hint, payload string) error {
 	if eventType == "" {
 		eventType = hint
 	}
+	if strings.HasPrefix(eventType, imageGenerationEventPrefix) {
+		state.inlineImage = true
+		return nil
+	}
 	switch eventType {
 	case "response.output_item.added", "response.output_item.done",
 		"response.function_call_arguments.delta", "response.function_call_arguments.done",
@@ -222,9 +246,16 @@ func (state *streamState) handle(hint, payload string) error {
 			return state.think()
 		case "function_call":
 			return state.call()
+		case imageGenerationItem:
+			state.inlineImage = true
 		}
 	case "response.output_item.done":
-		return state.outputs.settle(event.OutputIndex, event.Item)
+		if err := state.outputs.settle(event.OutputIndex, event.Item); err != nil {
+			return err
+		}
+		if state.outputs.slot(event.OutputIndex).kind == imageGenerationItem {
+			state.inlineImage = true
+		}
 	case "response.function_call_arguments.delta":
 		state.outputs.slot(event.OutputIndex).streamed.WriteString(event.Delta)
 		return state.call()
@@ -346,13 +377,20 @@ func (state *streamState) finish(eventType string, event streamEvent) error {
 
 // skipOversized handles a line over the stream line bound. The events that
 // matter for what the Adapter keeps are small; the large ones are the response
-// objects (they echo the instructions and the tools) and a done item holding a
-// big encrypted reasoning item. Losing the first costs nothing, losing the
-// second only the reasoning it carried. A terminal event that is too large is
-// told by its event: line: the response completed without a usage; one that
-// says the response ended otherwise ends it as a failure, whose details are
-// lost with the line.
-func (state *streamState) skipOversized(event string) {
+// objects (they echo the instructions and the tools, and the output), a done
+// item holding a big encrypted reasoning item, and a picture the model drew
+// itself (an image_generation_call item or event, whose base64 result is
+// megabytes, #638). Losing the first costs only the usage: the message and the
+// calls the item events closed are kept. Losing the second costs only the
+// reasoning it carried. The third is told by the item type the line's head
+// names. A terminal event that is too large is told by its event: line: the
+// response completed without a usage; one that says the response ended
+// otherwise ends it as a failure, whose details are lost with the line.
+func (state *streamState) skipOversized(event string, head []byte) {
+	if strings.HasPrefix(event, imageGenerationEventPrefix) ||
+		bytes.Contains(head, []byte(`"type":"`+imageGenerationItem+`"`)) {
+		state.inlineImage = true
+	}
 	switch event {
 	case "response.completed":
 		state.terminal, state.status = true, statusCompleted

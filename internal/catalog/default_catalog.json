@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.08.40",
+    "revision": "2026-11-26.09.18",
     "terminology": {
       "user_facing": [
         {
@@ -6719,7 +6719,8 @@
           "awaiting_approval": "awaiting_approval",
           "stopped": "stopped",
           "background": "background",
-          "error": "error"
+          "error": "error",
+          "empty_response": "empty_response"
         },
         "placeholder_stale_milliseconds": 300000,
         "failed_prompt_preview_characters": 50
@@ -6786,7 +6787,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "context_window_tokens": 1000000,
               "thinking_kind": "plaintext"
@@ -6801,7 +6803,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "omit_temperature": true,
               "wire_api": "responses",
@@ -6817,7 +6820,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "omit_temperature": true,
               "wire_api": "responses",
@@ -6833,7 +6837,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "chat_completions_tools": false
             },
@@ -6847,7 +6852,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "chat_completions_tools": false
             },
@@ -6861,7 +6867,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               }
             },
             {
@@ -6874,7 +6881,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               }
             },
             {
@@ -6887,7 +6895,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               }
             },
             {
@@ -6900,7 +6909,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               }
             },
             {
@@ -6913,7 +6923,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               }
             },
             {
@@ -6931,7 +6942,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "low"
               },
               "context_window_tokens": 1000000,
               "reasoning_passback": true,
@@ -6951,7 +6963,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "context_window_tokens": 1000000,
               "thinking_kind": "plaintext"
@@ -6969,7 +6982,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "medium"
               },
               "thinking_kind": "plaintext"
             },
@@ -7000,7 +7014,8 @@
               "turn_efforts": {
                 "title": "low",
                 "summary": "low",
-                "prompt_enhance": "low"
+                "prompt_enhance": "low",
+                "tool_followup": "high"
               },
               "stream_include_usage": false,
               "reasoning_passback": true,
@@ -7019,7 +7034,8 @@
           "max_attempts": 3,
           "initial_backoff_millis": 2000,
           "max_backoff_millis": 20000,
-          "max_retry_after_seconds": 60
+          "max_retry_after_seconds": 60,
+          "empty_response_retries": 1
         },
         "consent_wait_timeout_seconds": 120,
         "max_generation_calls_per_turn": 20,
@@ -10874,6 +10890,7 @@
           "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_request_rejected": "对话模型拒绝了这次请求里的参数「{param}」，可能是所选模型不支持这项设置。请换一个对话模型后重试，或把本条消息的错误 ID 发给管理员查看日志。",
           "agent_upstream_interrupted": "对话模型服务暂时出错（限流、服务端错误、连接中断或回复中途断开），自动重试后仍没有完成，本轮回复已停止。请稍后重新发送这条消息；本轮已经提交的生成任务不受影响，可以在任务中心查看。",
+          "agent_empty_response": "对话模型这一轮没有返回任何文字或工具调用，自动重试后仍是空的，本轮回复到此为止。前面已经说明或提交的内容不受影响；如果还有没做完的步骤，请点「重新生成」或重新发送这条消息，已经提交的生成任务可以在任务中心查看。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_image_invalid": "这次请求里的图片没有被模型接受：模型能读图，是这张图不符合要求。请重新生成这张图、换一张，或裁剪后再试。",
           "agent_image_invalid_reasons": "上游指出的问题：{reasons}。",
@@ -21986,6 +22003,7 @@
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_request_rejected": "The chat model rejected the \"{param}\" parameter of this request, possibly because the selected model does not support that setting. Please switch to another chat model and retry, or send this message's error ID to an administrator to check the log.",
             "chat.presentation.messages.agent_upstream_interrupted": "The chat model service failed for now (a rate limit, a server error, a broken connection or a reply cut off midway) and automatic retries did not help, so this reply stopped. Please send the message again later; generation tasks this turn already submitted are not affected and can be found in the task center.",
+            "chat.presentation.messages.agent_empty_response": "The chat model returned no text and no tool call in this round, and it was still empty after an automatic retry, so this reply stops here. What it already said or submitted is unaffected; if steps are left undone, click Regenerate or send the message again. Generation tasks already submitted are in the Task Center.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
             "chat.presentation.messages.agent_image_invalid": "The model did not accept the picture in this request: it does read images, but this picture does not meet its limits. Generate the picture again, use another one, or crop it and try again.",
             "chat.presentation.messages.agent_image_invalid_reasons": "The upstream named this problem: {reasons}.",

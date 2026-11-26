@@ -17,6 +17,7 @@ var endReasonStrings = catalog.ChatTurnEndReasonsSchema{
 	Stopped:          "configured-end-stopped",
 	Background:       "configured-end-background",
 	Error:            "configured-end-error",
+	EmptyResponse:    "configured-end-empty-response",
 }
 
 func endReasonService(t *testing.T, repository chat.Repository, reasons catalog.ChatTurnEndReasonsSchema) *chat.Service {

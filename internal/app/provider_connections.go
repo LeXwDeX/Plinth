@@ -901,6 +901,7 @@ func chatRetryPolicy(agent catalog.ChatAgentSchema, logger *slog.Logger) agents.
 		policy.InitialBackoff = time.Duration(retry.InitialBackoffMillis) * time.Millisecond
 		policy.MaxBackoff = time.Duration(retry.MaxBackoffMillis) * time.Millisecond
 		policy.MaxRetryAfter = time.Duration(retry.MaxRetryAfterSeconds) * time.Second
+		policy.EmptyRetries = retry.EmptyResponseRetries
 	}
 	return policy
 }

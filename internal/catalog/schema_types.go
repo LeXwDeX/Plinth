@@ -5377,6 +5377,11 @@ type ChatAgentRetrySchema struct {
 	// asks for a longer wait is not retried. The wait is the longer of the
 	// backoff and the Retry-After.
 	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
+	// EmptyResponseRetries is how many times a streamed Agent round that
+	// answered with no text and no tool call (or only with a picture the model
+	// drew itself) is sent again, apart from MaxAttempts (#638). 0 sends it
+	// once; the turn then ends with the empty_response end reason.
+	EmptyResponseRetries int `json:"empty_response_retries,omitempty"`
 }
 
 // ChatAgentRequestPicturesSchema is chat.agent.request_pictures: every picture
@@ -6726,6 +6731,12 @@ type ChatMessageTexts struct {
 	// after it had started streaming (#509): the person may send the message
 	// again. Optional: without it the unknown error is shown.
 	AgentUpstreamInterrupted string `json:"agent_upstream_interrupted,omitempty"`
+	// AgentEmptyResponse is what the reply says when a model round answered
+	// with no text and no tool call and its retry (chat.agent.retry.
+	// empty_response_retries) did not help (#638): the turn ends with the
+	// empty_response end reason instead of passing as completed. Optional:
+	// without it the no_result text is shown when the reply has nothing else.
+	AgentEmptyResponse string `json:"agent_empty_response,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The

@@ -1369,6 +1369,7 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.Model = turn.Options.Model
 	command.Options.ModelConnection = turn.Options.ModelConnection
 	command.Options.ReasoningEffort = turn.Options.ReasoningEffort
+	command.Options.FollowUpReasoningEffort = turn.Options.FollowUpReasoningEffort
 	// And so is the thinking contract the turn started with: a turn recovered
 	// after a restart must keep the wire, the kind and the passback rule it ran
 	// on, not the ones today's Catalog declares for its model (#377).
@@ -1444,6 +1445,10 @@ func (orchestrator *Orchestrator) Process(
 	// backgroundFinalized means the turn ended with its Tasks still running
 	// (#137); a stop requested later must not cancel them.
 	backgroundFinalized := false
+	// emptyReply means the last model round answered with no text and no tool
+	// call, also after the adapter layer's empty retry (#638): the turn ends
+	// with the empty_response reason and says so, never as completed.
+	emptyReply := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1588,6 +1593,7 @@ func (orchestrator *Orchestrator) Process(
 					failed:     failedTurn,
 					background: backgroundFinalized,
 					stopped:    stopFinalized,
+					empty:      emptyReply,
 				}),
 			),
 		)
@@ -1757,6 +1763,7 @@ func (orchestrator *Orchestrator) Process(
 			)
 		}
 		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage, request)
+		emptyReply = orchestrator.noteEmptyReply(command, completion, 0)
 		if err := streamFilter.Flush(round.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2039,6 +2046,12 @@ func (orchestrator *Orchestrator) Process(
 			completion,
 			toolContent,
 		)
+		// #638: a round after tool results sends the turn's follow-up level
+		// (the person's choice, else the profile's tool_followup level); the
+		// first round of the turn kept the turn's own level.
+		if level := command.Options.FollowUpReasoningEffort; level != "" {
+			followUp.ReasoningEffort = level
+		}
 		// 续跑流同样要过滤 DSML：模型可能在总结中继续发起调用。
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		followUpRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
@@ -2082,6 +2095,7 @@ func (orchestrator *Orchestrator) Process(
 			break
 		}
 		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage, followUp)
+		emptyReply = orchestrator.noteEmptyReply(command, next, effectiveRound+1)
 		if err := streamFilter.Flush(followUpRound.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2100,7 +2114,18 @@ func (orchestrator *Orchestrator) Process(
 		// 模型不再"失忆"重复已执行的工具调用。
 		request = followUp
 	}
-	if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
+	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
+	if emptyReply && emptyText != "" {
+		// #638: the model's last round said nothing, also after its retry.
+		// What the turn wrote and did before it stays; the reply says the
+		// model stopped answering, so the person can regenerate it.
+		note := orchestrator.withErrorReference(ctx, emptyText, assistant.ID)
+		if assistant.Content == "" {
+			assistant.Content = note
+		} else {
+			assistant.Content += "\n\n" + note
+		}
+	} else if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
 		assistant.Content = orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.NoResult)
 		// #120: a follow-up refused for a used-up balance or quota says so
 		// instead of asking for a retry that cannot succeed.
@@ -2109,6 +2134,8 @@ func (orchestrator *Orchestrator) Process(
 		} else if message, refused := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); refused {
 			assistant.Content = message
 		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
+			assistant.Content = message
+		} else if message, drew := orchestrator.agentInlineImageMessage(ctx, followUpErr); drew {
 			assistant.Content = message
 		}
 		if failed {
@@ -2121,6 +2148,10 @@ func (orchestrator *Orchestrator) Process(
 		if refused, named := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); named {
 			message = refused
 		}
+		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
+	} else if message, drew := orchestrator.agentInlineImageMessage(ctx, followUpErr); drew {
+		// #638: the follow-up drew its own picture instead of calling a tool,
+		// also after its retry; the reply so far stays and says so.
 		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
@@ -4081,6 +4112,34 @@ func (orchestrator *Orchestrator) agentInterruptedMessage(ctx context.Context, e
 		return "", false
 	}
 	return orchestrator.text(ctx, text), true
+}
+
+// agentInlineImageMessage is the Schema text for a chat model round that drew
+// a picture itself instead of answering or calling a tool (#638); false for
+// any other error.
+func (orchestrator *Orchestrator) agentInlineImageMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentInlineImageOutput
+	if text == "" || !errors.Is(err, agents.ErrInlineImageOutput) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
+}
+
+// noteEmptyReply reports a model round that answered with no text and no tool
+// call, also after the adapter layer's empty retry (#638), and logs it: such
+// a round ends the turn, and the turn must not pass as completed.
+func (orchestrator *Orchestrator) noteEmptyReply(command ProcessTurn, completion agents.Completion, round int) bool {
+	if !completion.Empty() {
+		return false
+	}
+	orchestrator.logger.Warn(
+		"对话模型本轮返回空回复（无文字、无工具调用），回合以 empty_response 结束",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"round", round,
+		"usage_reported", completion.Usage != nil,
+	)
+	return true
 }
 
 // agentQuotaExhaustedMessage is the Schema text for an Agent request the

@@ -2584,12 +2584,16 @@ func validateThinkingEffort(index int, profile ChatThinkingModelProfile) error {
 	if !levels[profile.DefaultEffort] {
 		return fmt.Errorf("agent.thinking.model_profiles[%d] 的 default_effort %q 不在 effort_levels 里", index, profile.DefaultEffort)
 	}
-	// A kind declared without levels would silently do nothing, and one naming
-	// a level the family does not offer would silently fall back (#382).
+	// A kind declared without levels would silently do nothing, one naming
+	// a level the family does not offer would silently fall back (#382), and a
+	// kind no request reads (a typo) would silently keep the default (#638).
 	for kind, level := range profile.TurnEfforts {
 		switch {
 		case kind == "":
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts 含空回合类型", index)
+		case !slices.Contains(chatTurnEffortKinds, kind):
+			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts 含未知回合类型 %q（可用 %s）",
+				index, kind, strings.Join(chatTurnEffortKinds, "、"))
 		case !levels[level]:
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts[%s] = %q 不在 effort_levels 里",
 				index, kind, level)
@@ -4397,6 +4401,9 @@ func validateChatAgentResilience(agent ChatAgentSchema) error {
 	}
 	if retry.MaxRetryAfterSeconds <= 0 {
 		return errors.New("agent.retry.max_retry_after_seconds 必须为正数")
+	}
+	if retry.EmptyResponseRetries < 0 || retry.EmptyResponseRetries > 3 {
+		return errors.New("agent.retry.empty_response_retries 必须在 0 到 3 之间")
 	}
 	if agent.RoundTimeoutSeconds > 0 && (retry.MaxRetryAfterSeconds >= agent.RoundTimeoutSeconds ||
 		retry.MaxBackoffMillis >= agent.RoundTimeoutSeconds*1000) {

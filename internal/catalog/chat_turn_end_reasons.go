@@ -24,6 +24,10 @@ type ChatTurnEndReasonsSchema struct {
 	Background string `json:"background"`
 	// Error is a turn that finished as failed.
 	Error string `json:"error"`
+	// EmptyResponse is a turn whose model round answered with no text and no
+	// tool call, also after its retry (#638): not a normal end, and not a
+	// failed one either, since what the turn did before it stays.
+	EmptyResponse string `json:"empty_response"`
 }
 
 // Declared reports whether the Catalog declares the turn end reasons.
@@ -38,13 +42,14 @@ func (reasons ChatTurnEndReasonsSchema) Validate() error {
 	if !reasons.Declared() {
 		return nil
 	}
-	seen := make(map[string]string, 5)
+	seen := make(map[string]string, 6)
 	for _, entry := range []struct{ name, value string }{
 		{"completed", reasons.Completed},
 		{"awaiting_approval", reasons.AwaitingApproval},
 		{"stopped", reasons.Stopped},
 		{"background", reasons.Background},
 		{"error", reasons.Error},
+		{"empty_response", reasons.EmptyResponse},
 	} {
 		if strings.TrimSpace(entry.value) == "" {
 			return fmt.Errorf("state.turn_end_reasons.%s 不能为空", entry.name)
