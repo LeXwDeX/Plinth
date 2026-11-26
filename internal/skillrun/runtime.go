@@ -477,11 +477,11 @@ func (r *Runtime) SubmitStep(ctx context.Context, owner generation.OwnerID, runI
 			generation.AdmissionRetryAfter(err) == 0 {
 			// The kernel refused this authorization for good before writing a
 			// Task (a stale frozen input, #516, a stale harness, an input or
-			// Offering it no longer accepts): give back the plan reservation
-			// (and the 3D step) the approval holds, as the generation tools do
-			// (#665). The release is idempotent and does nothing for a grant
-			// without one.
-			_ = r.Grants.AbandonBudgetReservation(context.WithoutCancel(ctx), string(owner), grant.RequestID)
+			// Offering it no longer accepts): deny the approval and give back
+			// the plan reservation (and the 3D step) it holds (#665). The
+			// grant is denied whoever approved it, so the step is not counted
+			// as in flight and can be started again. Idempotent.
+			_ = r.Grants.AbandonRefusedGrant(context.WithoutCancel(ctx), string(owner), grant.RequestID)
 		}
 		return Run{}, generation.Accepted{}, err
 	}

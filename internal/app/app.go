@@ -2168,6 +2168,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	agentToolExecutor.SetThreeView(applicationSchema.Chat.ThreeView)
+	agentToolExecutor.SetThreeViewTurnEnded(func(ctx context.Context, owner, session, turn string) (bool, error) {
+		current, err := chatService.GetTurn(ctx, owner, session, turn)
+		if err != nil {
+			return false, err
+		}
+		return chatService.TurnStateTerminal(current.State), nil
+	})
 	if applicationSchema.Chat.ThreeView.RecipeID != "" {
 		threeViewService, err = threeview.New(threeview.Config{
 			Runtime: skillRuntime, Sessions: chatService, Schema: applicationSchema.Chat.ThreeView,

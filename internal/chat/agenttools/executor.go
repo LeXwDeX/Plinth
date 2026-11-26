@@ -308,7 +308,17 @@ type Executor struct {
 	// threeViewSources serializes the start of new three-view groups of one
 	// session, so two parallel calls on the same source picture cannot both
 	// pass the duplicate guard (#665). Keys are owner and session.
-	threeViewSources sync.Map
+	threeViewSources threeViewLocks
+	// threeViewTurnEnded reports whether a turn finished (done or error); the
+	// duplicate guard uses it for a group between two views (#665). Nil
+	// leaves such a group inactive, as before.
+	threeViewTurnEnded func(ctx context.Context, owner, session, turn string) (bool, error)
+}
+
+// SetThreeViewTurnEnded wires the turn-state read the three-view duplicate
+// guard needs for a group between two views (#665).
+func (e *Executor) SetThreeViewTurnEnded(ended func(ctx context.Context, owner, session, turn string) (bool, error)) {
+	e.threeViewTurnEnded = ended
 }
 
 // limitText and reconcileText are the consent texts in the turn's locale.
