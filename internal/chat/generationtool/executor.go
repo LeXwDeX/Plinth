@@ -1292,7 +1292,7 @@ func (executor *Executor) selectReferences(
 		// twice and push the named one to image 2; the call's own list is the
 		// whole input, so the frozen references, the purpose numbering and the
 		// Agent's reference_handles stay one list.
-		return references, nil
+		return executor.boardStandIns(command, references), nil
 	}
 	// #266: the artboard snapshot the person sent is the turn's source. It
 	// leads the references whether or not the Agent named it; pictures the
@@ -1303,7 +1303,76 @@ func (executor *Executor) selectReferences(
 			bound = append(bound, reference)
 		}
 	}
-	return bound, nil
+	return executor.boardStandIns(command, bound), nil
+}
+
+// boardStandIns puts the version picture boardPicture finds in the snapshot's
+// place (#631, 1.9.1): a board of one layer that is an existing version is that
+// version, so the result descends from it and no copy of it is uploaded. A
+// picture named twice is sent once.
+func (executor *Executor) boardStandIns(command chat.ToolCommand, references []string) []string {
+	if _, picture := executor.boardPicture(command); picture == "" {
+		return references
+	}
+	sent := make([]string, 0, len(references))
+	for _, reference := range references {
+		if reference = executor.boardStandIn(command, reference); !slices.Contains(sent, reference) {
+			sent = append(sent, reference)
+		}
+	}
+	return sent
+}
+
+// boardPicture is the artboard snapshot URL of a canvas turn whose board
+// flattens one layer of one verified source Task, and the picture of that Task
+// the snapshot shows: the one generated image of the Task among the turn's
+// pictures. picture is empty when the board shows more, its layer is not
+// verified, or the Task has no picture here or several (the layer cannot be
+// told apart); the snapshot is then sent as it is (#266).
+func (executor *Executor) boardPicture(command chat.ToolCommand) (snapshot, picture string) {
+	if !executor.canvasTurn(command) || command.Tool.CanvasSource != canvasSourceBind {
+		return "", ""
+	}
+	var board *chat.CanvasLayout
+	for _, attachment := range command.Options.Selection {
+		if attachment.Kind != chat.AttachmentKindImage || attachment.URL == "" {
+			continue
+		}
+		if board != nil || attachment.Role != chat.AttachmentRoleCanvas || attachment.Canvas == nil {
+			return "", ""
+		}
+		board, snapshot = attachment.Canvas, attachment.URL
+	}
+	if board == nil || board.Layers != 1 || len(board.Sources) != 1 || board.Sources[0] == "" {
+		return "", ""
+	}
+	var pictures []string
+	add := func(url string) {
+		if url != "" && url != snapshot && !slices.Contains(pictures, url) {
+			pictures = append(pictures, url)
+		}
+	}
+	for _, message := range command.ReferenceHistory() {
+		for _, attachment := range message.Attachments {
+			if attachment.Role == chat.AttachmentRoleGenerated && attachment.Kind == chat.AttachmentKindImage &&
+				attachment.TaskID == board.Sources[0] {
+				add(chat.AttachmentURL(message, attachment))
+			}
+		}
+	}
+	if len(pictures) != 1 {
+		return "", ""
+	}
+	return snapshot, pictures[0]
+}
+
+// boardStandIn is the picture sent in place of a reference URL: the version
+// picture for the snapshot boardPicture replaces, the URL itself otherwise.
+func (executor *Executor) boardStandIn(command chat.ToolCommand, reference string) string {
+	if snapshot, picture := executor.boardPicture(command); picture != "" && reference == snapshot {
+		return picture
+	}
+	return reference
 }
 
 // boardShowsOnlyNamedPicture reports whether the artboard snapshot of a canvas
