@@ -55,3 +55,37 @@ func TestOrchestratorHandsPersistedGenerationUnitsToLaterCalls665(t *testing.T) 
 		}
 	}
 }
+
+// suspendingUnitsExecutor counts five units for the call and suspends it, as a
+// processing plan of five steps whose card waits for the person.
+type suspendingUnitsExecutor struct{}
+
+func (suspendingUnitsExecutor) Execute(context.Context, chat.ToolCommand, func(chat.ToolObservation) error) (chat.ToolResult, error) {
+	return chat.ToolResult{Suspend: true, NoSubmission: true, GenerationUnits: 5}, nil
+}
+
+// #665 wave 4: a call that suspends the turn for approval persists the units
+// it counted on the turn checkpoint, even without a call in flight beside it,
+// so a process that restarts during the wait rebuilds the turn's count.
+func TestSuspendedCallPersistsItsGenerationUnits665(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
+	schema := configuredChatSchema(t)
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{ToolCalls: []agents.ToolCall{budgetCall("plan", schema.Tools[0].Name, "plan")}},
+	}}
+	assistant := runBudgetTurn(t, service, schema, agent, suspendingUnitsExecutor{}, nil)
+	turn, err := service.GetTurn(context.Background(), "owner-a", assistant.SessionID, assistant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The orchestrator names the calls itself: one call, five units.
+	units := turn.Checkpoint.GenerationUnits
+	if len(units) != 1 {
+		t.Fatalf("checkpoint units = %v, want the suspended call's five persisted", units)
+	}
+	for _, n := range units {
+		if n != 5 {
+			t.Fatalf("checkpoint units = %v, want the suspended call's five persisted", units)
+		}
+	}
+}

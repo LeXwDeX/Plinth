@@ -72,7 +72,10 @@ func (service *Service) SessionBrief(ctx context.Context, ownerID, sessionID str
 // UpdateProductionBrief. Both share one compare-and-swap write path, so a
 // concurrent writer cannot drop the other's change and the returned previous
 // value is the one the audit compares against (#103 review C5). Returns the
-// brief before and after the write.
+// brief before and after the write. Being a whole replacement, it reads a
+// JSON null like an omitted field, as cleared; UpdateProductionBrief reads
+// null as unchanged (#665). Only the session API replaces the whole brief and
+// the Agent tool only patches, so the model never meets the replacement rule.
 func (service *Service) SetProductionBrief(
 	ctx context.Context,
 	ownerID string,

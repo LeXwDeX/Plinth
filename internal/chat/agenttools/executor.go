@@ -1026,13 +1026,35 @@ func (e *Executor) generateWithParams(
 			return chat.ToolResult{AgentContent: message, NoSubmission: true}, nil
 		}
 	}
-	if !alreadyPrepared && e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
-		command.Call.ID, command.PriorGenerationCalls, processingPlanWeight(command)) {
+	weight := processingPlanWeight(command)
+	if alreadyPrepared {
+		// The operation was prepared, so the call was counted when it was
+		// first executed; a process that lost that count (restart while the
+		// card waited, or eviction) counts it again with its full weight, a
+		// processing plan its paid steps, without refusing it (#665).
+		e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, weight)
+	} else if e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
+		command.Call.ID, command.PriorGenerationCalls, weight) {
 		return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
 	command.Options = e.mergedOptions(scope, command)
-	return e.generate.Execute(ctx, command, observe)
+	result, err := e.generate.Execute(ctx, command, observe)
+	if refusedBeforeSubmission(result, err) {
+		// The generation tool refused the call itself (invalid arguments, a
+		// refused input) after it was counted: nothing proceeded to submit,
+		// so it uses none of the turn's generations (#665).
+		e.forgetGenerationCall(scope, command.AssistantMessageID, command.Call.ID)
+	}
+	return result, err
+}
+
+// refusedBeforeSubmission reports a generation tool result that refused the
+// call before anything was submitted: no submission, an error, no approval
+// card to wait on and no admission queue retry of the same submission.
+func refusedBeforeSubmission(result chat.ToolResult, err error) bool {
+	return result.NoSubmission && !result.Suspend && !result.AwaitTask && result.TaskID == "" &&
+		result.RetryAfter == 0 && (err != nil || result.Error != "")
 }
 
 func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior int) bool {
@@ -1104,6 +1126,22 @@ func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight
 	}
 	e.usage[scope] = current
 	return false
+}
+
+// forgetGenerationCall takes a counted call back out of its turn's generation
+// count: the call was refused before it proceeded to submit.
+func (e *Executor) forgetGenerationCall(scope, turn, callID string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known || current.turn != turn {
+		return
+	}
+	if units, counted := current.calls[callID]; counted {
+		current.count -= units
+		delete(current.calls, callID)
+		e.usage[scope] = current
+	}
 }
 
 // countedGenerationUnits is what the call added to its turn's generation

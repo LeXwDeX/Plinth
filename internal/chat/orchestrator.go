@@ -3529,9 +3529,13 @@ func (orchestrator *Orchestrator) executeTools(
 		if result.Suspend {
 			// AGT-12：等待用户决定的工具已登记状态；挂起返回并保留
 			// 已完成部分的结果，未执行的调用在唤醒重放时重新执行。
-			// 同批已在途的任务先把等待项落库，保留各自的截止时间。
+			// 同批已在途的任务先把等待项落库，保留各自的截止时间。挂起调用
+			// 本身计入的生成单位也落库（#665）：只在内存里的话，进程在等批准
+			// 时重启，多步处理计划只按 1 次计入。
 			if len(inflight) > 0 {
 				turn.Checkpoint.SetWaiting(mergeWaiting(inflight, waiting, results))
+			}
+			if len(inflight) > 0 || result.GenerationUnits > 0 {
 				if saveErr := persist(orchestrator.service.TurnRunningState()); saveErr != nil {
 					return results, imageURLs, taskBindings, saveErr
 				}
