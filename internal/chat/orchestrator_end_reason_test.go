@@ -421,10 +421,11 @@ func TestTurnEndReasonServiceMapsKindsToTheSchemaStrings(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantTurnEnd(t, storedEndReasonTurn(t, service, command), test.state, test.reason)
-		if err := service.MarkTurnRunning(ctx, command.AssistantMessageID); err != nil {
-			t.Fatal(err)
+		// #665: a finished turn is never set running again by a late command.
+		if err := service.MarkTurnRunning(ctx, command.AssistantMessageID); !errors.Is(err, chat.ErrTurnStateChanged) {
+			t.Fatalf("MarkTurnRunning on a finished turn = %v, want ErrTurnStateChanged", err)
 		}
-		wantTurnEnd(t, storedEndReasonTurn(t, service, command), "configured-turn-running", "")
+		wantTurnEnd(t, storedEndReasonTurn(t, service, command), test.state, test.reason)
 	}
 	for _, test := range []struct {
 		failed bool

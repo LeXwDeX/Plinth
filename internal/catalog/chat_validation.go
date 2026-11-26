@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -521,6 +522,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		runtime.Frontend.ChatMessagePageSize > list.MaximumPageSize {
 		return errors.New("api.message_list 的默认页大小必须为正数且不超过上限，chat_message_page_size 不能超过上限")
 	}
+	if keys := schema.API.TurnIdempotency; keys.RetentionSeconds <= 0 || keys.MaximumKeyBytes <= 0 {
+		return errors.New("api.turn_idempotency 的 retention_seconds 与 maximum_key_bytes 必须为正数")
+	}
 	if schema.Agent.TitleMaxChars <= 0 || schema.Agent.TitleTimeoutSeconds <= 0 {
 		return errors.New("agent.title_max_characters 与 title_timeout_seconds 必须为正数")
 	}
@@ -544,6 +548,34 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	}
 	if schema.Agent.MaxGenerationCallsPerTurn <= 0 {
 		return errors.New("agent 的 max_generation_calls_per_turn 必须为正数")
+	}
+	// #665: the round bound is a soft guard against a runaway tool loop; it
+	// must leave room for every paid call of the turn.
+	if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds < 0 ||
+		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
+		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
+	}
+	// #665: a bounded tool result needs the note that tells the Agent what
+	// was cut and how to narrow the request.
+	if limit := schema.Agent.MaxToolResultCharacters; limit < 0 {
+		return errors.New("agent 的 max_tool_result_characters 不能为负")
+	} else if limit > 0 {
+		messages := schema.Presentation.Messages
+		for name, value := range map[string]string{
+			"tool_result_truncated":   messages.ToolResultTruncated,
+			"tool_result_cut_strings": messages.ToolResultCutStrings,
+			"tool_result_cut_items":   messages.ToolResultCutItems,
+			"tool_result_cut_text":    messages.ToolResultCutText,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("设置了 agent.max_tool_result_characters 时必须声明 presentation.messages.%s", name)
+			}
+		}
+		// The note itself must fit well inside the bound, or every shortened
+		// result would be only the note.
+		if utf8.RuneCountInString(messages.ToolResultTruncated) >= limit/2 {
+			return errors.New("agent.max_tool_result_characters 必须大于 tool_result_truncated 文案长度的两倍")
+		}
 	}
 	if schema.Agent.MaxListedModels <= 0 {
 		return errors.New("agent 的 max_listed_models 必须为正数")
@@ -779,6 +811,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 				return fmt.Errorf("chat.agent_tools[%d]: %w", index, err)
 			}
 		}
+	}
+	if err := validateChatToolParameters(schema); err != nil {
+		return err
 	}
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
@@ -1442,7 +1477,8 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 		// #251: the Agent revision's reason bound and waived-checkpoint limit.
 		// A historical plan tool without the block falls back to the runtime
 		// constants, so it stays readable.
-		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 {
+		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 ||
+			plan.Revision.MaxAgentRetriesPerStep < 0 {
 			return nil, errors.New("plan.revision 的上限无效")
 		}
 		for step, capability := range processing.Steps {
@@ -2012,11 +2048,18 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	messages := schema.Messages
 	required := map[string]string{
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
+		"duplicate_run":   messages.DuplicateRun,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
+		// #665: the recovery texts of a call that submits nothing. A Catalog
+		// written before #665 gets them from fillThreeViewMessageFallbacks
+		// (a declared text of the same meaning, else the built-in Catalog's).
+		"turn_stopped": messages.TurnStopped, "model_unavailable": messages.ModelUnavailable,
+		"image_unavailable": messages.ImageUnavailable, "arguments_invalid": messages.ArgumentsInvalid,
+		"denied": messages.Denied,
 	}
 	if schema.Continuation.Enabled || subjectTemplates || len(schema.SubjectTypes) > 0 {
 		required["agent_completed"] = messages.AgentCompleted
@@ -2049,6 +2092,10 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
+		}
+		if continuing := messages.AgentStartedContinuing; strings.TrimSpace(continuing) != "" &&
+			!strings.Contains(continuing, field) {
+			return fmt.Errorf("three_view.messages.agent_started_continuing 必须包含 %s", field)
 		}
 	}
 	for _, required := range []struct {
@@ -2652,6 +2699,9 @@ func validateContextCompaction(compaction ChatContextCompactionSchema) error {
 			return fmt.Errorf("context_compaction.%s 必须为正数", name)
 		}
 	}
+	if compaction.AutoFailureBackoffSeconds < 0 {
+		return fmt.Errorf("context_compaction.auto_failure_backoff_seconds 不能为负")
+	}
 	// Past the threshold there must be rounds to summarize beyond the kept ones.
 	if compaction.AutoMessageThreshold <= 2*compaction.KeepRecentRounds {
 		return fmt.Errorf("context_compaction.auto_message_threshold 必须大于 keep_recent_rounds 的两倍")
@@ -2756,6 +2806,14 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 func validateToolRejectionTexts(messages ChatMessageTexts) error {
 	if strings.TrimSpace(messages.ToolArgumentsInvalid) == "" {
 		return errors.New("presentation.tool_arguments_invalid 不能为空")
+	}
+	if text := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{tool}") || !strings.Contains(text, "{reason}")) {
+		return errors.New("presentation.tool_arguments_schema_invalid 须含 {tool} 与 {reason}")
+	}
+	if text := messages.ToolArgumentNotAllowed; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{field}") || !strings.Contains(text, "{choices}")) {
+		return errors.New("presentation.tool_argument_not_allowed 须含 {field} 与 {choices}")
 	}
 	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
 		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")

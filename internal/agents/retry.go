@@ -74,10 +74,22 @@ func (retrying *Retrying) Stream(parent context.Context, request Request, emit f
 		defer cancel()
 	}
 	emitted, shown := false, false
+	// thinking is true while the last delta passed on was a content-free
+	// thinking signal (#665): an empty answer sent again reasons again, and
+	// its first signal would repeat the status the caller already shows.
+	thinking := false
 	guarded := emit
 	if emit != nil {
 		guarded = func(delta Delta) error {
 			emitted = true
+			if delta.Thinking && delta.Content == "" && !delta.ToolCalling {
+				if thinking {
+					return nil
+				}
+				thinking = true
+			} else {
+				thinking = false
+			}
 			if delta.Content != "" {
 				shown = true
 			}
@@ -87,8 +99,18 @@ func (retrying *Retrying) Stream(parent context.Context, request Request, emit f
 	call := func(ctx context.Context) (Completion, error) {
 		return retrying.next.Stream(ctx, request, guarded)
 	}
+	// reported is the last usage an attempt reported (#665). The usage is
+	// the context reading of the request, the same for every empty retry of
+	// it, so it is carried over, not summed, when the answer kept reports
+	// none.
+	var reported *Usage
 	for empties := 0; ; empties++ {
 		completion, err := retrying.run(parent, ctx, request, call, func() bool { return emitted })
+		if completion.Usage != nil {
+			reported = completion.Usage
+		} else if err == nil {
+			completion.Usage = reported
+		}
 		if !retrying.retriesEmpty(ctx, request, completion, err, shown, empties) {
 			return completion, err
 		}

@@ -221,6 +221,10 @@ type Turn struct {
 	// of why the turn ended (#328). Empty while the turn runs, for a turn that
 	// ended before reasons were recorded, and when the Schema declares none.
 	EndReason string
+	// Key is the record of the Idempotency-Key the turn was started with
+	// (#665). Repository.StartTurn writes it with the turn; no read of a turn
+	// returns it.
+	Key *TurnKey
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.
@@ -239,6 +243,11 @@ type TurnCheckpoint struct {
 	// as arguments, never the raw text; the round answers each of them with the
 	// Schema's error text instead of running the tool, also after a restart.
 	MalformedCalls []string `json:"malformed_calls,omitempty"`
+	// InvalidJSONCalls are the MalformedCalls whose arguments were not valid
+	// JSON at all (#665): their result says so instead of naming a field the
+	// empty object put in their place lacks. A checkpoint of an earlier
+	// version lacks the list; its calls get the declaration's text.
+	InvalidJSONCalls []string `json:"invalid_json_calls,omitempty"`
 	// UnexecutedCalls lists the calls of the whole turn, every round kept,
 	// that were answered with a result instead of running a tool (#501): a
 	// tool this reply is not offered, a scope refusal or invalid arguments.
@@ -246,6 +255,13 @@ type TurnCheckpoint struct {
 	// so a stop treats it as task-free. A checkpoint of an earlier version
 	// lacks the list and keeps the stop's protective branch for its calls.
 	UnexecutedCalls []string `json:"unexecuted_calls,omitempty"`
+	// GenerationUnits holds, for every call of the whole turn (every round
+	// kept) that counted against max_generation_calls_per_turn, the units it
+	// added (#665). A restart, or an executor that no longer holds the turn,
+	// rebuilds the count from it instead of from task-bound calls only. A
+	// checkpoint of an earlier version lacks it; its task-bound calls count
+	// one each.
+	GenerationUnits map[string]int `json:"generation_units,omitempty"`
 	// Waiting lists the calls of this round that have no receipt yet: tasks
 	// in flight and submissions queued for a retry. It replaces the single
 	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.
@@ -320,6 +336,55 @@ func (checkpoint *TurnCheckpoint) markUnexecuted(callID string) {
 	if !slices.Contains(checkpoint.UnexecutedCalls, callID) {
 		checkpoint.UnexecutedCalls = append(checkpoint.UnexecutedCalls, callID)
 	}
+}
+
+// recordGenerationUnits keeps what a call added to the turn's generation
+// count. A result that counted nothing leaves an earlier entry as it is.
+func (checkpoint *TurnCheckpoint) recordGenerationUnits(callID string, units int) {
+	if units <= 0 || callID == "" {
+		return
+	}
+	if checkpoint.GenerationUnits == nil {
+		checkpoint.GenerationUnits = map[string]int{}
+	}
+	checkpoint.GenerationUnits[callID] = units
+}
+
+// takeBackGenerationUnits drops the call's entry: the tool took the call back
+// out of the turn's generation count (#665). An explicit removal, unlike a
+// result that counted nothing, so a count an earlier suspension persisted is
+// not added back for later calls.
+func (checkpoint *TurnCheckpoint) takeBackGenerationUnits(callID string) {
+	delete(checkpoint.GenerationUnits, callID)
+	if len(checkpoint.GenerationUnits) == 0 {
+		checkpoint.GenerationUnits = nil
+	}
+}
+
+// priorGenerationUnits is the turn's generation count before callID: the
+// recorded units of every other call, and one for each other task-bound call
+// without a record (a checkpoint of an earlier version, or a count lost
+// before it was saved).
+func (checkpoint TurnCheckpoint) priorGenerationUnits(callID string, bound ...map[string]string) int {
+	total := 0
+	for id, units := range checkpoint.GenerationUnits {
+		if id != callID {
+			total += units
+		}
+	}
+	counted := map[string]struct{}{}
+	for _, tasks := range bound {
+		for id := range tasks {
+			if _, recorded := checkpoint.GenerationUnits[id]; recorded || id == callID {
+				continue
+			}
+			if _, seen := counted[id]; !seen {
+				counted[id] = struct{}{}
+				total++
+			}
+		}
+	}
+	return total
 }
 
 // WaitingCall is one call of a tool round that still lacks its receipt.

@@ -16,6 +16,11 @@ const (
 	// idempotencyKeyRequiredCode is the public code of every such refusal, on
 	// every route that reads the header.
 	idempotencyKeyRequiredCode = "idempotency_key_required"
+	// idempotencyKeyInvalidCode refuses a key on a route where the header is
+	// optional (the chat send, #665): nothing is required there, only a key
+	// that is sent must be usable. The copy is the shared one, which asks for
+	// a valid key.
+	idempotencyKeyInvalidCode = "idempotency_key_invalid"
 	// idempotencyKeyRequiredMessage is the Product Schema message the shared
 	// refusal is worded with. Reroll words it with its own declared copy.
 	idempotencyKeyRequiredMessage = "error.idempotency_key_required"

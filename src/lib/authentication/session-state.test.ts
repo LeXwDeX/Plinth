@@ -41,6 +41,15 @@ describe('clearAccountClientStateWithoutSecureContext (#134)', () => {
     expect(localStorage.getItem('art-ai-preferences')).not.toBeNull();
   });
 
+  it('#665: also clears the queued messages and the tasks cleared with X', () => {
+    const { localStorage } = stubBrowser(false);
+    localStorage.setItem('plinth.queuedTurns', '{"s1":[]}');
+    localStorage.setItem('plinth.dismissedTasks', '["t1"]');
+    clearAccountClientStateWithoutSecureContext();
+    expect(localStorage.getItem('plinth.queuedTurns')).toBeNull();
+    expect(localStorage.getItem('plinth.dismissedTasks')).toBeNull();
+  });
+
   it('leaves state alone in a secure context, where Clear-Site-Data applies', () => {
     const { sessionStorage, localStorage } = stubBrowser(true);
     clearAccountClientStateWithoutSecureContext();

@@ -67,10 +67,16 @@ type ReviseCommand struct {
 	// session's production plan. The Agent names only its id; the tool layer
 	// fills this from the approved plan, never from the arguments.
 	Contingency *budget.PlanContingency `json:"-"`
-	Capability  generation.Capability   `json:"capability,omitempty"`
-	OfferingID  generation.OfferingID   `json:"offering_id,omitempty"`
-	Parameters  json.RawMessage         `json:"parameters,omitempty"`
-	Reason      string                  `json:"reason"`
+	// ApprovedPlan is the session's active production plan the server read,
+	// or nil when the session has none (#665). A replace that brings a new
+	// capability, or replaces a step the plan covers, stays within it: the
+	// capability (a step, a contingency or a correction capability) and any
+	// Offering the plan pins must be ones the plan allows.
+	ApprovedPlan *budget.Plan          `json:"-"`
+	Capability   generation.Capability `json:"capability,omitempty"`
+	OfferingID   generation.OfferingID `json:"offering_id,omitempty"`
+	Parameters   json.RawMessage       `json:"parameters,omitempty"`
+	Reason       string                `json:"reason"`
 }
 
 // Revise applies one controlled revision. Every operation re-checks the
@@ -129,6 +135,14 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 	contingency := command.Contingency
 	if contingency == nil || contingency.ID != command.ContingencyID {
 		return Plan{}, ErrRevisionOutsidePlan
+	}
+	// A declared contingency is one approved repair, not a loop: once its
+	// step is in the plan, the same contingency cannot be inserted again
+	// (#665). A further repair is the person's decision.
+	for _, existing := range plan.Steps {
+		if existing.ContingencyID == contingency.ID {
+			return Plan{}, ErrRevisionOutsidePlan
+		}
 	}
 	triggered := false
 	for _, trigger := range contingency.Trigger {
@@ -202,6 +216,10 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	if capability == "" {
 		capability = step.Capability
 	}
+	if command.ApprovedPlan != nil && replaceBoundByPlan(*plan, *step, *command.ApprovedPlan, capability) &&
+		!command.ApprovedPlan.Allows(string(capability), string(offeringID)) {
+		return Plan{}, ErrRevisionOutsidePlan
+	}
 	planned, err := s.revisedStep(capability, offeringID, command.Parameters)
 	if err != nil {
 		return Plan{}, err
@@ -218,6 +236,27 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	plan.Steps = steps
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
+}
+
+// replaceBoundByPlan reports whether a replace must stay within the session's
+// approved production plan (#665): when it brings a capability the step did
+// not have, or when the step itself falls under the plan (an Agent plan's step,
+// whose grant is budget-eligible, of a capability and Offering the plan
+// allows). A step the plan never covered, for example one a person approved,
+// may be replaced by the same capability; per-step grants decide it as before.
+// The caller then checks the capability and Offering with budget.Plan.Allows,
+// so an Offering the plan pins is kept. An Agent plan's step whose Offering
+// the plan no longer allows is still held to the Offerings the plan pins for
+// its capability: otherwise it could be replaced by any Offering (#665).
+func replaceBoundByPlan(plan Plan, step Step, approved budget.Plan, capability generation.Capability) bool {
+	if capability != step.Capability {
+		return true
+	}
+	if plan.Origin != OriginAgent {
+		return false
+	}
+	return approved.Allows(string(step.Capability), string(step.OfferingID)) ||
+		len(approved.PinnedOfferings(string(step.Capability))) > 0
 }
 
 func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseCommand, reason string) (Plan, error) {
@@ -259,6 +298,13 @@ func (s *Service) reviseRetry(ctx context.Context, plan *Plan, command ReviseCom
 		plan.Steps[command.StepIndex].State != Failed {
 		return Plan{}, ErrConflict
 	}
+	// Every retry is a new paid attempt: the Agent may start one step again
+	// only so often; after that the person decides (#665).
+	// Only the Agent's own retries count; the person's panel retries do not.
+	if plan.Steps[command.StepIndex].AgentRetries >= s.maxAgentStepRetries() {
+		return Plan{}, ErrRevisionRetryPerson
+	}
+	plan.Steps[command.StepIndex].AgentRetries++
 	return s.retryStep(ctx, plan, command.StepIndex, plan.Steps[command.StepIndex].Revision)
 }
 

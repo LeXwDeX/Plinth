@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
@@ -252,6 +253,8 @@ func (adapter *Adapter) Stream(
 	// frame, for a 200 answer that is not a stream at all.
 	ended, framed := false, false
 	plain := ""
+	// finish is the last finish_reason the stream reported (#665).
+	finish := ""
 	options := adapter.optionsFor(request)
 	var content, reasoning strings.Builder
 	// thinking is true from the first reasoning fragment until visible
@@ -262,8 +265,14 @@ func (adapter *Adapter) Stream(
 	// a model writes call arguments for a long while before the call can run,
 	// so the caller learns of the call at its first fragment (#375).
 	toolCalling := false
-	calls := map[int]*agents.ToolCall{}
-	var callOrder []int
+	// calls are the assembled calls in stream order; byIndex is the call the
+	// upstream index currently continues (#665).
+	var calls []*agents.ToolCall
+	byIndex := map[int]int{}
+	declared := map[string]bool{}
+	for _, tool := range request.Tools {
+		declared[tool.Name] = true
+	}
 	// inlineImage is set when the model drew a picture itself (delta.images,
 	// a multi-megabyte base64 line from models such as gpt-astra): the reply
 	// has no place for it, so it is dropped, and a turn that said nothing
@@ -318,6 +327,7 @@ func (adapter *Adapter) Stream(
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				ended = true
+				finish = *choice.FinishReason
 			}
 			if len(choice.Delta.Images) > 0 {
 				inlineImage = true
@@ -353,16 +363,42 @@ func (adapter *Adapter) Stream(
 						}
 					}
 				}
-				call, found := calls[fragment.Index]
-				if !found {
-					call = &agents.ToolCall{}
-					calls[fragment.Index] = call
-					callOrder = append(callOrder, fragment.Index)
+				// #665: a fragment without an index continues the last call.
+				// A different call ID at the call being continued starts a
+				// new call only when the fragment also names a tool and the
+				// call so far is whole, or both IDs look complete on their own
+				// while the call so far already has a name or arguments (a
+				// gateway that numbers parallel calls all 0, or leaves out the
+				// index, after a call with an undeclared name or arguments
+				// that are not JSON); otherwise it is the next piece of an ID
+				// streamed in pieces and is appended. One that repeats the
+				// whole ID or name in each fragment does not double them.
+				position := len(calls) - 1
+				if fragment.Index != nil {
+					if known, found := byIndex[*fragment.Index]; found {
+						position = known
+					} else {
+						position = -1
+					}
 				}
-				if fragment.ID != "" {
+				if position >= 0 && fragment.ID != "" && calls[position].ID != "" && fragment.ID != calls[position].ID &&
+					fragment.Function.Name != "" && startsNewToolCall(calls[position], fragment.ID, declared) {
+					position = -1
+				}
+				if position < 0 {
+					calls = append(calls, &agents.ToolCall{})
+					position = len(calls) - 1
+					if fragment.Index != nil {
+						byIndex[*fragment.Index] = position
+					}
+				}
+				call := calls[position]
+				if call.ID == "" {
+					call.ID = fragment.ID
+				} else if fragment.ID != "" && fragment.ID != call.ID {
 					call.ID += fragment.ID
 				}
-				call.Name += fragment.Function.Name
+				call.Name = appendNameFragment(call.Name, fragment.Function.Name, declared)
 				call.Arguments = append(
 					call.Arguments,
 					fragment.Function.Arguments...,
@@ -381,12 +417,13 @@ func (adapter *Adapter) Stream(
 		// call arguments so far may be half of what the model wrote.
 		return agents.Completion{}, agents.Transient(errors.New("agent stream ended before its last chunk"), 0)
 	}
-	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
+	if inlineImage && strings.TrimSpace(content.String()) == "" && len(calls) == 0 {
 		return agents.Completion{}, agents.ErrInlineImageOutput
 	}
-	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage}
-	for _, index := range callOrder {
-		result.ToolCalls = append(result.ToolCalls, *calls[index])
+	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage,
+		FinishReason: agents.FinishReasonOf(finish)}
+	for _, call := range calls {
+		result.ToolCalls = append(result.ToolCalls, *call)
 	}
 	return result, nil
 }
@@ -452,7 +489,7 @@ func (adapter *Adapter) Complete(
 		)
 	}
 	message := body.Choices[0].Message
-	result = agents.Completion{Content: message.Content}
+	result = agents.Completion{Content: message.Content, FinishReason: agents.FinishReasonOf(body.Choices[0].FinishReason)}
 	if body.Usage != nil {
 		usage = body.Usage.agentUsage()
 		result.Usage = usage
@@ -468,6 +505,87 @@ func (adapter *Adapter) Complete(
 		})
 	}
 	return result, nil
+}
+
+// wholeToolCall reports whether a call assembled so far could end here: it
+// names a tool (a declared one, when the request declares tools) and its
+// arguments are empty or a complete JSON value.
+func wholeToolCall(call *agents.ToolCall, declared map[string]bool) bool {
+	if call.Name == "" || (len(declared) > 0 && !declared[call.Name]) {
+		return false
+	}
+	return len(call.Arguments) == 0 || json.Valid(call.Arguments)
+}
+
+// startsNewToolCall reports whether a named fragment with a call ID other than
+// the current call's starts the next call (#665). A whole call ends there. A
+// call that is not whole (an undeclared or prefixed name, arguments that are
+// not JSON) also ends when it already has a name or arguments and both IDs
+// look complete: two complete IDs are two calls, while a piece of an ID ("a"
+// after "call-") continues the current one.
+func startsNewToolCall(call *agents.ToolCall, nextID string, declared map[string]bool) bool {
+	if toolCallIDPiece(call.ID, nextID) {
+		return false
+	}
+	if wholeToolCall(call, declared) {
+		return true
+	}
+	return (call.Name != "" || len(call.Arguments) > 0) && completeToolCallID(call.ID) && completeToolCallID(nextID)
+}
+
+// toolCallIDLengths is the shortest whole ID of the call ID formats whose
+// length is fixed by their issuer (OpenAI "call_" plus 24 characters,
+// Anthropic "toolu_" plus 24). It is wire parsing, not product policy.
+var toolCallIDLengths = map[string]int{"call_": 29, "toolu_": 30}
+
+// toolCallIDPiece reports whether nextID is the next piece of the current ID
+// rather than another call's ID (#665): the current ID has one of the known
+// prefixes but is still shorter than an ID of that format, and nextID does not
+// start with the same prefix. The calls of one answer come from one issuer and
+// share its prefix, so a gateway that streams the ID in pieces while every
+// piece repeats the name ("call_Ab12", then "Cd34...") is not split into two
+// calls. A format outside the table, or a gateway that issues shorter IDs of a
+// known prefix and streams them in pieces, is not recognised (known limit):
+// the rules of startsNewToolCall apply unchanged.
+func toolCallIDPiece(current, nextID string) bool {
+	for prefix, length := range toolCallIDLengths {
+		if strings.HasPrefix(current, prefix) {
+			return len(current) < length && !strings.HasPrefix(nextID, prefix)
+		}
+	}
+	return false
+}
+
+// completeToolCallID reports whether an ID has the shape of a whole call ID:
+// a letter prefix, a separator and a non-empty rest ("call_abc", "call-a",
+// "toolu_01", "chatcmpl-tool-9", "functions.name:0"), or a UUID. A piece of an
+// ID ("call-", "abc") does not.
+func completeToolCallID(id string) bool {
+	if len(id) == 36 && strings.Count(id, "-") == 4 {
+		return true
+	}
+	prefix := 0
+	for prefix < len(id) && (id[prefix] >= 'a' && id[prefix] <= 'z' || id[prefix] >= 'A' && id[prefix] <= 'Z') {
+		prefix++
+	}
+	if prefix == 0 || prefix+1 >= len(id) {
+		return false
+	}
+	return strings.ContainsRune("-_.:", rune(id[prefix]))
+}
+
+// appendNameFragment adds a fragment of a call's name. A fragment that
+// repeats the whole name so far is a gateway resending it (#665) and is
+// dropped, unless it is a single character (a name streamed character by
+// character, as "l", "l") or the doubled name is a tool the request declares.
+func appendNameFragment(value, fragment string, declared map[string]bool) string {
+	if fragment == "" {
+		return value
+	}
+	if fragment == value && utf8.RuneCountInString(fragment) > 1 && !declared[value+fragment] {
+		return value
+	}
+	return value + fragment
 }
 
 func passback(options *ThinkingOptions) bool {
@@ -776,7 +894,8 @@ type streamChunk struct {
 			// delta.images); they are noticed, never kept.
 			Images    []json.RawMessage `json:"images"`
 			ToolCalls []struct {
-				Index    int    `json:"index"`
+				// Index is nil when a gateway leaves it out (#665).
+				Index    *int   `json:"index"`
 				ID       string `json:"id"`
 				Function struct {
 					Name      string `json:"name"`
@@ -790,7 +909,8 @@ type streamChunk struct {
 type completionBody struct {
 	Usage   *wireUsage `json:"usage"`
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {

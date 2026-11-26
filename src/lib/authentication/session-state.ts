@@ -1,8 +1,8 @@
 import { DRAFT_KEY_PREFIX } from '@/lib/chat/composer-draft';
 import { LAST_OBJECT_KEY_PREFIX } from '@/lib/workspace/last-object';
 
-// 账号相关的本地键：输入区草稿、舞台上次对象。界面偏好（语言、模型选择等）不属于账号，保留。
-const ACCOUNT_LOCAL_KEY_PREFIXES = [DRAFT_KEY_PREFIX, LAST_OBJECT_KEY_PREFIX];
+// 账号相关的本地键：输入区草稿、舞台上次对象、排队待发的消息与点 X 清掉的任务（#665）。界面偏好（语言、模型选择等）不属于账号，保留。
+const ACCOUNT_LOCAL_KEY_PREFIXES = [DRAFT_KEY_PREFIX, LAST_OBJECT_KEY_PREFIX, 'plinth.queuedTurns', 'plinth.dismissedTasks'];
 
 /**
  * 主动登出后清掉当前账号留在本浏览器里的状态（#134）。服务端在 HTTPS/localhost

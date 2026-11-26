@@ -49,8 +49,12 @@ var (
 	ErrInvalidSessionPage          = errors.New("chat: invalid session page query")
 	ErrInvalidMessagePage          = errors.New("chat: invalid message page query")
 	ErrTurnCheckpointConflict      = errors.New("chat: turn checkpoint conflict")
-	ErrInvalidApprovalMode         = errors.New("chat: invalid approval mode")
-	ErrInvalidAgentScope           = errors.New("chat: invalid agent scope")
+	// ErrTurnStateChanged refuses a state write whose turn is no longer in
+	// one of the states the write expects (#665): a finished turn is never
+	// set running again.
+	ErrTurnStateChanged    = errors.New("chat: turn state changed")
+	ErrInvalidApprovalMode = errors.New("chat: invalid approval mode")
+	ErrInvalidAgentScope   = errors.New("chat: invalid agent scope")
 	// ErrNotLastTurn refuses a last-turn replacement (#645) whose messages
 	// are not exactly the session's last turn: the page is out of date.
 	ErrNotLastTurn = errors.New("chat: messages are not the session's last turn")
@@ -175,6 +179,11 @@ type Repository interface {
 	// ListMessagesPage reads one page of the owner's session, newest first by
 	// the same order as ListMessages, returned oldest first.
 	ListMessagesPage(context.Context, string, string, MessageListQuery) (MessagePage, error)
+	// StartTurn writes the turn, its two messages, its first event and the
+	// session's stream in one transaction. When the turn carries a Key it is
+	// written there too (#665); a key that already names a live record of the
+	// session writes nothing and returns *TurnKeyTakenError, and records that
+	// have expired are removed.
 	StartTurn(
 		context.Context,
 		string,
@@ -184,6 +193,12 @@ type Repository interface {
 		Stream,
 		Turn,
 	) (Message, Event, error)
+	// TurnKey reads the owner's record of key in the session (#665). A record
+	// expired at now, or one of another owner or session, is not found.
+	TurnKey(ctx context.Context, owner, session, key string, now time.Time) (TurnKey, bool, error)
+	// ReleaseTurnKey removes the owner's record of key in the session when it
+	// names assistantMessageID; otherwise it does nothing.
+	ReleaseTurnKey(ctx context.Context, owner, session, key, assistantMessageID string) error
 	DeleteMessage(
 		context.Context,
 		string,
@@ -231,13 +246,16 @@ type Repository interface {
 	// UpdateTurnState sets the turn's state and why it ended (#328): endReason
 	// is the Schema's end reason string, empty when the turn is not finished or
 	// the Schema declares none. Every call replaces the stored reason, so a
-	// turn that runs again loses its old one.
+	// turn that runs again loses its old one. from, when given, are the
+	// states the turn must be in: a turn in another state is left as it is
+	// and ErrTurnStateChanged is returned (#665).
 	UpdateTurnState(
 		ctx context.Context,
 		assistantMessageID string,
 		state string,
 		endReason string,
 		at time.Time,
+		from ...string,
 	) error
 	// FinishTurn ends the turn and drops the request its checkpoint still
 	// holds: a terminal turn is never resumed (#382).
@@ -292,9 +310,13 @@ type ServiceConfig struct {
 	TurnError             string
 	PlaceholderHealing    PlaceholderHealingPolicy
 	StreamCleanupTTL      time.Duration
-	SubscriberBufferSize  int
-	EventFields           EventFieldPolicy
-	EventTypes            EventTypePolicy
+	// TurnKeyRetention is application.chat.api.turn_idempotency (#665): how
+	// long the Idempotency-Key of a send keeps naming the turn it started.
+	// Zero keeps no key, and a keyed send starts a turn as an unkeyed one does.
+	TurnKeyRetention     time.Duration
+	SubscriberBufferSize int
+	EventFields          EventFieldPolicy
+	EventTypes           EventTypePolicy
 	// TurnEndReasons is application.chat.state.turn_end_reasons (#328): the
 	// strings stored with a finished turn to say why it ended. Optional; a zero
 	// value records no reason.
@@ -421,6 +443,7 @@ type Service struct {
 	turnEndReasons             catalog.ChatTurnEndReasonsSchema
 	placeholderHealing         PlaceholderHealingPolicy
 	streamCleanupTTL           time.Duration
+	turnKeyRetention           time.Duration
 	subscriberBufferSize       int
 	streamMu                   sync.Mutex
 	streamOperations           map[string]*streamOperation
@@ -606,6 +629,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		turnEndReasons:             config.TurnEndReasons,
 		placeholderHealing:         config.PlaceholderHealing,
 		streamCleanupTTL:           config.StreamCleanupTTL,
+		turnKeyRetention:           config.TurnKeyRetention,
 		subscriberBufferSize:       config.SubscriberBufferSize,
 		subscribers:                map[string]map[chan Event]struct{}{},
 		approvalPolicy:             config.ApprovalPolicy,
@@ -1222,6 +1246,13 @@ type StartTurn struct {
 	// (#321). The card is checked against the owner and session and answered
 	// once; the Agent then reads the exact next call from the card.
 	ChoiceAnswer *ChoiceAnswer
+	// IdempotencyKey is the browser's Idempotency-Key of this send (#665), and
+	// RequestFingerprint the digest of the request it came with. A repeat of
+	// a key that started a turn of the session answers that turn and starts
+	// nothing; the same key with another fingerprint is ErrIdempotencyConflict.
+	// An empty key starts a turn as before.
+	IdempotencyKey     string
+	RequestFingerprint string
 }
 
 // SetMultiviewModelValid installs the check a structured multiview request's
@@ -1250,6 +1281,19 @@ func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
 ) (Message, error) {
+	assistant, _, err := service.StartKeyedTurn(ctx, command)
+	return assistant, err
+}
+
+// StartKeyedTurn starts a person's turn like StartTurn and reports whether the
+// command's IdempotencyKey had already started one (#665). Then nothing is
+// written or published, and the message is that turn's assistant message with
+// only its ID and session set: the caller answers it as it answered the first
+// request and does not schedule it again.
+func (service *Service) StartKeyedTurn(
+	ctx context.Context,
+	command StartTurn,
+) (Message, bool, error) {
 	return service.startTurn(ctx, command, "", nil)
 }
 
@@ -1262,7 +1306,35 @@ func (service *Service) startTurn(
 	command StartTurn,
 	planContinuation string,
 	serverOptions *ServerTurnOptions,
+) (Message, bool, error) {
+	assistant, err := service.startTurnOnce(ctx, command, planContinuation, serverOptions)
+	var replay *turnReplay
+	if errors.As(err, &replay) {
+		return replay.assistant, true, replay.err
+	}
+	return assistant, false, err
+}
+
+// turnReplay carries the answer to a keyed send whose key had already started
+// a turn out of startTurnOnce: the earlier turn's assistant message, or err
+// when the key came with a different request.
+type turnReplay struct {
+	assistant Message
+	err       error
+}
+
+func (replay *turnReplay) Error() string { return "chat: keyed send answered by its earlier turn" }
+
+func (service *Service) startTurnOnce(
+	ctx context.Context,
+	command StartTurn,
+	planContinuation string,
+	serverOptions *ServerTurnOptions,
 ) (Message, error) {
+	if serverOptions != nil || planContinuation != "" {
+		// A turn the service starts itself is never keyed by a browser.
+		command.IdempotencyKey, command.RequestFingerprint = "", ""
+	}
 	// Client-supplied execution context never becomes a durable turn snapshot.
 	command.Options.Harness = nil
 	command.Options.Selection = nil
@@ -1287,6 +1359,15 @@ func (service *Service) startTurn(
 	// the deletion is about to remove (#384).
 	if service.sessionDeleting(command.OwnerID, command.SessionID) {
 		return Message{}, ErrSessionNotFound
+	}
+	// A repeat of a keyed send is answered before anything of the session is
+	// read or checked again: the turn it started may be running (the session
+	// is busy) or have answered the choice card the request carries (#665).
+	if assistant, found, err := service.replayTurnKey(ctx, command); found || err != nil {
+		if !found {
+			return Message{}, err
+		}
+		return Message{}, &turnReplay{assistant: assistant, err: err}
 	}
 	// The turn runs in the scope the stored session has now. The client cannot
 	// name a scope for a turn: whatever Options carries is replaced.
@@ -1476,6 +1557,14 @@ func (service *Service) startTurn(
 	if service.sessionDeleting(command.OwnerID, command.SessionID) {
 		return Message{}, ErrSessionNotFound
 	}
+	// Two copies of one keyed send that arrived together both passed the read
+	// above; the second to take the session's lock answers the first's turn.
+	if assistant, found, err := service.replayTurnKey(ctx, command); found || err != nil {
+		if !found {
+			return Message{}, err
+		}
+		return Message{}, &turnReplay{assistant: assistant, err: err}
+	}
 	if err := service.applyTurnAttachments(ctx, command, verified, &user, &command.Options); err != nil {
 		return Message{}, err
 	}
@@ -1508,6 +1597,14 @@ func (service *Service) startTurn(
 	answeredChoice := ""
 	if command.ChoiceAnswer != nil {
 		if err := service.answerChoice(ctx, command, user.ID, now); err != nil {
+			if errors.Is(err, ErrChoiceClosed) {
+				// Another server process may have taken the same keyed send
+				// after the reads above: it answered the card and started the
+				// key's turn. Answer that turn, not "card closed" (#665).
+				if replayed, found, replayErr := service.replayTurnKey(ctx, command); found {
+					return Message{}, &turnReplay{assistant: replayed, err: replayErr}
+				}
+			}
 			return Message{}, err
 		}
 		answeredChoice = command.ChoiceAnswer.ChoiceID
@@ -1534,8 +1631,16 @@ func (service *Service) startTurn(
 			State:              service.turnQueued,
 			CreatedAt:          now,
 			UpdatedAt:          now,
+			Key:                service.turnKeyRecord(command, user, assistant, now),
 		},
 	)
+	var taken *TurnKeyTakenError
+	if errors.As(err, &taken) {
+		// Another server process started the key's turn between the reads
+		// above and this write: answer it the same way.
+		replayed, _, replayErr := replayedTurn(taken.Existing, command)
+		err = &turnReplay{assistant: replayed, err: replayErr}
+	}
 	if err == nil {
 		service.streamMu.Lock()
 		service.publishLocked(storedEvent)
@@ -1759,6 +1864,9 @@ func (service *Service) TurnStopRequested(ctx context.Context, ownerID, sessionI
 
 // MarkTurnRunning sets the turn running. It stores no end reason, so a turn
 // that runs again loses the reason of its earlier end (#328).
+// MarkTurnRunning sets a queued, running or waiting turn running. The write
+// is conditional on that state (#665): a command that read the turn before it
+// finished cannot reopen it; it gets ErrTurnStateChanged.
 func (service *Service) MarkTurnRunning(
 	ctx context.Context,
 	assistantMessageID string,
@@ -1769,6 +1877,7 @@ func (service *Service) MarkTurnRunning(
 		service.turnRunning,
 		"",
 		service.clock(),
+		service.turnQueued, service.turnRunning, service.turnWaitingTask,
 	)
 }
 

@@ -3,11 +3,13 @@ package skillrun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/harness"
 )
 
 // GenerationGateway is the sole paid execution path. The Skill ledger does not
@@ -378,12 +380,11 @@ func (r *Runtime) requestGrant(ctx context.Context, principal executiongrant.Pri
 		if grant.Source != principal.Source || grant.TriggerTurnID != triggerTurnID || grant.Harness != execution.Harness {
 			return Run{}, executiongrant.Grant{}, ErrConflict
 		}
-		// Re-applying the session policy is idempotent and heals a restart
-		// between the pending grant and its automatic approval.
-		grant, err = r.Grants.ApplyPolicy(ctx, grant)
-		if err != nil {
-			return Run{}, executiongrant.Grant{}, err
-		}
+		// The session policy decided this grant before it was recorded on the
+		// step (below), so a replay never consults it again: a step that was
+		// left to a person under one approval mode is not approved by a later
+		// switch to another mode, only by the person on its card. This is the
+		// generation tools' rule (PolicyEvaluated, #665).
 		run, err := r.Runs.Get(ctx, owner, runID)
 		return run, grant, err
 	}
@@ -403,17 +404,22 @@ func (r *Runtime) requestGrant(ctx context.Context, principal executiongrant.Pri
 	if err != nil {
 		return Run{}, executiongrant.Grant{}, err
 	}
+	// The session policy decides the grant before the step records it. Until
+	// the step names the grant, no card shows it, and a restart in between
+	// prepares the same grant again (Prepare is idempotent for one identity)
+	// and repeats this decision: an approved grant stays approved, and a
+	// pending one has never been in front of a person. Once the step records
+	// it, the decision is final for the policy (#665). A step that needs a
+	// human stays pending.
+	grant, err = r.Grants.ApplyPolicy(ctx, grant)
+	if err != nil {
+		return Run{}, executiongrant.Grant{}, err
+	}
 	run, err := r.Runs.AttachGrant(ctx, GrantCommand{
 		StepCommand: StepCommand{OwnerID: owner, RunID: runID, StepKey: stepKey,
 			OperationID: execution.OperationID, IdempotencyKey: execution.IdempotencyKey},
 		GrantRequestID: grant.RequestID,
 	})
-	if err != nil {
-		return run, grant, err
-	}
-	// The grant is recorded on the step first; only then may session policy
-	// approve it. A step that needs a human stays pending.
-	grant, err = r.Grants.ApplyPolicy(ctx, grant)
 	return run, grant, err
 }
 
@@ -467,6 +473,17 @@ func (r *Runtime) SubmitStep(ctx context.Context, owner generation.OwnerID, runI
 		PlanStepID: execution.PlanStepID, AuthorizationRef: grant.RequestID,
 	})
 	if err != nil {
+		if generation.RefusedPermanently(err) || errors.Is(err, harness.ErrStale) {
+			// The kernel refused this authorization for good before writing a
+			// Task (a stale frozen input, #516, a stale harness, an input or
+			// Offering it no longer accepts): deny the approval and give back
+			// the plan reservation (and the 3D step) it holds (#665). The
+			// grant is denied whoever approved it, so the step is not counted
+			// as in flight and can be started again. Idempotent. A transient
+			// refusal (an overlapping conversion, a full admission) keeps the
+			// approval for the next submit.
+			_ = r.Grants.AbandonRefusedGrant(context.WithoutCancel(ctx), string(owner), grant.RequestID)
+		}
 		return Run{}, generation.Accepted{}, err
 	}
 	run, err := r.Runs.BindTask(ctx, TaskCommand{

@@ -1,5 +1,6 @@
 import type { ProductSchema } from '@/lib/product-schema';
 import { isApprovalMode } from '@/lib/chat/approval-modes';
+import { IDEMPOTENCY_REFUSAL_CODES } from '@/lib/chat/send-error-codes';
 import { parseLineage, type LineageGraph } from '@/lib/workspace/lineage';
 import { parseThreeViewGroup, parseThreeViews, type ThreeViewAction, type ThreeViewGroup } from '@/lib/workspace/three-view';
 import {
@@ -26,7 +27,7 @@ import { parsePreferences, type ChatPreference, type PreferenceSignal } from '@/
 import { parseSelfChecks, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
-import { responseRequestId, withRequestReference } from '@/lib/problem-reference';
+import { problemRequestId, responseRequestId, withRequestReference } from '@/lib/problem-reference';
 
 /**
  * #65: the person's structured request to make one 3D model from several views of one object. The three-view
@@ -76,6 +77,11 @@ export interface ChatTurnOptions {
   choiceAnswer?: { choiceId: string; optionId?: string; useDefault?: boolean };
   /** #65: a structured multiview request (Schema `chat.api.fields.multiview`). */
   multiview?: MultiviewTurnRequest;
+  /**
+   * #665: the send's Idempotency-Key. A repeat with the same key and the same request is answered with the turn the
+   * key started; the client itself repeats a keyed send once when the network failed before any answer arrived.
+   */
+  idempotencyKey?: string;
 }
 
 /** One page of a conversation, oldest first; `nextCursor` reads the page before it ('' when none). */
@@ -303,7 +309,7 @@ export interface ChatBrowserClient {
     signal?: AbortSignal,
   ): Promise<AcceptedChatTurn>;
   // cancelTurn 请求服务端停止当前轮次（中断 LLM 与工具执行并尽力
-  // 取消已绑定的生成任务），返回是否有轮次被中断。
+  // 取消已绑定的生成任务），返回是否有轮次被中断；服务端拒绝时抛出 ChatBrowserError（#665）。
   cancelTurn(sessionID: string, signal?: AbortSignal): Promise<boolean>;
   /**
    * #137: whether the session's waiting turn may stop waiting while its Task keeps running. False
@@ -395,12 +401,32 @@ export interface ChatBrowserClientDependencies {
   eventSourceFactory?: (url: string) => EventSourceAdapter;
 }
 
+/**
+ * #665: whether a failed response is the API's own chat error, not a gateway's or proxy's JSON error page. The API
+ * answers a chat error with the Schema's error field and the request's ID (`request_id`, in the server's format), the
+ * same ID its `X-Request-ID` header names; a body that only has an `error` string proves nothing.
+ */
+export function apiErrorAnswer(response: Response, payload: Record<string, unknown>, errorField: string): boolean {
+  if (typeof payload[errorField] !== 'string') return false;
+  const id = problemRequestId(payload);
+  // A proxy that adds its own X-Request-ID makes `get` join both values with commas: any one of them may be the API's.
+  const header = response.headers?.get?.('X-Request-ID');
+  return id !== '' && typeof header === 'string' && header.split(',').some((value) => value.trim() === id);
+}
+
 export class ChatBrowserError extends Error {
   readonly status: number;
   /** The server's request ID, shown after the message as the error reference (#240). */
   readonly requestId: string;
   /** 429 时服务端 `Retry-After` 给出的等待秒数；缺失、非法或不大于 0 时不设置。 */
   readonly retryAfterSeconds?: number;
+  /**
+   * #665: the failure carried the API's own error body, so the status is the server's answer rather than a gateway's
+   * or proxy's (a 404 page during a deploy). Set by the reads that need to tell them apart.
+   */
+  serverAnswered = false;
+  /** #665: the problem code of the server's refusal, when it answered with one (see send-error-codes.ts); else ''. */
+  code = '';
 
   constructor(message: string, status: number, requestId = '', retryAfterSeconds?: number) {
     super(message);
@@ -1208,10 +1234,12 @@ export function createChatBrowserClient(
       const payload = record(await responseValue(response));
       if (!response.ok) {
         const message = payload[responseFields.error];
-        throw new ChatBrowserError(
+        const error = new ChatBrowserError(
           typeof message === 'string' ? message : schema.chat.presentation.messages.internal_error,
           response.status,
         );
+        error.serverAnswered = apiErrorAnswer(response, payload, responseFields.error);
+        throw error;
       }
       return normalizeSession(schema, payload);
     },
@@ -1346,26 +1374,37 @@ export function createChatBrowserClient(
           [fields.skill_name]: options.skill.name,
         };
       }
-      const response = await fetcher(
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+      const send = () => fetcher(
         route(schema.runtime.http.legacy_routes.chat_messages, { sessionID }),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal,
-        },
+        { method: 'POST', headers, body: JSON.stringify(body), signal },
       );
+      let response: Response;
+      try {
+        response = await send();
+      } catch (error) {
+        // #665: no answer arrived, so the server may have started the turn. Only a keyed send is repeated: the key makes
+        // the repeat answer that turn instead of starting another.
+        if (!options.idempotencyKey || signal?.aborted || (error as Error)?.name === 'AbortError') throw error;
+        response = await send();
+      }
       const payload = await responseObject(response);
       if (!response.ok) {
-        const purposeError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid';
-        const message = purposeError ? payload.detail : payload[responseFields.error];
-        throw new ChatBrowserError(
+        const code = typeof payload.code === 'string' ? payload.code : '';
+        const problemError = code === 'attachment_purpose_invalid' || code === 'attachment_purpose_attachment_invalid' ||
+          IDEMPOTENCY_REFUSAL_CODES.includes(code);
+        const message = problemError ? payload.detail : payload[responseFields.error];
+        const failure = new ChatBrowserError(
           typeof message === 'string'
             ? message
             : schema.chat.presentation.messages.internal_error,
           response.status,
           responseRequestId(response, payload),
         );
+        // #665: a refusal of the Idempotency-Key is told apart by its code (the caller drops the key and sends anew).
+        if (problemError) failure.code = code;
+        throw failure;
       }
       return {
         assistantMessageID: String(
@@ -1381,7 +1420,10 @@ export function createChatBrowserClient(
         }),
         { method: 'POST', signal },
       );
-      if (!response.ok) return false;
+      // #665: a refused cancel is an error, not "nothing to cancel": the turn may still run.
+      if (!response.ok) {
+        throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status, responseRequestId(response));
+      }
       const payload = await responseObject(response);
       return payload[fields.turn_canceled] === true;
     },
@@ -1749,6 +1791,10 @@ export function createChatBrowserClient(
       // got no frame since. One timer is armed at a time: the first-frame timeout until the first
       // frame, then the silence window after every frame.
       let lastEventID: number | undefined;
+      // #665: without any event id the reconnect starts again from the original cursor and the server replays what was
+      // already delivered; that many events of the replay are skipped so no text or picture arrives twice.
+      let delivered = 0;
+      let replayed = 0;
       let reconnects = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;
       type StreamSource = ReturnType<typeof eventSourceFactory>;
@@ -1796,6 +1842,11 @@ export function createChatBrowserClient(
           }
           const event = decodeEvent(schema, parsed);
           if (event === null) return;
+          if (replayed > 0) {
+            replayed -= 1;
+            return;
+          }
+          delivered += 1;
           options.onEvent(event);
           if (event.type === 'done') finish();
         };
@@ -1816,6 +1867,7 @@ export function createChatBrowserClient(
         reconnects += 1;
         source.close();
         try {
+          replayed = lastEventID === undefined ? delivered : 0;
           source = open(lastEventID === undefined ? fromID : lastEventID + 1);
         } catch {
           fail();

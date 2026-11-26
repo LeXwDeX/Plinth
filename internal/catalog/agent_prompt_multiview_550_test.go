@@ -33,9 +33,10 @@ func multiviewRuleKey(t *testing.T, chat catalog.ChatSchema) string {
 }
 
 // systemSkillBodies returns the three-view and four-view system Skills and
-// the shared body of their prompts: everything after the Skill's own first
-// line.
-func systemSkillBodies(t *testing.T, chat catalog.ChatSchema) (map[string]catalog.SkillSchema, string) {
+// their bodies: everything after the Skill's own first line. Since #665 each
+// Skill has its own body: the views it makes, the four-view switch and how the
+// approval modes continue differ, while the shared rules appear in both.
+func systemSkillBodies(t *testing.T, chat catalog.ChatSchema) (map[string]catalog.SkillSchema, map[string]string) {
 	t.Helper()
 	skills := map[string]catalog.SkillSchema{}
 	for _, skill := range chat.Skills.SystemSkills {
@@ -53,12 +54,7 @@ func systemSkillBodies(t *testing.T, chat catalog.ChatSchema) (map[string]catalo
 		}
 		bodies[id] = body
 	}
-	// Both Skills carry the same instructions word for word (#548): there is
-	// no reference mechanism, so the test keeps the two copies equal.
-	if bodies["system-three-view"] != bodies["system-four-view"] {
-		t.Fatal("the three-view and four-view Skills no longer share their body word for word")
-	}
-	return skills, bodies["system-three-view"]
+	return skills, bodies
 }
 
 // #550, #548: a person who says three-view or four-view gets one picture per
@@ -94,21 +90,23 @@ func TestThreeViewRouteStaysResidentAndTheRuleLivesInTheSkills(t *testing.T) {
 	if strings.Contains(route, "【三视图制作要领】") {
 		t.Error("the three-view craft brief is still resident")
 	}
-	_, body := systemSkillBodies(t, chat)
+	_, bodies := systemSkillBodies(t, chat)
 	key := multiviewRuleKey(t, chat)
-	for _, want := range []string{
-		key,
-		"不开概念图数量卡",             // the count is already known
-		"只有用户明确要一张图",           // the composite is an explicit exception
-		"只说设定图",                // a plain design-sheet request keeps today's behavior
-		"没有源图时先用 refine_image", // a text-only request draws one front source first
-		"estimated_credits",    // the total comes from the quote, not from the Agent
-		"create_three_view",
-		"create_multiview_images",
-		"create_model_3d_from_views",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the three-view Skill body lacks %q", want)
+	for id, body := range bodies {
+		for _, want := range []string{
+			key,
+			"不开概念图数量卡",             // the count is already known
+			"只有用户明确要一张图",           // the composite is an explicit exception
+			"只说设定图",                // a plain design-sheet request keeps today's behavior
+			"没有源图时先用 refine_image", // a text-only request draws one front source first
+			"estimated_credits",    // the total comes from the quote, not from the Agent
+			"create_three_view",
+			"create_multiview_images",
+			"create_model_3d_from_views",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("the %s Skill body lacks %q", id, want)
+			}
 		}
 	}
 	raw, err := os.ReadFile("default_catalog.json")
@@ -190,7 +188,7 @@ func TestThreeAndFourViewSkillsUseTheGivenPictureOrDrawOneFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	application := product.Application()
-	skills, body := systemSkillBodies(t, application.Chat)
+	skills, bodies := systemSkillBodies(t, application.Chat)
 	english := application.Localization.Bundles["en"].Fields
 	for id, view := range map[string]string{"system-three-view": "出三视图", "system-four-view": "出四视图"} {
 		skill := skills[id]
@@ -213,8 +211,10 @@ func TestThreeAndFourViewSkillsUseTheGivenPictureOrDrawOneFirst(t *testing.T) {
 		}
 	}
 	// The per-view rule is unchanged: one separate picture per view.
-	if !strings.Contains(body, "每个视角一张独立图片") || !strings.Contains(body, "用户确认用哪张后再以它为源调用") {
-		t.Errorf("shared body lost a rule: %q", body)
+	for id, body := range bodies {
+		if !strings.Contains(body, "每个视角一张独立图片") || !strings.Contains(body, "用户确认用哪张后再以它为源调用") {
+			t.Errorf("%s body lost a rule: %q", id, body)
+		}
 	}
 	// The directive names the tool as the goal, not as the only allowed tool.
 	directive := application.Chat.Skills.ToolDirectiveTemplate
@@ -223,5 +223,56 @@ func TestThreeAndFourViewSkillsUseTheGivenPictureOrDrawOneFirst(t *testing.T) {
 	}
 	if en := english["chat.skills.tool_directive_template"]; strings.Contains(en, "Do not substitute another tool") || !strings.Contains(en, "when they gave none") {
 		t.Errorf("the English Skill directive still forces the bound tool: %q", en)
+	}
+}
+
+// #665: each Skill tells the truth about its own views. The three-view Skill
+// makes no right view and passes no include_right unless the person asks for
+// four views; the four-view Skill passes include_right; both say how each
+// approval mode continues after the front view, and how a budget plan covers
+// the views (no pinned model; the right view stays on the card).
+func TestThreeAndFourViewSkillsMatchTheirOwnViews(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	skills, bodies := systemSkillBodies(t, application.Chat)
+	three, four := bodies["system-three-view"], bodies["system-four-view"]
+	if three == four {
+		t.Fatal("the three-view and four-view Skills still share one body")
+	}
+	if strings.Contains(three, "依次出左、背、右") || strings.Contains(three, "依次出左侧、背面和右侧") {
+		t.Error("the three-view Skill still says it makes the right view")
+	}
+	for id, want := range map[string][]string{
+		"system-three-view": {"不传 include_right", "要四视图", "include_right=true", "不要写 model", "严格（逐步批准）", "预算（制作计划）", "自动："},
+		"system-four-view":  {"传 include_right=true", "只要三视图", "不要写 model", "optional=true", "留在三视图卡片上", "严格（逐步批准）"},
+	} {
+		for _, phrase := range want {
+			if !strings.Contains(skills[id].Prompt, phrase) {
+				t.Errorf("%s prompt lacks %q", id, phrase)
+			}
+		}
+	}
+	for _, body := range bodies {
+		if strings.Contains(body, "自动或预算批准方式下服务端在同一回合里接着出完其余视角") {
+			t.Error("a Skill still says the budget mode always finishes the views")
+		}
+	}
+	english := application.Localization.Bundles["en"].Fields
+	for _, id := range []string{"system-three-view", "system-four-view"} {
+		en := english["chat.skills.system_skills[id="+id+"].prompt"]
+		if !strings.Contains(en, "include_right") || !strings.Contains(en, "Strict (approve each step)") {
+			t.Errorf("%s English prompt lacks the mode rules: %q", id, en)
+		}
+	}
+	// A picked Skill is not read again, and the person's words win over the chip.
+	directive := application.Chat.Skills.ToolDirectiveTemplate
+	if !strings.Contains(directive, "不要再用 use_skill 读它") || !strings.Contains(directive, "以用户的话为准") {
+		t.Errorf("the directive does not resolve a request that differs from the pick: %q", directive)
+	}
+	if picked := application.Chat.Skills.Directory.Messages.Picked; !strings.Contains(picked, "以用户的话为准") {
+		t.Errorf("the picked message does not let the person's words win: %q", picked)
 	}
 }

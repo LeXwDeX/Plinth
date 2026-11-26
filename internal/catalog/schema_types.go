@@ -3406,6 +3406,11 @@ type ChatContextCompactionSchema struct {
 	AutoMessageThreshold int `json:"auto_message_threshold"`
 	// RequestTimeoutSeconds bounds the summary call.
 	RequestTimeoutSeconds int `json:"request_timeout_seconds"`
+	// AutoFailureBackoffSeconds is how long a session skips the automatic
+	// compaction after it failed (#665): a failing summary call would
+	// otherwise cost its whole timeout on every turn. 0 or absent: no
+	// backoff. A manual compaction is never held back.
+	AutoFailureBackoffSeconds int `json:"auto_failure_backoff_seconds,omitempty"`
 	// MaximumSummaryCharacters bounds the stored summary; a longer answer is cut.
 	MaximumSummaryCharacters int `json:"maximum_summary_characters"`
 	// ListLimit bounds how many compaction records one session read returns.
@@ -4369,8 +4374,34 @@ type ChatThreeViewMultiviewSchema struct {
 // the Agent's receipt when a view stayed refused by admission past the queue
 // deadline (#59): nothing was submitted or charged.
 type ChatThreeViewMessages struct {
-	AgentStarted      string `json:"agent_started"`
-	AdmissionFull     string `json:"admission_full"`
+	// AgentStarted is the receipt of the first view when the other views wait
+	// for the person on the card (the strict mode, or the budget mode without a
+	// plan covering every required view); AgentStartedContinuing is the same
+	// receipt when the server finishes the required views in the turn (the
+	// auto mode, or a covering budget plan) (#665). Both take {run}, {view},
+	// {approval}, {credits} and {task}.
+	AgentStarted           string `json:"agent_started"`
+	AgentStartedContinuing string `json:"agent_started_continuing,omitempty"`
+	// The texts the three-view tool answers with when it submits nothing
+	// (#665): the turn was stopped, the session's model has no image-to-image
+	// Offering for the recipe, the chosen picture cannot be used, the
+	// arguments do not have the declared shape, and the step was not approved
+	// (a refusal on the card, a stopped turn or an expired card all deny the
+	// grant, so Denied names none of them). They are the Agent's recovery
+	// guidance, so they live here, not in code. Optional for a Catalog written
+	// before #665: a missing one takes a declared text of the same meaning or
+	// the built-in Catalog's (fillThreeViewMessageFallbacks).
+	TurnStopped      string `json:"turn_stopped,omitempty"`
+	ModelUnavailable string `json:"model_unavailable,omitempty"`
+	ImageUnavailable string `json:"image_unavailable,omitempty"`
+	ArgumentsInvalid string `json:"arguments_invalid,omitempty"`
+	Denied           string `json:"denied,omitempty"`
+	AdmissionFull    string `json:"admission_full"`
+	// DuplicateRun refuses a second group of the same source picture while
+	// an earlier group of the session still waits on its card or runs
+	// (#665): nothing new is created, submitted or charged. Fields: {run}.
+	// Optional: a Catalog without it takes the built-in Catalog's.
+	DuplicateRun      string `json:"duplicate_run,omitempty"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
@@ -4702,6 +4733,10 @@ type ChatAPISchema struct {
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+	// TurnIdempotency bounds the optional Idempotency-Key of the request that
+	// starts a turn (#665): how long a key keeps naming the turn it started and
+	// the longest key accepted. Server side only.
+	TurnIdempotency ChatTurnIdempotencySchema `json:"turn_idempotency"`
 	// SessionGroups is how the browser groups the session list by where a
 	// session came from (#332): the declared order is the order the groups are
 	// shown in, and each group's label is the content.messages key of its name.
@@ -4874,6 +4909,16 @@ type ChatStyleLockAPIFields struct {
 type ChatMessageListSchema struct {
 	DefaultPageSize int `json:"default_page_size"`
 	MaximumPageSize int `json:"maximum_page_size"`
+}
+
+// ChatTurnIdempotencySchema is the contract of the Idempotency-Key a browser
+// sends with the request that starts a turn (#665). A repeat of the same key
+// with the same request, within RetentionSeconds of the turn it started,
+// answers that turn again instead of starting another; a key longer than
+// MaximumKeyBytes is refused before anything is read.
+type ChatTurnIdempotencySchema struct {
+	RetentionSeconds int `json:"retention_seconds"`
+	MaximumKeyBytes  int `json:"maximum_key_bytes"`
 }
 
 // ChatSessionListSchema is the paging contract of the session list: the page
@@ -5478,6 +5523,19 @@ type ChatAgentSchema struct {
 	// MaxGenerationCallsPerTurn 限定单个对话轮次内付费生成工具的执行
 	// 次数上限（服务端硬约束，防止 LLM 一次输出大量工具调用连击扣费）。
 	MaxGenerationCallsPerTurn int `json:"max_generation_calls_per_turn"`
+	// MaxToolRoundsPerTurn bounds how many tool rounds one turn runs (#665):
+	// a model that keeps calling tools without ending its reply is stopped
+	// there, the round past the bound does not run, and the reply ends with
+	// presentation.messages.tool_rounds_capped. It is a soft guard far
+	// above a legitimate long turn (#553 keeps tool calls unbounded per round);
+	// 0 or absent: no bound.
+	MaxToolRoundsPerTurn int `json:"max_tool_rounds_per_turn,omitempty"`
+	// MaxToolResultCharacters bounds the text of one executed Agent tool's
+	// result that goes back to the model, in characters (Unicode code points,
+	// #665). A longer result is shortened (a JSON result keeps valid JSON:
+	// long strings, then trailing list items are cut) and carries
+	// presentation.messages.tool_result_truncated. 0 or absent: no bound.
+	MaxToolResultCharacters int `json:"max_tool_result_characters,omitempty"`
 	// MaxParallelGenerationSubmissions bounds how many paid generation calls
 	// of one tool round are submitted before the turn waits for their Tasks
 	// together (in-flight steps of the round); calls beyond it form the next
@@ -6174,6 +6232,11 @@ type ChatToolProcessingPlanSchema struct {
 type ChatToolProcessingRevisionSchema struct {
 	MaxReasonCharacters  int `json:"max_reason_characters"`
 	MaxWaivedCheckpoints int `json:"max_waived_checkpoints"`
+	// MaxAgentRetriesPerStep bounds how often the Agent's revise retry may
+	// start one step again (#665); the person's own Retry is not counted
+	// against it. The processing service reads it
+	// (ProcessingAgentStepRetries); 0 keeps processing.MaxAgentStepRetries.
+	MaxAgentRetriesPerStep int `json:"max_agent_retries_per_step"`
 }
 
 // ChatProcessingSchema is application.chat.processing: server-only wording for
@@ -6765,6 +6828,36 @@ type ChatMessageTexts struct {
 	// empty_response end reason instead of passing as completed. Optional:
 	// without it the no_result text is shown when the reply has nothing else.
 	AgentEmptyResponse string `json:"agent_empty_response,omitempty"`
+	// AgentReplyTruncated is appended to a reply whose model round stopped at
+	// its output token limit (finish_reason length, #665): the text may be cut
+	// and the round's tool calls, whose arguments may be cut, did not run.
+	// AgentReplyFiltered is appended when the upstream's content filter ended
+	// the round (finish_reason content_filter). Optional: without them the
+	// reply keeps what arrived and says nothing more.
+	AgentReplyTruncated string `json:"agent_reply_truncated,omitempty"`
+	AgentReplyFiltered  string `json:"agent_reply_filtered,omitempty"`
+	// ToolRoundsCapped ends a reply that reached
+	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
+	// Optional: without it the reply ends without a note.
+	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
+	// ToolResultTruncated is the note on a tool result shortened to
+	// chat.agent.max_tool_result_characters (#665): {tool} is the tool name,
+	// {size} the original length and {limit} the bound, both in characters,
+	// and {cut} one of the ToolResultCut* phrases saying what was cut. The
+	// note asks the Agent to narrow the request. Required while the bound is
+	// set.
+	ToolResultTruncated  string `json:"tool_result_truncated,omitempty"`
+	ToolResultCutStrings string `json:"tool_result_cut_strings,omitempty"`
+	ToolResultCutItems   string `json:"tool_result_cut_items,omitempty"`
+	ToolResultCutText    string `json:"tool_result_cut_text,omitempty"`
+	// AgentReadOutOfScope answers get_task, and a picture compare_model_reference
+	// names by ID, when the Task or asset is not readable from the session:
+	// another session of the owner (not an ancestor of this branch, not
+	// registered in the session's project) or one that does not exist. The
+	// same words for both, so the answer never says whether the ID exists
+	// (#665); {id} is the named ID. Optional: without it the tools keep their
+	// generic refusal.
+	AgentReadOutOfScope string `json:"agent_read_out_of_scope,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The
@@ -6807,6 +6900,15 @@ type ChatMessageTexts struct {
 	// (#378).
 	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
 	ToolUnavailable      string `json:"tool_unavailable"`
+	// ToolArgumentsSchemaInvalid ({tool}, {reason}) is the result of a call
+	// to an Agent tool whose arguments are valid JSON but break the tool's
+	// declared parameters; {reason} names the field and the rule (#665).
+	ToolArgumentsSchemaInvalid string `json:"tool_arguments_schema_invalid,omitempty"`
+	// ToolArgumentNotAllowed ({field}, {choices}) is the {reason} of a value
+	// outside the parameter's enum; {choices} lists the declared values
+	// (#665). Without it the reason is the validator's own wording, which
+	// lists them too.
+	ToolArgumentNotAllowed string `json:"tool_argument_not_allowed,omitempty"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or

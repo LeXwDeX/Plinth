@@ -17,6 +17,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/processing"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
 	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
@@ -113,8 +114,10 @@ type Config struct {
 	// chat.context); a policy without a bound leaves the tool unavailable.
 	HistoryLookup chat.HistoryLookupPolicy
 	// ReadTask 读取 owner 自己的公开 Task 事实（状态、进度、公开失败与
-	// 已落盘 Asset），不得包含上游 remote ID、Opaque 或取证字段。
-	ReadTask func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	// 已落盘 Asset），不得包含上游 remote ID、Opaque 或取证字段。#665 起只读
+	// 本会话范围内的 Task（本会话、分支祖先、清单项引用与本项目登记），范围外
+	// 与不存在的 Task 都返回 *chat.ReadScopeRefusal。
+	ReadTask func(ctx context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error)
 	// RecoverTask starts (or returns) the no-charge refetch of a failed Task's
 	// accepted upstream result for the command's own owner and session (#295)
 	// and returns the result the Agent reads.
@@ -259,7 +262,7 @@ type Executor struct {
 	submissionGate        func(ctx context.Context, command chat.ToolCommand) string
 	projection            func(capability, model string) json.RawMessage
 	historyLookup         chat.HistoryLookupPolicy
-	readTask              func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	readTask              func(ctx context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error)
 	recoverTask           func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
 	listModels            func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	readProcessingPlan    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -296,6 +299,7 @@ type Executor struct {
 	// 同一会话同时只有一个活动轮次，按 scope 覆盖即可。
 	usageMu       sync.Mutex
 	usage         map[string]generationUsage
+	usageClock    uint64
 	maxGeneration int
 
 	// limitContent and reconcileContent are the Schema's texts for a reached
@@ -303,6 +307,21 @@ type Executor struct {
 	limitContent     string
 	reconcileContent string
 	texts            *catalog.TextLocalizer
+
+	// threeViewSources serializes the start of new three-view groups of one
+	// session, so two parallel calls on the same source picture cannot both
+	// pass the duplicate guard (#665). Keys are owner and session.
+	threeViewSources threeViewLocks
+	// threeViewTurnEnded reports whether a turn finished (done or error); the
+	// duplicate guard uses it for a group between two views (#665). Nil
+	// leaves such a group inactive, as before.
+	threeViewTurnEnded func(ctx context.Context, owner, session, turn string) (bool, error)
+}
+
+// SetThreeViewTurnEnded wires the turn-state read the three-view duplicate
+// guard needs for a group between two views (#665).
+func (e *Executor) SetThreeViewTurnEnded(ended func(ctx context.Context, owner, session, turn string) (bool, error)) {
+	e.threeViewTurnEnded = ended
 }
 
 // limitText and reconcileText are the consent texts in the turn's locale.
@@ -380,8 +399,21 @@ func (e *Executor) DetachedOperationForCall(ctx context.Context, command chat.To
 type generationUsage struct {
 	turn  string
 	count int
-	calls map[string]struct{}
+	// calls holds the units each counted call of the turn added; the
+	// orchestrator persists them on the turn checkpoint (ToolResult
+	// GenerationUnits) so a restart or an eviction rebuilds the same count.
+	calls map[string]int
+	// used orders the scopes by their last call for the eviction below.
+	used uint64
 }
+
+// maxUsageScopes bounds the per-session generation counts this process keeps
+// (#665). It is a memory bound, not product policy: an evicted session loses
+// only the in-process dedup of its current turn's calls, whose units the
+// orchestrator hands back as PriorGenerationCalls from the turn checkpoint. Far
+// above the sessions one process serves at once, so a running turn is never
+// the oldest entry in practice.
+const maxUsageScopes = 4096
 
 func New(config Config) (*Executor, error) {
 	if config.Params == nil || config.Generate == nil {
@@ -446,6 +478,19 @@ func (e *Executor) Execute(
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
+	result, err := e.execute(ctx, command, observe)
+	// The units this call added to the turn's generation count travel with
+	// its result, so the orchestrator persists them and a restart rebuilds
+	// the same count (#665).
+	result.GenerationUnits = e.countedGenerationUnits(e.scopeKey(command), command.AssistantMessageID, command.Call.ID)
+	return result, err
+}
+
+func (e *Executor) execute(
+	ctx context.Context,
+	command chat.ToolCommand,
+	observe func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
 	switch command.Call.Name {
 	case ToolSetParams:
 		return e.setParams(command), nil
@@ -466,7 +511,22 @@ func (e *Executor) Execute(
 		if e.reviseProcessingPlan == nil {
 			return chat.ToolResult{Error: "processing plan revision unavailable", NoSubmission: true}, nil
 		}
-		return e.reviseProcessingPlan(ctx, command)
+		// A revision that adds a paid attempt (insert, retry) is one more
+		// generation of the turn (#665); replace, skip and waive add none.
+		// It is counted only once applied: a refused revision (another plan,
+		// a retry left to the person, outside the approved plan) adds no
+		// attempt and must not use up the turn's generations.
+		adds := revisionAddsPaidStep(command)
+		scope := e.scopeKey(command)
+		if adds && e.generationLimitWouldBeReached(scope, command.AssistantMessageID, command.Call.ID,
+			command.PriorGenerationCalls, 1) {
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+		}
+		result, err := e.reviseProcessingPlan(ctx, command)
+		if adds && err == nil && result.Error == "" {
+			e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, 1)
+		}
+		return result, err
 	case ToolUpdateSessionNotes:
 		return e.updateSessionNotes(ctx, command), nil
 	case ToolUpdateProductionBrief:
@@ -656,8 +716,14 @@ func (e *Executor) readTaskState(
 	if err := json.Unmarshal(command.Call.Arguments, &args); err != nil || args.TaskID == "" {
 		return chat.ToolResult{Error: "invalid task_id"}
 	}
-	state, err := e.readTask(ctx, command.OwnerID, args.TaskID)
+	state, err := e.readTask(ctx, command, args.TaskID)
 	if err != nil {
+		// #665: a Task outside the session scope, or one that does not exist,
+		// is refused in the Schema's words without saying which.
+		var refusal *chat.ReadScopeRefusal
+		if errors.As(err, &refusal) && refusal.Message != "" {
+			return chat.ToolResult{Error: refusal.Message, NoSubmission: true}
+		}
 		return chat.ToolResult{Error: "task not readable"}
 	}
 	return chat.ToolResult{AgentContent: string(state)}
@@ -951,6 +1017,10 @@ func (e *Executor) generateWithParams(
 	// first paid-gate layer runs for a fresh operation and for its
 	// already-prepared replay: both are one new submission here.
 	if result, refused := e.submissionRefused(ctx, command); refused {
+		// Nothing was submitted: a replay of a call an earlier suspension
+		// counted takes its persisted units back too (#665).
+		e.forgetGenerationCall(scope, command.AssistantMessageID, command.Call.ID)
+		result.GenerationUnitsTakenBack = true
 		return result, nil
 	}
 	alreadyPrepared := false
@@ -968,42 +1038,152 @@ func (e *Executor) generateWithParams(
 			return chat.ToolResult{AgentContent: message, NoSubmission: true}, nil
 		}
 	}
-	if !alreadyPrepared && e.generationLimitReachedForCall(scope, command.AssistantMessageID,
-		command.Call.ID, command.PriorGenerationCalls) {
+	weight := processingPlanWeight(command)
+	if alreadyPrepared {
+		// The operation was prepared, so the call was counted when it was
+		// first executed; a process that lost that count (restart while the
+		// card waited, or eviction) counts it again with its full weight, a
+		// processing plan its paid steps, without refusing it (#665).
+		e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, weight)
+	} else if e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
+		command.Call.ID, command.PriorGenerationCalls, weight) {
 		return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
 	command.Options = e.mergedOptions(scope, command)
-	return e.generate.Execute(ctx, command, observe)
+	result, err := e.generate.Execute(ctx, command, observe)
+	if refusedBeforeSubmission(result, err) {
+		// The generation tool refused the call itself (invalid arguments, a
+		// refused input) after it was counted: nothing proceeded to submit,
+		// so it uses none of the turn's generations (#665).
+		// The take-back also reaches the turn checkpoint: a suspension
+		// persisted the call's units, and a later call must not add them back.
+		e.forgetGenerationCall(scope, command.AssistantMessageID, command.Call.ID)
+		result.GenerationUnitsTakenBack = true
+	}
+	return result, err
+}
+
+// refusedBeforeSubmission reports a generation tool result that refused the
+// call before anything was submitted: no submission, an error, no approval
+// card to wait on and no admission queue retry of the same submission.
+func refusedBeforeSubmission(result chat.ToolResult, err error) bool {
+	return result.NoSubmission && !result.Suspend && !result.AwaitTask && result.TaskID == "" &&
+		result.RetryAfter == 0 && (err != nil || result.Error != "")
 }
 
 func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior int) bool {
+	return e.generationLimitReachedForCallWeighted(scope, turn, callID, prior, 1)
+}
+
+// generationLimitReachedForCallWeighted counts one call as weight paid
+// generations (#665): a processing plan counts each of its paid steps when it
+// is created. The call is refused when its weight does not fit the rest of
+// the turn's max_generation_calls_per_turn; a call already counted is free.
+func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID string, prior, weight int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, true, true)
+}
+
+// generationLimitWouldBeReached is the check of
+// generationLimitReachedForCallWeighted without counting the call: a call
+// counted only after it was applied asks first.
+func (e *Executor) generationLimitWouldBeReached(scope, turn, callID string, prior, weight int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, true, false)
+}
+
+// recordGenerationCall counts an applied call whatever the limit says: the
+// check came before it was applied. A call already counted is not counted
+// again.
+func (e *Executor) recordGenerationCall(scope, turn, callID string, prior, weight int) {
+	e.countGenerationCall(scope, turn, callID, prior, weight, false, true)
+}
+
+// countGenerationCall checks (check) and counts (record) one call of weight
+// units against the turn's generation count, which starts at prior (the units
+// the orchestrator rebuilt from the turn checkpoint) when this process holds
+// less. It reports whether the call does not fit; a call already counted
+// always fits.
+func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight int, check, record bool) bool {
+	if weight < 1 {
+		weight = 1
+	}
 	if e.maxGeneration <= 0 {
 		return false
 	}
 	e.usageMu.Lock()
 	defer e.usageMu.Unlock()
-	current := e.usage[scope]
+	current, known := e.usage[scope]
+	if !known && len(e.usage) >= maxUsageScopes {
+		e.evictOldestUsageLocked()
+	}
+	e.usageClock++
+	current.used = e.usageClock
 	if current.turn != turn {
-		current = generationUsage{turn: turn, calls: map[string]struct{}{}}
+		current = generationUsage{turn: turn, calls: map[string]int{}, used: e.usageClock}
 	}
 	if _, seen := current.calls[callID]; seen {
+		e.usage[scope] = current
 		return false
 	}
 	if current.count < prior {
 		current.count = prior
 	}
-	if current.count >= e.maxGeneration {
+	if check && current.count+weight > e.maxGeneration {
 		e.usage[scope] = current
 		return true
 	}
-	current.count++
-	if current.calls == nil {
-		current.calls = map[string]struct{}{}
+	if record {
+		current.count += weight
+		if current.calls == nil {
+			current.calls = map[string]int{}
+		}
+		current.calls[callID] = weight
 	}
-	current.calls[callID] = struct{}{}
 	e.usage[scope] = current
 	return false
+}
+
+// forgetGenerationCall takes a counted call back out of its turn's generation
+// count: the call was refused before it proceeded to submit.
+func (e *Executor) forgetGenerationCall(scope, turn, callID string) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known || current.turn != turn {
+		return
+	}
+	if units, counted := current.calls[callID]; counted {
+		current.count -= units
+		delete(current.calls, callID)
+		e.usage[scope] = current
+	}
+}
+
+// countedGenerationUnits is what the call added to its turn's generation
+// count in this process (0 when it was not counted here).
+func (e *Executor) countedGenerationUnits(scope, turn, callID string) int {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known || current.turn != turn {
+		return 0
+	}
+	return current.calls[callID]
+}
+
+// evictOldestUsageLocked drops the scope whose last generation call is the
+// oldest (#665); the caller holds usageMu.
+func (e *Executor) evictOldestUsageLocked() {
+	oldest, found := "", false
+	var at uint64
+	for scope, usage := range e.usage {
+		if !found || usage.used < at {
+			oldest, at, found = scope, usage.used, true
+		}
+	}
+	if found {
+		delete(e.usage, oldest)
+	}
 }
 
 // explicitParameters retains provenance without changing Options or its hash.
@@ -1039,4 +1219,35 @@ func (e *Executor) mergedOptions(scope string, command chat.ToolCommand) chat.Tu
 // scopeKey 组合 owner+session 作为参数存储和生成次数的键，保证按用户隔离。
 func (e *Executor) scopeKey(command chat.ToolCommand) string {
 	return agentparams.ScopeKey(command.OwnerID, command.SessionID)
+}
+
+// processingPlanWeight is the number of paid steps a processing plan call
+// proposes (#665), read from the plan tool's Schema-declared steps argument;
+// any other call weighs one.
+func processingPlanWeight(command chat.ToolCommand) int {
+	if command.Tool.Processing == nil || command.Tool.Processing.Plan == nil ||
+		command.Tool.Processing.Plan.StepsArgument == "" {
+		return 1
+	}
+	var arguments map[string]json.RawMessage
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil {
+		return 1
+	}
+	var steps []json.RawMessage
+	if json.Unmarshal(arguments[command.Tool.Processing.Plan.StepsArgument], &steps) != nil || len(steps) == 0 {
+		return 1
+	}
+	return len(steps)
+}
+
+// revisionAddsPaidStep reports whether a revise_processing_plan call inserts a
+// step or retries one: both are a new paid attempt.
+func revisionAddsPaidStep(command chat.ToolCommand) bool {
+	var arguments struct {
+		Operation string `json:"operation"`
+	}
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil {
+		return false
+	}
+	return arguments.Operation == processing.OperationInsert || arguments.Operation == processing.OperationRetry
 }

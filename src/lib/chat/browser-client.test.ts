@@ -1277,6 +1277,18 @@ describe('chat stream silence watchdog (#375)', () => {
     expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(3)]);
   });
 
+  it('#665: a reconnect from the original cursor skips the events the stream already delivered', () => {
+    const watched = watch();
+    // Frames without an id line: the browser has no last event id to resume from.
+    watched.sources[0].emit(watched.text('a'), '');
+    watched.sources[0].emit(watched.text('b'), '');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(3)]);
+    // The server replays from the cursor: a and b again, then what the client never saw.
+    for (const content of ['a', 'b', 'c']) watched.sources[1].emit(watched.text(content), '');
+    expect(watched.events).toEqual(['a', 'b', 'c'].map((content) => ({ type: 'text', content })));
+  });
+
   it('keeps a quiet stream open while visible heartbeats arrive and never delivers them', () => {
     const watched = watch();
     watched.sources[0].emit(watched.text('a'), '3');

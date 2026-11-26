@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   countPending,
+  DECIDED_LIMIT,
   DecisionLedger,
   decidePendingApproval,
   decidePendingCard,
@@ -11,7 +12,10 @@ import {
   hasExpired,
   parsePendingApprovals,
   PendingApprovalError,
+  readPendingApprovals,
+  rememberDecided,
   retainExpired,
+  serverClockOffset,
   type PendingApproval,
 } from '@/lib/chat/pending-approvals';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -60,6 +64,65 @@ describe('expired approval cards', () => {
     const items = displayedApprovals([approval('r1', past), approval('r2', future)], []);
     expect(countPending(items, now)).toBe(1);
     expect(items).toHaveLength(2);
+  });
+});
+
+describe('expiry on the server clock (#665)', () => {
+  it('reads the server clock lead from the Date header, 0 without one', () => {
+    const response = new Response(null, { headers: { Date: new Date(now).toUTCString() } });
+    expect(serverClockOffset(response, now + 10 * 60_000)).toBe(-10 * 60_000);
+    expect(serverClockOffset(new Response(null), now)).toBe(0);
+  });
+
+  it('ignores a lead within the header precision or from a cached copy of unknown age, and counts a cache Age', () => {
+    const at = (date: number, extra: Record<string, string> = {}) =>
+      new Response(null, { headers: { Date: new Date(date).toUTCString(), ...extra } });
+    expect(serverClockOffset(at(now), now + 900)).toBe(0);
+    // A browser clock two hours fast (or a day slow) is exactly when the server's time matters: a fresh answer counts.
+    expect(serverClockOffset(at(now), now + 2 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
+    expect(serverClockOffset(at(now), now - 24 * 60 * 60_000)).toBe(24 * 60 * 60_000);
+    // A Date header a cache kept for two hours without saying how old it is: stale, not a clock two hours slow.
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT from proxy' }), now + 2 * 60 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { 'CF-Cache-Status': 'STALE' }), now + 2 * 60 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { 'X-Cache': 'MISS' }), now + 2 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
+    // Within an hour a cache hit still counts, and with an Age header its Date is corrected, whatever the size.
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT' }), now + 10 * 60_000)).toBe(-10 * 60_000);
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT', Age: '7200' }), now + 4 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
+    // A cached answer: its Date is as old as its Age says.
+    expect(serverClockOffset(at(now, { Age: '600' }), now + 10 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { Age: '60' }), now + 10 * 60_000)).toBe(-9 * 60_000);
+    expect(serverClockOffset(new Response(null, { headers: { Date: 'garbage' } }), now)).toBe(0);
+  });
+
+  it('keeps the decided cards bounded', () => {
+    const decided = new Set<string>();
+    for (let index = 0; index < DECIDED_LIMIT + 50; index += 1) rememberDecided(decided, `r${index}`);
+    expect(decided.size).toBe(DECIDED_LIMIT);
+    expect(decided.has('r0')).toBe(false);
+    expect(decided.has(`r${DECIDED_LIMIT + 49}`)).toBe(true);
+    const ledger = new DecisionLedger();
+    for (let index = 0; index < DECIDED_LIMIT + 50; index += 1) ledger.markDecided(`r${index}`, now);
+    const listed = [approval('r0', future), approval(`r${DECIDED_LIMIT + 49}`, future)];
+    // The oldest decision was forgotten, so only the newest stays hidden from a read sent before it.
+    expect(ledger.visible({ startedAt: now - 1, items: listed }).map((item) => item.requestId)).toEqual(['r0']);
+  });
+
+  it('a browser clock running ahead does not turn a decided card into an expired one to re-request', async () => {
+    const soon = '2026-10-09T10:05:00Z';
+    const browserNow = now + 10 * 60_000; // ten minutes fast
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
+      status: 200, headers: { Date: new Date(now).toUTCString() },
+    }));
+    const schema = { runtime: { http: { routes: { chat_session_pending_approvals: '/s/{sessionID}/approvals' } } } } as unknown as ProductSchema;
+    vi.spyOn(Date, 'now').mockReturnValue(browserNow);
+    try {
+      const read = await readPendingApprovals(schema, 's1', undefined, fetcher as unknown as typeof fetch);
+      // The card was decided in another tab, so the server no longer lists it; on the server it is not yet due.
+      expect(retainExpired([approval('r1', soon)], read.items, [], browserNow + read.clockOffset)).toEqual([]);
+      expect(countPending([approval('r2', soon)], browserNow + read.clockOffset)).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

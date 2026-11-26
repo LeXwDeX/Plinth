@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -614,7 +615,12 @@ type memoryChatRepository struct {
 	// the conditional replace; it runs under the repository lock (#103 review
 	// C5).
 	interposeBrief func(current chat.ProductionBrief) (chat.ProductionBrief, bool)
+	// turnKeys holds the Idempotency-Key records of keyed sends (#665), by
+	// owner, session and key, with the same rules as go_chat_turn_keys.
+	turnKeys map[memoryTurnKeyID]chat.TurnKey
 }
+
+type memoryTurnKeyID struct{ owner, session, key string }
 
 func newMemoryChatRepository() *memoryChatRepository {
 	return &memoryChatRepository{
@@ -1195,6 +1201,11 @@ func (r *memoryChatRepository) DeleteSession(
 	delete(r.preferences, sessionID)
 	delete(r.messages, sessionID)
 	delete(r.events, sessionID)
+	for id := range r.turnKeys {
+		if id.session == sessionID {
+			delete(r.turnKeys, id)
+		}
+	}
 	// The SQLite schema cascades the stream and the turns with the session.
 	delete(r.streams, sessionID)
 	for id, turn := range r.turns {
@@ -1293,17 +1304,59 @@ func (r *memoryChatRepository) StartTurn(
 	if !r.ownsSession(ownerID, user.SessionID) {
 		return chat.Message{}, chat.Event{}, chat.ErrSessionNotFound
 	}
+	if record := turn.Key; record != nil {
+		// As in SQLite: expired records go, a live one of the same key wins.
+		for id, existing := range r.turnKeys {
+			if !existing.ExpiresAt.After(record.CreatedAt) {
+				delete(r.turnKeys, id)
+			}
+		}
+		id := memoryTurnKeyID{record.OwnerID, record.SessionID, record.Key}
+		if existing, taken := r.turnKeys[id]; taken {
+			return chat.Message{}, chat.Event{}, &chat.TurnKeyTakenError{Existing: existing}
+		}
+		if r.turnKeys == nil {
+			r.turnKeys = map[memoryTurnKeyID]chat.TurnKey{}
+		}
+		r.turnKeys[id] = *record
+		turn.Key = nil
+	}
 	r.messages[user.SessionID] = append(
 		r.messages[user.SessionID],
 		user,
 		assistant,
 	)
+	// As in SQLite (#665), the new turn's events continue the numbering.
+	event.ID = nextMemoryEventID(r.events[event.SessionID])
 	r.events[event.SessionID] = nil
 	r.streams[event.SessionID] = stream
 	r.turns[assistant.ID] = turn
-	event.ID = int64(len(r.events[event.SessionID]))
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return assistant, event, nil
+}
+
+func (r *memoryChatRepository) TurnKey(
+	_ context.Context, owner, session, key string, now time.Time,
+) (chat.TurnKey, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	record, found := r.turnKeys[memoryTurnKeyID{owner, session, key}]
+	if !found || !record.ExpiresAt.After(now) {
+		return chat.TurnKey{}, false, nil
+	}
+	return record, true, nil
+}
+
+func (r *memoryChatRepository) ReleaseTurnKey(
+	_ context.Context, owner, session, key, assistantMessageID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := memoryTurnKeyID{owner, session, key}
+	if record, found := r.turnKeys[id]; found && record.AssistantMessageID == assistantMessageID {
+		delete(r.turnKeys, id)
+	}
+	return nil
 }
 
 func (r *memoryChatRepository) ListSessionTurns(
@@ -1458,12 +1511,16 @@ func (r *memoryChatRepository) UpdateTurnState(
 	state string,
 	endReason string,
 	updatedAt time.Time,
+	from ...string,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, found := r.turns[assistantMessageID]
 	if !found {
 		return chat.ErrMessageNotFound
+	}
+	if len(from) > 0 && !slices.Contains(from, turn.State) {
+		return chat.ErrTurnStateChanged
 	}
 	turn.State = state
 	turn.EndReason = endReason
@@ -1675,9 +1732,17 @@ func (r *memoryChatRepository) AppendEvent(
 	if _, found := r.sessions[event.SessionID]; !found {
 		return chat.Event{}, chat.ErrSessionNotFound
 	}
-	event.ID = int64(len(r.events[event.SessionID]))
+	event.ID = nextMemoryEventID(r.events[event.SessionID])
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return event, nil
+}
+
+// nextMemoryEventID numbers an event after the session's newest one.
+func nextMemoryEventID(events []chat.Event) int64 {
+	if len(events) == 0 {
+		return 0
+	}
+	return events[len(events)-1].ID + 1
 }
 
 func (r *memoryChatRepository) ListEvents(

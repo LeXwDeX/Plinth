@@ -15,3 +15,17 @@ func ProcessingSourcePreference(tools []ChatToolSchema) []string {
 	}
 	return nil
 }
+
+// ProcessingAgentStepRetries is how often the Agent's revise retry may start
+// one plan step again (#665): the plan tool's
+// processing.plan.revision.max_agent_retries_per_step, or 0 when no tool
+// declares one (the processing service then keeps its built-in bound).
+func ProcessingAgentStepRetries(tools []ChatToolSchema) int {
+	for _, tool := range tools {
+		if tool.Processing != nil && tool.Processing.Plan != nil &&
+			tool.Processing.Plan.Revision.MaxAgentRetriesPerStep > 0 {
+			return tool.Processing.Plan.Revision.MaxAgentRetriesPerStep
+		}
+	}
+	return 0
+}

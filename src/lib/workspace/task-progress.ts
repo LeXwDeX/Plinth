@@ -138,3 +138,10 @@ export function taskBatchProgress(
 export function statusBubbleShown(streaming: boolean, statusText: string, runningTasks: number): boolean {
   return streaming && statusText !== '' && runningTasks === 0;
 }
+
+/** #665: forgets when the page first saw a task once the task is no longer tracked, so the record stays bounded. */
+export function forgetUntrackedTasks(seen: Map<string, number>, tracked: readonly Pick<TrackedTask, 'taskId'>[]): void {
+  if (seen.size <= tracked.length) return;
+  const ids = new Set(tracked.map((task) => task.taskId));
+  for (const id of [...seen.keys()]) if (!ids.has(id)) seen.delete(id);
+}

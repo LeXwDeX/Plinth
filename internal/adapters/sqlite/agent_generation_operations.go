@@ -386,6 +386,59 @@ func (r *Repository) CancelStoppedAgentOperation(ctx context.Context, operation 
 	return true, nil
 }
 
+// ExpireExecutionGrant denies a pending Agent grant as the system because its
+// approval expired (executiongrant.ExpiredActor, audited, #665). The caller
+// has checked the expiry; a grant that is no longer pending (a decision
+// committed first) is returned unchanged.
+func (r *Repository) ExpireExecutionGrant(ctx context.Context, owner, requestID string) (executiongrant.Grant, error) {
+	if owner == "" || requestID == "" {
+		return executiongrant.Grant{}, executiongrant.ErrInvalid
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return executiongrant.Grant{}, err
+	}
+	defer conn.Close()
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status='denied', decided_by=?, decided_at=?, updated_at=?
+ WHERE owner_id=? AND request_id=? AND status='pending' AND source='agent_human_decision'`,
+		executiongrant.ExpiredActor, now, now, owner, requestID)
+	if err != nil {
+		return executiongrant.Grant{}, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return executiongrant.Grant{}, err
+	}
+	grant, err := grantByRequest(ctx, conn, owner, requestID)
+	if err != nil {
+		return executiongrant.Grant{}, err
+	}
+	if n == 1 {
+		identityJSON, err := json.Marshal(grant.Identity)
+		if err != nil {
+			return executiongrant.Grant{}, err
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO execution_grant_audit
+		(request_id,owner_id,request_version,event,actor_id,identity_json,occurred_at) VALUES (?,?,?,?,?,?,?)`,
+			grant.RequestID, grant.OwnerID, grant.RequestVersion, executiongrant.Denied,
+			executiongrant.ExpiredActor, string(identityJSON), now); err != nil {
+			return executiongrant.Grant{}, err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return executiongrant.Grant{}, err
+	}
+	committed = true
+	return grant, nil
+}
+
 func (r *Repository) ListUnsettledDetached(ctx context.Context, afterSeq int64, limit int) ([]generationtool.Operation, error) {
 	if limit <= 0 {
 		return nil, nil

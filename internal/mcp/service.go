@@ -106,6 +106,9 @@ func New(presets []catalog.AgentMCPPresetSchema, policy catalog.AgentMCPPolicySc
 			if err := validateSchema(tool.Parameters); err != nil {
 				return nil, err
 			}
+			if err := validateStringBounds(tool.Parameters, policy.MaxStringArgumentCharacters); err != nil {
+				return nil, fmt.Errorf("MCP tool %q: %w", tool.Name, err)
+			}
 			s.byName[tool.Name] = preset.ID
 		}
 		// Copy declarations so callers cannot mutate the tool allowlist.
@@ -178,6 +181,9 @@ func (s *Service) Call(ctx context.Context, scope Scope, name string, arguments 
 	}
 	if err := validateArguments(declaration.Parameters, arguments); err != nil {
 		return nil, err
+	}
+	if err := validateStringArgumentLengths(arguments, s.policy.MaxStringArgumentCharacters); err != nil {
+		return nil, fmt.Errorf("MCP tool %q: %w", name, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(s.policy.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
@@ -301,6 +307,92 @@ func validateSchema(data json.RawMessage) error {
 	}
 	return nil
 }
+
+// validateStringBounds refuses a peer tool whose declared string maxLength
+// exceeds the Schema's MCP policy bound (#665). Zero disables the check. The
+// declaration is walked whole (properties and items at any depth), so a bound
+// cannot hide in a nested schema even though validateSchema accepts only
+// scalar parameters today.
+func validateStringBounds(data json.RawMessage, maximum int) error {
+	if maximum <= 0 {
+		return nil
+	}
+	var declaration any
+	if json.Unmarshal(data, &declaration) != nil {
+		return ErrToolDenied
+	}
+	return walkStringBounds(declaration, "", maximum)
+}
+
+func walkStringBounds(node any, path string, maximum int) error {
+	switch typed := node.(type) {
+	case map[string]any:
+		if bound, ok := typed["maxLength"].(float64); ok && typed["type"] == "string" && bound > float64(maximum) {
+			return fmt.Errorf("%w: parameter %q maxLength %d exceeds the policy bound %d", ErrToolDenied, strings.TrimPrefix(path, "."), int(bound), maximum)
+		}
+		if properties, ok := typed["properties"].(map[string]any); ok {
+			for name, property := range properties {
+				if err := walkStringBounds(property, path+"."+name, maximum); err != nil {
+					return err
+				}
+			}
+		}
+		if items, ok := typed["items"]; ok {
+			if err := walkStringBounds(items, path+"[]", maximum); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if err := walkStringBounds(item, path+"[]", maximum); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateStringArgumentLengths refuses any string argument longer than the
+// Schema's MCP policy bound (#665), at any depth of the arguments, so a
+// parameter declared without maxLength cannot carry unbounded text to the
+// peer. Zero disables the check. The bound is the Schema's
+// agent_configuration.mcp_policy.max_string_argument_characters; the shipped
+// 2000 is deliberately far below the 20000-character prompt limit because
+// the presets are read queries (capabilities, task and asset IDs), not
+// prompts.
+func validateStringArgumentLengths(data json.RawMessage, maximum int) error {
+	if maximum <= 0 {
+		return nil
+	}
+	var values map[string]any
+	if json.Unmarshal(data, &values) != nil {
+		return ErrInvalidArguments
+	}
+	return walkStringArguments(values, "", maximum)
+}
+
+func walkStringArguments(node any, path string, maximum int) error {
+	switch typed := node.(type) {
+	case string:
+		if length := len([]rune(typed)); length > maximum {
+			return fmt.Errorf("%w: argument %q has %d characters, over the bound %d", ErrInvalidArguments, strings.TrimPrefix(path, "."), length, maximum)
+		}
+	case map[string]any:
+		for key, value := range typed {
+			if err := walkStringArguments(value, path+"."+key, maximum); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, value := range typed {
+			if err := walkStringArguments(value, path+"[]", maximum); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func validateArguments(schemaJSON, data json.RawMessage) error {
 	schema, err := parseSchema(schemaJSON)
 	if err != nil {

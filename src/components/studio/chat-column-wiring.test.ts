@@ -54,7 +54,7 @@ describe('workspace chat message wiring', () => {
     expect(upload).toBeLessThan(send.indexOf('if (turnRunning) {'));
     expect(upload).toBeLessThan(send.indexOf('setQueue((current) => enqueueTurn('));
     expect(upload).toBeLessThan(send.indexOf('initStreaming(sessionId, {'));
-    expect(upload).toBeLessThan(send.indexOf('await chatClient.startTurn('));
+    expect(upload).toBeLessThan(send.indexOf('await sendUnderKey(uncertainSends, {'));
     expect(send).toContain('uploadWorkspaceInputAssetResult(schema, picture, inlineImageFilename(schema, picture))');
     expect(send).toContain('maximumBytes: schema.runtime.input_assets.upload_max_bytes');
     // A failure sends nothing and says why (with the request ID), like the board snapshot.
@@ -99,15 +99,35 @@ describe('workspace chat message wiring', () => {
 
   it('restores the server message list when deletion fails', () => {
     expect(agentDialog).toMatch(
-      /setMessages\(sessionId, previous\);[\s\S]{0,200}ui\.chat\.toast\.delete_message_retry/,
+      /setMessages\(sessionId, restoreRemovedMessage\([\s\S]{0,200}ui\.chat\.toast\.delete_message_retry/,
     );
   });
+
+  // #665: the stop, stage-request and stream-error behaviour is tested in src/lib/chat/turn-signals.test.ts, the
+  // coalesced reads in src/lib/chat/coalesce.test.ts.
 
   it('keeps chat surfaces on the design tokens', () => {
     const hardcoded = chatMessage.match(
       /(?:bg|text|border|ring|from|to|via)-(?:indigo|zinc|red|blue|green|amber|gray|slate|neutral|stone|sky|violet|purple|pink|rose|yellow|orange)-?\d*/g,
     );
     expect(hardcoded ?? []).toEqual([]);
+  });
+});
+
+// #665: the queue's drain across tabs is tested on its steps (nextDrainStep, holdsToRelease, the read gate and the
+// pruning in src/lib/chat/send-queue.test.ts), the per-session holds and turn lock in
+// src/store/send-queue-store-665.test.ts, and the read numbering in src/lib/chat/session-recovery.test.ts.
+describe('the queue drain releases an idle hold after a claim fails (#665)', () => {
+  it('bumps drainTick on a failed claim, and the hold release runs on drainTick', () => {
+    const failed = agentDialog.indexOf("if (!(await useSendQueueStore.getState().claim(sessionId, turn.id))) {");
+    expect(failed).toBeGreaterThan(0);
+    const branch = agentDialog.slice(failed, agentDialog.indexOf('return;', failed));
+    expect(branch).toContain('drainingRef.current = null;');
+    expect(branch).toContain('setDrainTick((tick) => tick + 1);');
+    const release = agentDialog.indexOf('holdsToRelease(store.heldSessions()');
+    expect(release).toBeGreaterThan(failed);
+    const dependencies = agentDialog.slice(agentDialog.indexOf('}, [', release), agentDialog.indexOf(']);', release));
+    expect(dependencies).toContain('drainTick');
   });
 });
 
@@ -124,7 +144,15 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     // #134: the turn the server starts for an approved plan is followed by re-running the session recovery.
     const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
     expect(decidePlan).toMatch(/if \(result\.turnMessageId &&[\s\S]{0,120}\{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
-    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,200}return recoverChatSession\(/);
+    // The effect that runs the session recovery lists serverTurnTick among its dependencies, so a tick re-runs it,
+    // however much else the effect grows to hold.
+    const recovery = agentDialog.indexOf('recoverChatSession({');
+    const effectStart = agentDialog.lastIndexOf('useEffect(() => {', recovery);
+    const dependencies = agentDialog.indexOf('}, [', recovery);
+    expect(recovery).toBeGreaterThan(0);
+    expect(agentDialog.indexOf('useEffect(', effectStart + 1)).toBeGreaterThan(dependencies);
+    const dependencyList = agentDialog.slice(dependencies + 4, agentDialog.indexOf(']);', dependencies));
+    expect(dependencyList.split(',').map((name) => name.trim())).toContain('serverTurnTick');
     expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });
@@ -142,7 +170,7 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     const flush = send.indexOf('await flushExplicitModel3D(sessionId, (id, model) => chatClient.setExplicitModel3D(id, model));');
     expect(flush).toBeGreaterThan(0);
     expect(flush).toBeLessThan(send.indexOf('initStreaming(sessionId, {'));
-    expect(flush).toBeLessThan(send.indexOf('await chatClient.startTurn('));
+    expect(flush).toBeLessThan(send.indexOf('await sendUnderKey(uncertainSends, {'));
     // The draft is spent only after the server took the turn; a failed lock returns first.
     expect(flush).toBeLessThan(send.indexOf('if (!choiceAnswer) {'));
     expect(send).toMatch(/catch \{\s*if \(isCurrentSessionScope\(scope\)\) toast\.error\(schemaText\(schema, 'ui\.studio\.picker\.lock_failed'\)\);\s*return;/);
@@ -259,10 +287,12 @@ describe('the conversation is read a page at a time', () => {
   it('swaps the stored turn in before ending the live buffer (#177)', () => {
     // Clearing the buffer first dropped the whole turn for a frame: the list shrank and the view jumped.
     expect(column).toContain('let settled = false;');
-    expect(column).toContain('settleStreaming(sessionId, page);');
+    // #665: the settle names its turn; a later turn's buffer is not touched by it.
+    expect(column).toContain('if (!settleStreaming(sessionId, page, turn)) return;');
+    expect(column).toContain('finishStreaming(sessionId, turn);');
     expect(column).toContain('STREAM_SETTLE_FALLBACK_MILLISECONDS');
     const settle = column.slice(column.indexOf('let settled = false;'), column.indexOf('void refreshApproval();', column.indexOf('let settled = false;')));
-    expect(settle).not.toContain('finishStreaming(sessionId);\n            chatClient');
+    expect(settle).not.toContain('finishStreaming(sessionId, turn);\n            chatClient');
   });
 
   it('routes every stream event through the one status slot and marks the thinking status (#285)', () => {
@@ -271,6 +301,19 @@ describe('the conversation is read a page at a time', () => {
     expect(agentDialog).toContain('thinking={streamBuf?.genState?.thinking === true}');
     expect(chatMessage).toContain('data-testid="chat-status-bubble"');
     expect(chatMessage).toContain("data-thinking={thinking ? 'true' : undefined}");
+  });
+
+  it('sends every turn under an Idempotency-Key that a repeat of an unanswered send reuses (#665)', () => {
+    expect(agentDialog).toContain("signature: sendSignature(sessionId, text, turnOptions, { locale, ...(queuedId ? { queuedId } : {}) }),");
+    expect(agentDialog).toContain('(key) => chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: key }, controller.signal), idempotencyRefused);');
+    // Kept per session in the tab's sessionStorage (send-key-665.test.ts covers forgetting and reuse).
+    expect(agentDialog).toContain('createUncertainSendStore(() => (typeof window === \'undefined\' ? undefined : window.sessionStorage))');
+    // A queued send that met another tab's running turn is put back quietly, with its own text.
+    expect(agentDialog).toContain("toast.info(schemaText(schema, 'ui.studio.chat.queued_other_tab'));");
+    expect(agentDialog).toContain("toast.error(schemaText(schema, 'ui.studio.chat.send_key_refused'));");
+    // A queued message is stored with its own key and goes out under it.
+    expect(agentDialog).toContain('idempotencyKey: newSendKey(),');
+    expect(agentDialog).toContain('idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id,');
   });
 });
 

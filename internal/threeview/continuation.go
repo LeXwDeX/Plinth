@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
@@ -121,6 +122,7 @@ func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskI
 		return ContinuationResult{}, err
 	}
 	steps := s.requiredSteps(settled)
+	rightDropped := false
 	if includeRight {
 		basis, err := s.autoBasis(ctx, settled, steps)
 		if err != nil {
@@ -128,9 +130,47 @@ func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskI
 		}
 		if basis {
 			steps = s.stepsWithOptional(settled, steps)
+		} else {
+			// The group started in the auto mode and the person switched away
+			// from it: the right view no longer continues by itself (#665).
+			rightDropped, err = s.startedOnPolicy(ctx, settled, steps)
+			if err != nil {
+				return ContinuationResult{}, err
+			}
 		}
 	}
-	return s.advanceRequired(ctx, settled, turnID, steps)
+	result, err := s.advanceRequired(ctx, settled, turnID, steps)
+	if err != nil || !rightDropped || result.Paused || result.TaskID != "" {
+		return result, err
+	}
+	// The required views are done but the four-view request is not: say so
+	// instead of reporting the group complete, so the Agent tells the person
+	// the right view waits for them on the card (#665).
+	for _, step := range s.stepsWithOptional(settled, nil) {
+		if step.ReplacementAssetID == "" && !(step.Phase == skillrun.OutputReady && step.Review == skillrun.Accepted) {
+			result.Paused, result.Reason, result.View = true, ReasonBudgetNotCovered, step.Spec.Key
+			result.Completed = nil
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+// startedOnPolicy reports whether the group's first required view was approved
+// by the auto mode's policy actor, so a four-view request was made on the auto
+// basis. The strict and budget modes approve cheap views by policy too
+// (policy:manual, policy:budget); such a group never had the right view on
+// that basis and finishes as a three-view group (#665).
+func (s *Service) startedOnPolicy(ctx context.Context, run skillrun.Run, required []skillrun.Step) (bool, error) {
+	if len(required) == 0 || required[0].GrantRequestID == "" {
+		return false, nil
+	}
+	grant, err := s.runtime.Grants.Grants.GetExecutionGrant(ctx, string(run.OwnerID), required[0].GrantRequestID)
+	if err != nil {
+		return false, err
+	}
+	return grant.Status != executiongrant.Pending &&
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto, nil
 }
 
 // autoBasis reports whether the session approves every paid step by itself, the

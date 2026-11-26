@@ -37,9 +37,9 @@ func TestOrchestratorSaysWhenTheChatModelCallBrokeOff(t *testing.T) {
 }
 
 // The follow-up round after a tool broke off: the reply the person already
-// read stays, and the turn ends with the text that says it was cut, instead of
-// stopping mid-sentence without a word. With no reply text yet, the text alone
-// replaces "no result".
+// read stays, the half sentence the broken round streamed included (#665), and
+// the turn ends with the text that says it was cut, instead of stopping
+// mid-sentence without a word.
 func TestOrchestratorEndsABrokenFollowUpWithTheInterruptedText(t *testing.T) {
 	schema := configuredChatSchema(t)
 	interrupted := schema.Presentation.Messages.AgentUpstreamInterrupted
@@ -54,8 +54,8 @@ func TestOrchestratorEndsABrokenFollowUpWithTheInterruptedText(t *testing.T) {
 		if !strings.HasPrefix(content, opening) || !strings.Contains(content, interrupted) || !strings.Contains(content, reference) {
 			t.Fatalf("opening %q: assistant = %q", opening, content)
 		}
-		if opening == "" && !strings.HasPrefix(content, interrupted) {
-			t.Fatalf("no opening: assistant = %q", content)
+		if !strings.Contains(content, "Half a sen") || strings.Index(content, "Half a sen") > strings.Index(content, interrupted) {
+			t.Fatalf("opening %q: assistant = %q, want the streamed half sentence before the note", opening, content)
 		}
 	}
 }

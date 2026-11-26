@@ -248,6 +248,42 @@ func (m *Module) verifyPreparedTaskReplay(ctx context.Context, cmd SubmitPrepare
 // instead of waiting for a Task that cannot exist (#516).
 var ErrNotSubmitted = errors.New("generation: prepared input refused before any task was written")
 
+// RefusedBeforeSubmission reports whether a submit error is known to have
+// written no Task and to be refused again on replay of the same authorization:
+// ErrNotSubmitted, an overlapping conversion, or a code the kernel returns
+// before any write (invalid capability or input, unknown or missing Offering,
+// not found, forbidden, too many requests). A caller that holds an approved
+// grant gives its reservation back on such an error (#665); one with an
+// admission RetryAfter is retried instead (AdmissionRetryAfter).
+func RefusedBeforeSubmission(err error) bool {
+	if errors.Is(err, ErrConversionInProgress) || errors.Is(err, ErrNotSubmitted) {
+		return true
+	}
+	for _, code := range []ErrorCode{
+		ErrInvalidCapability, ErrInvalidInput, ErrUnknownOffering, ErrNoOffering,
+		ErrNotFound, ErrForbidden, ErrTooManyRequests,
+	} {
+		if IsCode(err, code) {
+			return true
+		}
+	}
+	return false
+}
+
+// RefusedPermanently is the part of RefusedBeforeSubmission that a replay of
+// the same authorization can never overcome: it excludes an overlapping
+// conversion (ErrConversionInProgress ends when the other run ends) and every
+// admission refusal (ErrTooManyRequests, with or without a RetryAfter), which
+// are transient. Only such a refusal may deny an approved grant: denying it on
+// a transient refusal would throw away a person's approval that a later submit
+// could still use (#665).
+func RefusedPermanently(err error) bool {
+	if errors.Is(err, ErrConversionInProgress) || IsCode(err, ErrTooManyRequests) {
+		return false
+	}
+	return RefusedBeforeSubmission(err)
+}
+
 // refusedBeforeWrite is a SubmitPrepared refusal marked ErrNotSubmitted. The
 // Detail and Code stay what callers already read.
 func refusedBeforeWrite(code ErrorCode, detail string, cause error) *Error {

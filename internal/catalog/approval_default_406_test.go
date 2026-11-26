@@ -89,7 +89,7 @@ func TestPlanCardWordingDoesNotAssumeTheBudgetDefault_406(t *testing.T) {
 	if planTool.Name == "" {
 		t.Fatal("propose_production_plan is not declared")
 	}
-	const only = "Use this tool only when the session's approval mode is budget"
+	const only = "Use this tool only when the session's approval mode is the Budget mode"
 	if !strings.Contains(planTool.Description, only) {
 		t.Errorf("the plan tool does not say it belongs to the budget mode: %s", planTool.Description)
 	}

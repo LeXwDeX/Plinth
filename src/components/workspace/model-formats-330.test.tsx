@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { ModelFormatsView } from '@/components/workspace/model-formats';
 import { schemaCountMessage, schemaMessage, type ProductSchema } from '@/lib/product-schema';
-import { failedSteps, formatRowAction, parseModelFormatCoverage } from '@/lib/workspace/model-formats';
+import { failedSteps, formatRowAction, parseModelFormatCoverage, refetchUnderway } from '@/lib/workspace/model-formats';
 import { parseRefetchEligibility } from '@/lib/workspace/task-refetch';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
@@ -62,13 +62,25 @@ describe('a paid conversion that was charged but not delivered (#330)', () => {
 
   it('offers the free refetch first and says what was charged', () => {
     const coverage = coverageOf(failedStep({ eligible: true }));
-    expect(formatRowAction(coverage, coverage.formats[1])?.kind).toBe('refetch');
+    expect(formatRowAction(schema.task_states, coverage, coverage.formats[1])?.kind).toBe('refetch');
     const fbx = rowOf(render(failedStep({ eligible: true }), () => {}), 'fbx');
     expect(fbx).toContain('data-action="refetch"');
     expect(fbx).toContain(`${messages['ui.workspace.model_formats.refetch']}</button>`);
     expect(fbx).toContain(schemaCountMessage(schema, 'ui.workspace.model_formats.refetch_hint', 1, { credits: 1 }));
     expect(fbx).toContain(messages['ui.workspace.model_formats.free']);
     expect(fbx).not.toContain(messages['ui.workspace.model_formats.retry_hint']);
+  });
+
+  it('reads whether a refetch Task is still underway from the Schema task_states (#665)', () => {
+    const step = (state: string) => coverageOf(failedStep({ eligible: true, task_id: 'refetch-1', state })).steps[0];
+    // Running or delivered: nothing to act on. Ended without success (failed, canceled, expired): the step is open again.
+    expect(refetchUnderway(schema.task_states, step('RUNNING'))).toBe(true);
+    expect(refetchUnderway(schema.task_states, step('SUCCEEDED'))).toBe(true);
+    for (const ended of ['FAILED', 'CANCELED', 'EXPIRED']) expect(refetchUnderway(schema.task_states, step(ended))).toBe(false);
+    // A Schema that renames its failure state is followed; no state list is kept in the browser.
+    const renamed = schema.task_states.map((state) => (state.internal_state === 'FAILED' ? { ...state, internal_state: 'BROKEN', public_state: 'BROKEN' } : state));
+    expect(refetchUnderway(renamed, step('BROKEN'))).toBe(false);
+    expect(failedSteps(renamed, coverageOf(failedStep({ eligible: true, task_id: 'refetch-1', state: 'BROKEN' })))).toHaveLength(1);
   });
 
   it('falls back to a retry that says it charges again once the free refetch is not possible', () => {
@@ -109,11 +121,11 @@ describe('a paid conversion that was charged but not delivered (#330)', () => {
   it('a running or delivered refetch is not a failure to act on', () => {
     for (const state of ['RUNNING', 'SUCCEEDED']) {
       const coverage = coverageOf(failedStep({ eligible: true, task_id: 'refetch-1', state }));
-      expect(failedSteps(coverage)).toEqual([]);
-      expect(formatRowAction(coverage, coverage.formats[1])).toBeNull();
+      expect(failedSteps(schema.task_states, coverage)).toEqual([]);
+      expect(formatRowAction(schema.task_states, coverage, coverage.formats[1])).toBeNull();
     }
     const again = coverageOf(failedStep({ eligible: true, task_id: 'refetch-1', state: 'FAILED', failed: 1 }));
-    expect(failedSteps(again)).toHaveLength(1);
+    expect(failedSteps(schema.task_states, again)).toHaveLength(1);
   });
 
   it('declares the new texts in both languages', () => {

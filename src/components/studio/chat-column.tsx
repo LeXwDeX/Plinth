@@ -100,9 +100,20 @@ import { budgetFollowsTasks, followSettledBudget, reloadSessionBudget } from '@/
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
-import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import {
+  cancelQueuedTurn, enqueueTurn, holdDrainForRead, holdsToRelease, nextDrainStep, pruneQueuedSessions, queueMayDrain, queuedFor,
+  readCompleted, takeQueuedTurn, type DrainGate, type QueueBySession,
+} from '@/lib/chat/send-queue';
+import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
+import { createCoalescer } from '@/lib/chat/coalesce';
+import { restoreRemovedMessage } from '@/lib/chat/message-pages';
+import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
+import { createUncertainSendStore, newSendKey, sendSignature, sendUnderKey } from '@/lib/chat/send-key';
+import { idempotencyRefused } from '@/lib/chat/send-error-codes';
+import { activeLocale } from '@/lib/i18n/locale';
+import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
-import { recoverChatSession } from '@/lib/chat/session-recovery';
+import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
 import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
@@ -144,7 +155,6 @@ import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
-import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
@@ -469,15 +479,26 @@ export function ChatColumn() {
   const draftEpoch = useRef(0);
   // Messages sent while a turn runs wait here ("排队中") and go out when it ends. Kept per
   // session, so switching away and back does not lose them.
-  const [queue, setQueue] = useState<QueueBySession>({});
+  // #665: the queue is kept in this browser (a reload does not lose a queued message) and leaves with its session.
+  const queue: QueueBySession = useSendQueueStore((state) => state.queue);
+  const setQueue = useSendQueueStore((state) => state.update);
   const queuedTurns = queuedFor(queue, activeSessionId);
   const [drainTick, setDrainTick] = useState(0);
+  // #665: the sessions whose drain waits for a read started after another tab's claim or send (see DrainGate, numbered
+  // by lastReadStarted), and the read a waiting drain last asked for. The holds this tab took are kept per session in
+  // the send queue store.
+  const [drainGate, setDrainGate] = useState<DrainGate>({});
+  const forcedRead = useRef<number | null>(null);
   // #154: the session's saved style lock and this turn's exemption. The exemption never outlives its turn.
   const styleLock = useStyleLock(chatClient, activeSessionId);
   const [styleLockSkipped, setStyleLockSkipped] = useState(false);
   useEffect(() => { setStyleLockSkipped(false); }, [activeSessionId]);
-  const drainingRef = useRef(false);
+  // #665: the session whose queued turn this page is claiming or sending, or null.
+  const drainingRef = useRef<string | null>(null);
   const startedTurnsRef = useRef(0);
+  // #665: per session, the last send whose answer never came, until a send of another request or an answered one
+  // replaces it; kept in the tab's sessionStorage so a reload keeps it.
+  const [uncertainSends] = useState(() => createUncertainSendStore(() => (typeof window === 'undefined' ? undefined : window.sessionStorage)));
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
@@ -752,6 +773,11 @@ export function ChatColumn() {
     return result;
   }, [messages, optimisticUser, schema, streamBuf]);
 
+  const coalesceReads = useRef(createCoalescer());
+  const replyStalled = useMemo(() => ({
+    text: schemaText(schema, 'ui.chat.toast.reply_stalled'),
+    retry: schemaText(schema, 'ui.chat.toast.reply_stalled.retry'),
+  }), [schema]);
   const processEvent = useCallback(
     (sessionId: string, event: ChatSemanticEvent) => {
       // #285: thinking, tool status and progress share one status slot.
@@ -765,14 +791,14 @@ export function ChatColumn() {
       }
       // #275: a status event follows each round's tool calls being saved on the assistant message, so
       // the count in the saved message is read again then; it only ever rises during a reply.
+      // #665: a replayed stream repeats every status; the reads are coalesced per session.
       if (event.type === 'status') {
-        chatClient
+        coalesceReads.current(`tool-calls:${sessionId}`, () => chatClient
           .listMessagePage(sessionId, { limit: 4 })
           .then((page) => {
             const count = latestToolCallCount(page.messages);
             if (count !== undefined) useChatStore.getState().observeToolCallCount(sessionId, count);
-          })
-          .catch(() => {});
+          }));
       }
       switch (event.type) {
         case 'text':
@@ -793,7 +819,8 @@ export function ChatColumn() {
           updateSessionTitle(sessionId, event.content);
           break;
         case 'error':
-          toast.error(event.content);
+          // #665: the same error replayed on a reattach updates its toast instead of stacking another one.
+          toast.error(event.content, { id: chatErrorToastId(sessionId, buffer?.assistantDbId ?? '', event.content) });
           break;
         case 'taskRegistered':
           // P0 契约：agent 会话按任务隔离，任务注册即绑定；
@@ -809,8 +836,8 @@ export function ChatColumn() {
           { const step = paidStepFromTaskRegistered(event);
             if (step) addStreamPaidStep(sessionId, step);
           }
-          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值。
-          void refreshApproval();
+          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值（#665：重放时合并为一次读取）。
+          coalesceReads.current(`approval:${sessionId}`, async () => { await refreshApproval(); });
           break;
         case 'taskUpdate': {
           const trackedId = event.finalTaskID || event.taskID;
@@ -875,7 +902,8 @@ export function ChatColumn() {
     void reconnectTick;
     void serverTurnTick;
     setHistoryLoading(!(activeSessionId in useChatStore.getState().messagesBySession));
-    return recoverChatSession({
+    const stalledToast = `reply-stalled:${activeSessionId}`;
+    const stop = recoverChatSession({
       sessionId: activeSessionId,
       client: chatClient,
       pageSize: messagePageSize,
@@ -883,7 +911,18 @@ export function ChatColumn() {
       pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
       onLoading: setHistoryLoading,
       onLoadError: () => toast.error(ui.loadFailed),
+      onRead: (started) => setDrainGate((gate) => readCompleted(gate, activeSessionId, started)),
+      // #665: a reply that stays pending is no longer read on its own; say so and offer to read it again.
+      onGaveUp: () => toast.message(replyStalled.text, {
+        id: stalledToast,
+        duration: Infinity,
+        action: { label: replyStalled.retry, onClick: () => setServerTurnTick((tick) => tick + 1) },
+      }),
     });
+    return () => {
+      stop();
+      toast.dismiss(stalledToast);
+    };
   }, [
     activeSessionId,
     reconnectTick,
@@ -893,7 +932,39 @@ export function ChatColumn() {
     messagePageSize,
     schema.chat.frontend.fallback_poll_milliseconds,
     ui.loadFailed,
+    replyStalled,
   ]);
+
+  // #665: the queues of sessions this account no longer has (deleted in another tab or device, or another account's)
+  // leave the browser once the session list is known.
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    const known = new Set(useChatStore.getState().sessions.map((session) => session.id));
+    const controller = new AbortController();
+    void pruneQueuedSessions(
+      Object.keys(useSendQueueStore.getState().queue),
+      known,
+      (sessionId, signal) => chatClient.getSession(sessionId, signal),
+      (sessionId) => useSendQueueStore.getState().forgetSession(sessionId),
+      controller.signal,
+    );
+    return () => controller.abort();
+  }, [sessionsLoaded, chatClient]);
+
+  // #665: another tab claimed a queued turn of this session, or the turn it sent ended: this tab's messages cannot
+  // show that yet, so its drain waits for a read started from now on (a read already in flight does not count).
+  const foreignChanges = useSendQueueStore((state) => (activeSessionId ? state.foreignChanges[activeSessionId] ?? 0 : 0));
+  useEffect(() => {
+    if (!activeSessionId || foreignChanges === 0) return;
+    const next = lastReadStarted() + 1;
+    setDrainGate((gate) => holdDrainForRead(gate, activeSessionId, next));
+  }, [activeSessionId, foreignChanges]);
+
+  // #665: the session's turn as this page sees it; a stalled-reply notice goes away once the reply is settled.
+  const activeTurnRunning = sessionTurnRunning(activeSessionId ? messagesBySession[activeSessionId] : undefined, isStreaming);
+  useEffect(() => {
+    if (activeSessionId && !activeTurnRunning) toast.dismiss(`reply-stalled:${activeSessionId}`);
+  }, [activeSessionId, activeTurnRunning]);
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
@@ -964,7 +1035,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string } },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1167,6 +1238,7 @@ export function ChatColumn() {
       if (turnRunning) {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          idempotencyKey: newSendKey(),
           text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
@@ -1288,7 +1360,7 @@ export function ChatColumn() {
           const starting = { sessionId, text };
           startingRef.current = starting;
           setPreparingSession(null);
-          initStreaming(sessionId, {
+          const turn = initStreaming(sessionId, {
             content: text,
             images: images.map((url) => ({ url, taskId: '' })),
           });
@@ -1303,27 +1375,35 @@ export function ChatColumn() {
           // (转 3D) or a choice-card answer also carries its own selection, but was never in the box or the queue.
           const queued = extra?.queued === true;
           try {
-            await chatClient.startTurn(
+            const turnOptions: ChatTurnOptions = {
+              ...(selectedModel ? { model: selectedModel } : {}),
+              creativeDomain: domain,
+              ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
+              ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
+              ...(images.length > 0 ? { imageURLs: images } : {}),
+              ...(claims.length > 0 ? { attachments: claims } : {}),
+              ...(selection.length > 0 ? { selection } : {}),
+              ...(mentions.length > 0 ? { mentions } : {}),
+              ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
+              ...(inputSource ? { inputSource } : {}),
+              ...(selectionMask ? { selectionMask } : {}),
+              ...(choiceAnswer ? { choiceAnswer } : {}),
+              ...(multiview ? { multiview } : {}),
+              ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
+            };
+            // #665: the same request as a send whose answer never came goes out under that send's key, so the server
+            // answers the turn it may already have started; any other send gets a key of its own. The locale is part
+            // of the request (the server's fingerprint has it), and so is a queued message's id: two queued messages
+            // with the same words are two requests. A key the server refuses is dropped and the send goes once more
+            // under a fresh one (sendUnderKey).
+            const locale = activeLocale(schema);
+            const queuedId = extra?.queuedId;
+            await sendUnderKey(uncertainSends, {
               sessionId,
-              text,
-              {
-                ...(selectedModel ? { model: selectedModel } : {}),
-                creativeDomain: domain,
-                ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
-                ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
-                ...(images.length > 0 ? { imageURLs: images } : {}),
-                ...(claims.length > 0 ? { attachments: claims } : {}),
-                ...(selection.length > 0 ? { selection } : {}),
-                ...(mentions.length > 0 ? { mentions } : {}),
-                ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
-                ...(inputSource ? { inputSource } : {}),
-                ...(selectionMask ? { selectionMask } : {}),
-                ...(choiceAnswer ? { choiceAnswer } : {}),
-                ...(multiview ? { multiview } : {}),
-                ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
-              },
-              controller.signal,
-            );
+              signature: sendSignature(sessionId, text, turnOptions, { locale, ...(queuedId ? { queuedId } : {}) }),
+              ...(queuedId ? { typedSignature: sendSignature(sessionId, text, turnOptions, { locale }) } : {}),
+              ...(extra?.idempotencyKey ? { preferred: extra.idempotencyKey } : {}),
+            }, (key) => chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: key }, controller.signal), idempotencyRefused);
             sent = true;
             extra?.onSent?.();
             // A one-shot Skill (declared in the Schema) is spent once the server has the turn; a failed send keeps it.
@@ -1379,13 +1459,19 @@ export function ChatColumn() {
             // or the message had waited in the queue), so they go back, not lost.
             const restore = !sent && (replaced || queued) && isCurrentSessionScope(scope) && !controller.signal.aborted;
             if ((error as Error).name !== 'AbortError') {
-              toast.error(
-                restore && queued
-                  ? schemaText(schema, 'ui.studio.chat.queued_restored')
-                  : error instanceof Error && error.message !== ''
-                    ? withErrorReference(error.message, error)
-                    : ui.sendFailed,
-              );
+              if (restore && queued && turnActiveRefusal(error)) {
+                // #665: another tab's turn of the session runs (it sent first): nothing failed, the words wait in the box.
+                toast.info(schemaText(schema, 'ui.studio.chat.queued_other_tab'));
+              } else if (idempotencyRefused(error)) {
+                // #665: the key was refused twice; the message was not sent and the key is gone.
+                toast.error(schemaText(schema, 'ui.studio.chat.send_key_refused'));
+              } else {
+                toast.error(
+                  restore && queued
+                    ? schemaText(schema, 'ui.studio.chat.queued_restored')
+                    : turnFailureText(error, [schema.chat.presentation.messages.sse_interrupted], ui.sendFailed),
+                );
+              }
             }
             if (restore) {
               setInput((current) => (current === '' ? written : current));
@@ -1401,14 +1487,15 @@ export function ChatColumn() {
             // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
             let settled = false;
             const settleFallback = window.setTimeout(() => {
-              if (!settled) finishStreaming(sessionId);
+              if (!settled) finishStreaming(sessionId, turn);
             }, STREAM_SETTLE_FALLBACK_MILLISECONDS);
             chatClient
               .listMessagePage(sessionId, { limit: messagePageSize })
               .then((page) => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                settleStreaming(sessionId, page);
+                // #665: a read that comes back after a later turn started is that earlier turn's: it is dropped.
+                if (!settleStreaming(sessionId, page, turn)) return;
                 const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
                 // #605: the server ended this turn's tasks with it; read them now and with the rereads below rather
                 // than leave them running (and the branch disabled) until the next task poll.
@@ -1448,7 +1535,7 @@ export function ChatColumn() {
               .catch(() => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                finishStreaming(sessionId);
+                finishStreaming(sessionId, turn);
               });
             void refreshApproval();
             void pending.refresh();
@@ -1506,6 +1593,7 @@ export function ChatColumn() {
       refreshChoices,
       refreshNotes,
       ui.sendFailed,
+      uncertainSends,
       uploading,
     ],
   );
@@ -1523,39 +1611,98 @@ export function ChatColumn() {
   // 会写明基础积分、额外积分和用途，批准才算同意。
   useEffect(() => {
     if (!turnRequest) return;
+    // #665: a send refuses while attachments upload; the request is kept (and said to wait) instead of being dropped,
+    // and goes out when the upload ends (this effect runs again then).
+    const step = stageRequestStep({
+      hasSession: useChatStore.getState().activeSessionId !== null,
+      uploadsPending: uploading || attachmentsPending(attachmentReads, captureSessionScope()),
+    });
+    if (step === 'wait') {
+      toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
+      return;
+    }
     clearTurnRequest();
-    if (useChatStore.getState().activeSessionId === null) return;
+    if (step === 'drop') return;
     void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
       turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
-  }, [turnRequest, clearTurnRequest]);
+  }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
   // 输入框，不让用户的话丢掉。
+  // #665: after a reload the queue waits for the session's messages to be read, and for a reply the server still runs
+  // to end, so it never goes out beside a turn this page did not start. A turn is claimed from the stored queue before
+  // it is sent: another tab that already sent (or cancelled) it makes the claim fail, and it is not sent twice.
+  const drainMessages = activeSessionId ? messagesBySession[activeSessionId] : undefined;
   useEffect(() => {
-    if (!activeSessionId || isStreaming || preparing || uploading || drainingRef.current) return;
+    if (!activeSessionId || drainingRef.current) return;
+    if (!queueMayDrain({ busy: preparing || uploading, historyLoading, messages: drainMessages, streaming: isStreaming })) return;
     // The turn that just ended may still hold the send lock while it cleans up; its release bumps drainTick.
     if (sendPreparation.current.has(activeSessionId)) return;
     const { turn } = takeQueuedTurn(queue, activeSessionId);
     if (!turn) return;
-    const sessionId = activeSessionId;
-    drainingRef.current = true;
-    setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
-    const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
-      drainingRef.current = false;
-      if (startedTurnsRef.current === started) {
-        if (useChatStore.getState().activeSessionId === sessionId) {
-          setInput((current) => (current === '' ? turn.text : current));
-          useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
-          setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
-            turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
-          setStyleLockSkipped(turn.styleLockSkipped === true);
-        }
-        toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
-      }
-      setDrainTick((tick) => tick + 1);
+    // #665: another tab holds the session's send while the turn it sent runs: wait for its release (a storage event)
+    // or for the hold to lapse (a tab that closed without releasing it). After another tab's claim or send, or a claim
+    // of this tab that failed, read the session again first; a read that failed or was cut short is asked for again
+    // after the Schema's poll interval.
+    const step = nextDrainStep({
+      hold: useSendQueueStore.getState().foreignHold(activeSessionId),
+      now: Date.now(),
+      required: drainGate[activeSessionId],
+      forcedRead: forcedRead.current,
+      pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
     });
-  }, [activeSessionId, drainTick, isStreaming, preparing, queue, schema, setAttachmentPurposes, setInput, uploading]);
+    if (step.kind === 'wait') {
+      const timer = setTimeout(() => {
+        forcedRead.current = null;
+        setDrainTick((tick) => tick + 1);
+      }, step.delay);
+      return () => clearTimeout(timer);
+    }
+    if (step.kind === 'read') {
+      forcedRead.current = step.required;
+      setServerTurnTick((tick) => tick + 1);
+      return;
+    }
+    const sessionId = activeSessionId;
+    drainingRef.current = sessionId;
+    void (async () => {
+      if (!(await useSendQueueStore.getState().claim(sessionId, turn.id))) {
+        drainingRef.current = null;
+        const next = lastReadStarted() + 1;
+        setDrainGate((gate) => holdDrainForRead(gate, sessionId, next));
+        // The hold this tab may still keep from its last turn goes now (the release effect runs on drainTick), so
+        // another tab's queued messages for the session are not held back by an idle heartbeat and turn lock.
+        setDrainTick((tick) => tick + 1);
+        return;
+      }
+      const started = startedTurnsRef.current;
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+        drainingRef.current = null;
+        if (startedTurnsRef.current === started) {
+          if (useChatStore.getState().activeSessionId === sessionId) {
+            setInput((current) => (current === '' ? turn.text : current));
+            useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
+            setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
+              turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
+            setStyleLockSkipped(turn.styleLockSkipped === true);
+          }
+          toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
+        }
+        setDrainTick((tick) => tick + 1);
+      });
+    })();
+  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
+
+  // #665: each hold this tab took with a claim lives while the turn it sent runs (the store keeps it alive), and is
+  // released once that turn is over or the person left the session, so another tab drains next. A page that goes away
+  // releases them all.
+  useEffect(() => {
+    const store = useSendQueueStore.getState();
+    for (const sessionId of holdsToRelease(store.heldSessions(), { sending: drainingRef.current, activeSessionId, activeTurnRunning })) {
+      store.releaseHold(sessionId);
+    }
+  }, [activeSessionId, activeTurnRunning, drainTick]);
+  useEffect(() => releaseAllHolds, []);
 
   // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
@@ -1723,11 +1870,15 @@ export function ChatColumn() {
       if (!activeSessionId) return;
       const sessionId = activeSessionId;
       const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
+      const removed = previous.find((message) => message.id === messageId);
       deleteMessage(sessionId, messageId);
       try {
         await chatClient.deleteMessage(sessionId, messageId);
       } catch {
-        setMessages(sessionId, previous);
+        // #665: only the removed message goes back; pages read since the deletion started are kept.
+        if (removed) {
+          setMessages(sessionId, restoreRemovedMessage(useChatStore.getState().messagesBySession[sessionId] ?? [], previous, removed));
+        }
         toast.error(
           schemaText(schema, 'ui.chat.toast.delete_message_retry'),
         );
@@ -2061,7 +2212,7 @@ export function ChatColumn() {
         flush: () => flushPendingEdits(sessionId), isCurrent: () => useChatStore.getState().activeSessionId === sessionId,
         clear: clearTrackedTasks, select: addSession, remember: useChatStore.getState().rememberSession,
         done: (copied) => toast.success(schemaText(schema, 'ui.studio.message.branch_done'), branchCopiedCurrentState(copied) ? { description: schemaText(schema, 'ui.chat.branch_canvas_current') } : undefined),
-        failed: (error) => toast.error(error instanceof Error && error.message ? withErrorReference(error.message, error) : schemaText(schema, 'ui.studio.message.branch_failed')),
+        failed: (error) => toast.error(turnFailureText(error, [], schemaText(schema, 'ui.studio.message.branch_failed'))),
       });
     } finally {
       branchBusyRef.current = false;
@@ -2260,9 +2411,13 @@ export function ChatColumn() {
 
   const stopTurn = () => {
     // 真停止：请求服务端取消轮次（含在飞生成任务），再断开本地 SSE；失败时仍退回仅断开连接。
+    // #665: a cancel the server did not take is said, and the turn is still followed (it still runs).
     if (activeSessionId) {
-      void chatClient.cancelTurn(activeSessionId).catch(() => undefined);
-      controllers.current.get(activeSessionId)?.abort();
+      const sessionId = activeSessionId;
+      void requestTurnStop(chatClient, sessionId, {
+        onStopped: () => controllers.current.get(sessionId)?.abort(),
+        onRefused: () => toast.error(schemaText(schema, 'ui.chat.toast.stop_failed')),
+      });
     }
   };
   // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting
@@ -2281,9 +2436,7 @@ export function ChatColumn() {
   const stopInBackground = () => {
     if (!activeSessionId) return;
     void chatClient.continueTurnInBackground(activeSessionId).catch((error: unknown) => {
-      toast.error(error instanceof Error && error.message !== ''
-        ? withErrorReference(error.message, error)
-        : schema.chat.presentation.messages.internal_error);
+      toast.error(turnFailureText(error, [], schema.chat.presentation.messages.internal_error));
     });
   };
 
@@ -2525,7 +2678,7 @@ export function ChatColumn() {
                     key={card.requestId}
                     model={card}
                     busy={card.source === 'turn' ? consentBusy : decisionBusy.has(card.requestId)}
-                    now={now}
+                    now={now + (pending.clockOffset ?? 0)}
                     error={decisionError[card.requestId] ?? null}
                     onDecide={(approved) => {
                       if (card.source === 'turn') void decideTurnConsent(approved);

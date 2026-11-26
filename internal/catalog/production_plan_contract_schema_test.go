@@ -100,7 +100,8 @@ func TestDefaultCatalogDeclaresProcessingFailuresAndRevision(t *testing.T) {
 		}
 	}
 	if planTool == nil || planTool.Processing.Plan.Revision.MaxReasonCharacters != processing.MaxRevisionReasonCharacters ||
-		planTool.Processing.Plan.Revision.MaxWaivedCheckpoints != processing.MaxWaivedCheckpoints {
+		planTool.Processing.Plan.Revision.MaxWaivedCheckpoints != processing.MaxWaivedCheckpoints ||
+		planTool.Processing.Plan.Revision.MaxAgentRetriesPerStep != processing.MaxAgentStepRetries {
 		t.Fatalf("plan revision bounds = %+v", planTool)
 	}
 	if reviseTool == nil || reviseTool.Execution.ImplementationKey != "processing.revise" ||

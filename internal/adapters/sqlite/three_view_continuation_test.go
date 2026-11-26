@@ -34,6 +34,8 @@ type continuationGateway struct {
 	repo     *Repository
 	prepares int
 	submits  int
+	// refuse, when set, is returned by SubmitPrepared before any write.
+	refuse error
 }
 
 func (g *continuationGateway) PrepareInput(ctx context.Context, cmd generation.PrepareInputCommand) (generation.PreparedInput, error) {
@@ -69,6 +71,9 @@ func (g *continuationGateway) GetPreparedInput(ctx context.Context, owner genera
 
 func (g *continuationGateway) SubmitPrepared(ctx context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
 	g.submits++
+	if g.refuse != nil {
+		return generation.Accepted{}, g.refuse
+	}
 	prepared, err := g.GetPreparedInput(ctx, cmd.OwnerID, cmd.PreparedInputID)
 	if err != nil {
 		return generation.Accepted{}, err

@@ -72,7 +72,10 @@ func (service *Service) SessionBrief(ctx context.Context, ownerID, sessionID str
 // UpdateProductionBrief. Both share one compare-and-swap write path, so a
 // concurrent writer cannot drop the other's change and the returned previous
 // value is the one the audit compares against (#103 review C5). Returns the
-// brief before and after the write.
+// brief before and after the write. Being a whole replacement, it reads a
+// JSON null like an omitted field, as cleared; UpdateProductionBrief reads
+// null as unchanged (#665). Only the session API replaces the whole brief and
+// the Agent tool only patches, so the model never meets the replacement rule.
 func (service *Service) SetProductionBrief(
 	ctx context.Context,
 	ownerID string,
@@ -88,8 +91,11 @@ func (service *Service) SetProductionBrief(
 // leaves every other field as it was. The choice-card continuation replays
 // update_production_brief with only the purpose argument, so treating that
 // replay as a whole replacement would clear the style, notes and triangle
-// budget the person had already set (#103 review C2). A present empty value
-// clears that field.
+// budget the person had already set (#103 review C2). A present empty string
+// clears that field. A JSON null leaves it as stored, like an omitted field:
+// tool-argument validation treats a null optional property as absent (#665,
+// toolschema.OptionalNullAbsent), and models often send null for every
+// optional field, which must not wipe the confirmed style or transparency.
 func (service *Service) UpdateProductionBrief(
 	ctx context.Context,
 	ownerID string,
@@ -107,10 +113,13 @@ func (service *Service) UpdateProductionBrief(
 		}
 		for name, value := range patch {
 			if briefValueEmpty(value) {
-				delete(merged, name)
 				continue
 			}
-			merged[name] = normalized[name]
+			if normalized, present := normalized[name]; present {
+				merged[name] = normalized
+				continue
+			}
+			delete(merged, name)
 		}
 		return merged, nil
 	})

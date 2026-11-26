@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,9 @@ type ToolCommand struct {
 	// derive a different paid-operation identity from a changed tool schema.
 	FrozenIdempotencyKey string
 	TaskWaitDeadline     time.Time
+	// PriorGenerationCalls is the turn's max_generation_calls_per_turn count
+	// before this call, rebuilt from the units the turn checkpoint keeps
+	// (TurnCheckpoint.GenerationUnits, #665).
 	PriorGenerationCalls int
 	// ConsentWaitDeadline 非零表示本轮已因等待同意而挂起过：工具在
 	// 决定未出且已过该时刻时应返回等待文案，而不是再次登记挂起。
@@ -133,6 +137,19 @@ type ToolResult struct {
 	// call for a retry while the Schema request timeout allows, and hands
 	// that receipt to the model only once it ran out.
 	RetryAfter time.Duration `json:"-"`
+	// GenerationUnits is what this call added to the turn's
+	// max_generation_calls_per_turn count (a processing plan its paid steps,
+	// an applied insert or retry one, a generation that proceeded to submit
+	// one; 0 when it was not counted). The orchestrator keeps it on the turn
+	// checkpoint so a later call after a restart starts from the same count
+	// (#665).
+	GenerationUnits int `json:"-"`
+	// GenerationUnitsTakenBack says the tool took this call back out of the
+	// turn's generation count (refused before anything was submitted, for
+	// example after its approval was denied on a replay). The orchestrator
+	// then drops the call's units from the turn checkpoint, so an entry an
+	// earlier suspension persisted no longer counts for later calls (#665).
+	GenerationUnitsTakenBack bool `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -411,6 +428,21 @@ type Orchestrator struct {
 	// （用户决定/超时/停止）只允许一个来源生效——弹出即失效。
 	suspendMu    sync.Mutex
 	consentWaits map[string]*consentSuspend
+	// wakePending holds a consent decision that arrived while the turn of the
+	// key was still running and had not registered its wait yet (#665): the
+	// assistant message ID it was for. suspendForConsent consumes it right
+	// after registering, so the decision wakes the turn at once instead of
+	// after consent_wait_timeout. A tool round drops it before its tools run:
+	// a decision from before then was not for the consent those tools ask
+	// for. Guarded by suspendMu.
+	wakePending map[string]string
+
+	// panicked are the turns whose processing panicked in this process
+	// (#665). A worker does not run such a turn again: it only ends it as
+	// failed, so a turn that keeps panicking cannot loop through the restart
+	// recovery or the stranded-turn reclaim. Guarded by panickedMu.
+	panickedMu sync.Mutex
+	panicked   map[string]struct{}
 
 	// stranded holds the running turns the last reclaim pass found held by no
 	// worker and no consent wait of this process (#516); a turn still
@@ -421,6 +453,9 @@ type Orchestrator struct {
 	// compacting serializes the context compactions of each session (#322).
 	compactMu  sync.Mutex
 	compacting map[string]*compactionLock
+	// compactFailedUntil is when each session's automatic compaction may be
+	// tried again after it failed (#665). Guarded by compactMu.
+	compactFailedUntil map[string]time.Time
 
 	// backgroundWarned is when a failing background-availability read of
 	// each session was last logged as a warning (#137).
@@ -455,6 +490,10 @@ func (orchestrator *Orchestrator) unregisterActiveTurn(key string) {
 	defer orchestrator.activeMu.Unlock()
 	delete(orchestrator.activeCancel, key)
 	delete(orchestrator.activeAssistant, key)
+	// #665: the stop marker goes with the registration, under the same lock.
+	// CancelTurn writes it only while the turn is registered, so a stop that
+	// raced the end of the turn can never leave it to poison the next turn.
+	delete(orchestrator.canceledTurn, key)
 	if done := orchestrator.activeDone[key]; done != nil {
 		close(done)
 		delete(orchestrator.activeDone, key)
@@ -641,10 +680,7 @@ func (orchestrator *Orchestrator) CancelTurn(
 		ctx = context.WithValue(ctx, configurationContextKey{}, stored.Checkpoint.Configuration)
 	}
 	turnKey := orchestrator.turnKey(ownerID, sessionID)
-	orchestrator.activeMu.Lock()
-	cancel := orchestrator.activeCancel[turnKey]
-	orchestrator.canceledTurn[turnKey] = struct{}{}
-	orchestrator.activeMu.Unlock()
+	cancel := orchestrator.markActiveTurnCanceled(turnKey, turn.AssistantMessageID)
 	// AGT-12：轮次可能正处于挂起（consentWaits 有登记）——无论当前
 	// 是否有活动 ctx，都要尝试弹出挂起登记并按停止唤醒；pop 成功后
 	// 重写取消标记（defer clearTurnCanceled 可能已抹掉第一次写入），
@@ -692,6 +728,22 @@ func (orchestrator *Orchestrator) CancelTurn(
 		break
 	}
 	return true, nil
+}
+
+// markActiveTurnCanceled writes the stop marker of the key only while the
+// stopped turn is the one registered as active, and returns its cancel
+// function (#665). A turn that ended between RequestTurnStop and here has
+// unregistered: no marker is written (the durable stop intent covers a turn
+// that is only queued), so it cannot stop the next turn of the session.
+func (orchestrator *Orchestrator) markActiveTurnCanceled(key, assistantMessageID string) context.CancelFunc {
+	orchestrator.activeMu.Lock()
+	defer orchestrator.activeMu.Unlock()
+	cancel := orchestrator.activeCancel[key]
+	if cancel == nil || orchestrator.activeAssistant[key] != assistantMessageID {
+		return nil
+	}
+	orchestrator.canceledTurn[key] = struct{}{}
+	return cancel
 }
 
 // finalizeStoppedTurn 把被用户停止的轮次落成可见的停止终态：追加停止
@@ -748,6 +800,10 @@ func (orchestrator *Orchestrator) finalizeStoppedTurn(
 		command.OwnerID,
 		*assistant,
 	); err != nil {
+		// #665: the stream ends whether or not the stop text was stored, as
+		// a failure's does, or its client would wait for an event that never
+		// comes.
+		orchestrator.appendDone(ctx, command.SessionID)
 		return err
 	}
 	return orchestrator.appendEvent(
@@ -815,8 +871,11 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		activeAssistant:    map[string]string{},
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
+		wakePending:        map[string]string{},
+		panicked:           map[string]struct{}{},
 		stranded:           map[string]struct{}{},
 		compacting:         map[string]*compactionLock{},
+		compactFailedUntil: map[string]time.Time{},
 
 		backgroundWarned: map[string]time.Time{},
 	}
@@ -847,6 +906,7 @@ func (orchestrator *Orchestrator) suspendForConsent(
 		return false
 	}
 	timeoutEnqueue := func() {
+		defer orchestrator.recoverGoroutine("consent-wait-timer", "session_id", command.SessionID)
 		// 超时唤醒：弹出登记（幂等）后带过期 deadline 重新入队，
 		// 工具在重放时看到已过期即返回等待文案（与旧阻塞语义一致）。
 		if _, ok := orchestrator.popConsentWait(
@@ -866,9 +926,19 @@ func (orchestrator *Orchestrator) suspendForConsent(
 		return true
 	}
 	entry := &consentSuspend{command: command, deadline: deadline}
+	// #665: a decision that arrived before this registration left a wake
+	// token; the wait fires at once instead of at its deadline. The token is
+	// read under the same lock ResumeConsentWait writes it with.
+	fireIn := time.Until(deadline)
+	if woken := orchestrator.wakePending[key]; woken != "" {
+		delete(orchestrator.wakePending, key)
+		if woken == command.AssistantMessageID {
+			fireIn = 0
+		}
+	}
 	// timer 在持锁期间创建：entry 的发布与 timer 字段写入对
 	// popConsentWait（同样持锁）可见，避免 timer 字段竞态。
-	entry.timer = time.AfterFunc(time.Until(deadline), timeoutEnqueue)
+	entry.timer = time.AfterFunc(fireIn, timeoutEnqueue)
 	orchestrator.consentWaits[key] = entry
 	return true
 }
@@ -916,15 +986,42 @@ func (orchestrator *Orchestrator) PendingConsentWaits() int {
 
 // ResumeConsentWait 在用户写入同意决定后唤醒挂起轮次：重新入队续跑。
 // 返回是否存在被唤醒的挂起轮次。不占用调用方 goroutine。
+//
+// A decision that lands while the session's turn is still running, before it
+// registered its wait (the tool already wrote the pending grant), is not lost
+// (#665): it leaves a wake token for that turn, and suspendForConsent wakes
+// the turn as soon as it registers.
 func (orchestrator *Orchestrator) ResumeConsentWait(
 	ownerID, sessionID string,
 ) bool {
+	key := orchestrator.turnKey(ownerID, sessionID)
+	orchestrator.suspendMu.Lock()
+	entry := orchestrator.consentWaits[key]
+	if entry == nil {
+		orchestrator.activeMu.Lock()
+		active := orchestrator.activeAssistant[key]
+		orchestrator.activeMu.Unlock()
+		if active != "" {
+			orchestrator.wakePending[key] = active
+		}
+		orchestrator.suspendMu.Unlock()
+		return false
+	}
+	orchestrator.suspendMu.Unlock()
 	command, ok := orchestrator.popConsentWait(ownerID, sessionID)
 	if !ok {
 		return false
 	}
 	orchestrator.enqueueSuspendedResume(command)
 	return true
+}
+
+// clearWakePending drops the wake token of the key when its turn leaves
+// Process: a token is only for the turn that was running when it was left.
+func (orchestrator *Orchestrator) clearWakePending(key string) {
+	orchestrator.suspendMu.Lock()
+	defer orchestrator.suspendMu.Unlock()
+	delete(orchestrator.wakePending, key)
 }
 
 // enqueueForWake 是唤醒路径专用入队：与普通 Enqueue 的去重语义不同。
@@ -1000,6 +1097,7 @@ func (orchestrator *Orchestrator) reRegisterConsentWait(
 	}
 	entry := &consentSuspend{command: command, deadline: deadline}
 	entry.timer = time.AfterFunc(time.Until(fireAt), func() {
+		defer orchestrator.recoverGoroutine("consent-wake-retry", "session_id", command.SessionID)
 		if _, ok := orchestrator.popConsentWait(
 			command.OwnerID,
 			command.SessionID,
@@ -1160,59 +1258,97 @@ func (orchestrator *Orchestrator) runWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case command := <-orchestrator.queue:
-			// A session being deleted has nothing for a worker to run (#384).
-			if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
-				orchestrator.unmarkQueued(command.AssistantMessageID)
-				continue
-			}
-			dispatch, err := orchestrator.turnAwaitsDispatch(context.WithoutCancel(ctx), command)
-			if err != nil || !dispatch {
-				if err != nil {
-					// The turn row goes with its session or message: gone is
-					// not a failure.
-					level := slog.LevelError
-					if errors.Is(err, ErrMessageNotFound) {
-						level = slog.LevelDebug
-					}
-					orchestrator.logger.Log(
-						ctx, level,
-						"读取 Chat Agent Turn 状态失败",
-						"assistant_message_id", command.AssistantMessageID,
-						"error", err,
-					)
-				}
-				orchestrator.unmarkQueued(command.AssistantMessageID)
-				continue
-			}
-			if err := orchestrator.service.MarkTurnRunning(
-				context.WithoutCancel(ctx),
-				command.AssistantMessageID,
-			); err != nil {
-				level := slog.LevelError
-				if errors.Is(err, ErrMessageNotFound) {
-					level = slog.LevelDebug
-				}
-				orchestrator.logger.Log(
-					ctx, level,
-					"更新 Chat Agent Turn 状态失败",
-					"assistant_message_id", command.AssistantMessageID,
-					"error", err,
-				)
-				orchestrator.unmarkQueued(command.AssistantMessageID)
-				continue
-			}
-			if err := orchestrator.Process(ctx, command); err != nil &&
-				!errors.Is(err, context.Canceled) {
-				orchestrator.logger.Error(
-					"Chat Agent 任务失败",
-					"session_id", command.SessionID,
-					"assistant_message_id", command.AssistantMessageID,
-					"error", err,
-				)
-			}
-			orchestrator.unmarkQueued(command.AssistantMessageID)
+			orchestrator.dispatch(ctx, command)
 		}
 	}
+}
+
+// dispatch runs one dequeued command. A panic anywhere in it is recovered
+// (#665): the worker keeps serving, the turn ends as failed with the Schema's
+// error text instead of taking the process down, and a turn that panicked
+// once is not run again by this process.
+func (orchestrator *Orchestrator) dispatch(ctx context.Context, command ProcessTurn) {
+	defer func() {
+		if value := recover(); value != nil {
+			orchestrator.notePanicked(command.AssistantMessageID)
+			orchestrator.logger.Error("对话回合调度崩溃，轮次以失败结束",
+				"session_id", command.SessionID,
+				"assistant_message_id", command.AssistantMessageID,
+				"error_id", command.AssistantMessageID,
+				"panic", fmt.Sprint(value),
+				"stack", string(debug.Stack()),
+			)
+			orchestrator.failPanickedTurn(context.WithoutCancel(ctx), command)
+			orchestrator.unmarkQueued(command.AssistantMessageID)
+		}
+	}()
+	if orchestrator.turnPanicked(command.AssistantMessageID) {
+		// Never run it again. A turn whose ending is already written is left
+		// as it is (#665): ending it again would rewrite its reply and append
+		// error and done events to the session's stream, which may be the
+		// next turn's by now. One whose first ending could not be written is
+		// ended again.
+		if orchestrator.panickedTurnEnded(context.WithoutCancel(ctx), command) {
+			orchestrator.clearPanicked(command.AssistantMessageID)
+		} else {
+			orchestrator.failPanickedTurn(context.WithoutCancel(ctx), command)
+		}
+		orchestrator.unmarkQueued(command.AssistantMessageID)
+		return
+	}
+	// A session being deleted has nothing for a worker to run (#384).
+	if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
+		orchestrator.unmarkQueued(command.AssistantMessageID)
+		return
+	}
+	dispatch, err := orchestrator.turnAwaitsDispatch(context.WithoutCancel(ctx), command)
+	if err != nil || !dispatch {
+		if err != nil {
+			// The turn row goes with its session or message: gone is
+			// not a failure.
+			level := slog.LevelError
+			if errors.Is(err, ErrMessageNotFound) {
+				level = slog.LevelDebug
+			}
+			orchestrator.logger.Log(
+				ctx, level,
+				"读取 Chat Agent Turn 状态失败",
+				"assistant_message_id", command.AssistantMessageID,
+				"error", err,
+			)
+		}
+		orchestrator.unmarkQueued(command.AssistantMessageID)
+		return
+	}
+	if err := orchestrator.service.MarkTurnRunning(
+		context.WithoutCancel(ctx),
+		command.AssistantMessageID,
+	); err != nil {
+		// A turn gone, or one that finished since it was read (#665), is not
+		// a failure: there is nothing to run.
+		level := slog.LevelError
+		if errors.Is(err, ErrMessageNotFound) || errors.Is(err, ErrTurnStateChanged) {
+			level = slog.LevelDebug
+		}
+		orchestrator.logger.Log(
+			ctx, level,
+			"更新 Chat Agent Turn 状态失败",
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+		orchestrator.unmarkQueued(command.AssistantMessageID)
+		return
+	}
+	if err := orchestrator.Process(ctx, command); err != nil &&
+		!errors.Is(err, context.Canceled) {
+		orchestrator.logger.Error(
+			"Chat Agent 任务失败",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+	}
+	orchestrator.unmarkQueued(command.AssistantMessageID)
 }
 
 // turnAwaitsDispatch reports whether a dequeued command still names a turn
@@ -1429,6 +1565,7 @@ func (orchestrator *Orchestrator) Process(
 	turnKey := orchestrator.turnKey(command.OwnerID, command.SessionID)
 	orchestrator.registerActiveTurn(turnKey, command.AssistantMessageID, cancelProcess)
 	defer orchestrator.unregisterActiveTurn(turnKey)
+	defer orchestrator.clearWakePending(turnKey)
 	defer orchestrator.clearTurnCanceled(turnKey)
 	defer cancelProcess()
 	// Check after registering: a deletion that began before the registration
@@ -1490,21 +1627,9 @@ func (orchestrator *Orchestrator) Process(
 			"stage", stage,
 			"error", cause,
 		)
-		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
-		if failure != nil {
-			// The failure text could not be stored either; the stream
-			// still ends, or its client would wait for an event that
-			// never comes.
-			_ = orchestrator.appendEvent(
-				context.WithoutCancel(ctx),
-				command.SessionID,
-				map[string]any{
-					orchestrator.schema.Stream.EventFields.Type: orchestrator.
-						schema.Stream.EventTypes.Done,
-				},
-			)
-		}
-		return failure
+		// fail ends the stream with its done event also when the failure
+		// text could not be stored.
+		return orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
 	}
 	// endBackgroundFailed ends a turn whose background ending could not be
 	// stored (#137/#429). The person already chose to let the Tasks run, so
@@ -1541,21 +1666,9 @@ func (orchestrator *Orchestrator) Process(
 			"assistant_message_id", command.AssistantMessageID,
 			"error", cause,
 		)
-		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
-		if failure != nil {
-			// The failure text could not be stored either; the stream
-			// still ends, or its client would wait for an event that
-			// never comes.
-			_ = orchestrator.appendEvent(
-				context.WithoutCancel(ctx),
-				command.SessionID,
-				map[string]any{
-					orchestrator.schema.Stream.EventFields.Type: orchestrator.
-						schema.Stream.EventTypes.Done,
-				},
-			)
-		}
-		return failure
+		// fail ends the stream with its done event also when the failure
+		// text could not be stored.
+		return orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
 	}
 	// 进程停机（区别于用户取消：仅 runCtx 被取消）时轮次保持可恢复：
 	// 不落失败、不收尾流，交给重启后的 RecoverTurns 重新入队续跑。
@@ -1612,6 +1725,29 @@ func (orchestrator *Orchestrator) Process(
 			orchestrator.logger.Warn("收尾时失效旧选项卡失败", "session_id", command.SessionID,
 				"assistant_message_id", command.AssistantMessageID, "error", err)
 		}
+	}()
+	// #665: a panic in the turn (a tool, an executor, the request builder) is
+	// recovered here, before the finalizer above runs: the reply gets the
+	// Schema's error text with its error ID, the stream gets its done event,
+	// and the turn ends as failed instead of taking the process down and being
+	// recovered into the same panic on every restart.
+	defer func() {
+		value := recover()
+		if value == nil {
+			return
+		}
+		orchestrator.notePanicked(command.AssistantMessageID)
+		suspended, failed = false, true
+		orchestrator.logger.Error("对话回合执行崩溃，轮次以失败结束",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error_id", assistant.ID,
+			"panic", fmt.Sprint(value),
+			"stack", string(debug.Stack()),
+		)
+		cause := fmt.Errorf("%w: %v", errTurnPanicked, value)
+		processErr = errors.Join(processErr, cause,
+			orchestrator.fail(context.WithoutCancel(ctx), command.OwnerID, &assistant, ""))
 	}()
 	// #137: the person stopped waiting and let the Tasks run on. This comes
 	// before the stop check: the choice committed before any later stop.
@@ -1755,7 +1891,13 @@ func (orchestrator *Orchestrator) Process(
 			inlineImageReply, completion, err = true, agents.Completion{}, nil
 		}
 		if err != nil {
+			// #665: what the round already streamed stays in the reply, as
+			// the person saw it, before the stop or failure text.
+			streamed := round.streamed.String()
 			if orchestrator.turnCanceled(turnKey) {
+				if streamed != "" {
+					assistant.Content = streamed
+				}
 				return finalizeStop()
 			}
 			if ctx.Err() != nil {
@@ -1773,12 +1915,11 @@ func (orchestrator *Orchestrator) Process(
 				"assistant_message_id", command.AssistantMessageID,
 				"error", err,
 			)
-			return orchestrator.fail(
-				ctx,
-				command.OwnerID,
-				&assistant,
-				orchestrator.agentFailureMessage(ctx, err),
-			)
+			detail := orchestrator.agentFailureMessage(ctx, err)
+			if streamed != "" {
+				detail = joinNarration(streamed, detail)
+			}
+			return orchestrator.fail(ctx, command.OwnerID, &assistant, detail)
 		}
 		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage, request)
 		emptyReply = !inlineImageReply && orchestrator.noteEmptyReply(command, completion, 0)
@@ -1791,11 +1932,14 @@ func (orchestrator *Orchestrator) Process(
 				return nil
 			}
 			failed = true
+			orchestrator.appendDone(ctx, command.SessionID)
 			return err
 		}
 	}
 	// B4 工具循环：模型（例如同意获批后）可在同一轮内继续调用
-	// 工具，调用次数不设上限（#553），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
+	// 工具，单轮调用个数不设上限（#553），轮次数受
+	// chat.agent.max_tool_rounds_per_turn 约束（#665，重放的已落库计划
+	// 不再计数），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
 	// 累积在 assistant 消息上（停止可取消全部在飞任务）。
 	// 恢复路径的 completion 来自已落库计划（ID 已定型、内容已剥离
 	// DSML），标记 parsed 跳过重新解析与改写。
@@ -1817,12 +1961,23 @@ func (orchestrator *Orchestrator) Process(
 		startRound = turn.Checkpoint.Round
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) - startRound
 	}
+	// replayingPlan is set when round 0 replays a stored plan without a
+	// checkpoint (#665): its calls were planned, and counted against
+	// chat.agent.max_tool_rounds_per_turn, when the model wrote them. A new
+	// round after it is round effectiveRound-1 of the turn: the call IDs of
+	// that path skip one number past the stored rounds.
+	replayingPlan := resumingPlan && !checkpointResuming
 	// followUpErr is the follow-up request's failure that ended the loop, if
 	// any; a reply left empty by it is told from it.
 	var followUpErr error
 	// malformedCalls are the calls of this round whose arguments the model
 	// wrote as invalid JSON (#378); the checkpoint keeps them.
-	var malformedCalls []string
+	var malformedCalls, invalidJSONCalls []string
+	// cutReply is the finish reason of a round the upstream cut (#665): its
+	// output token limit or its content filter. roundsCapped is set when the
+	// model called tools past chat.agent.max_tool_rounds_per_turn.
+	cutReply := ""
+	roundsCapped := false
 	// endUnsavedRound is endUnsaved for the round the model just planned. The
 	// calls the round added (executed is how many the reply had before it)
 	// never ran, so they leave the reply; a round resumed from the checkpoint
@@ -1856,7 +2011,37 @@ func (orchestrator *Orchestrator) Process(
 			// a call whose arguments are not valid JSON is not run, and the
 			// model gets the error instead. A checkpoint being resumed was
 			// vetted when it was written.
-			completion.ToolCalls, malformedCalls = orchestrator.vetToolArguments(command, completion.ToolCalls)
+			completion.ToolCalls, malformedCalls, invalidJSONCalls = orchestrator.vetToolArguments(ctx, command, completion.ToolCalls)
+			cutReply = completion.FinishReason
+			if cutReply != "" && len(completion.ToolCalls) > 0 {
+				// #665: a round the upstream cut is not whole. Its calls' arguments
+				// may be cut short, and it may have meant more calls: none of them
+				// runs, and the reply says it was cut.
+				orchestrator.logger.Warn("对话模型这一轮被上游截断，本轮工具调用不执行",
+					"session_id", command.SessionID,
+					"assistant_message_id", command.AssistantMessageID,
+					"finish_reason", cutReply,
+					"calls", len(completion.ToolCalls),
+				)
+				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil
+			}
+			planRound := effectiveRound
+			if replayingPlan {
+				planRound--
+			}
+			if limit := orchestrator.schema.Agent.MaxToolRoundsPerTurn; limit > 0 &&
+				!(replayingPlan && round == 0) && planRound >= limit && len(completion.ToolCalls) > 0 {
+				// #665: the model kept calling tools past the turn's bound; the
+				// round past it does not run, and the reply says why it ended.
+				orchestrator.logger.Warn("对话回合工具轮次达到上限，本轮到此为止",
+					"session_id", command.SessionID,
+					"assistant_message_id", command.AssistantMessageID,
+					"rounds", planRound,
+					"limit", limit,
+				)
+				completion.ToolCalls, malformedCalls, invalidJSONCalls = nil, nil, nil
+				roundsCapped = true
+			}
 		}
 		if checkpointResuming && round == startRound {
 			// The assistant plan and completed tool replies are already durable.
@@ -1895,8 +2080,8 @@ func (orchestrator *Orchestrator) Process(
 		if !checkpointResuming || round != startRound {
 			// The calls answered without running stay listed for the whole
 			// turn (#501): a stop in a later round still reconciles them.
-			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls,
-				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls}
+			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls, InvalidJSONCalls: invalidJSONCalls,
+				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls, GenerationUnits: turn.Checkpoint.GenerationUnits}
 			version, saveErr := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), turn,
 				orchestrator.service.TurnRunningState(), turn.Checkpoint, false)
 			if saveErr != nil {
@@ -1943,8 +2128,13 @@ func (orchestrator *Orchestrator) Process(
 				return nil
 			}
 			failed = true
+			orchestrator.appendDone(ctx, command.SessionID)
 			return err
 		}
+		// #665: a wake token left before this round's tools run came from a
+		// decision on another card; the round's own consent request comes
+		// from these tools, so only a decision after it may wake its wait.
+		orchestrator.clearWakePending(turnKey)
 		results := turnResults(assistant, boundTasks)
 		// Tool pictures share the request's vision budget (#247): the base
 		// request's pictures spend first, and every round of this turn keeps
@@ -2089,6 +2279,11 @@ func (orchestrator *Orchestrator) Process(
 		}
 		followUp = sentFollowUp
 		if streamErr != nil {
+			// #665: the text this round already streamed stays in the reply,
+			// as the person saw it; the stop or interruption note follows it.
+			if streamed := followUpRound.streamed.String(); streamed != "" {
+				assistant.Content = joinNarration(assistant.Content, streamed)
+			}
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
 			}
@@ -2128,6 +2323,7 @@ func (orchestrator *Orchestrator) Process(
 				return nil
 			}
 			failed = true
+			orchestrator.appendDone(ctx, command.SessionID)
 			return err
 		}
 		completion = next
@@ -2139,6 +2335,15 @@ func (orchestrator *Orchestrator) Process(
 	}
 	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
 	inlineText, _ := orchestrator.agentInlineImageMessage(ctx, agents.ErrInlineImageOutput)
+	if note := orchestrator.endingNote(ctx, cutReply, roundsCapped); note != "" {
+		// #665: a reply the upstream cut, or one stopped at the tool round
+		// bound, keeps what it wrote and says why it ends there.
+		emptyReply = false
+		assistant.Content = joinNarration(assistant.Content, "\n\n"+note)
+		if strings.TrimSpace(assistant.Content) == note {
+			assistant.Content = note
+		}
+	}
 	if inlineImageReply && inlineText != "" {
 		note := orchestrator.withErrorReference(ctx, inlineText, assistant.ID)
 		if assistant.Content == "" {
@@ -2186,6 +2391,7 @@ func (orchestrator *Orchestrator) Process(
 		assistant,
 	); err != nil {
 		failed = true
+		orchestrator.appendDone(ctx, command.SessionID)
 		return err
 	}
 	if err := orchestrator.appendEvent(
@@ -2200,6 +2406,23 @@ func (orchestrator *Orchestrator) Process(
 		return err
 	}
 	return nil
+}
+
+// endingNote is the Schema note of a reply that ends early (#665): the round
+// the upstream cut at its output limit or by its content filter, or the tool
+// round bound. Empty when none applies or the Schema declares no text.
+func (orchestrator *Orchestrator) endingNote(ctx context.Context, cutReply string, roundsCapped bool) string {
+	messages := orchestrator.schema.Presentation.Messages
+	switch {
+	case roundsCapped && messages.ToolRoundsCapped != "":
+		return strings.ReplaceAll(orchestrator.text(ctx, messages.ToolRoundsCapped),
+			"{limit}", strconv.Itoa(orchestrator.schema.Agent.MaxToolRoundsPerTurn))
+	case cutReply == agents.FinishLength:
+		return orchestrator.text(ctx, messages.AgentReplyTruncated)
+	case cutReply == agents.FinishContentFilter:
+		return orchestrator.text(ctx, messages.AgentReplyFiltered)
+	}
+	return ""
 }
 
 // startFirstTurnTitle summarises the session title from the first user message
@@ -2217,6 +2440,7 @@ func (orchestrator *Orchestrator) startFirstTurnTitle(command ProcessTurn, histo
 	orchestrator.titleWaiters.Add(1)
 	go func() {
 		defer orchestrator.titleWaiters.Done()
+		defer orchestrator.recoverGoroutine("first-turn-title", "session_id", command.SessionID)
 		timeout := time.Duration(orchestrator.schema.Agent.TitleTimeoutSeconds) * time.Second
 		ctx, cancel := context.WithTimeout(catalog.WithLocale(context.Background(), command.Options.Locale), timeout)
 		defer cancel()
@@ -2774,6 +2998,10 @@ type thinkingRound struct {
 	// is false and shown is no longer kept.
 	following bool
 	shown     string
+	// streamed is the round's visible text as the filter passed it on, before
+	// the paragraph break (#665): a round that breaks off keeps it in the
+	// reply with joinNarration, which puts the same break.
+	streamed strings.Builder
 }
 
 func (orchestrator *Orchestrator) startThinkingRound(
@@ -2845,6 +3073,7 @@ func (round *thinkingRound) continueAfter(shown string) {
 
 // emitText appends visible text; text that is not blank ends the status.
 func (round *thinkingRound) emitText(content string) error {
+	round.streamed.WriteString(content)
 	if strings.TrimSpace(content) != "" {
 		round.active = false
 	}
@@ -2908,22 +3137,15 @@ func (orchestrator *Orchestrator) fail(
 			orchestrator.schema.Stream.EventFields.Content: assistant.Content,
 		},
 	)
-	if err := orchestrator.service.UpdateMessage(
+	err := orchestrator.service.UpdateMessage(
 		context.WithoutCancel(ctx),
 		ownerID,
 		*assistant,
-	); err != nil {
-		return err
-	}
-	_ = orchestrator.appendEvent(
-		context.WithoutCancel(ctx),
-		assistant.SessionID,
-		map[string]any{
-			orchestrator.schema.Stream.EventFields.Type: orchestrator.
-				schema.Stream.EventTypes.Done,
-		},
 	)
-	return nil
+	// #665: the stream ends whether or not the failure text was stored, or
+	// its client would wait for an event that never comes.
+	orchestrator.appendDone(ctx, assistant.SessionID)
+	return err
 }
 
 // persistToolCallBinding 尽力把工具调用的任务绑定即时写入 assistant
@@ -3080,9 +3302,10 @@ func (orchestrator *Orchestrator) executeTools(
 			if len(inflight) > 0 {
 				break
 			}
+			invalidJSON := slices.Contains(turn.Checkpoint.InvalidJSONCalls, call.ID)
 			results = append(results, agents.Message{
 				Role:       orchestrator.schema.Roles.Tool,
-				Content:    orchestrator.toolArgumentsInvalidText(ctx),
+				Content:    orchestrator.toolArgumentsInvalidText(ctx, call, invalidJSON),
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
@@ -3110,17 +3333,7 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			waitDeadline = entry.Deadline
 		}
-		priorTaskCalls := map[string]struct{}{}
-		for id := range boundTasks {
-			if id != call.ID {
-				priorTaskCalls[id] = struct{}{}
-			}
-		}
-		for id := range taskBindings {
-			if id != call.ID {
-				priorTaskCalls[id] = struct{}{}
-			}
-		}
+		priorGenerationCalls := turn.Checkpoint.priorGenerationUnits(call.ID, boundTasks, taskBindings)
 		tool, found := registry.resolve(call.Name, boundTaskID != "")
 		if !found && boundTaskID == "" {
 			// Current catalog availability cannot hide an already accepted Task.
@@ -3239,7 +3452,7 @@ func (orchestrator *Orchestrator) executeTools(
 				BoundTaskID:          boundTaskID,
 				FrozenIdempotencyKey: frozenKey,
 				TaskWaitDeadline:     waitDeadline,
-				PriorGenerationCalls: len(priorTaskCalls),
+				PriorGenerationCalls: priorGenerationCalls,
 				ConsentWaitDeadline:  command.ConsentWaitDeadline,
 				Call:                 call,
 				Tool:                 tool,
@@ -3274,6 +3487,13 @@ func (orchestrator *Orchestrator) executeTools(
 				)
 			},
 		)
+		// Before any branch below: a suspended, queued or discarded result
+		// still counted against the turn (#665).
+		if result.GenerationUnitsTakenBack {
+			turn.Checkpoint.takeBackGenerationUnits(call.ID)
+		} else {
+			turn.Checkpoint.recordGenerationUnits(call.ID, result.GenerationUnits)
+		}
 		if err != nil && !result.NoSubmission && result.TaskID == "" && paidTool(tool.Execution) {
 			// Task acceptance may have committed while the response or chat
 			// binding was lost. Keep this call outside Checkpoint.Completed so
@@ -3319,11 +3539,23 @@ func (orchestrator *Orchestrator) executeTools(
 		if result.Suspend {
 			// AGT-12：等待用户决定的工具已登记状态；挂起返回并保留
 			// 已完成部分的结果，未执行的调用在唤醒重放时重新执行。
-			// 同批已在途的任务先把等待项落库，保留各自的截止时间。
+			// 同批已在途的任务先把等待项落库，保留各自的截止时间。挂起调用
+			// 本身计入的生成单位也落库（#665）：只在内存里的话，进程在等批准
+			// 时重启，多步处理计划只按 1 次计入。
 			if len(inflight) > 0 {
 				turn.Checkpoint.SetWaiting(mergeWaiting(inflight, waiting, results))
+			}
+			if len(inflight) > 0 || result.GenerationUnits > 0 {
 				if saveErr := persist(orchestrator.service.TurnRunningState()); saveErr != nil {
-					return results, imageURLs, taskBindings, saveErr
+					// 只为落库生成单位而写、且不是输给另一个写入方时，写入失败
+					// 不让回合失败：批准卡已经发出，照常挂起；进程在等待时重启
+					// 的话，单位按旧规则重建（已准备的调用重放时按全量权重重新
+					// 计入，#665）。同批有在途调用时等待项必须落库，仍按失败处理。
+					if len(inflight) > 0 || errors.Is(saveErr, ErrTurnCheckpointConflict) {
+						return results, imageURLs, taskBindings, saveErr
+					}
+					orchestrator.logger.Warn("挂起调用的生成单位落库失败，照常挂起",
+						"session_id", command.SessionID, "call_id", call.ID, "error", saveErr)
 				}
 			}
 			return results, imageURLs, taskBindings, ErrTurnSuspended
@@ -3382,6 +3614,8 @@ func (orchestrator *Orchestrator) executeTools(
 		imagesBefore := len(produced.ImageURLs)
 		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
 		content = orchestrator.withPresentedHandles(content, result, *produced, imagesBefore, handles)
+		// #665: the result text the model reads is bounded by the Schema.
+		content = orchestrator.capToolResult(ctx, call.Name, content)
 		// #246: the self-check record stores the pictures a check produced by
 		// their attachment handles, once the reply has named them.
 		orchestrator.attachSelfCheckHandles(ctx, command.OwnerID, command.SessionID, result.Summary, handles)

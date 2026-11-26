@@ -130,7 +130,7 @@ func TestBudgetCopyMatchesWhatTheServerDoes(t *testing.T) {
 	if strings.Contains(analyze, "approval mode has nothing to decide") {
 		t.Error("analyze_model still claims the approval mode never decides a report step")
 	}
-	if !strings.Contains(analyze, "budget mode") || !strings.Contains(analyze, "correction_capabilities") {
+	if !strings.Contains(analyze, "Budget mode") || !strings.Contains(analyze, "correction_capabilities") {
 		t.Error("analyze_model does not say a report step outside the plan cards in budget mode")
 	}
 }
