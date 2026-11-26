@@ -68,14 +68,15 @@ type ReviseCommand struct {
 	// fills this from the approved plan, never from the arguments.
 	Contingency *budget.PlanContingency `json:"-"`
 	// ApprovedPlan is the session's active production plan the server read,
-	// or nil when the session has none (#665). A replace stays within it: the
-	// new step's capability must be one the plan approved (a step, a
-	// contingency or a correction capability).
-	ApprovedPlan *budget.Plan `json:"-"`
-	Capability  generation.Capability   `json:"capability,omitempty"`
-	OfferingID  generation.OfferingID   `json:"offering_id,omitempty"`
-	Parameters  json.RawMessage         `json:"parameters,omitempty"`
-	Reason      string                  `json:"reason"`
+	// or nil when the session has none (#665). A replace that brings a new
+	// capability, or replaces a step the plan covers, stays within it: the
+	// capability (a step, a contingency or a correction capability) and any
+	// Offering the plan pins must be ones the plan allows.
+	ApprovedPlan *budget.Plan          `json:"-"`
+	Capability   generation.Capability `json:"capability,omitempty"`
+	OfferingID   generation.OfferingID `json:"offering_id,omitempty"`
+	Parameters   json.RawMessage       `json:"parameters,omitempty"`
+	Reason       string                `json:"reason"`
 }
 
 // Revise applies one controlled revision. Every operation re-checks the
@@ -215,7 +216,8 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	if capability == "" {
 		capability = step.Capability
 	}
-	if command.ApprovedPlan != nil && !approvedPlanCovers(*command.ApprovedPlan, capability) {
+	if command.ApprovedPlan != nil && replaceBoundByPlan(*plan, *step, *command.ApprovedPlan, capability) &&
+		!command.ApprovedPlan.Allows(string(capability), string(offeringID)) {
 		return Plan{}, ErrRevisionOutsidePlan
 	}
 	planned, err := s.revisedStep(capability, offeringID, command.Parameters)
@@ -236,20 +238,19 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
 
-// approvedPlanCovers reports whether the approved production plan names the
-// capability as one of its steps, contingencies or correction capabilities.
-func approvedPlanCovers(plan budget.Plan, capability generation.Capability) bool {
-	for _, step := range plan.Steps {
-		if step.Capability == string(capability) {
-			return true
-		}
+// replaceBoundByPlan reports whether a replace must stay within the session's
+// approved production plan (#665): when it brings a capability the step did
+// not have, or when the step itself falls under the plan (an Agent plan's step,
+// whose grant is budget-eligible, of a capability and Offering the plan
+// allows). A step the plan never covered, for example one a person approved,
+// may be replaced by the same capability; per-step grants decide it as before.
+// The caller then checks the capability and Offering with budget.Plan.Allows,
+// so an Offering the plan pins is kept.
+func replaceBoundByPlan(plan Plan, step Step, approved budget.Plan, capability generation.Capability) bool {
+	if capability != step.Capability {
+		return true
 	}
-	for _, contingency := range plan.Contingencies {
-		if contingency.Step.Capability == string(capability) {
-			return true
-		}
-	}
-	return slices.Contains(plan.CorrectionCapabilities, string(capability))
+	return plan.Origin == OriginAgent && approved.Allows(string(step.Capability), string(step.OfferingID))
 }
 
 func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseCommand, reason string) (Plan, error) {
