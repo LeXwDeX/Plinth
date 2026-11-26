@@ -69,3 +69,36 @@ func TestAdapterAssemblesRepeatedAndUnindexedToolCallFragments(t *testing.T) {
 		t.Fatalf("unindexed fragments = %#v", unindexed.ToolCalls)
 	}
 }
+
+// #665: an unindexed fragment after explicitly indexed ones continues the
+// last call instead of reading a call that is not there; a name streamed
+// character by character keeps its repeated characters; and a gateway that
+// numbers parallel calls all 0 still yields one call per distinct call ID.
+func TestAdapterAssemblesMixedSingleCharacterAndSameIndexToolCallFragments(t *testing.T) {
+	mixed := streamOf(t,
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":3,\"id\":\"call-a\",\"function\":{\"name\":\"a\",\"arguments\":\"{\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call-a\",\"function\":{\"arguments\":\"}\"}}]}}]}\n\n"+
+			"data: [DONE]\n\n")
+	if len(mixed.ToolCalls) != 1 || mixed.ToolCalls[0].ID != "call-a" || string(mixed.ToolCalls[0].Arguments) != "{}" {
+		t.Fatalf("mixed fragments = %#v", mixed.ToolCalls)
+	}
+	characters := streamOf(t,
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"l\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"l\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"m\",\"arguments\":\"{}\"}}]}}]}\n\n"+
+			"data: [DONE]\n\n")
+	if len(characters.ToolCalls) != 1 || characters.ToolCalls[0].Name != "llm" {
+		t.Fatalf("character fragments = %#v", characters.ToolCalls)
+	}
+	parallel := streamOf(t,
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"a\",\"arguments\":\"{\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-b\",\"function\":{\"name\":\"b\",\"arguments\":\"{\"}}]}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]}}]}\n\n"+
+			"data: [DONE]\n\n")
+	if len(parallel.ToolCalls) != 2 || parallel.ToolCalls[0].ID != "call-a" || parallel.ToolCalls[0].Name != "a" ||
+		string(parallel.ToolCalls[0].Arguments) != "{}" || parallel.ToolCalls[1].ID != "call-b" ||
+		parallel.ToolCalls[1].Name != "b" || string(parallel.ToolCalls[1].Arguments) != "{}" {
+		t.Fatalf("same-index fragments = %#v", parallel.ToolCalls)
+	}
+}

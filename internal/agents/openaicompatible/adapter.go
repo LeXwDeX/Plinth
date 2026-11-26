@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
@@ -264,8 +265,14 @@ func (adapter *Adapter) Stream(
 	// a model writes call arguments for a long while before the call can run,
 	// so the caller learns of the call at its first fragment (#375).
 	toolCalling := false
-	calls := map[int]*agents.ToolCall{}
-	var callOrder []int
+	// calls are the assembled calls in stream order; byIndex is the call the
+	// upstream index currently continues (#665).
+	var calls []*agents.ToolCall
+	byIndex := map[int]int{}
+	declared := map[string]bool{}
+	for _, tool := range request.Tools {
+		declared[tool.Name] = true
+	}
 	// inlineImage is set when the model drew a picture itself (delta.images,
 	// a multi-megabyte base64 line from models such as gpt-astra): the reply
 	// has no place for it, so it is dropped, and a turn that said nothing
@@ -358,22 +365,33 @@ func (adapter *Adapter) Stream(
 				}
 				// #665: a gateway that leaves out the index starts a new
 				// call with every new call ID and continues the last call
-				// otherwise; one that repeats the whole ID or name in each
-				// fragment does not double them.
-				index := len(callOrder) - 1
+				// otherwise; a new call ID at an index already in use starts
+				// a new call too (a gateway that numbers parallel calls all
+				// 0). One that repeats the whole ID or name in each fragment
+				// does not double them.
+				position := len(calls) - 1
 				if fragment.Index != nil {
-					index = *fragment.Index
-				} else if index < 0 || fragment.ID != "" && calls[index].ID != "" && fragment.ID != calls[index].ID {
-					index = len(callOrder)
+					if known, found := byIndex[*fragment.Index]; found {
+						position = known
+					} else {
+						position = -1
+					}
 				}
-				call, found := calls[index]
-				if !found {
-					call = &agents.ToolCall{}
-					calls[index] = call
-					callOrder = append(callOrder, index)
+				if position >= 0 && fragment.ID != "" && calls[position].ID != "" && fragment.ID != calls[position].ID {
+					position = -1
 				}
-				call.ID = appendFragment(call.ID, fragment.ID)
-				call.Name = appendFragment(call.Name, fragment.Function.Name)
+				if position < 0 {
+					calls = append(calls, &agents.ToolCall{})
+					position = len(calls) - 1
+					if fragment.Index != nil {
+						byIndex[*fragment.Index] = position
+					}
+				}
+				call := calls[position]
+				if call.ID == "" {
+					call.ID = fragment.ID
+				}
+				call.Name = appendNameFragment(call.Name, fragment.Function.Name, declared)
 				call.Arguments = append(
 					call.Arguments,
 					fragment.Function.Arguments...,
@@ -392,13 +410,13 @@ func (adapter *Adapter) Stream(
 		// call arguments so far may be half of what the model wrote.
 		return agents.Completion{}, agents.Transient(errors.New("agent stream ended before its last chunk"), 0)
 	}
-	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
+	if inlineImage && strings.TrimSpace(content.String()) == "" && len(calls) == 0 {
 		return agents.Completion{}, agents.ErrInlineImageOutput
 	}
 	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage,
 		FinishReason: agents.FinishReasonOf(finish)}
-	for _, index := range callOrder {
-		result.ToolCalls = append(result.ToolCalls, *calls[index])
+	for _, call := range calls {
+		result.ToolCalls = append(result.ToolCalls, *call)
 	}
 	return result, nil
 }
@@ -482,11 +500,15 @@ func (adapter *Adapter) Complete(
 	return result, nil
 }
 
-// appendFragment joins a streamed fragment of a call ID or name. A fragment
-// equal to what is already there is the whole value repeated by a gateway
-// that sends it with every chunk, not a second half (#665).
-func appendFragment(value, fragment string) string {
-	if fragment == "" || fragment == value {
+// appendNameFragment adds a fragment of a call's name. A fragment that
+// repeats the whole name so far is a gateway resending it (#665) and is
+// dropped, unless it is a single character (a name streamed character by
+// character, as "l", "l") or the doubled name is a tool the request declares.
+func appendNameFragment(value, fragment string, declared map[string]bool) string {
+	if fragment == "" {
+		return value
+	}
+	if fragment == value && utf8.RuneCountInString(fragment) > 1 && !declared[value+fragment] {
 		return value
 	}
 	return value + fragment
