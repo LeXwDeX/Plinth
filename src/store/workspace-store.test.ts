@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { scanTasks, type NoticeTask } from '@/lib/workspace/completion-notice';
 import type { TrackedTaskProjection } from '@/lib/workspace/task-projection';
@@ -269,5 +269,43 @@ describe('failure notice after a reload (#651)', () => {
       () => useWorkspaceStore.getState().applyTaskDetail('live', failedProjection, null),
     );
     expect(announced).toEqual(['live']);
+  });
+});
+
+describe('dismissed tasks stay dismissed after the history is read again (#651)', () => {
+  const memory = new Map<string, string>();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  beforeEach(() => {
+    memory.clear();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value); } },
+    });
+  });
+  afterEach(() => {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+
+  it('does not bring back a task the person cleared when a reload restores it', () => {
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 'gone', capability: 'image-to-image', progressMaximum: 100, restored: true });
+    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['gone']);
+    store.dismissTask('gone');
+    expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
+    store.registerTask({ taskId: 'gone', capability: 'image-to-image', progressMaximum: 100, restored: true });
+    expect(useWorkspaceStore.getState().trackedTasks).toEqual([]);
+    // A task this page submits again under the same ID (never happens, IDs are new) is still tracked: only history is skipped.
+    store.registerTask({ taskId: 'gone', capability: 'image-to-image', progressMaximum: 100 });
+    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['gone']);
+  });
+
+  it('works without storage: dismissed tasks then simply return, as before', () => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: () => { throw new Error('blocked'); } });
+    const store = useWorkspaceStore.getState();
+    store.registerTask({ taskId: 'x', capability: 'image-to-image', progressMaximum: 100, restored: true });
+    expect(() => store.dismissTask('x')).not.toThrow();
+    store.registerTask({ taskId: 'x', capability: 'image-to-image', progressMaximum: 100, restored: true });
+    expect(useWorkspaceStore.getState().trackedTasks.map((task) => task.taskId)).toEqual(['x']);
   });
 });

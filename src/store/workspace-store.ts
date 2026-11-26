@@ -4,6 +4,7 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 import type { ProductSchema } from '@/lib/product-schema';
 import { useCanvasStore } from '@/store/canvas-store';
 import { viewableModelAsset } from '@/lib/workspace/task-projection';
+import { isDismissedTask, rememberDismissedTask } from '@/lib/workspace/dismissed-tasks';
 import type {
   TrackedAsset,
   TrackedResource,
@@ -325,6 +326,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   },
   registerTask: (input) =>
     set((state) => {
+      // A task the person cleared with X stays cleared when the history is read again (#651).
+      if (input.restored && isDismissedTask(input.taskId)) return state;
       const known = state.trackedTasks.find((task) => task.taskId === input.taskId);
       if (known) {
         // #375: the first registration wins, except for the session. A task the history
@@ -417,12 +420,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         updatedAt: Date.now(),
       })),
     })),
-  dismissTask: (taskId) =>
+  dismissTask: (taskId) => {
+    rememberDismissedTask(taskId);
     set((state) => ({
       trackedTasks: state.trackedTasks.filter(
         (task) => task.taskId !== taskId,
       ),
-    })),
+    }));
+  },
   clearTrackedTasks: () => set({
     trackedTasks: [],
     currentObject: null,

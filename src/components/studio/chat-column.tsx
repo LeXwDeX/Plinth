@@ -1767,7 +1767,8 @@ export function ChatColumn() {
       consume: (input, projection) => {
         const store = useWorkspaceStore.getState();
         if (store.trackedTasks.some((task) => task.taskId === input.taskId)) return;
-        store.registerTask({ ...input, autoPreview: false });
+        // #651: a task already terminal on the server is history, not a failure this page just saw happen.
+        store.registerTask({ ...input, autoPreview: false, restored: projection.terminal });
         useWorkspaceStore.getState().applyTaskDetail(input.taskId, projection, useChatStore.getState().activeSessionId);
       },
     }).catch(() => {});
