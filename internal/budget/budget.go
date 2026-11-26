@@ -285,6 +285,13 @@ func (p Plan) Allows(capability, offeringID string) bool {
 		!containsString(p.CorrectionCapabilities, capability) {
 		return false
 	}
+	pinned := p.PinnedOfferings(capability)
+	return len(pinned) == 0 || containsString(pinned, offeringID)
+}
+
+// PinnedOfferings lists the Offerings the plan's steps and contingencies fix
+// for the capability; none means any Offering of it is allowed.
+func (p Plan) PinnedOfferings(capability string) []string {
 	var pinned []string
 	for _, step := range p.Steps {
 		if step.Capability == capability && step.OfferingID != "" {
@@ -296,7 +303,7 @@ func (p Plan) Allows(capability, offeringID string) bool {
 			pinned = append(pinned, contingency.Step.OfferingID)
 		}
 	}
-	return len(pinned) == 0 || containsString(pinned, offeringID)
+	return pinned
 }
 
 // Covers reports whether the plan explicitly reserves at least count steps of

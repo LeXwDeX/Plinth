@@ -35,6 +35,12 @@ func TestReviseReplaceIsBoundByThePlanOnlyWhereThePlanApplies665(t *testing.T) {
 		{"pinned offering mismatch", budget.Plan{Steps: []budget.PlanStep{{Capability: "remesh"},
 			{Capability: "resize", OfferingID: "resize-pinned"}}},
 			"resize", "resize", `{"origin_at":"bottom"}`, true},
+		// #665 wave 4: the step's own Offering is not the one the plan pins,
+		// so Allows of the step is false; the replacement is still held to
+		// the pinned Offering.
+		{"step offering outside the pinned one", budget.Plan{Steps: []budget.PlanStep{{Capability: "remesh"},
+			{Capability: "rigging", OfferingID: "rigging-pinned"}}},
+			"rigging", "rigging-other", `{}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, _, _, plan := checkpointFixture(t)

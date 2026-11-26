@@ -245,12 +245,18 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 // allows). A step the plan never covered, for example one a person approved,
 // may be replaced by the same capability; per-step grants decide it as before.
 // The caller then checks the capability and Offering with budget.Plan.Allows,
-// so an Offering the plan pins is kept.
+// so an Offering the plan pins is kept. An Agent plan's step whose Offering
+// the plan no longer allows is still held to the Offerings the plan pins for
+// its capability: otherwise it could be replaced by any Offering (#665).
 func replaceBoundByPlan(plan Plan, step Step, approved budget.Plan, capability generation.Capability) bool {
 	if capability != step.Capability {
 		return true
 	}
-	return plan.Origin == OriginAgent && approved.Allows(string(step.Capability), string(step.OfferingID))
+	if plan.Origin != OriginAgent {
+		return false
+	}
+	return approved.Allows(string(step.Capability), string(step.OfferingID)) ||
+		len(approved.PinnedOfferings(string(step.Capability))) > 0
 }
 
 func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseCommand, reason string) (Plan, error) {
