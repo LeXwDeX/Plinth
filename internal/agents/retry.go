@@ -23,9 +23,9 @@ type RetryPolicy struct {
 	// a longer wait is returned at once instead of waited for.
 	MaxRetryAfter time.Duration
 	// EmptyRetries is how many times a streamed call that answered with an
-	// empty completion (no text, no tool call) or with only a picture of the
-	// model's own (ErrInlineImageOutput) is sent again (#638); 0 returns it as
-	// it is. It is counted apart from MaxAttempts.
+	// empty completion (no text, no tool call) is sent again (#638); 0 returns
+	// it as it is. It is counted apart from MaxAttempts. A picture the model
+	// drew itself (ErrInlineImageOutput) is not empty and never sent again.
 	EmptyRetries int
 	// RoundTimeout bounds one call with all its attempts and waits; 0: only
 	// each attempt's own request timeout bounds it.
@@ -97,14 +97,15 @@ func (retrying *Retrying) Stream(parent context.Context, request Request, emit f
 }
 
 // retriesEmpty reports whether an answer is sent again for being empty (#638):
-// a completion without text or a tool call, or a picture the model drew
-// itself, while the policy has empty retries left, nothing visible was passed
-// on and the caller still waits. It waits the first backoff before saying yes.
+// a completion without text or a tool call, while the policy has empty
+// retries left, nothing visible was passed on and the caller still waits. It
+// waits the first backoff before saying yes. A picture the model drew itself
+// (ErrInlineImageOutput) is never sent again: it is the model's own choice,
+// billed as a generated image, and a repeat would only be billed again.
 func (retrying *Retrying) retriesEmpty(
 	ctx context.Context, request Request, completion Completion, err error, shown bool, empties int,
 ) bool {
-	empty := (err == nil && completion.Empty()) || errors.Is(err, ErrInlineImageOutput)
-	if !empty || shown || empties >= retrying.policy.EmptyRetries || ctx.Err() != nil {
+	if err != nil || !completion.Empty() || shown || empties >= retrying.policy.EmptyRetries || ctx.Err() != nil {
 		return false
 	}
 	if logger := retrying.policy.Logger; logger != nil {

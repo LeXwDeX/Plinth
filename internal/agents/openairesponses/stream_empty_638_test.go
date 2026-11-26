@@ -2,9 +2,12 @@ package openairesponses_test
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 )
@@ -92,14 +95,63 @@ func TestAPictureTheModelDrewItselfIsInlineImageOutput(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	// A picture beside a call or text is dropped; the rest is the answer.
+	// The stream is cut at the picture's first sign, so a call or text before
+	// it does not make the round an answer: what follows was never read.
 	withCall := frames(
-		"response.output_item.added", `{"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","status":"in_progress"}}`,
-		"response.output_item.done", `{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"c1","name":"lookup_note","arguments":"{}"}}`,
+		"response.output_item.done", `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"c1","name":"lookup_note","arguments":"{}"}}`,
+		"response.output_item.added", `{"type":"response.output_item.added","output_index":1,"item":{"type":"image_generation_call","status":"in_progress"}}`,
 	) + oversizedCompleted()
 	adapter, _ := scripted(t, http.StatusOK, "text/event-stream", withCall)
-	completion, err := adapter.Stream(ctx, agents.Request{Model: "gpt-astra", Messages: userHello, Tools: lookup}, nil)
-	if err != nil || len(completion.ToolCalls) != 1 {
-		t.Fatalf("with a call: %#v %v", completion, err)
+	if _, err := adapter.Stream(ctx, agents.Request{Model: "gpt-astra", Messages: userHello, Tools: lookup}, nil); !errors.Is(err, agents.ErrInlineImageOutput) {
+		t.Fatalf("with a call: %v", err)
+	}
+}
+
+// #638: the picture is billed as a generated image and its result runs to
+// megabytes, so the Adapter stops reading and drops the connection at the
+// first image_generation_call sign instead of downloading the rest. The
+// upstream here sends the item added, then holds the stream open: the call
+// returns at once, and the upstream sees its client go away.
+func TestAPictureTheModelDrawsItselfCutsTheStream(t *testing.T) {
+	for name, opening := range map[string]string{
+		"item added": frames("response.output_item.added",
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","status":"in_progress"}}`),
+		"progress event": frames("response.image_generation_call.generating",
+			`{"type":"response.image_generation_call.generating","output_index":0}`),
+	} {
+		gone := make(chan struct{})
+		rest := make(chan bool, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, opening)
+			w.(http.Flusher).Flush()
+			select {
+			case <-r.Context().Done():
+				close(gone)
+				rest <- false
+			case <-time.After(5 * time.Second):
+				// Only an Adapter still reading gets the picture.
+				_, _ = io.WriteString(w, frames("response.output_item.done",
+					`{"type":"response.output_item.done","output_index":0,"item":{"type":"image_generation_call","result":"AAAA"}}`))
+				rest <- true
+			}
+		}))
+		adapter := newAdapter(t, server.URL, &recorder{}, nil)
+		started := time.Now()
+		_, err := adapter.Stream(ctx, agents.Request{Model: "gpt-astra", Messages: userHello}, nil)
+		if !errors.Is(err, agents.ErrInlineImageOutput) || time.Since(started) > 2*time.Second {
+			t.Fatalf("%s: after %s: %v", name, time.Since(started), err)
+		}
+		select {
+		case <-gone:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: the upstream never saw the connection dropped", name)
+		}
+		if <-rest {
+			t.Fatalf("%s: the rest of the stream was sent", name)
+		}
+		server.Close()
 	}
 }

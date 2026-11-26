@@ -42,8 +42,8 @@ func (adapter *answersInTurn) Complete(context.Context, agents.Request) (agents.
 // call; only its thinking signal, no usage) is sent again EmptyRetries times,
 // apart from the transient attempts; the retry's answer is the round's. Still
 // empty after them, the empty completion is returned for the caller to end the
-// turn on. A picture the model drew itself counts as empty; a round that
-// showed text, a policy without empty retries and Complete are sent once.
+// turn on. A picture the model drew itself, a round that showed text, a policy
+// without empty retries and Complete are sent once.
 func TestAnEmptyAnswerIsSentAgainWithinTheEmptyRetries(t *testing.T) {
 	thought := []agents.Delta{{Thinking: true}}
 	empty := answer{deltas: thought, completion: agents.Completion{ReasoningContent: "r"}}
@@ -79,10 +79,12 @@ func TestAnEmptyAnswerIsSentAgainWithinTheEmptyRetries(t *testing.T) {
 		t.Fatalf("empty then transient: %d calls, %#v %v", mixed.calls, completion, err)
 	}
 
+	// A picture the model drew itself is billed as a generated image: it is
+	// returned at once, never sent again (#638).
 	picture := &answersInTurn{answers: []answer{{err: agents.ErrInlineImageOutput}, called}}
-	if completion, err := agents.NewRetrying(picture, policy).Stream(context.Background(), hello("go"), sink); err != nil ||
-		len(completion.ToolCalls) != 1 || picture.calls != 2 {
-		t.Fatalf("inline picture: %d calls, %#v %v", picture.calls, completion, err)
+	if _, err := agents.NewRetrying(picture, policy).Stream(context.Background(), hello("go"), sink); !errors.Is(err, agents.ErrInlineImageOutput) ||
+		picture.calls != 1 {
+		t.Fatalf("inline picture: %d calls, %v", picture.calls, err)
 	}
 
 	shown := &answersInTurn{answers: []answer{{deltas: []agents.Delta{{Content: "  "}}, completion: agents.Completion{Content: "  "}}, called}}

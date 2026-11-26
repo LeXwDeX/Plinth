@@ -5378,9 +5378,11 @@ type ChatAgentRetrySchema struct {
 	// backoff and the Retry-After.
 	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
 	// EmptyResponseRetries is how many times a streamed Agent round that
-	// answered with no text and no tool call (or only with a picture the model
-	// drew itself) is sent again, apart from MaxAttempts (#638). 0 sends it
-	// once; the turn then ends with the empty_response end reason.
+	// answered with no text and no tool call is sent again, apart from
+	// MaxAttempts (#638). 0 sends it once; the turn then ends with the
+	// empty_response end reason. A round in which the model drew a picture
+	// itself is never sent again (it is billed as a generated image): the turn
+	// ends with the inline_image end reason.
 	EmptyResponseRetries int `json:"empty_response_retries,omitempty"`
 }
 

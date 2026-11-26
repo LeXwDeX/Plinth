@@ -18,13 +18,17 @@ type turnOutcome struct {
 	// empty is a turn whose last model round answered with no text and no
 	// tool call, also after its retry (#638).
 	empty bool
+	// inlineImage is a turn a model round of which drew a picture itself
+	// instead of calling a generation tool (#638).
+	inlineImage bool
 }
 
 // turnEndReason tells why a finished turn ended, by one fixed priority: failed,
-// background, stopped, empty response, awaiting approval, completed. A turn
+// background, stopped, inline image, empty response, awaiting approval,
+// completed. A turn
 // that failed stays an error however it also looks; a stop or a background end
-// is what the person chose; a turn whose model answered with nothing did not
-// end as the model meant it to (#638); a turn that left an approval card is
+// is what the person chose; a turn whose model drew a picture itself or
+// answered with nothing did not end as the model meant it to (#638); a turn that left an approval card is
 // waiting for the person.
 // A reply has no tool call limit (#553), so no turn ends for spending one.
 func (orchestrator *Orchestrator) turnEndReason(
@@ -40,6 +44,8 @@ func (orchestrator *Orchestrator) turnEndReason(
 		return TurnEndBackground
 	case outcome.stopped:
 		return TurnEndStopped
+	case outcome.inlineImage:
+		return TurnEndInlineImage
 	case outcome.empty:
 		return TurnEndEmptyResponse
 	}
