@@ -4388,8 +4388,9 @@ type ChatThreeViewMessages struct {
 	// arguments do not have the declared shape, and the step was not approved
 	// (a refusal on the card, a stopped turn or an expired card all deny the
 	// grant, so Denied names none of them). They are the Agent's recovery
-	// guidance, so they live here, not in code. Optional: a Catalog without
-	// them borrows the nearest declared text (fillThreeViewMessageFallbacks).
+	// guidance, so they live here, not in code. Optional for a Catalog written
+	// before #665: a missing one takes a declared text of the same meaning or
+	// the built-in Catalog's (fillThreeViewMessageFallbacks).
 	TurnStopped      string `json:"turn_stopped,omitempty"`
 	ModelUnavailable string `json:"model_unavailable,omitempty"`
 	ImageUnavailable string `json:"image_unavailable,omitempty"`
@@ -4399,7 +4400,7 @@ type ChatThreeViewMessages struct {
 	// DuplicateRun refuses a second group of the same source picture while
 	// an earlier group of the session still waits on its card or runs
 	// (#665): nothing new is created, submitted or charged. Fields: {run}.
-	// Optional: a Catalog without it borrows AdmissionFull.
+	// Optional: a Catalog without it takes the built-in Catalog's.
 	DuplicateRun      string `json:"duplicate_run,omitempty"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`

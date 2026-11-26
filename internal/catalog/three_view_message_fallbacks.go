@@ -1,15 +1,27 @@
 package catalog
 
+import (
+	"encoding/json"
+	"sync"
+)
+
 // fillThreeViewMessageFallbacks gives the three-view texts #665 added a value
 // when a Catalog does not declare them. The rule for keys added to a released
 // Schema is that a Catalog written for an earlier release still loads (see
-// dropRetiredFields; multiview_model_unavailable and budget_plan_inactive
-// fall back the same way), and product copy stays in the Schema: an empty
-// text takes the nearest text that Catalog already declares, never a string
-// in Go. Translations are looked up by the default-language text, so the
-// borrowed text keeps the locale copies of its source. It runs before
-// validation, which still requires every one of them; a Catalog without the
-// three-view recipe is left alone.
+// dropRetiredFields), and product copy stays in the Schema, never a string in
+// Go. A missing text takes, in order:
+//
+//   - a text the same Catalog declares with the same meaning (a stopped turn,
+//     arguments of the wrong shape, asking for one picture again), so its
+//     wording and locale copies stay the Catalog's own; or
+//   - the same key of the built-in Catalog document (default_catalog.json),
+//     which is data shipped with the release and must declare every one of
+//     them (TestDefaultCatalogDeclaresThe665ThreeViewTexts). A text with
+//     another meaning is never borrowed: a refusal to start is not a queue
+//     timeout, and a denied grant is not "the person refused".
+//
+// It runs before validation, which still requires every one of them; a
+// Catalog without the three-view recipe is left alone.
 func fillThreeViewMessageFallbacks(application *ApplicationSchema) {
 	if application == nil {
 		return
@@ -31,18 +43,32 @@ func fillThreeViewMessageFallbacks(application *ApplicationSchema) {
 			}
 		}
 	}
+	builtIn := builtInThreeViewMessages()
 	// Nothing submitted because the turn stopped.
-	fallback(&messages.TurnStopped, presentation.TurnStopped)
+	fallback(&messages.TurnStopped, presentation.TurnStopped, builtIn.TurnStopped)
 	// The arguments do not have the declared shape.
-	fallback(&messages.ArgumentsInvalid, presentation.ToolArgumentsInvalid)
-	// The session's model cannot draw the views: the turn-start refusal of a
-	// model that takes no several views, else the generic refusal.
-	fallback(&messages.ModelUnavailable, presentation.MultiviewModelUnavailable, presentation.InvalidParameters)
+	fallback(&messages.ArgumentsInvalid, presentation.ToolArgumentsInvalid, builtIn.ArgumentsInvalid)
 	// The chosen picture cannot be used: ask for one picture again.
-	fallback(&messages.ImageUnavailable, messages.ReferenceRequired)
-	// The step was not approved: the late-decision text of a refusal.
-	fallback(&messages.Denied, chat.PendingApprovals.Messages.Denied)
-	// An earlier group of the same picture is still going: nothing was
-	// submitted or charged, and the person continues on the card.
-	fallback(&messages.DuplicateRun, messages.AdmissionFull)
+	fallback(&messages.ImageUnavailable, messages.ReferenceRequired, builtIn.ImageUnavailable)
+	// No text of the Catalog says these to the Agent; the release's own.
+	fallback(&messages.ModelUnavailable, builtIn.ModelUnavailable)
+	fallback(&messages.Denied, builtIn.Denied)
+	fallback(&messages.DuplicateRun, builtIn.DuplicateRun)
 }
+
+// builtInThreeViewMessages reads the three-view texts of the built-in Catalog
+// document once. It decodes only that object, so it does not depend on the
+// whole document loading (LoadDefault itself goes through Load).
+var builtInThreeViewMessages = sync.OnceValue(func() ChatThreeViewMessages {
+	var document struct {
+		Application struct {
+			Chat struct {
+				ThreeView struct {
+					Messages ChatThreeViewMessages `json:"messages"`
+				} `json:"three_view"`
+			} `json:"chat"`
+		} `json:"application"`
+	}
+	_ = json.Unmarshal(defaultCatalog, &document)
+	return document.Application.Chat.ThreeView.Messages
+})
