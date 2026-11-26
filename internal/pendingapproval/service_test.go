@@ -937,6 +937,12 @@ func TestSweepPostsTheExpiryOnceAndKeepsTheApprovalRefused(t *testing.T) {
 	if w.gateway.distinctTasks() != 0 {
 		t.Fatal("a task was created")
 	}
+	// #665: the grant does not stay pending behind the expired card; the
+	// system denied it as expired.
+	if stored, err := w.repo.GetExecutionGrant(context.Background(), "owner-a", grant.RequestID); err != nil ||
+		stored.Status != executiongrant.Denied || !stored.ExpiredUndecided() {
+		t.Fatalf("grant after the expiry = %+v err=%v, want denied as expired", stored, err)
+	}
 }
 
 // Defect 1: a Stop that won the race against the detach ends in a visible state.

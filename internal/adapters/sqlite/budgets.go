@@ -1143,9 +1143,10 @@ func (r *Repository) ApproveExecutionGrantWithBudget(ctx context.Context, owner,
 		return executiongrant.Grant{}, err
 	}
 	stamp := formatTime(now)
+	// A stopped turn's own grant is never approved by its plan either (#665).
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants
  SET status = 'approved', decided_by = ?, decided_at = ?, updated_at = ?
- WHERE request_id = ? AND owner_id = ? AND status = 'pending'`,
+ WHERE request_id = ? AND owner_id = ? AND status = 'pending' AND `+turnOwnsStoppedGrantNot,
 		actor, stamp, stamp, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, err

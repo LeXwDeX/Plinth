@@ -383,6 +383,19 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 
 验证：`internal/chat/agenttools/crop_test.go`（返回图片 URL、逐项尺寸与提示、不可呈现时不写任何资产；#642 按出厂上限整块裁出 4096×4096 画板中的 4096×2302、超过工具上限仍拒绝并在文案里写出上限）、`internal/chat/orchestrator_crop_presented_test.go`（真实裁图工具、`find_history_images` 与 `refine_image` 串成一回合：最终消息带四张 `crop` 角色附件 `@img2`–`@img5`，结果逐项带句柄，同回合查历史能列出、`reference_handles` 能解析；一张未通过附件校验时 Agent 读到 `not_presented`）、`internal/chat/references/item_reference_test.go`（裁图 crop 角色）、`internal/catalog/chat_image_crop_schema_test.go`、`src/components/chat/chat-message-crops.test.tsx`。未在 dev-test 部署验收。
 
+### Agent 付费步骤的批准规则（#665；源码已实现，本机 Go 测试覆盖，未部署验收）
+
+- **Agent 发起的步骤。** `executiongrant.Grant.AgentOriginated()` 把两类授权都算作 Agent 的步骤：Agent 自己工具的授权（`AgentPending`），以及 Agent 建的处理计划的步骤授权（计划以 `HumanBrowser` 申请，只有 Agent 计划的步骤带预算资格 `BudgetEligible`，#120）。人在面板上自己发起的步骤不在其列。
+- **重复扣费守卫（#294）覆盖全部入口。** `executiongrant.Service.Recharge` 在每次按批准方式决定 Agent 发起的步骤时调用；应用装配把它接到 `generationtool.UnstoredChargedTasks`（本会话、同一能力、上游已扣费但结果没入库且之后无人处理的 Task）。命中时任何批准方式（含自动、预算与 3D 步数）都不批准，授权留给人在卡片上决定：三视图首张与续出、Agent 处理计划步骤都适用。生成工具在此之前按自己更宽的能力集合判断，结果一致。
+- **额外花费与无法定价。** 手动方式下额外积分由人确认的规则从 `AgentPending` 扩到全部 Agent 发起的步骤（含 Agent 计划步骤）；按积分计费、却既没有估价也没有原生报价的 Agent 步骤在手动成本阈值生效时等人确认，不再当作 0 积分放行。自动方式不变。
+- **一次决定，不因切换方式重判。** 生成工具已有 `PolicyEvaluated`；SkillRun（三视图）现在先由批准方式决定授权、再把授权记到步骤上（`Prepare` 对同一身份幂等，记录前重启会重做同一决定，那时卡片尚未出现）。步骤记下授权后，重放不再调用批准方式：严格方式下已出卡的视角，人改成自动或预算后也只由人批准。
+- **已停止回合的授权。** 批准方式、预算与 3D 步数的批准写入与人的批准一样带 `turnOwnsStoppedGrantNot` 条件，读方式与写入之间提交的 Stop 不会留下无法认领的已批准授权。
+- **永久拒绝释放预留。** `generation.RefusedBeforeSubmission`（原 `generationtool.KnownNotSubmitted` 的判定）与过期的 harness 让 `skillrun.Runtime.SubmitStep` 调 `AbandonBudgetReservation`，三视图视角的计划预留与 3D 步数不再一直占着。
+- **过期即拒绝。** 待批准卡片过期时，扫描先以 `executiongrant.ExpiredActor`（`system:approval_expired`，入审计）把授权改为拒绝，再发过期消息；之后的批准仍返回 `ErrExpired`。三视图步骤的授权不在待批准操作表里，这一步不处理它们（尚无扫描）。
+- **三视图。** 同一会话同一源图、同一配方已有在途或待批准的组时，`create_three_view` 不再新建第二组，回 Schema 的 `three_view.messages.duplicate_run`（同会话的新组创建在进程内串行）；`include_right` 只接受 JSON 布尔，其他类型返回工具错误。以自动方式开始的四视图请求在中途切出自动方式后，必需视角完成时停在右视图（`budget_not_covered`），不再报整组完成。
+- **处理计划修订。** 同一预案（contingency）只能插入一次；Agent 的 revise retry 对同一步最多 `processing.MaxAgentStepRetries` 次（处理计划工具 Schema 的 `processing.plan.revision.max_agent_retries_per_step` 与之对齐），超出由人决定，人的面板重试不计入。尚未做：修订计入 `max_generation_calls_per_turn`、计划创建按付费步数计数、replace 受已批准制作计划约束。
+- **装配失败即拒绝启动。** 生成工具缺任一授权端口（prepared gateway、操作存储、授权服务、停止读取）时 `app.New` 返回错误，不再退回无授权的旧提交路径。
+
 ### 凭据种类与个人访问 Key（#332；源码已实现，本机 Go 与前端测试覆盖；第 1–5 步已在 dev-test 验收，第 6 步的部署验收记录见 #332；管理端 API、每 Key 用量统计、整体开关与管理页面已实现，管理端未部署验收）
 
 - **凭据种类。** `access.Principal` 带一个明确的凭据种类（`access.Credential`）：`browser_session`（已登录的浏览器 Cookie）、`deployment_token`（`auth_mode=bearer` 的部署级静态令牌）、`development`（开发身份，以及非生产环境不带 Cookie 的 mock 用户）、`access_key`（个人访问 Key）；没有经过身份解析器构造的 Principal（测试等）种类为空，任何代码都不得把它当作真人。此前“是不是真人”由各路由自己看请求头判断，`taskHumanPrincipal`（真实 Cookie 且不带 `Authorization` 头）仍是需要真人的路由的判据，种类字段是额外的明确事实，不替代它。种类由 `authentication.Service.Identify`、`BearerIdentity`、`DevelopmentIdentity` 在构造 Principal 处设置。

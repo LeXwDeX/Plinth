@@ -248,6 +248,28 @@ func (m *Module) verifyPreparedTaskReplay(ctx context.Context, cmd SubmitPrepare
 // instead of waiting for a Task that cannot exist (#516).
 var ErrNotSubmitted = errors.New("generation: prepared input refused before any task was written")
 
+// RefusedBeforeSubmission reports whether a submit error is known to have
+// written no Task and to be refused again on replay of the same authorization:
+// ErrNotSubmitted, an overlapping conversion, or a code the kernel returns
+// before any write (invalid capability or input, unknown or missing Offering,
+// not found, forbidden, too many requests). A caller that holds an approved
+// grant gives its reservation back on such an error (#665); one with an
+// admission RetryAfter is retried instead (AdmissionRetryAfter).
+func RefusedBeforeSubmission(err error) bool {
+	if errors.Is(err, ErrConversionInProgress) || errors.Is(err, ErrNotSubmitted) {
+		return true
+	}
+	for _, code := range []ErrorCode{
+		ErrInvalidCapability, ErrInvalidInput, ErrUnknownOffering, ErrNoOffering,
+		ErrNotFound, ErrForbidden, ErrTooManyRequests,
+	} {
+		if IsCode(err, code) {
+			return true
+		}
+	}
+	return false
+}
+
 // refusedBeforeWrite is a SubmitPrepared refusal marked ErrNotSubmitted. The
 // Detail and Code stay what callers already read.
 func refusedBeforeWrite(code ErrorCode, detail string, cause error) *Error {

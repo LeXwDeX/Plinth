@@ -861,6 +861,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// An Agent approval stays approvable for the Schema's duration; after
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,
+		// #665: the recharge guard of #294 decides every Agent-originated
+		// step's policy approval (three-view views, their continuation and
+		// Agent processing-plan steps), not only the generation tools'.
+		Recharge: func(ctx context.Context, ownerID, sessionID, capability string) (string, error) {
+			unstored, err := generationtool.UnstoredChargedTasks(ctx, module, applicationSchema.Chat,
+				generation.OwnerID(ownerID), sessionID, []generation.Capability{generation.Capability(capability)})
+			if err != nil || len(unstored) == 0 {
+				return "", err
+			}
+			return string(unstored[0]), nil
+		},
 	}
 	// #410: collect the plans that finished while nothing settled — a
 	// deployment that was stopped when the last step succeeded, or a plan whose
@@ -1204,6 +1215,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		TaskStates:      applicationSchema.TaskStates,
 	})
 	if err != nil {
+		return nil, err
+	}
+	// #665: without the grant ports a generation tool would submit through the
+	// legacy path with no execution grant and no approval mode at all. A
+	// partially wired application must not start.
+	if err := requireExecutionGrants(toolExecutor); err != nil {
 		return nil, err
 	}
 	// A planned step is checked against the session purpose's budget by the
