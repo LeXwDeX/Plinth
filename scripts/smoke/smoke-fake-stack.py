@@ -1834,7 +1834,7 @@ def scenario_mcp(api, mcp_base):
     # A 2D task can finish while the cancel request travels, so retry a few
     # times; at least one cancellation must find the task still running.
     cancel_detail, cancel_id = {}, ""
-    for _attempt in range(3):
+    for _attempt in range(6):
         started_cancel = tasks.tool("generate_image", {"prompt": "cancel me", "asset": asset,
                                                        "idempotency_key": "mcp-cancel-" + uuid.uuid4().hex})
         cancel_id = (started_cancel.get("result") or {}).get("taskId") or ""
@@ -1842,7 +1842,8 @@ def scenario_mcp(api, mcp_base):
             continue
         cancel_status, _headers, cancel_raw = tasks.call("tasks/cancel", {"taskId": cancel_id})
         if cancel_status != 200:
-            break
+            # The task finished before the request arrived (the same race): try a new one.
+            continue
         try:
             cancel_result = json.loads(cancel_raw).get("result") or {}
         except (TypeError, ValueError):
@@ -3780,6 +3781,18 @@ def scenario_next_step(api):
            f"allow_prerequisites {saved.get('allow_prerequisites')} -> {after.get('allow_prerequisites')}")
     if not ok:
         return
+    # #645: the unrelated message of step (3) ended a turn that did not answer the card, so the card is superseded
+    # and can no longer be answered; the page does not show it either. A new card is opened to answer.
+    old_card = next((item for item in _choice_cards(api, session) if item.get("id") == card["id"]), {})
+    record("#645 next-step: an unrelated new message supersedes the pending card", old_card.get("state") == "superseded",
+           f"state={old_card.get('state')}")
+    finished, why = _next_step_turn(api, session, "再给我一个方向 " + marker)
+    fresh = [item for item in _choice_cards(api, session) if item.get("kind") == "next_step" and item.get("state") == "pending"]
+    if not (finished and fresh):
+        record("#374 next-step: a fresh card is open to answer", False, f"turn finished={finished} {why}; pending={len(fresh)}")
+        return
+    card = fresh[-1]
+    options = card.get("options") or []
     pick = options[0]
     template = messages.get("ui.chat.choice.answer_text") or "选择：{title}"
     finished, why = _next_step_turn(api, session, template.replace("{title}", pick.get("label") or pick["id"]),
@@ -3794,7 +3807,9 @@ def scenario_next_step(api):
     record("#374 next-step: the answer marks the card answered and reaches the Agent", ok,
            f"turn finished={finished} {why}; state={answered.get('state')} answer={answer} direction text sent to the LLM={told}")
 
-    # (5) with the selection clear the same call runs.
+    # (5) with the selection clear the same call runs. The fresh card's turn above called ask_choice again, so the
+    # baseline of the tools already called is read now.
+    called_fixed = _session_tool_names(api, session)
     finished, why = _next_step_turn(api, session, NEXT_STEP_BRIEF_REQUEST + NEXT_STEP_BRIEF_CALL)
     brief_free, called_free = _session_brief(api, session), _session_tool_names(api, session)
     ok = (finished and called_free[len(called_fixed):] == ["update_production_brief"]

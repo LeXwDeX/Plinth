@@ -630,6 +630,84 @@ func TestCropImageRegionsMapsServiceRefusals(t *testing.T) {
 	}
 }
 
+// boardPicture encodes a white board with one dark band, quickly enough for
+// 4K sizes.
+func boardPicture(t *testing.T, width, height int) []byte {
+	t.Helper()
+	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for index := range picture.Pix {
+		picture.Pix[index] = 255
+	}
+	for y := height / 4; y < height*3/4; y++ {
+		row := picture.Pix[y*picture.Stride : y*picture.Stride+width*4]
+		for x := 0; x < len(row); x += 4 {
+			row[x], row[x+1], row[x+2] = 40, 80, uint8(x/4) // alpha stays 255
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, picture); err != nil {
+		t.Fatal(err)
+	}
+	return encoded.Bytes()
+}
+
+// #642: the shipped tool limits are the tool's own, apart from the asset-list
+// decompose crop. The scene band of a 4096x4096 board (4096x2302, about 9.43
+// million pixels, over the decompose 4,000,000) is cut whole; a region over
+// the tool cap is still refused and the copy names the cap.
+func TestCropImageRegionsShippedLimitsCutAWhole4KBoardBand(t *testing.T) {
+	defaults, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := defaults.Application()
+	limits := application.Chat.ImageCrop.Limits
+	if application.AssetList.Decompose.Crop.MaximumRegionPixels >= 4096*2302 {
+		t.Fatalf("decompose crop cap = %d; it keeps its own smaller value",
+			application.AssetList.Decompose.Crop.MaximumRegionPixels)
+	}
+	configure := func(config *listcrop.Config) {
+		config.SourceMaxBytes = application.Chat.ImageMask.Limits.MaxBytes
+		config.SourceMaxPixels = application.Chat.ImageMask.Limits.MaxPixels
+		config.MinimumSide = application.AssetList.Decompose.Crop.MinimumShortEdge
+		config.MaximumRegionPixels = limits.MaximumRegionPixels
+		config.UploadMaxBytes = limits.MaximumPNGBytes
+	}
+	t.Run("4K board band", func(t *testing.T) {
+		fixture := newCropToolFixture(t, configure)
+		fixture.inputs.addInputAsset("owner-a", "source_1", "image", "image/png",
+			boardPicture(t, 4096, 4096))
+		result, err := fixture.tool.Execute(context.Background(), cropCommand("owner-a", "@img1",
+			`{"label":"scene","region":{"x":0,"y":0.2197265625,"width":1,"height":0.56201171875}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := decodeCrop[cropContentResult](t, result.AgentContent)
+		if !content.Success || len(content.Crops) != 1 ||
+			content.Crops[0].Width != 4096 || content.Crops[0].Height != 2302 {
+			t.Fatalf("content = %+v (%s)", content, result.AgentContent)
+		}
+	})
+	t.Run("over the tool cap", func(t *testing.T) {
+		fixture := newCropToolFixture(t, configure)
+		fixture.inputs.addInputAsset("owner-a", "source_1", "image", "image/png",
+			boardPicture(t, 5000, 4000))
+		result, err := fixture.tool.Execute(context.Background(), cropCommand("owner-a", "@img1",
+			`{"label":"all","region":{"x":0,"y":0,"width":1,"height":1}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		refusal := decodeCrop[cropRefusalResult](t, result.AgentContent)
+		if refusal.Success || refusal.Code != cropCodeImageTooLarge ||
+			!strings.Contains(refusal.Error, fmt.Sprint(limits.MaximumRegionPixels)) {
+			t.Fatalf("refusal = %+v, want image_too_large naming %d", refusal, limits.MaximumRegionPixels)
+		}
+		if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
+			t.Fatalf("uploads = %d; a refused batch must write nothing", len(uploads))
+		}
+	})
+}
+
 // #331: the executor dispatches the tool and an unwired executor refuses it
 // without a submission.
 func TestCropImageRegionsDispatchesThroughTheExecutor(t *testing.T) {

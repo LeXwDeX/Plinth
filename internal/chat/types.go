@@ -132,6 +132,12 @@ type TurnOptions struct {
 	// model; empty ReasoningEffort sends the model profile's default.
 	Model           string `json:"Model,omitempty"`
 	ReasoningEffort string `json:"ReasoningEffort,omitempty"`
+	// FollowUpReasoningEffort is the thinking level of the turn's rounds
+	// after its tool results came back, frozen with the turn (#638): the
+	// person's chosen level when the session has one, else the level the model
+	// profile declares for turn_efforts.tool_followup. Empty (a turn stored
+	// before it) sends ReasoningEffort; the first round always does.
+	FollowUpReasoningEffort string `json:"FollowUpReasoningEffort,omitempty"`
 	// ModelConnection is the connection that serves Model (#322 Scope 5);
 	// empty (a turn stored before it, or a deployment with one model) is the
 	// deployment's own connection.

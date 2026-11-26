@@ -1874,6 +1874,14 @@ func (r *Repository) DeleteMessage(
 			return true, false, err
 		}
 	}
+	if affected > 0 {
+		// #645: the cards the reply asked go with it, so no card stays open
+		// without the message it belongs to.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_choices WHERE owner_id = ? AND session_id = ? AND assistant_message_id = ?`,
+			ownerID, sessionID, messageID); err != nil {
+			return true, false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return true, false, err
 	}

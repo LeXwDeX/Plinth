@@ -4981,6 +4981,11 @@ type ChatAPIFields struct {
 	Multiview    string `json:"multiview,omitempty"`
 	FromID       string `json:"from_id"`
 	TurnCanceled string `json:"turn_canceled"`
+	// LastTurn is the repeated query member of a message deletion that
+	// replaces the last turn (#645, regenerate or edit and resend): the IDs
+	// of the turn's messages still to delete, this one included. The server
+	// deletes only when they are exactly the session's last turn now.
+	LastTurn string `json:"last_turn,omitempty"`
 	// TurnBackgrounded is the response member of the background-continue
 	// request (#137): true once the waiting turn was set to end without
 	// cancelling its Tasks. TurnBackgroundAvailable is the member of the
@@ -5377,6 +5382,28 @@ type ChatAgentRetrySchema struct {
 	// asks for a longer wait is not retried. The wait is the longer of the
 	// backoff and the Retry-After.
 	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
+	// EmptyResponseRetries is how many times a streamed Agent round that
+	// answered with no text and no tool call is sent again, apart from
+	// MaxAttempts (#638). 0 sends it once; the turn then ends with the
+	// empty_response end reason. A round in which the model drew a picture
+	// itself is never sent again (it is billed as a generated image): the turn
+	// ends with the inline_image end reason.
+	EmptyResponseRetries int `json:"empty_response_retries,omitempty"`
+}
+
+// ChatAgentQuotaMuteSchema is chat.agent.quota_mute (#640): how a gateway's
+// mute after a used-up quota is read. A gateway that saw a connection's
+// upstream refuse with a used-up quota (429 quota_exceeded) mutes the target
+// and answers later calls itself with HTTPStatus ("all targets muted until
+// ..."). Within WindowSeconds of the connection's last used-up quota, such an
+// answer whose body contains one of ContainsAny (case-insensitive) is the same
+// used-up quota, with the class it had: it is not retried, and the person reads
+// the quota text, not a generic failure. Outside the window, or without an
+// earlier used-up quota, it stays the transient status it is.
+type ChatAgentQuotaMuteSchema struct {
+	WindowSeconds int      `json:"window_seconds"`
+	HTTPStatus    int      `json:"http_status"`
+	ContainsAny   []string `json:"contains_any"`
 }
 
 // ChatAgentRequestPicturesSchema is chat.agent.request_pictures: every picture
@@ -5441,6 +5468,9 @@ type ChatAgentSchema struct {
 	// Retry is how a model call meets a transient failure (#509); absent: it
 	// is sent once.
 	Retry *ChatAgentRetrySchema `json:"retry,omitempty"`
+	// QuotaMute reads a gateway's mute after a used-up quota as that quota
+	// (#640); absent: such an answer stays transient.
+	QuotaMute *ChatAgentQuotaMuteSchema `json:"quota_mute,omitempty"`
 	// ConsentWaitTimeoutSeconds 界定一轮对话因等待用户批准决定而挂起的
 	// 最长时长（AGT-12：挂起不占 worker；由 orchestrator 消费，不得在
 	// 代码中硬编码）。
@@ -5623,6 +5653,9 @@ type ChatPromptReportSchema struct {
 	// TooLongTemplate is the refusal when OverLimit is "refuse". Fields:
 	// {model}, {length}, {maximum}, {excess}, {unit}.
 	TooLongTemplate string `json:"too_long_template"`
+	// UnitText is the {unit} word of both templates, in the default locale
+	// (#632). Empty keeps the historical "characters".
+	UnitText string `json:"unit_text,omitempty"`
 	// Layers labels each layer id. The layer ids are reference_template,
 	// previous_prompt_template, purposes_template, skill_template,
 	// style_lock, negative_prompt, truncation and prepared_input.
@@ -6548,6 +6581,9 @@ type ChatMessageTexts struct {
 	// ChoiceRejected one whose option the card does not offer (#321).
 	ChoiceAnswered string `json:"choice_answered"`
 	ChoiceRejected string `json:"choice_rejected"`
+	// NotLastTurn answers 409 to a last-turn replacement whose messages are no
+	// longer the session's last turn (#645): the page is out of date.
+	NotLastTurn string `json:"not_last_turn,omitempty"`
 	// BudgetPlanInactive answers 409 when a continuation is asked of a plan
 	// that is no longer the session's active one (#410): it was replaced by a
 	// newer plan, refused, or already completed. Empty falls back to
@@ -6723,6 +6759,12 @@ type ChatMessageTexts struct {
 	// after it had started streaming (#509): the person may send the message
 	// again. Optional: without it the unknown error is shown.
 	AgentUpstreamInterrupted string `json:"agent_upstream_interrupted,omitempty"`
+	// AgentEmptyResponse is what the reply says when a model round answered
+	// with no text and no tool call and its retry (chat.agent.retry.
+	// empty_response_retries) did not help (#638): the turn ends with the
+	// empty_response end reason instead of passing as completed. Optional:
+	// without it the no_result text is shown when the reply has nothing else.
+	AgentEmptyResponse string `json:"agent_empty_response,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The

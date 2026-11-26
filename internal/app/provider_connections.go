@@ -692,6 +692,9 @@ func buildChatAgentWithTransport(
 			}
 			// One client for both wires of the connection (#401), so a
 			// recorded or routed transport applies to every request.
+			// Both wires of the connection share one memory of its last
+			// used-up quota, which reads a gateway's later mute (#640).
+			quota := newChatQuotaMemory(chatExhaustedQuota(connection.ErrorMapping), schema.Chat.Agent.QuotaMute, nil)
 			client := wireHTTPClient(
 				httpTransport,
 				chatConnection.ID,
@@ -725,7 +728,7 @@ func buildChatAgentWithTransport(
 					Logger: logger,
 					// Every chat connection speaks the declared connection's
 					// protocol, so its error_mapping reads their refusals.
-					ExhaustedQuota: chatExhaustedQuota(connection.ErrorMapping),
+					ExhaustedQuota: quota.reader(),
 					// Every inline picture goes out in the declared format,
 					// with the chat layer's encodings shared (#555).
 					Pictures: pictures,
@@ -757,7 +760,7 @@ func buildChatAgentWithTransport(
 					},
 					ParallelToolCalls: schema.Chat.Agent.ParallelToolCalls,
 					Logger:            logger,
-					ExhaustedQuota:    chatExhaustedQuota(connection.ErrorMapping),
+					ExhaustedQuota:    quota.reader(),
 					Pictures:          pictures,
 				})
 				if err != nil {
@@ -901,6 +904,7 @@ func chatRetryPolicy(agent catalog.ChatAgentSchema, logger *slog.Logger) agents.
 		policy.InitialBackoff = time.Duration(retry.InitialBackoffMillis) * time.Millisecond
 		policy.MaxBackoff = time.Duration(retry.MaxBackoffMillis) * time.Millisecond
 		policy.MaxRetryAfter = time.Duration(retry.MaxRetryAfterSeconds) * time.Second
+		policy.EmptyRetries = retry.EmptyResponseRetries
 	}
 	return policy
 }

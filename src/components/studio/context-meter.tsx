@@ -3,6 +3,7 @@
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { useSessionReasoning } from '@/hooks/use-session-reasoning';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useSessionContext } from '@/hooks/use-session-context';
@@ -80,6 +81,8 @@ export function ContextMeter() {
     return state.toolCallCounts?.[id] ?? latestToolCallCount(state.messagesBySession?.[id] ?? []) ?? 0;
   });
   const { supported, canCompact, context, compacting, turnRunning, compact } = useSessionContext(activeSessionId);
+  // The thinking level the next turn sends (the user's pick, else the model's own default), as the picker holds it.
+  const { reasoning } = useSessionReasoning(activeSessionId);
   const settings = schema.chat.context_compaction;
   if (!supported || !settings) return null;
   const tokens = context?.tokens ?? null;
@@ -90,7 +93,10 @@ export function ContextMeter() {
   const visionTokens = context?.visionTokens ?? null;
   const visionTokenBudget = context?.visionTokenBudget ?? null;
   const visionImages = context?.visionBudget ?? null;
-  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn', toolCalls, { count: toolCalls });
+  // The counter row: "thinking level, tool calls". The level is always named: a model that offers none (or whose
+  // levels are not read yet) says so in the Schema's words instead of leaving it out.
+  const effort = reasoning?.effort || reasoning?.defaultLevel || schemaText(schema, 'ui.studio.reasoning.none_value');
+  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn_with_effort', toolCalls, { effort, count: toolCalls });
   const compactLabel = schemaText(schema, compacting ? 'ui.studio.context.compacting' : 'ui.studio.context.compact');
 
   const run = () => {

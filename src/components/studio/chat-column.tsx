@@ -28,7 +28,7 @@ import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
 import { SessionStepsBar } from '@/components/studio/session-steps-bar';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
-import { Composer, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
+import { Composer, type ComposerBoardMode, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
 import { SessionNotesPanel, sessionNotesText } from '@/components/workspace/session-notes-panel';
 import { applyChoiceAction } from '@/components/workspace/harness-choice-action';
 import { Action } from '@/components/ui/button';
@@ -70,7 +70,8 @@ import { isAutoTitlePending, pollAutoTitle } from '@/lib/chat/session-pages';
 import { nextStreamStatus } from '@/lib/chat/stream-status';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
 import { useReferenceSize } from '@/hooks/use-reference-size';
-import { canvasSnapshotClaim, currentObjectSource } from '@/lib/canvas/current-object';
+import { canvasSnapshotClaim } from '@/lib/canvas/current-object';
+import { boardInputSource, boardMode } from '@/lib/chat/board-mode';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
 import { inpaintGeometry, paintMask } from '@/lib/canvas/inpaint-export';
@@ -88,7 +89,7 @@ import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, latestReplies, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
 import { runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
@@ -133,7 +134,7 @@ import {
   type ChatImage,
   type ChatMessage as ChatMessageType,
 } from '@/store/chat-store';
-import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
+import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -210,7 +211,6 @@ function ResizeHandle({ width, label, onResize }: { width: number; label: string
 }
 
 /** 对话列：会话设定、消息与批准卡片、输入区。折叠成窄条时事件流照常接收。 */
-const NO_NODES: CanvasNode[] = [];
 
 /** The attachments being read or prepared for one visit. A count, so one paste finishing cannot unlock another. */
 interface PendingAttachmentReads {
@@ -432,6 +432,11 @@ export function ChatColumn() {
   const [pinnedPurpose, setPinnedPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // 「从这里继续」之后、发出之前：下一个版本接在这个版本后面（芯片可取消）。
   const [branchFrom, setBranchFrom] = useSessionState<{ key: string; label: string } | null>(null);
+  // #644 「以画板为主」: this message only, off by default and off again once it has left the box. A selection or
+  // mask on the board, `@画布` or 「发送到对话」 from the board turns it on (boardMode below).
+  const [boardModeChosen, setBoardModeChosen] = useSessionState(false);
+  const boardModeChosenRef = useRef(false);
+  boardModeChosenRef.current = boardModeChosen;
   const chipHandleRef = useRef('');
   const mentionsRef = useRef<MentionCandidate[]>([]);
   // What the `@` list entries were when picked: numbered names shift when a layer or attachment is removed.
@@ -486,16 +491,6 @@ export function ChatColumn() {
   // that takes references, so that is the one priced.
   const objectDeselected = sessionSelection != null && deselectedObject === objectKey(sessionSelection);
   const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectDeselected);
-  useEffect(() => {
-    if (!activeSessionId) return;
-    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected };
-    useStudioStore.getState().setGenerationReferenceContext(context);
-    return () => {
-      if (useStudioStore.getState().generationReferenceContext === context) {
-        useStudioStore.getState().setGenerationReferenceContext(null);
-      }
-    };
-  }, [activeSessionId, hasReference, objectDeselected]);
   const imageGeneration = useGenerationParams('image', activeSessionId, hasReference);
   const modelGeneration = useGenerationParams('model-3d', activeSessionId, hasReference);
   const generation = stageDomain === 'image' ? imageGeneration : modelGeneration;
@@ -1039,11 +1034,10 @@ export function ChatColumn() {
       // (which wins over the selection; the chip says so), leaves the object and the artboard out of the turn.
       const skipped = sessionObject != null
         && (deselectedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
-      // The Agent's current object is what the dashed artboard shows while the current picture's layer is in it:
-      // the artboard is rasterised at the chosen output pixels like every other delivery (export, send to chat,
-      // inpaint, merge) and uploaded as an input asset, even a lone untouched picture. #610: other pictures on
-      // the board without the current one (a version clicked on the strip), or no current picture, never make
-      // the board the turn's source; only @画布 or a painted mask send it then.
+      // #644: the board is the turn's source only on a canvas turn (以画板为主). Then the dashed artboard is
+      // rasterised at the chosen output pixels like every other delivery (export, inpaint, merge) and uploaded as
+      // an input asset. Every other turn works on the conversation (the current object's own picture, the
+      // attached pictures and the outputs) and the board takes no part: #610/#631 were the board leaking in.
       let canvasSelection: ChatAttachmentClaim[] | null = null;
       // Writing @画布 asks for the artboard itself: the same rasteriser, whatever the current object is.
       const namesBoard = reuseImages === undefined && mentionsBoard(written, mentionsRef.current);
@@ -1051,31 +1045,33 @@ export function ChatColumn() {
       const maskDraftNow = reuseImages === undefined && queuedSelection === undefined ? useMaskStore.getState().draft : null;
       const maskStrokesNow = maskDraftNow ? maskStrokeCount(maskDraftNow, sessionId) : 0;
       const withMask = maskStrokesNow > 0 && artboard !== null;
-      if (!queuedSelection && (namesBoard || withMask || !skipped) && artboard) {
-        const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard, sessionObject, proxyAssetUrl);
-        if (source === 'canvas') {
-          try {
-            // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
-            let boardNodes = useCanvasStore.getState().getNodes(sessionId);
-            const { url } = await exportAndUploadSnapshot({
-              flush: () => flushPendingEdits(sessionId),
-              exportPicture: () => {
-                boardNodes = useCanvasStore.getState().getNodes(sessionId);
-                return exportArtboardToBlob(boardNodes, schema.canvas, artboard, deliveryPixels);
-              },
-              upload: (picture) => uploadWorkspaceInputAsset(schema, picture, snapshotFilename(schema)),
-              maximumBytes: schema.runtime.input_assets.upload_max_bytes,
-            });
-            // #272: the claim says how many visible layers the snapshot flattens; the server measures its size.
-            canvasSelection = [canvasSnapshotClaim(url, boardNodes, artboard)];
-          } catch (error) {
-            // The draft stays in the box: nothing below clears it on this path.
-            const text = reportSnapshotFailure(schema, 'chat-send', error);
-            if (isCurrentSessionScope(scope)) toast.error(text);
-            return;
-          }
-          if (!isCurrentSessionScope(scope)) return;
+      // The toggle belongs to the box: a stage action, a card answer or a replayed round never picks it up.
+      const fromBox = reuseImages === undefined && queuedSelection === undefined && !choiceAnswer;
+      const boardTurn = boardMode({
+        chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,
+      }).on;
+      if (!queuedSelection && boardTurn && artboard) {
+        try {
+          // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
+          let boardNodes = useCanvasStore.getState().getNodes(sessionId);
+          const { url } = await exportAndUploadSnapshot({
+            flush: () => flushPendingEdits(sessionId),
+            exportPicture: () => {
+              boardNodes = useCanvasStore.getState().getNodes(sessionId);
+              return exportArtboardToBlob(boardNodes, schema.canvas, artboard, deliveryPixels);
+            },
+            upload: (picture) => uploadWorkspaceInputAsset(schema, picture, snapshotFilename(schema)),
+            maximumBytes: schema.runtime.input_assets.upload_max_bytes,
+          });
+          // #272: the claim says how many visible layers the snapshot flattens; the server measures its size.
+          canvasSelection = [canvasSnapshotClaim(url, boardNodes, artboard)];
+        } catch (error) {
+          // The draft stays in the box: nothing below clears it on this path.
+          const text = reportSnapshotFailure(schema, 'chat-send', error);
+          if (isCurrentSessionScope(scope)) toast.error(text);
+          return;
         }
+        if (!isCurrentSessionScope(scope)) return;
       }
       // #244: the mask is painted on the same artboard at the same delivery pixels, so a stroke lands on the
       // same pixel of the snapshot and of the mask. Upload it as an input asset; the server measures and freezes it.
@@ -1112,10 +1108,11 @@ export function ChatColumn() {
         selectionMask = { maskAssetId };
       }
       // #266: a turn that sends the artboard says so; the server binds that snapshot as the turn's source
-      // whatever the Agent names. A queued turn keeps the source it was queued with.
+      // whatever the Agent names. A queued turn keeps the source it was queued with. #644: only a canvas turn
+      // sends a snapshot, so every other turn goes out without an input source and the server keeps the board out.
       const inputSource = queuedSelection !== undefined
         ? queuedInputSource
-        : canvasSelection ? schema.chat.context.canvas_input_source : undefined;
+        : boardInputSource(canvasSelection !== null, schema.chat.context.canvas_input_source);
       const stageSelection = queuedSelection ?? canvasSelection ?? (skipped ? [] : buildChatSelection({
         sessionId,
         currentObject: sessionObject,
@@ -1195,6 +1192,8 @@ export function ChatColumn() {
           setCanvasReference(null);
           setAttachmentPurpose(null);
           setBranchFrom(null);
+          // #644: 以画板为主 is this message's; the next one starts off again.
+          setBoardModeChosen(false);
         }
         // Queued is accepted: the box and the draft are already spent.
         extra?.onSent?.();
@@ -1268,7 +1267,11 @@ export function ChatColumn() {
           if (replaceIds && replaceIds.length > 0) {
             const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
             try {
-              for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);
+              // #645: each deletion names the turn's messages still to delete; the server deletes only while they
+              // are its last turn, so a page that missed a newer turn gets a 409 and nothing is deleted.
+              for (const [index, id] of replaceIds.entries()) {
+                await chatClient.deleteMessage(sessionId, id, replaceIds.slice(index));
+              }
             } catch (error) {
               const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
               if (page) applyNewestMessagePage(sessionId, page);
@@ -1349,6 +1352,8 @@ export function ChatColumn() {
                 setCanvasReference(null);
                 setAttachmentPurpose(null);
                 setBranchFrom(null);
+                // #644: 以画板为主 is this message's; the next one starts off again.
+                setBoardModeChosen(false);
               }
             } else {
               void refreshChoices();
@@ -1471,6 +1476,7 @@ export function ChatColumn() {
       setAttachmentPurpose,
       setAttachmentPurposes,
       setBranchFrom,
+      setBoardModeChosen,
       canvasReference,
       hasCanvasReference,
       chatClient,
@@ -1604,9 +1610,11 @@ export function ChatColumn() {
 
   const timeline = useMemo(() => interleaveGroups(displayMessages, threeViews), [displayMessages, threeViews]);
   // #321: each choice card follows the assistant message that asked; an open one not on the page goes last.
+  // #645: an open card of a reply before the latest user message is not drawn (the person typed instead).
   const choicePlacement = useMemo(
-    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id)),
-    [sessionChoices.cards, displayMessages],
+    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id),
+      latestReplies(displayMessages, schema.chat.frontend.optimistic_assistant_message_id), answeringChoice),
+    [sessionChoices.cards, displayMessages, schema, answeringChoice],
   );
   // #327: a production list follows the message that proposed it; every other list goes to the end.
   const assetListCards = useMemo(
@@ -2116,22 +2124,12 @@ export function ChatColumn() {
     return previous && sameData(previous, next) ? previous : next;
   }, [sessionMessages]);
   handleReferencesRef.current = sessionHandleReferences;
-  const boardNodes = useCanvasStore((state) => (activeSessionId ? state.nodesBySession[activeSessionId] : undefined) ?? NO_NODES);
   const chip = useMemo((): ComposerChip | null => {
     if (!sessionSelection) return null;
     const tile = tileOfObject(versions, sessionSelection);
     // A picture drawn on the board that is no version has no chip; a merged version (手绘) is one.
     if (sessionSelection.taskId.startsWith('canvas:') && !tile) return null;
-    // The artboard holds the current picture's layer: the turn carries the whole artboard (#610: not when the
-    // board holds only other pictures; the chip then shows the picture the turn names).
-    if (artboard && currentObjectSource(boardNodes, artboard, sessionSelection, proxyAssetUrl) === 'canvas') {
-      return {
-        kind: 'image',
-        thumbnail: previewAssetUrl(sessionSelection.url),
-        label: schemaText(schema, 'ui.studio.composer.chip.canvas'),
-        handle: '',
-      };
-    }
+    // #644: the chip names the picture the turn works on; a canvas turn shows the board instead (composerChip).
     return {
       kind: sessionSelection.kind,
       // #290: chips are small; they show the preview of a task picture.
@@ -2141,7 +2139,7 @@ export function ChatColumn() {
       label: versionLabel(schema, tile, sessionSelection.kind),
       handle: sessionSelection.handle ?? handleOfObject(sessionMessages, sessionSelection),
     };
-  }, [artboard, boardNodes, previewAssetUrl, proxyAssetUrl, schema, sessionMessages, sessionSelection, versions]);
+  }, [previewAssetUrl, schema, sessionMessages, sessionSelection, versions]);
   // The branch chip belongs to the version it was made for: another version on the stage drops it.
   const branchChip = useMemo((): ComposerBranch | null => {
     if (!branchFrom || !sessionSelection || objectKey(sessionSelection) !== branchFrom.key) return null;
@@ -2214,6 +2212,39 @@ export function ChatColumn() {
     return withBoardMention(listed, artboard ? boardMentionCandidate(schemaText(schema, 'ui.studio.composer.mention.token_board')) : null);
   }, [artboard, attachedImages, canvasNodes, canvasReference, hasCanvasReference, pendingSources, schema, sessionMessages, versions.tiles]);
   mentionsRef.current = mentionList;
+  // #644: what the next message is sent as. The same rule the send reads, so the toggle never shows one thing
+  // while the message goes out as another; a canvas turn shows the board as the chip.
+  const boardTurnNow = boardMode({
+    chosen: boardModeChosen, artboard: artboard !== null, maskSteps: maskStrokes, namesBoard: mentionsBoard(input, mentionList),
+  });
+  const composerChip = useMemo((): ComposerChip | null => (boardTurnNow.on && chip?.kind === 'image'
+    ? { kind: 'image', thumbnail: chip.thumbnail, label: schemaText(schema, 'ui.studio.composer.chip.canvas'), handle: '' }
+    : chip), [boardTurnNow.on, chip, schema]);
+  const composerBoardMode = useMemo((): ComposerBoardMode | null => (artboard === null ? null : {
+    on: boardTurnNow.on,
+    forced: boardTurnNow.forced,
+    onToggle: () => setBoardModeChosen((current) => !current),
+  }), [artboard, boardTurnNow.forced, boardTurnNow.on, setBoardModeChosen]);
+  // The composer's context for the next turn's settings and the canvas size notice (use-canvas-artboard): whether
+  // a picture rides along, and whether the board is the turn's source (#644: only a canvas turn).
+  const boardTurnOn = boardTurnNow.on;
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected, boardTurn: boardTurnOn };
+    useStudioStore.getState().setGenerationReferenceContext(context);
+    return () => {
+      if (useStudioStore.getState().generationReferenceContext === context) {
+        useStudioStore.getState().setGenerationReferenceContext(null);
+      }
+    };
+  }, [activeSessionId, boardTurnOn, hasReference, objectDeselected]);
+  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644).
+  const boardModeRequest = useWorkspaceStore((state) => state.boardModeRequest);
+  useEffect(() => {
+    if (!boardModeRequest || boardModeRequest !== activeSessionId) return;
+    useWorkspaceStore.getState().clearBoardModeRequest();
+    setBoardModeChosen(true);
+  }, [activeSessionId, boardModeRequest, setBoardModeChosen]);
   const mentions = useMemo((): ComposerMention[] => mentionList.map((candidate) => {
     let thumbnail = '';
     if (candidate.kind === 'image') {
@@ -2376,6 +2407,7 @@ export function ChatColumn() {
                   <ChatMessage
                     message={item.message}
                     taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}
+                    statusBubbleShown={statusBubbleShown(isStreaming, statusText, runningTaskCount)}
                     sessionId={activeSessionId}
                     onImageClick={openImageDetail}
                     handleReferences={sessionHandleReferences}
@@ -2552,7 +2584,8 @@ export function ChatColumn() {
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}
-            chip={objectDeselected ? null : chip}
+            chip={objectDeselected ? null : composerChip}
+            boardMode={composerBoardMode}
             onDeselectChip={() => {
               if (sessionSelection) setDeselectedObject(objectKey(sessionSelection));
             }}

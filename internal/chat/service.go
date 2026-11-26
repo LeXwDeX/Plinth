@@ -51,6 +51,9 @@ var (
 	ErrTurnCheckpointConflict      = errors.New("chat: turn checkpoint conflict")
 	ErrInvalidApprovalMode         = errors.New("chat: invalid approval mode")
 	ErrInvalidAgentScope           = errors.New("chat: invalid agent scope")
+	// ErrNotLastTurn refuses a last-turn replacement (#645) whose messages
+	// are not exactly the session's last turn: the page is out of date.
+	ErrNotLastTurn = errors.New("chat: messages are not the session's last turn")
 	// ErrItemSessionApprovalMode refuses an approval-mode write to an
 	// asset-list item sub-session (#328): its mode is derived from the list
 	// workflow, not chosen by a person.
@@ -1381,13 +1384,17 @@ func (service *Service) startTurn(
 	// The model is the session's choice while the administrator offers it,
 	// else the default (#322 Scope 5); the level falls back to what that
 	// model offers.
-	model, effort, err := service.TurnModel(ctx, command.OwnerID, command.SessionID)
+	model, effort, chosen, err := service.turnModelChoice(ctx, command.OwnerID, command.SessionID)
 	if err != nil {
 		return Message{}, err
 	}
 	command.Options.Model = model.Model
 	command.Options.ModelConnection = model.ID
 	command.Options.ReasoningEffort = effort
+	// The rounds after tool results think less unless the person chose the
+	// level (#638); frozen with the turn like the level itself.
+	profile, _ := service.models.Profile(model.Model)
+	command.Options.FollowUpReasoningEffort = profile.EffortForFollowUp(effort, chosen, model.EffortLevels)
 	// The thinking contract of the model is frozen with the turn for the same
 	// reason (#377): the reasoning of a tool loop is only ever sent back to the
 	// connection, model, wire and kind it came from, and a Catalog that changed
@@ -1664,6 +1671,22 @@ func (service *Service) answerChoice(ctx context.Context, command StartTurn, mes
 	return err
 }
 
+// SupersedeStaleChoices ends the cards an earlier reply left open when the
+// person's own turn ends (#645). The person typed a new message instead of
+// answering: during the turn the cards stay pending, so the Agent can still map
+// the typed text to one (ChoiceAnsweredByAgent); whatever it did not map is
+// superseded at the end, whether the turn completed, failed or was stopped.
+// Only cards created no later than the turn started are touched, never the
+// turn's own. A server-started turn (a plan continuation, a production-list
+// item) is not the person's message and leaves the cards alone.
+func (service *Service) SupersedeStaleChoices(ctx context.Context, turn Turn) error {
+	if service.choices == nil || turn.Options.PlanContinuation != "" || turn.Options.AssetListItemID != "" ||
+		turn.CreatedAt.IsZero() {
+		return nil
+	}
+	return service.choices.SupersedeChoicesBefore(ctx, turn.OwnerID, turn.SessionID, turn.AssistantMessageID, turn.CreatedAt)
+}
+
 // SetAttachmentVerifier installs the verifier of structured attachment claims.
 // Application assembly calls it once, before the service takes requests,
 // because the verifier needs the reference resolver that is built after it.
@@ -1785,6 +1808,62 @@ func (service *Service) DeleteMessage(
 		return ErrMessageNotFound
 	}
 	return nil
+}
+
+// DeleteLastTurnMessage deletes one message of the turn the person replaces
+// (#645: regenerate, or edit and resend). lastTurn names the messages of that
+// turn still to delete, this one included; they must be exactly the session's
+// last turn now: its last user message and every message after it. A page that
+// is out of date (a newer turn, an extra reply it never read) is refused with
+// ErrNotLastTurn and nothing is deleted. The check and the deletion hold the
+// session's stream lock, so no turn starts between them.
+func (service *Service) DeleteLastTurnMessage(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+	messageID string,
+	lastTurn []string,
+) error {
+	expected := map[string]bool{}
+	for _, id := range lastTurn {
+		if id = strings.TrimSpace(id); id != "" {
+			expected[id] = true
+		}
+	}
+	if !expected[messageID] {
+		return ErrNotLastTurn
+	}
+	unlock, err := service.lockStreamSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// The tail can only match when it is at most len(expected) long, so one
+	// more message is enough to see the user message that opens it.
+	page, err := service.repository.ListMessagesPage(ctx, ownerID, sessionID, MessageListQuery{Limit: len(expected) + 1})
+	if err != nil {
+		return err
+	}
+	start := -1
+	for index := len(page.Messages) - 1; index >= 0; index-- {
+		if page.Messages[index].Role == service.userRole {
+			start = index
+			break
+		}
+	}
+	if start < 0 {
+		return ErrNotLastTurn
+	}
+	tail := page.Messages[start:]
+	if len(tail) != len(expected) {
+		return ErrNotLastTurn
+	}
+	for _, message := range tail {
+		if !expected[message.ID] {
+			return ErrNotLastTurn
+		}
+	}
+	return service.DeleteMessage(ctx, ownerID, sessionID, messageID)
 }
 
 func (service *Service) UpdateMessage(

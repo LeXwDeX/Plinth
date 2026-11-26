@@ -31,7 +31,17 @@ func choiceRepository(t *testing.T) (*sqlite.Repository, string) {
 			t.Fatal(err)
 		}
 	}
+	// A card is read only while the reply that asked it exists (#645).
+	insertReply(t, repo, "owner-a", "session-a", "turn-1", now)
 	return repo, path
+}
+
+func insertReply(t *testing.T, repo *sqlite.Repository, owner, session, id string, at time.Time) {
+	t.Helper()
+	if _, err := repo.InsertMessageIfAbsent(context.Background(), owner,
+		chat.Message{ID: id, SessionID: session, Role: "assistant", Content: "reply", CreatedAt: at}, at); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func sampleChoice(call string) chat.Choice {

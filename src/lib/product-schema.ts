@@ -1694,6 +1694,8 @@ export interface ChatProductSchema {
       selection_mask?: string;
       from_id: string;
       turn_canceled: string;
+      /** #645: the repeated query member naming the last turn's messages still to delete when it is replaced. */
+      last_turn?: string;
       /** #137: the background-continue response and availability members. */
       turn_backgrounded?: string;
       turn_background_available?: string;
@@ -1911,6 +1913,10 @@ export interface ChatProductSchema {
       stopped: string;
       background: string;
       error: string;
+      /** #638: a model round answered with nothing, also after its retry. */
+      empty_response: string;
+      /** #638: a model round drew a picture itself; it was dropped, not retried. */
+      inline_image: string;
     };
     placeholder_stale_milliseconds: number;
     failed_prompt_preview_characters: number;

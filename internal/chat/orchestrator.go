@@ -1369,6 +1369,7 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.Model = turn.Options.Model
 	command.Options.ModelConnection = turn.Options.ModelConnection
 	command.Options.ReasoningEffort = turn.Options.ReasoningEffort
+	command.Options.FollowUpReasoningEffort = turn.Options.FollowUpReasoningEffort
 	// And so is the thinking contract the turn started with: a turn recovered
 	// after a restart must keep the wire, the kind and the passback rule it ran
 	// on, not the ones today's Catalog declares for its model (#377).
@@ -1444,6 +1445,15 @@ func (orchestrator *Orchestrator) Process(
 	// backgroundFinalized means the turn ended with its Tasks still running
 	// (#137); a stop requested later must not cancel them.
 	backgroundFinalized := false
+	// emptyReply means the last model round answered with no text and no tool
+	// call, also after the adapter layer's empty retry (#638): the turn ends
+	// with the empty_response reason and says so, never as completed.
+	emptyReply := false
+	// inlineImageReply means a model round drew a picture itself instead of
+	// calling a generation tool (#638). The Adapter cut that stream and nothing
+	// sends it again (the picture is billed as a generated image); the turn
+	// ends with the inline_image reason and says so.
+	inlineImageReply := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1585,14 +1595,22 @@ func (orchestrator *Orchestrator) Process(
 				finishCtx,
 				command.AssistantMessageID,
 				orchestrator.turnEndReason(finishCtx, command, assistant, turnOutcome{
-					failed:     failedTurn,
-					background: backgroundFinalized,
-					stopped:    stopFinalized,
+					failed:      failedTurn,
+					background:  backgroundFinalized,
+					stopped:     stopFinalized,
+					empty:       emptyReply,
+					inlineImage: inlineImageReply,
 				}),
 			),
 		)
 		if err := finishErr; processErr == nil && err != nil {
 			processErr = err
+		}
+		// #645: the cards of an earlier reply the Agent did not map this
+		// turn's typed message to are no longer open.
+		if err := orchestrator.service.SupersedeStaleChoices(finishCtx, turn); err != nil && orchestrator.logger != nil {
+			orchestrator.logger.Warn("收尾时失效旧选项卡失败", "session_id", command.SessionID,
+				"assistant_message_id", command.AssistantMessageID, "error", err)
 		}
 	}()
 	// #137: the person stopped waiting and let the Tasks run on. This comes
@@ -1730,6 +1748,12 @@ func (orchestrator *Orchestrator) Process(
 				return round.receive(delta, streamFilter)
 			},
 		)
+		if errors.Is(err, agents.ErrInlineImageOutput) && !orchestrator.turnCanceled(turnKey) && ctx.Err() == nil {
+			// #638: not a failure of the turn, and not to be repeated: the
+			// reply says the model drew a picture itself.
+			orchestrator.noteInlineImage(command, err)
+			inlineImageReply, completion, err = true, agents.Completion{}, nil
+		}
 		if err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -1757,6 +1781,7 @@ func (orchestrator *Orchestrator) Process(
 			)
 		}
 		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage, request)
+		emptyReply = !inlineImageReply && orchestrator.noteEmptyReply(command, completion, 0)
 		if err := streamFilter.Flush(round.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2039,6 +2064,12 @@ func (orchestrator *Orchestrator) Process(
 			completion,
 			toolContent,
 		)
+		// #638: a round after tool results sends the turn's follow-up level
+		// (the person's choice, else the profile's tool_followup level); the
+		// first round of the turn kept the turn's own level.
+		if level := command.Options.FollowUpReasoningEffort; level != "" {
+			followUp.ReasoningEffort = level
+		}
 		// 续跑流同样要过滤 DSML：模型可能在总结中继续发起调用。
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		followUpRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
@@ -2075,13 +2106,19 @@ func (orchestrator *Orchestrator) Process(
 				"assistant_message_id", command.AssistantMessageID,
 				"error", streamErr,
 			)
-			if len(assistant.ImageURLs) == 0 && toolErr == nil {
+			if errors.Is(streamErr, agents.ErrInlineImageOutput) {
+				// #638: the reply so far stays; it says the model drew a
+				// picture itself, and the turn is not failed.
+				orchestrator.noteInlineImage(command, streamErr)
+				inlineImageReply = true
+			} else if len(assistant.ImageURLs) == 0 && toolErr == nil {
 				failed = true
 			}
 			followUpErr = streamErr
 			break
 		}
 		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage, followUp)
+		emptyReply = orchestrator.noteEmptyReply(command, next, effectiveRound+1)
 		if err := streamFilter.Flush(followUpRound.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2100,7 +2137,26 @@ func (orchestrator *Orchestrator) Process(
 		// 模型不再"失忆"重复已执行的工具调用。
 		request = followUp
 	}
-	if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
+	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
+	inlineText, _ := orchestrator.agentInlineImageMessage(ctx, agents.ErrInlineImageOutput)
+	if inlineImageReply && inlineText != "" {
+		note := orchestrator.withErrorReference(ctx, inlineText, assistant.ID)
+		if assistant.Content == "" {
+			assistant.Content = note
+		} else {
+			assistant.Content += "\n\n" + note
+		}
+	} else if emptyReply && emptyText != "" {
+		// #638: the model's last round said nothing, also after its retry.
+		// What the turn wrote and did before it stays; the reply says the
+		// model stopped answering, so the person can regenerate it.
+		note := orchestrator.withErrorReference(ctx, emptyText, assistant.ID)
+		if assistant.Content == "" {
+			assistant.Content = note
+		} else {
+			assistant.Content += "\n\n" + note
+		}
+	} else if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
 		assistant.Content = orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.NoResult)
 		// #120: a follow-up refused for a used-up balance or quota says so
 		// instead of asking for a retry that cannot succeed.
@@ -4081,6 +4137,45 @@ func (orchestrator *Orchestrator) agentInterruptedMessage(ctx context.Context, e
 		return "", false
 	}
 	return orchestrator.text(ctx, text), true
+}
+
+// agentInlineImageMessage is the Schema text for a chat model round that drew
+// a picture itself instead of answering or calling a tool (#638); false for
+// any other error.
+func (orchestrator *Orchestrator) agentInlineImageMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentInlineImageOutput
+	if text == "" || !errors.Is(err, agents.ErrInlineImageOutput) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
+}
+
+// noteInlineImage logs a model round that drew a picture itself (#638): the
+// Adapter cut its stream, and the turn ends on it without sending it again.
+func (orchestrator *Orchestrator) noteInlineImage(command ProcessTurn, err error) {
+	orchestrator.logger.Warn(
+		"对话模型自己画了图（未调用生成工具），已断开该轮且不重发，回合以 inline_image 结束",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"error", err,
+	)
+}
+
+// noteEmptyReply reports a model round that answered with no text and no tool
+// call, also after the adapter layer's empty retry (#638), and logs it: such
+// a round ends the turn, and the turn must not pass as completed.
+func (orchestrator *Orchestrator) noteEmptyReply(command ProcessTurn, completion agents.Completion, round int) bool {
+	if !completion.Empty() {
+		return false
+	}
+	orchestrator.logger.Warn(
+		"对话模型本轮返回空回复（无文字、无工具调用），回合以 empty_response 结束",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"round", round,
+		"usage_reported", completion.Usage != nil,
+	)
+	return true
 }
 
 // agentQuotaExhaustedMessage is the Schema text for an Agent request the

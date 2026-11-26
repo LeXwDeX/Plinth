@@ -566,6 +566,10 @@ func TestLegacyAssetRulesAndErrorsComeFromProductSchema(t *testing.T) {
 			nil,
 			func(application *catalog.ApplicationSchema) {
 				application.Runtime.InputAssets.UploadMaxBytes = 1 << 20
+				// #642: the crop tool's PNG cap may not exceed the upload cap, so it follows the lowered limit.
+				if application.Chat.ImageCrop.Limits.MaximumPNGBytes > 1<<20 {
+					application.Chat.ImageCrop.Limits.MaximumPNGBytes = 1 << 20
+				}
 				application.Runtime.InputAssets.ModelProfile.Limits.MaxBytes = 1 << 20
 				application.Runtime.InputAssets.ModelProfile.Limits.MaxJSONBytes = 1 << 20
 				application.Content.Messages["error.legacy_asset_upload_too_large"] = "Schema 限制 {limit}"

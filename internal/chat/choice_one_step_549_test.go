@@ -68,6 +68,7 @@ func openOneStepService(t *testing.T) (*chat.Service, context.Context) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1", "turn-2")
 	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{directionChoiceKind(), oneStepNextStepKind()}
 		config.ChoiceMaxOptions = 8
@@ -230,6 +231,12 @@ func (store *answeredChoices) ListChoices(context.Context, string, string, int) 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return append([]chat.Choice(nil), store.choices...), nil
+}
+
+// SupersedeChoicesBefore is the end of every person's turn (#645); these
+// cards are answered on the card, so it changes nothing.
+func (store *answeredChoices) SupersedeChoicesBefore(context.Context, string, string, string, time.Time) error {
+	return nil
 }
 
 // stepToolExecutor records every tool really run; paid calls get a Task.

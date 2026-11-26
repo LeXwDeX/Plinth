@@ -1,6 +1,9 @@
 package catalog
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // ProfileFor returns the first vendor profile whose prefix the model name
 // starts with, case-insensitively; none while thinking is off or nil.
@@ -50,8 +53,10 @@ func (profile ChatThinkingModelProfile) EffortFor(chosen string) string {
 	return profile.DefaultEffort
 }
 
-// The kinds of request that are not a conversation turn and so take the level
-// turn_efforts declares instead of the session's choice (#382).
+// The kinds of request that take the level turn_efforts declares (#382): the
+// requests beside a conversation turn, which never take the session's choice,
+// and a turn's own tool follow-up rounds, which take it only when the person
+// chose a level (#638).
 const (
 	// ChatTurnEffortTitle is the first turn's title request.
 	ChatTurnEffortTitle = "title"
@@ -59,7 +64,17 @@ const (
 	ChatTurnEffortSummary = "summary"
 	// ChatTurnEffortPromptEnhance is a prompt-enhancer request.
 	ChatTurnEffortPromptEnhance = "prompt_enhance"
+	// ChatTurnEffortToolFollowup is a conversation turn's round after its tool
+	// results came back (#638): the model mostly reads what a read-only check
+	// or an Offering list returned and picks the next call, so it needs far
+	// less thinking than the round that answered the person's message.
+	ChatTurnEffortToolFollowup = "tool_followup"
 )
+
+// chatTurnEffortKinds are the kinds turn_efforts may name.
+var chatTurnEffortKinds = []string{
+	ChatTurnEffortTitle, ChatTurnEffortSummary, ChatTurnEffortPromptEnhance, ChatTurnEffortToolFollowup,
+}
 
 // EffortForTurn is the level a request of a kind that is not a conversation
 // turn sends: the level turn_efforts declares for the kind when the profile
@@ -78,6 +93,24 @@ func (profile ChatThinkingModelProfile) EffortForTurn(kind string) string {
 		}
 	}
 	return profile.DefaultEffort
+}
+
+// EffortForFollowUp is the level a tool follow-up round of a turn sends
+// (#638), for a turn whose own level is turnLevel. A level the person chose
+// for the session is kept for every round of the turn. Otherwise the round
+// takes the level turn_efforts declares for tool_followup when the profile
+// offers it (and offered, when not empty, the levels the administrator opened
+// for the model, lists it); a profile that declares none keeps turnLevel.
+func (profile ChatThinkingModelProfile) EffortForFollowUp(turnLevel string, chosen bool, offered []string) string {
+	if chosen || !profile.OffersEffort() {
+		return turnLevel
+	}
+	level, declared := profile.TurnEfforts[ChatTurnEffortToolFollowup]
+	if !declared || !slices.Contains(profile.EffortLevels, level) ||
+		(len(offered) > 0 && !slices.Contains(offered, level)) {
+		return turnLevel
+	}
+	return level
 }
 
 // Wire is the HTTP API the model family is served on: chat_completions unless

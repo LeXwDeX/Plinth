@@ -369,6 +369,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 - **提示词**：#554 起系统提示词与领域上下文一律取运行中的 Catalog；自定义文档没有同步 #549、#550 对系统提示词、制作要领与 `ask_choice` 说明的修改时，Agent 按自定义文档里的旧文本工作。
 - Catalog revision 本批次统一为 `2026-11-24.19.20`。回滚到旧镜像时同时换回升级前的那份自定义 Catalog。本汇总由集成分支按升级前默认 Catalog 逐项加载核对得出，尚未在 dev-test 验收，记录见 Issue #518。
 
+**升级说明：裁图工具的独立上限（#642）。** 没有数据库迁移。`application.chat.image_crop.limits` 是可选段：自定义 `CATALOG_FILE` 缺了照常启动，裁图工具退回拆解上限（400 万像素），4K 画板仍不能整块裁；建议照抄本版本默认 Catalog 补上。声明时两项都要给：`maximum_region_pixels` 在 4096 到 `chat.image_mask.limits.max_pixels` 之间，`maximum_png_bytes` 在 1 到 `runtime.input_assets.upload_max_bytes` 之间，否则 Catalog 校验失败、进程拒绝启动。`application.asset_list.decompose.crop` 不变，仍只约束清单裁图编辑。回滚到旧镜像时同时换回升级前的那份自定义 Catalog。尚未在 dev-test 验收，记录见 Issue #642。
+
 ## 7. 冒烟失败后的手工回滚
 
 自动回滚只覆盖发布脚本内的失败。冒烟失败且已有前一版本时（首次 bootstrap 版本没有前一版本，只能停止服务并保留现场）：

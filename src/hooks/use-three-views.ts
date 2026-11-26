@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { ChatBrowserError, createChatBrowserClient } from '@/lib/chat/browser-client';
 import { schemaText } from '@/lib/product-schema';
 import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
+import { forgetPendingAdvance, rememberPendingAdvance, settlePendingAdvances } from '@/lib/workspace/three-view-pending';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { groupsAreActive, remainingSlots, slotAction, slotReplaceable, viewLabelOfTask, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
 import { createLineageRefreshGate, type LineageWatch } from '@/lib/workspace/lineage-refresh';
@@ -37,7 +38,13 @@ export function useThreeViews() {
     {
       revalidateOnFocus: false,
       keepPreviousData: false,
-      refreshInterval: (latest) => (groupsAreActive(latest) ? schema.chat.frontend.fallback_poll_milliseconds : 0),
+      // #636: a start this tab sent before a reload may still be taken by the server; it is read until the view
+      // moves or the page's own limit for starting a view (the queue limit) runs out. Unloaded data says nothing.
+      refreshInterval: (latest) => {
+        const pending = latest !== undefined && Boolean(sessionId)
+          && settlePendingAdvances(sessionId as string, latest, Date.now(), threeViewQueueLimitMs(schema)).length > 0;
+        return groupsAreActive(latest) || pending ? schema.chat.frontend.fallback_poll_milliseconds : 0;
+      },
     },
   );
   // #618: a group is made by a turn (or a step approved after it), not by this page, so with no group in flight
@@ -65,6 +72,8 @@ export function useThreeViews() {
   /** `${runId}:${slotKey}` of views waiting for a free admission slot; they resubmit on their own. */
   const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set());
   const aborter = useRef<AbortController | null>(null);
+  /** Bumped when a start is left with the server unanswered, so the page renders and its polling looks again (#636). */
+  const [, setUnanswered] = useState(0);
 
   // 会话切换或卸载时中止所有排队等待，定时器随之清掉。
   useEffect(() => {
@@ -87,9 +96,23 @@ export function useThreeViews() {
     const controller = aborter.current;
     if (!controller) return null;
     setBusy(busyKey);
+    const pending = { sessionId, runId: group.runId, slotKey: slot.key };
     try {
       const next = await advanceWithQueue({
-        call: () => chat.advanceThreeView(sessionId, group.runId, slot.key, action, slot.attempt),
+        // #636: remembered while the request is out; an answer (even a refusal) means the server is no longer
+        // taking it, a lost connection does not.
+        call: async () => {
+          rememberPendingAdvance({ ...pending, action, attempt: slot.attempt, at: Date.now() });
+          try {
+            const answer = await chat.advanceThreeView(sessionId, group.runId, slot.key, action, slot.attempt);
+            forgetPendingAdvance(pending);
+            return answer;
+          } catch (error) {
+            if (error instanceof ChatBrowserError) forgetPendingAdvance(pending);
+            else setUnanswered((count) => count + 1);
+            throw error;
+          }
+        },
         onQueued: () => {
           // 排队中不占用 busy，其它视图仍可开始；本视图由 queued 禁用按钮。
           setQueued((current) => new Set(current).add(busyKey));

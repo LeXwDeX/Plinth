@@ -29,7 +29,7 @@ func endReasonOrchestratorForInternal(t *testing.T, tools ToolExecutor, logger *
 	t.Helper()
 	service := newChatServiceForInternal(t)
 	service.turnEndReasons = catalog.ChatTurnEndReasonsSchema{
-		Completed: "c", AwaitingApproval: "a", Stopped: "s", Background: "b", Error: "e",
+		Completed: "c", AwaitingApproval: "a", Stopped: "s", Background: "b", Error: "e", EmptyResponse: "x", InlineImage: "i",
 	}
 	schema := suspendTestSchema()
 	orchestrator, err := NewOrchestrator(OrchestratorConfig{

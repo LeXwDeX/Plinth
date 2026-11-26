@@ -248,6 +248,11 @@ func TestACardAnswerNamesTheService(t *testing.T) {
 	h.gateway.tasks["bang-big"] = bigBangResult(h)
 	h.gateway.tasks["rodin-1"] = rodinOriginal(h)
 	ctx := context.Background()
+	// A card is read only while the reply that asked it exists (#645).
+	if _, err := repo.InsertMessageIfAbsent(ctx, "owner-a", chat.Message{ID: "turn-0", SessionID: "session-a",
+		Role: "assistant", Content: "reply", CreatedAt: time.Now().UTC()}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	stored, err := repo.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-0",
 		CallID: "call-0", ToolName: "process_model", Capability: "mesh-segmentation", StepIndex: -1,
 		Options: []chat.ChoiceOption{

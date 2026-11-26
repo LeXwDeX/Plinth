@@ -140,6 +140,7 @@ func TestUsageProfileCardOffersTheDefaultPurpose(t *testing.T) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 
 	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"}}
@@ -187,6 +188,7 @@ func TestUsageProfileCardWithoutADeclaredDefaultHasNoDefault(t *testing.T) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"}}
 	if _, err := service.AskChoice(ctx, command, usageProfileKind(), chat.AskChoiceArguments{Kind: "usage_profile"}); err != nil {
@@ -222,6 +224,7 @@ func TestAskChoiceBuildsAUsageProfileCardAndTheBriefSettlesIt(t *testing.T) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	command := chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
@@ -362,6 +365,7 @@ func TestBriefSettlesTheUsageProfileKindDeclaredByTheSchema(t *testing.T) {
 		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{kind}
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	if _, err := service.AskChoice(ctx, chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
@@ -708,9 +712,15 @@ func TestImageUsageProfileCardAndBriefSettlement(t *testing.T) {
 		config.ChoiceMaxOptions = 8
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
+	seedReplies(t, repository, "owner-a", "session-b", "turn-1-session-b")
 	commandFor := func(session, call string) chat.ToolCommand {
+		reply := "turn-1"
+		if session != "session-a" {
+			reply = "turn-1-" + session
+		}
 		return chat.ToolCommand{
-			OwnerID: "owner-a", SessionID: session, AssistantMessageID: "turn-1",
+			OwnerID: "owner-a", SessionID: session, AssistantMessageID: reply,
 			Call: agents.ToolCall{ID: call, Name: "ask_choice"},
 		}
 	}
@@ -804,6 +814,7 @@ func TestDirectionCardTakesBoundedAgentOptions(t *testing.T) {
 		config.ChoiceMaxOptions = 3
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	command := chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
@@ -889,6 +900,7 @@ func TestConceptDirectionCardCarriesSketchArgumentsAndThumbnails(t *testing.T) {
 		})
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	command := chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
 		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
@@ -1003,6 +1015,7 @@ func openNextStepService(t *testing.T) (*chat.Service, context.Context) {
 		config.HarnessOperations = nextStepOperations()
 	})
 	service.SetChoices(repository, 20)
+	seedReplies(t, repository, "owner-a", "session-a", "turn-1")
 	return service, ctx
 }
 

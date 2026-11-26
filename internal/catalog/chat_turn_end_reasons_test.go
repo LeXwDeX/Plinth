@@ -8,7 +8,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// #328: the shipped Schema names the six turn end reasons, with a distinct
+// #328, #638: the shipped Schema names the seven turn end reasons, with a distinct
 // non-empty string each, and publishes them with the chat state strings.
 func TestShippedCatalogDeclaresDistinctTurnEndReasons(t *testing.T) {
 	c, err := catalog.LoadDefault()
@@ -24,6 +24,7 @@ func TestShippedCatalogDeclaresDistinctTurnEndReasons(t *testing.T) {
 	for name, value := range map[string]string{
 		"completed": reasons.Completed, "awaiting_approval": reasons.AwaitingApproval,
 		"stopped": reasons.Stopped, "background": reasons.Background, "error": reasons.Error,
+		"empty_response": reasons.EmptyResponse, "inline_image": reasons.InlineImage,
 	} {
 		if strings.TrimSpace(value) == "" || seen[value] {
 			t.Fatalf("turn end reason %s = %q is empty or repeated", name, value)
@@ -45,7 +46,7 @@ func TestShippedCatalogDeclaresDistinctTurnEndReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	published := decoded.Chat.State.TurnEndReasons
-	if len(published) != 5 || published["completed"] != reasons.Completed ||
+	if len(published) != 7 || published["empty_response"] != reasons.EmptyResponse || published["inline_image"] != reasons.InlineImage || published["completed"] != reasons.Completed ||
 		published["awaiting_approval"] != reasons.AwaitingApproval || published["stopped"] != reasons.Stopped ||
 		published["background"] != reasons.Background || published["error"] != reasons.Error {
 		t.Fatalf("published turn end reasons = %v", published)
@@ -88,6 +89,8 @@ func TestTurnEndReasonsAreNeverPartialOrRepeated(t *testing.T) {
 		"stopped empty":           {func(r *catalog.ChatTurnEndReasonsSchema) { r.Stopped = "" }, "turn_end_reasons.stopped"},
 		"background empty":        {func(r *catalog.ChatTurnEndReasonsSchema) { r.Background = "" }, "turn_end_reasons.background"},
 		"error empty":             {func(r *catalog.ChatTurnEndReasonsSchema) { r.Error = "" }, "turn_end_reasons.error"},
+		"empty_response empty":    {func(r *catalog.ChatTurnEndReasonsSchema) { r.EmptyResponse = "" }, "turn_end_reasons.empty_response"},
+		"inline_image empty":      {func(r *catalog.ChatTurnEndReasonsSchema) { r.InlineImage = "" }, "turn_end_reasons.inline_image"},
 		"completed repeated":      {func(r *catalog.ChatTurnEndReasonsSchema) { r.Error = r.Completed }, "重复"},
 		"stopped repeated":        {func(r *catalog.ChatTurnEndReasonsSchema) { r.Background = r.Stopped }, "重复"},
 	} {

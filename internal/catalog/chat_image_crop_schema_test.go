@@ -98,8 +98,21 @@ func TestDefaultCatalogDeclaresImageCropContracts(t *testing.T) {
 			t.Fatalf("English bundle lacks %s", key)
 		}
 	}
+	// #642: the tool cuts a whole 4096x4096 board; the decompose crop keeps
+	// its own smaller cap.
+	if crop.Limits.MaximumRegionPixels < 4096*4096 || crop.Limits.MaximumPNGBytes <= 0 ||
+		application.AssetList.Decompose.Crop.MaximumRegionPixels >= crop.Limits.MaximumRegionPixels {
+		t.Fatalf("image_crop.limits = %+v, decompose crop = %+v",
+			crop.Limits, application.AssetList.Decompose.Crop)
+	}
 	if err := catalog.ValidateApplicationSchema(application); err != nil {
 		t.Fatalf("default image crop schema invalid: %v", err)
+	}
+	// An older Catalog without the section still loads; the tool then keeps
+	// the decompose crop limits.
+	application.Chat.ImageCrop.Limits = catalog.ChatImageCropLimits{}
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("image crop schema without limits invalid: %v", err)
 	}
 }
 
@@ -136,6 +149,20 @@ func TestImageCropSchemaRejectsIncompleteDeclarations(t *testing.T) {
 		"missing not presented detail": func(application *catalog.ApplicationSchema) string {
 			application.Chat.ImageCrop.Texts.NotPresented = "not shown"
 			return "{detail}"
+		},
+		// #642: the tool's own crop caps stay within the source decode bound
+		// and the input-asset storage cap.
+		"half-declared caps": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Limits.MaximumRegionPixels = 0
+			return "chat.image_crop.limits.maximum_region_pixels"
+		},
+		"region cap over the source decode bound": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Limits.MaximumRegionPixels = application.Chat.ImageMask.Limits.MaxPixels + 1
+			return "chat.image_crop.limits.maximum_region_pixels"
+		},
+		"PNG cap over the upload cap": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Limits.MaximumPNGBytes = application.Runtime.InputAssets.UploadMaxBytes + 1
+			return "chat.image_crop.limits.maximum_png_bytes"
 		},
 	}
 	for name, mutate := range cases {

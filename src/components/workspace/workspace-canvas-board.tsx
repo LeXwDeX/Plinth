@@ -753,25 +753,13 @@ export function WorkspaceCanvasBoard() {
       }
       return;
     }
-    let url: string;
-    try {
-      // #286: saved edits, export and upload each say when they fail, and are reported with their step.
-      ({ url } = await exportAndUploadSnapshot({
-        flush: () => flushPendingEdits(sessionID),
-        exportPicture: () => rasteriseBoard(sessionID),
-        upload: (picture) => uploadBlob(picture, filename),
-        maximumBytes: schema.runtime.input_assets.upload_max_bytes,
-      }));
-    } catch (error) {
-      const text = reportSnapshotFailure(schema, 'board-to-chat', error);
-      if (isCurrentSessionScope(scope)) toast.error(text);
-      return;
-    }
-    if (!isCurrentSessionScope(scope)) return;
-    // Sending to the chat only attaches the picture to the next message; the stage object stays.
-    useWorkspaceStore.getState().queueChatAttachments([url]);
+    // #644: sending the board to the chat makes the next message a canvas turn (以画板为主). The board is
+    // rasterised when that message is sent, like every canvas turn, so it goes out as the board is then and
+    // with the canvas turn's layout, mask and size rules; it is no longer attached as a plain upload. The stage
+    // object stays.
+    useWorkspaceStore.getState().requestBoardMode(sessionID);
     useStudioStore.getState().setChatCollapsed(false);
-  }, [exportFilename, loadedSessionID, rasteriseBoard, schema, sessionID, ui.exportFailed, uploadBlob]);
+  }, [exportFilename, loadedSessionID, rasteriseBoard, sessionID, ui.exportFailed]);
 
   /**
    * Stamp the visible layers (Photoshop's "stamp visible"): the artboard is rasterised like any other

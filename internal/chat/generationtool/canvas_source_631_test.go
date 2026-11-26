@@ -58,14 +58,54 @@ func TestCanvasTurnBoardStillLeadsWhenItHoldsMoreThanTheNamedPicture(t *testing.
 			}
 		})
 	}
-	// The Agent naming nothing, or another picture only, keeps the board too.
+	// A one-layer board of a picture the session does not show keeps the board
+	// whatever the Agent names.
 	rig := newPurposeRig(t, 4)
-	rig.run(t, chat.ToolCommand{Options: boardOf(rig, 1, "task-pose")}, `{"prompt":"p","reference_handles":["@img7"]}`)
-	if got := rig.resolver.urls; !slices.Equal(got, []string{"/api/v1/input-assets/board", "/api/v1/input-assets/outfit"}) {
-		t.Fatalf("frozen references = %v; want the board first", got)
+	rig.run(t, chat.ToolCommand{Options: boardOf(rig, 1, "task-other")}, `{"prompt":"p"}`)
+	if got := rig.resolver.urls; !slices.Equal(got, []string{"/api/v1/input-assets/board"}) {
+		t.Fatalf("frozen references = %v; want the board alone", got)
 	}
-	rig = newPurposeRig(t, 4)
-	rig.run(t, chat.ToolCommand{Options: boardOf(rig, 1, "task-pose")}, `{"prompt":"p"}`)
+}
+
+// #631 (1.9.1, PROD): the board holds nothing but version v1 and the Agent
+// named the board's own handle (@img9), or nothing at all, or only another
+// picture. The board is that version: its picture asset is sent in the
+// snapshot's place, so the result descends from v1 ("from 2D v1") and no
+// 4096 upload of the snapshot joins the strip. A purpose stated for the board
+// handle numbers the version picture.
+func TestCanvasTurnBoardOfOneVersionLayerIsThatVersion(t *testing.T) {
+	const pose, outfit = "/api/v1/tasks/task-pose/assets/pose", "/api/v1/input-assets/outfit"
+	for name, test := range map[string]struct {
+		arguments string
+		want      []string
+		purpose   string
+	}{
+		"board handle":         {`{"prompt":"p","reference_handles":["@img9"],"reference_purposes":{"@img9":"the pouch"}}`, []string{pose}, "the pouch"},
+		"board and version":    {`{"prompt":"p","reference_handles":["@img9","@img3"]}`, []string{pose}, ""},
+		"nothing named":        {`{"prompt":"p"}`, []string{pose}, ""},
+		"another picture only": {`{"prompt":"p","reference_handles":["@img7"]}`, []string{pose, outfit}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newPurposeRig(t, 4)
+			rig.run(t, chat.ToolCommand{Options: boardOf(rig, 1, "task-pose")}, test.arguments)
+			if got := rig.resolver.urls; !slices.Equal(got, test.want) {
+				t.Fatalf("frozen references = %v; want %v", got, test.want)
+			}
+			if test.purpose != "" {
+				if got := rig.submittedPrompt(t); got != rig.expectedPrompt(rig.item("1", test.purpose), "p") {
+					t.Fatalf("prompt = %q; the board purpose must number the version", got)
+				}
+			}
+		})
+	}
+	// A version Task with several pictures cannot tell which one the layer is:
+	// the snapshot is sent as it is.
+	rig := newPurposeRig(t, 4)
+	history := poseAndOutfitHistory(rig.schema)
+	history[1].ImageURLs = append(history[1].ImageURLs, "/api/v1/tasks/task-pose/assets/pose-b")
+	history[1].Attachments = append(history[1].Attachments, chat.Attachment{Handle: "@img4", Kind: chat.AttachmentKindImage,
+		Role: chat.AttachmentRoleGenerated, TaskID: "task-pose", AssetID: "pose-b", ImageSlot: 2})
+	rig.run(t, chat.ToolCommand{History: history, Options: boardOf(rig, 1, "task-pose")}, `{"prompt":"p"}`)
 	if got := rig.resolver.urls; !slices.Equal(got, []string{"/api/v1/input-assets/board"}) {
 		t.Fatalf("frozen references = %v; want the board alone", got)
 	}

@@ -43,7 +43,8 @@ func (invalidity *ImageInvalidity) Error() string { return ErrImageInvalid.Error
 func (invalidity *ImageInvalidity) Is(target error) bool { return target == ErrImageInvalid }
 
 // ErrInlineImageOutput marks a reply in which the Agent model drew a picture
-// itself (delta.images) instead of answering in text or calling a generation
+// itself (delta.images on Chat Completions, an image_generation_call item on
+// Responses, #638) instead of answering in text or calling a generation
 // tool. The picture is not kept, so the person is told to retry or switch the
 // conversation model rather than reading an unknown error.
 var ErrInlineImageOutput = errors.New("agent model answered with a picture of its own instead of text or a tool call")
@@ -329,6 +330,14 @@ type Completion struct {
 	// Usage is what the upstream reported for this request; nil when it
 	// reported nothing (#322).
 	Usage *Usage `json:",omitempty"`
+}
+
+// Empty reports a completion that said nothing the reply can hold: no visible
+// text and no tool call (#638). Its reasoning and its usage do not count: a
+// round that only thought, or whose terminal event was lost with its usage, is
+// still empty.
+func (completion Completion) Empty() bool {
+	return strings.TrimSpace(completion.Content) == "" && len(completion.ToolCalls) == 0
 }
 
 // WithoutReasoning is a completion with its reasoning dropped, for what a turn
