@@ -348,8 +348,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   },
   registerTask: (input) =>
     set((state) => {
-      // A task the person cleared with X stays cleared when the history is read again (#651).
-      if ((input.restored || input.listed) && isDismissedTask(input.taskId)) return state;
+      // A task the person cleared with X stays cleared when the history is read again (#651), and when a stream
+      // replayed from its first event registers it again (#665). Task IDs are never reused: a new task, a retry or a
+      // rerun has its own, so only a task already cleared on this device is skipped.
+      if (isDismissedTask(input.taskId)) return state;
       const known = state.trackedTasks.find((task) => task.taskId === input.taskId);
       if (known) {
         // #375: the first registration wins, except for the session. A task the history
@@ -435,7 +437,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         trackedTasks: patchTask(state.trackedTasks, taskId, (task) => ({
           ...task,
           state: patch.state ?? task.state,
-          // A replayed older event never lowers the progress already shown.
+          // A replayed older event never lowers the progress already shown. The floor is the last value written: the
+          // polled task detail writes its progress as it is, so a retried attempt starts again from the detail's.
           progress: patch.progress === undefined ? task.progress : Math.max(task.progress, patch.progress),
           liveError: patch.error ?? task.liveError,
           terminal: patch.terminal ?? task.terminal,

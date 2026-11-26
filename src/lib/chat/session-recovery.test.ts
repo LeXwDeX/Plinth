@@ -21,6 +21,7 @@ function fixture(sessionId = 'session-a') {
   });
   const onLoading = vi.fn();
   const onLoadError = vi.fn();
+  const onGaveUp = vi.fn();
   // The recoverer reads only the newest page; each fixture response is a whole conversation.
   const pageQueries: Array<{ before?: string; limit: number }> = [];
   const listMessagePage = (id: string, query: { before?: string; limit: number }, signal?: AbortSignal) => {
@@ -29,9 +30,9 @@ function fixture(sessionId = 'session-a') {
   };
   const start = () => recoverChatSession({
     sessionId, client: { listMessagePage }, pageSize: 50, connect, pollMilliseconds: 500,
-    onLoading, onLoadError,
+    onLoading, onLoadError, onGaveUp,
   });
-  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError };
+  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError, onGaveUp };
 }
 
 describe('history session recovery', () => {
@@ -182,6 +183,22 @@ describe('history session recovery', () => {
     expect(f.listMessages.mock.calls.length).toBe(reads);
     expect(reads).toBeLessThan(60);
     expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
+    // #665: the page is told once that the reads stopped, so it can say so and offer to read again.
+    expect(f.onGaveUp).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('#665: a reply that ends before the bound does not report giving up', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValueOnce(pending).mockResolvedValueOnce(pending).mockResolvedValue(complete);
+    f.connect.mockImplementation((_id: string, options: { onDone(): void; onError(): void }) => {
+      queueMicrotask(() => options.onError());
+      return f.closed;
+    });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(useChatStore.getState().messagesBySession['session-a']).toEqual(complete);
+    expect(f.onGaveUp).not.toHaveBeenCalled();
     stop();
   });
 });

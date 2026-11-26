@@ -23,6 +23,8 @@ import {
   taskAssetRoute,
 } from './model-formats';
 
+const states = (defaultCatalog.application as unknown as ProductSchema).task_states;
+
 const schema = defaultCatalog.application as unknown as ProductSchema;
 
 const wire = {
@@ -63,8 +65,8 @@ describe('model format coverage', () => {
   it('classifies steps by plan state', () => {
     const coverage = parseModelFormatCoverage(wire)!;
     expect(stepsInProgress(coverage)).toBe(true);
-    expect(failedSteps(coverage).map((step) => step.planId)).toEqual(['p2']);
-    expect(failedSteps(coverage)[0]).toMatchObject({ planVersion: 3, offeringRevision: 'r1' });
+    expect(failedSteps(states, coverage).map((step) => step.planId)).toEqual(['p2']);
+    expect(failedSteps(states, coverage)[0]).toMatchObject({ planVersion: 3, offeringRevision: 'r1' });
     expect(pausedSteps(coverage).map((step) => step.planId)).toEqual(['p3']);
   });
 
@@ -185,31 +187,31 @@ describe('the row of one obtainable format (#323)', () => {
       { offering_id: 'local/generated-glb/to-gltf', formats: ['gltf'] },
       { offering_id: 'meshy/processing/remesh', formats: ['fbx', 'obj'], estimated_credits: 5 },
     ]);
-    expect(formatRowAction(coverage, coverage.formats[0])).toMatchObject({ kind: 'start', formats: ['gltf'] });
-    expect(formatRowAction(coverage, coverage.formats[2])).toMatchObject({ kind: 'start', formats: ['fbx', 'obj'] });
+    expect(formatRowAction(states, coverage, coverage.formats[0])).toMatchObject({ kind: 'start', formats: ['gltf'] });
+    expect(formatRowAction(states, coverage, coverage.formats[2])).toMatchObject({ kind: 'start', formats: ['fbx', 'obj'] });
   });
 
   it('retries the failed plan of the row instead of starting a new one', () => {
     const coverage = coverageOf([{ id: 'gltf', label: 'glTF', status: 'obtainable', conversion: local }], [
       { offering_id: 'o', formats: ['gltf'], state: 'FAILED', plan_id: 'p1', plan_version: 2, offering_revision: 'r' },
     ]);
-    expect(formatRowAction(coverage, coverage.formats[0])).toMatchObject({ kind: 'retry', step: { planId: 'p1', planVersion: 2 } });
+    expect(formatRowAction(states, coverage, coverage.formats[0])).toMatchObject({ kind: 'retry', step: { planId: 'p1', planVersion: 2 } });
   });
 
   it('has no row action while the step runs, waits, or for rows that are not obtainable', () => {
     for (const state of ['PENDING', 'RUNNING', 'PAUSED', 'SUCCEEDED']) {
       const coverage = coverageOf([{ id: 'gltf', label: 'glTF', status: 'obtainable', conversion: local }], [{ formats: ['gltf'], state, plan_id: 'p' }]);
-      expect(formatRowAction(coverage, coverage.formats[0])).toBeNull();
+      expect(formatRowAction(states, coverage, coverage.formats[0])).toBeNull();
     }
     const coverage = coverageOf([
       { id: 'glb', label: 'GLB', status: 'available' },
       { id: 'gltf', label: 'glTF', status: 'converting', conversion: local },
       { id: 'fbx', label: 'FBX', status: 'obtainable', conversion: meshy },
     ], [{ formats: ['gltf'] }]);
-    expect(formatRowAction(coverage, coverage.formats[0])).toBeNull();
-    expect(formatRowAction(coverage, coverage.formats[1])).toBeNull();
+    expect(formatRowAction(states, coverage, coverage.formats[0])).toBeNull();
+    expect(formatRowAction(states, coverage, coverage.formats[1])).toBeNull();
     // An obtainable row no step names: nothing to start from it.
-    expect(formatRowAction(coverage, coverage.formats[2])).toBeNull();
+    expect(formatRowAction(states, coverage, coverage.formats[2])).toBeNull();
   });
 
   it('asks the completion route for that format only', () => {

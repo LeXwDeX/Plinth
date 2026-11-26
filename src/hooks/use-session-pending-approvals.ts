@@ -8,6 +8,7 @@ import { useIdleInterval, useSessionBusy } from '@/hooks/use-polling';
 import {
   countPending,
   DecisionLedger,
+  rememberDecided,
   decidePendingCard,
   displayedApprovals,
   PendingApprovalError,
@@ -86,7 +87,7 @@ export function useSessionPendingApprovals(sessionId: string | null) {
     if (sessionId === null) throw new PendingApprovalError('', 0);
     try {
       const outcome = await decidePendingCard(schema, sessionId, { requestId, kind }, approve);
-      decided.current.add(requestId);
+      rememberDecided(decided.current, requestId);
       ledger.current.markDecided(requestId, Date.now());
       setDecisions((count) => count + 1);
       return outcome;

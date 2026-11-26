@@ -239,10 +239,33 @@ export interface PolledApprovals {
   clockOffset?: number;
 }
 
-/** #665: the server clock's lead over the browser's, read from a response's Date header; 0 when it has none. */
+/** #665: a Date header names whole seconds, so a smaller lead is its rounding, not the server's clock. */
+const CLOCK_OFFSET_PRECISION_MS = 1_000;
+/** #665: a larger lead is taken for a stale (cached or proxied) Date header, not a clock, and ignored. */
+const MAX_CLOCK_OFFSET_MS = 60 * 60 * 1_000;
+
+/**
+ * #665: the server clock's lead over the browser's, read from a response's Date header (plus its Age, when a cache
+ * answered); 0 when it has none, when the lead is within the header's one-second precision, or when it is too large
+ * to be a clock rather than a stale header. Each read stands alone: the caller keeps only the freshest response's.
+ */
 export function serverClockOffset(response: Pick<Response, 'headers'>, receivedAt: number): number {
   const date = Date.parse(response.headers?.get('Date') ?? '');
-  return Number.isFinite(date) ? date - receivedAt : 0;
+  if (!Number.isFinite(date)) return 0;
+  const age = Number(response.headers?.get('Age') ?? '');
+  const offset = date + (Number.isFinite(age) && age > 0 ? age * 1_000 : 0) - receivedAt;
+  if (Math.abs(offset) < CLOCK_OFFSET_PRECISION_MS || Math.abs(offset) > MAX_CLOCK_OFFSET_MS) return 0;
+  return offset;
+}
+
+/** #665: how many decided cards a page remembers; far more than one session ever shows at once. */
+export const DECIDED_LIMIT = 200;
+
+/** #665: adds a decided card to a page's set, dropping the oldest once it holds DECIDED_LIMIT. */
+export function rememberDecided(decided: Set<string>, requestId: string): void {
+  decided.delete(requestId);
+  decided.add(requestId);
+  while (decided.size > DECIDED_LIMIT) decided.delete(decided.values().next().value as string);
 }
 
 /**
@@ -258,7 +281,10 @@ export class DecisionLedger {
 
   /** Record a decision that the server accepted, finished at `at`. */
   markDecided(requestId: string, at: number): void {
+    this.decidedAt.delete(requestId);
     this.decidedAt.set(requestId, at);
+    // #665: a page that is never read again keeps no unbounded list; the oldest decisions go first.
+    while (this.decidedAt.size > DECIDED_LIMIT) this.decidedAt.delete(this.decidedAt.keys().next().value as string);
   }
 
   /** Whether a read sent at `startedAt` must not be believed about this card. */

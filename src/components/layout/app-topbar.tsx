@@ -19,6 +19,7 @@ import { WorkspaceBalance } from '@/components/workspace/workspace-balance';
 import { useAuth } from '@/hooks/use-auth';
 import { createAuthenticationBrowserClient } from '@/lib/authentication/browser-client';
 import { schemaText } from '@/lib/product-schema';
+import { useSendQueueStore } from '@/store/send-queue-store';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 
 function UserMenu() {
@@ -37,6 +38,9 @@ function UserMenu() {
     } catch {
       // Logging out still returns to the sign-in page when the request fails.
     } finally {
+      // #665: the queued messages are this account's words: they leave this browser (page and storage) on every
+      // logout, also where the server's Clear-Site-Data does not apply.
+      useSendQueueStore.getState().clear();
       window.location.href = schema.runtime.frontend.client_routes.login;
     }
   };
