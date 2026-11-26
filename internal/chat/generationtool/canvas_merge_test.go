@@ -100,11 +100,11 @@ func ratioOffering() generation.Offering {
 	}}
 }
 
-// #272: what the artboard shows is what comes out. On a canvas turn the output
-// size follows the artboard over a size remembered earlier in the session
-// whose author is not the Agent (#614 keeps the Agent's own choice, see
-// canvas_agent_size_614_test.go); a model that cannot produce it gets the
-// nearest legal size, and the Agent is told which.
+// #272/#653: on a canvas turn the output size follows the artboard over a
+// size remembered earlier in the session whose author is not the Agent (#614
+// keeps the Agent's own choice, see canvas_agent_size_614_test.go): the
+// highest quality the model has at the canvas ratio; a model without that
+// ratio takes the nearest one, and the Agent is told which.
 func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 	_, schema := handleExecutor(t)
 	agentSize := func(_, _, _ string) map[string]json.RawMessage {
@@ -127,11 +127,11 @@ func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 		raw, _ := json.Marshal(input)
 		return executor.canvasSizeNote(command, offering, raw)
 	}
-	followed := func(canvas, size string) string {
-		return strings.NewReplacer("{canvas}", canvas, "{size}", size).Replace(schema.Context.CanvasOutputSizeTemplate)
+	followed := func(ratio, size string) string {
+		return strings.NewReplacer("{ratio}", ratio, "{size}", size).Replace(schema.Context.CanvasOutputSizeTemplate)
 	}
-	nearest := func(canvas, size string) string {
-		return strings.NewReplacer("{canvas}", canvas, "{size}", size).Replace(schema.Context.CanvasOutputSizeNearestTemplate)
+	nearest := func(ratio, size string) string {
+		return strings.NewReplacer("{ratio}", ratio, "{size}", size).Replace(schema.Context.CanvasOutputSizeNearestTemplate)
 	}
 
 	for _, test := range []struct {
@@ -142,11 +142,11 @@ func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 		want          string
 		note          string
 	}{
-		{"pixel model takes the artboard size", 2048, 2048, pixelSizeOffering(), "size", "2048x2048", followed("2048×2048", "2048x2048")},
-		{"pixel model takes a custom artboard size", 1920, 1088, pixelSizeOffering(), "size", "1920x1088", followed("1920×1088", "1920x1088")},
-		{"pixel model snaps to its grid", 1000, 700, pixelSizeOffering(), "size", "1008x704", nearest("1000×700", "1008x704")},
-		{"ratio model takes the artboard ratio", 2048, 1536, ratioOffering(), "aspect_ratio", "4:3", followed("2048×1536", "4:3")},
-		{"ratio model takes the nearest ratio", 2048, 1000, ratioOffering(), "aspect_ratio", "16:9", nearest("2048×1000", "16:9")},
+		{"pixel model takes its largest legal square", 2048, 2048, pixelSizeOffering(), "size", "2880x2880", followed("1:1", "2880x2880")},
+		{"pixel model takes its largest size of an uncommon ratio", 1920, 1088, pixelSizeOffering(), "size", "3808x2160", followed("30:17", "3808x2160")},
+		{"pixel model keeps the ratio of an off-grid artboard", 1000, 700, pixelSizeOffering(), "size", "3408x2384", followed("10:7", "3408x2384")},
+		{"ratio model takes the artboard ratio", 2048, 1536, ratioOffering(), "aspect_ratio", "4:3", followed("4:3", "4:3")},
+		{"ratio model takes the nearest ratio", 2048, 1000, ratioOffering(), "aspect_ratio", "16:9", nearest("41:20", "16:9")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			command := canvasCommand(schema, test.width, test.height)
@@ -161,14 +161,15 @@ func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 	}
 
 	// The note reports what was really submitted, after the Offering's own
-	// rules (a forced larger size of the same ratio still follows the canvas).
+	// rules (an option forced to a larger size of the same ratio).
 	command := canvasCommand(schema, 2048, 2048)
 	forced := pixelSizeOffering()
+	forced.Parameters[1].ImageSize = nil
 	forced.Parameters[1].ForcedWhen = []generation.ForcedValue{{
 		When:  generation.ParameterCondition{Parameter: "size", Operator: "equals", Value: json.RawMessage(`"2048x2048"`)},
 		Value: json.RawMessage(`"4096x4096"`),
 	}}
-	if got := note(command, forced, map[string]any{"size": "4096x4096"}); got != followed("2048×2048", "4096x4096") {
+	if got := note(command, forced, map[string]any{"size": "4096x4096"}); got != followed("1:1", "4096x4096") {
 		t.Fatalf("forced same-ratio size note = %q", got)
 	}
 	// #614: a submitted size the canvas rule did not pick (the Agent chose it)

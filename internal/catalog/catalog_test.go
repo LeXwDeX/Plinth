@@ -693,8 +693,8 @@ const minimalApplication = `"application":{
 			"selection_canvas_template":" {layout}",
 			"selection_canvas_note":"canvas",
 			"maximum_canvas_layers":100,
-			"canvas_output_size_template":"{size} {canvas}",
-			"canvas_output_size_nearest_template":"nearest {size} {canvas}"
+			"canvas_output_size_template":"{size} {ratio}",
+			"canvas_output_size_nearest_template":"nearest {size} {ratio}"
 		},
 		"dsml":{
 			"enabled":true,"markers":["configured-marker-"],

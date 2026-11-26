@@ -134,7 +134,7 @@ func TestOneReferenceSetsTheOutputSizeNobodyChose(t *testing.T) {
 			tool: func(command *chat.ToolCommand) { command.Tool.ReferenceSize = "" }},
 			nil, ""},
 		{"on a canvas turn the artboard sets the size", run{command: canvas, references: []string{"upload-4x3"}},
-			"2048x2048", ""},
+			"2880x2880", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			input, note := build(t, test.run)

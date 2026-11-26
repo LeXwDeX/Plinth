@@ -11,8 +11,7 @@ import type { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
 import type { GenerationParams } from '@/hooks/use-generation-params';
 import { CanvasSizeNotice, ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
-import { canvasResizeForChoice } from '@/lib/workspace/canvas-size';
-import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
+import { CanvasRatioPicker } from '@/components/canvas/canvas-ratio-picker';
 import { CanvasResizeAnchor } from '@/components/canvas/canvas-resize-anchor';
 import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote } from '@/lib/pricing';
@@ -33,7 +32,7 @@ export interface ParamsPanelProps {
   /** The selected Skill, whose recommended size becomes the size default. */
   skill: { name: string; recommendedSize: string } | null;
   effective: ReturnType<typeof useAgentEffectiveConfiguration>;
-  /** #246: the session's canvas. A 2D size chosen here resizes it; a mismatch with the model is shown. */
+  /** #653: the session's canvas: its ratio is picked here, and a model without that ratio is said. */
   canvas?: { sessionId: string; delivery: CanvasDelivery } | null;
 }
 
@@ -141,17 +140,6 @@ export function ParamsPanel({ params, domains, hasSession, disabled = false, ski
 /** One capability owns one form and one parameter scope. Read-only exposure is explicitly opt-in. */
 export function ParamsDomainSection({ params, hasSession, disabled, skill, canvas = null }: Pick<ParamsPanelProps, 'params' | 'hasSession' | 'disabled' | 'skill' | 'canvas'>) {
   const { schema } = useProductSchema();
-  /**
-   * #246: a size the person picks (or resets to the default) is the canvas size too: the boundary changes as
-   * one undo step, content keeping its pixel size and its place relative to the chosen anchor. Only a canvas
-   * whose size is already known is resized; a canvas still loading starts from the chosen size anyway.
-   */
-  const resizeCanvasTo = (name: string, value: unknown) => {
-    if (!canvas) return;
-    const pixels = canvasResizeForChoice(canvas.delivery.known, params.offering, params.model.sizeParams, params.values,
-      name, value, schema.canvas.frontend.artboard, schema.canvas.limits);
-    if (pixels) applyCanvasResize(schema, canvas.sessionId, pixels);
-  };
   const text = (key: string) => schemaText(schema, key);
   const [showMore, setShowMore] = useState(false);
   const { model, values, setValue, estimate } = params;
@@ -258,17 +246,18 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
             label={param.label}
             note={fromSkill ? formatSchemaText(text('ui.studio.params.from_skill'), { skill: skill?.name ?? '' }) : undefined}
           >
-            <ParameterOrigin params={params} name={param.name} size disabled={!hasSession || disabled || parameterDisabled(param, values)} onReset={() => resizeCanvasTo(param.name, null)} />
-            <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => { setValue(param.name, value); resizeCanvasTo(param.name, value); }} optionText={sizeText} />
+            <ParameterOrigin params={params} name={param.name} size disabled={!hasSession || disabled || parameterDisabled(param, values)} />
+            <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => setValue(param.name, value)} optionText={sizeText} />
             {conditionNotice(param)}
           </Row>
         );
       })}
 
-      {canvas && model.sizeParams.length > 0 ? (
+      {canvas ? (
         <>
           <ReferenceSizeNotice delivery={canvas.delivery} />
           <CanvasSizeNotice sessionId={canvas.sessionId} delivery={canvas.delivery} />
+          <CanvasRatioPicker sessionId={canvas.sessionId} delivery={canvas.delivery} disabled={!hasSession || disabled} />
           <p className="text-[11px] leading-4 text-muted-foreground" data-testid="canvas-resize-hint">{text('ui.canvas.size.resize_hint')}</p>
           <CanvasResizeAnchor disabled={!hasSession || disabled} />
         </>
