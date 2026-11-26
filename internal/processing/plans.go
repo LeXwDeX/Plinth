@@ -136,6 +136,10 @@ type Step struct {
 	PlanStepID          string                     `json:"plan_step_id,omitempty"`
 	IdempotencyKey      string                     `json:"idempotency_key,omitempty"`
 	AuthorizationRef    string                     `json:"authorization_request_id,omitempty"`
+	// PolicyDecidedRef is the grant the session approval policy already
+	// decided for this frozen step (#665). A grant the policy left to a
+	// person is not decided again by a later mode: the person decides it.
+	PolicyDecidedRef string `json:"policy_decided_request_id,omitempty"`
 	// QueuedUntil 记录生成内核因在途准入已满拒绝本步提交后的下一次重试
 	// 时间：内核确定没有提交，计划保持活动，到点后后台按同一幂等键再提交。
 	QueuedUntil *time.Time `json:"queued_until,omitempty"`
@@ -330,8 +334,16 @@ func (s *Service) approveStepByPolicy(ctx context.Context, plan *Plan, step *Ste
 		PlanStepID:        step.PlanStepID,
 		BudgetEligible:    plan.Origin == OriginAgent,
 	})
+	if err == nil && grant.Status == executiongrant.Pending && step.PolicyDecidedRef == grant.RequestID {
+		// Decided once already and left to a person (#665): switching the
+		// mode afterwards does not approve it.
+		return ""
+	}
 	if err == nil {
 		grant, err = s.grants.ApplyPolicy(ctx, grant)
+	}
+	if err == nil {
+		step.PolicyDecidedRef = grant.RequestID
 	}
 	if err != nil {
 		s.logger.Warn("按批准方式准备处理步骤失败，改为等待确认", "plan_id", plan.ID, "error", err)
