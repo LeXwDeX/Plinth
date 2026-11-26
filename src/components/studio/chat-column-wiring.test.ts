@@ -54,7 +54,7 @@ describe('workspace chat message wiring', () => {
     expect(upload).toBeLessThan(send.indexOf('if (turnRunning) {'));
     expect(upload).toBeLessThan(send.indexOf('setQueue((current) => enqueueTurn('));
     expect(upload).toBeLessThan(send.indexOf('initStreaming(sessionId, {'));
-    expect(upload).toBeLessThan(send.indexOf('await chatClient.startTurn('));
+    expect(upload).toBeLessThan(send.indexOf('await sendUnderKey(uncertainSends, {'));
     expect(send).toContain('uploadWorkspaceInputAssetResult(schema, picture, inlineImageFilename(schema, picture))');
     expect(send).toContain('maximumBytes: schema.runtime.input_assets.upload_max_bytes');
     // A failure sends nothing and says why (with the request ID), like the board snapshot.
@@ -170,7 +170,7 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     const flush = send.indexOf('await flushExplicitModel3D(sessionId, (id, model) => chatClient.setExplicitModel3D(id, model));');
     expect(flush).toBeGreaterThan(0);
     expect(flush).toBeLessThan(send.indexOf('initStreaming(sessionId, {'));
-    expect(flush).toBeLessThan(send.indexOf('await chatClient.startTurn('));
+    expect(flush).toBeLessThan(send.indexOf('await sendUnderKey(uncertainSends, {'));
     // The draft is spent only after the server took the turn; a failed lock returns first.
     expect(flush).toBeLessThan(send.indexOf('if (!choiceAnswer) {'));
     expect(send).toMatch(/catch \{\s*if \(isCurrentSessionScope\(scope\)\) toast\.error\(schemaText\(schema, 'ui\.studio\.picker\.lock_failed'\)\);\s*return;/);
@@ -304,14 +304,16 @@ describe('the conversation is read a page at a time', () => {
   });
 
   it('sends every turn under an Idempotency-Key that a repeat of an unanswered send reuses (#665)', () => {
-    expect(agentDialog).toContain('const signature = sendSignature(sessionId, text, turnOptions);');
-    expect(agentDialog).toContain('key: sendKeyFor(uncertainSend.current, signature, extra?.idempotencyKey)');
-    expect(agentDialog).toContain('{ ...turnOptions, idempotencyKey: uncertain.key }');
-    // Only an answered send forgets its key; a failed one keeps it for the repeat of the same request.
-    expect(agentDialog).toContain('if (uncertainSend.current === uncertain) uncertainSend.current = null;');
+    expect(agentDialog).toContain("signature: sendSignature(sessionId, text, turnOptions, { locale, ...(queuedId ? { queuedId } : {}) }),");
+    expect(agentDialog).toContain('(key) => chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: key }, controller.signal), idempotencyRefused);');
+    // Kept per session in the tab's sessionStorage (send-key-665.test.ts covers forgetting and reuse).
+    expect(agentDialog).toContain('createUncertainSendStore(() => (typeof window === \'undefined\' ? undefined : window.sessionStorage))');
+    // A queued send that met another tab's running turn is put back quietly, with its own text.
+    expect(agentDialog).toContain("toast.info(schemaText(schema, 'ui.studio.chat.queued_other_tab'));");
+    expect(agentDialog).toContain("toast.error(schemaText(schema, 'ui.studio.chat.send_key_refused'));");
     // A queued message is stored with its own key and goes out under it.
     expect(agentDialog).toContain('idempotencyKey: newSendKey(),');
-    expect(agentDialog).toContain('idempotencyKey: turn.idempotencyKey ?? turn.id,');
+    expect(agentDialog).toContain('idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id,');
   });
 });
 

@@ -176,7 +176,7 @@ describe('stage, right panel, lightbox and compare wiring', () => {
     expect(hook).not.toContain('seeded.current');
     expect(chat).toContain('imageGeneration, modelGeneration');
     expect(chat).toContain('params.nextTurn');
-    expect(chat.indexOf('params.flush()')).toBeLessThan(chat.indexOf('await chatClient.startTurn('));
+    expect(chat.indexOf('params.flush()')).toBeLessThan(chat.indexOf('await sendUnderKey(uncertainSends, {'));
   });
 
   it('puts the 贴图 / 白模 / 线框 view bar on the left of the 3D stage, drawn by the shared ToolRail from the Schema tools', () => {

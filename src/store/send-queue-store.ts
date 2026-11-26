@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 import {
   cancelQueuedTurn, claimStoredTurn, foreignHold, MAX_TURN_LOCK_REFUSALS, parseQueue, parseSendHold, SEND_HOLD_MS,
-  SEND_HOLD_PREFIX, SEND_QUEUE_KEY, sendHoldKey, turnLockRetryDelay, writeQueue, type QueueBySession, type SendHold,
+  SEND_HOLD_PREFIX, SEND_QUEUE_KEY, sendHoldKey, TURN_LOCK_REFUSALS_END_MS, turnLockRetryDelay, writeQueue, type QueueBySession, type SendHold,
 } from '@/lib/chat/send-queue';
 
 /**
@@ -76,9 +76,20 @@ function takeTurnLock(locks: Locks, sessionId: string): Promise<(() => void) | n
  * the tab was hidden), the drain waits as for a stored hold, until `until`, instead of reading again at once. The wait
  * grows with each refusal in a row (turnLockRetryDelay); after MAX_TURN_LOCK_REFUSALS of them the session's claims
  * count the stored hold alone (a frozen tab keeps its lock). Taking the lock, forgetting the session or clearing the
- * queue ends the count.
+ * queue ends the count, and so does time: a count whose last wait ended more than TURN_LOCK_REFUSALS_END_MS ago is
+ * over (refusalsInARow), and the next refusal starts from the first wait.
  */
 const lockedOut = new Map<string, { until: number; refusals: number }>();
+
+function refusalsInARow(sessionId: string, now: number): number {
+  const entry = lockedOut.get(sessionId);
+  if (!entry) return 0;
+  if (now - entry.until > TURN_LOCK_REFUSALS_END_MS) {
+    lockedOut.delete(sessionId);
+    return 0;
+  }
+  return entry.refusals;
+}
 
 // Set once a write was refused (a full or read-only storage): the stored queue no longer follows this page's.
 let writesRefused = false;
@@ -158,7 +169,7 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
       if (locks && !holds.has(sessionId)) {
         const taken = await takeTurnLock(locks, sessionId);
         if (taken === null) {
-          const refusals = lockedOut.get(sessionId)?.refusals ?? 0;
+          const refusals = refusalsInARow(sessionId, Date.now());
           if (refusals < MAX_TURN_LOCK_REFUSALS) {
             lockedOut.set(sessionId, { until: Date.now() + turnLockRetryDelay(refusals + 1), refusals: refusals + 1 });
             return false;

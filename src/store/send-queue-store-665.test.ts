@@ -4,7 +4,7 @@ import { cancelQueuedTurn, enqueueTurn, pruneQueuedSessions, queueMayDrain, type
 import type { ChatMessage } from './chat-store';
 import { useChatStore } from './chat-store';
 import { sendHoldKey } from '@/lib/chat/send-queue';
-import { MAX_TURN_LOCK_REFUSALS, MAX_TURN_LOCK_RETRY_MS, SEND_HOLD_MS, turnLockRetryDelay } from '@/lib/chat/send-queue';
+import { MAX_TURN_LOCK_REFUSALS, MAX_TURN_LOCK_RETRY_MS, SEND_HOLD_MS, TURN_LOCK_REFUSALS_END_MS, turnLockRetryDelay } from '@/lib/chat/send-queue';
 import {
   onSendQueueStorage, refreshAllHolds, releaseAllHolds, reloadSendQueue, SEND_QUEUE_KEY, sweepLapsedHolds, useSendQueueStore,
 } from './send-queue-store';
@@ -180,6 +180,30 @@ describe('messages queued while a turn runs (#665)', () => {
     // Clearing the queue (a logout) ends it too.
     store().clear();
     expect(store().foreignHold('f')).toBeNull();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('end a refusal count whose last wait ended long ago: a new episode starts from the first wait', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { locks } = fakeLocks(new Set([turnLock('e')]));
+    vi.stubGlobal('navigator', { locks });
+    const store = () => useSendQueueStore.getState();
+    store().update((queue) => enqueueTurn(queue, 'e', turn('e1')));
+    for (let refusal = 0; refusal < MAX_TURN_LOCK_REFUSALS; refusal += 1) {
+      expect(await store().claim('e', 'e1')).toBe(false);
+      vi.setSystemTime(store().foreignHold('e')!.expiresAt);
+    }
+    // Counted out: the lock no longer blocks, the stored hold of the other tab does.
+    memory.set(sendHoldKey('e'), JSON.stringify({ owner: 'other-tab', expiresAt: Date.now() + 10_000 }));
+    expect(await store().claim('e', 'e1')).toBe(false);
+    expect(store().foreignHold('e')?.owner).toBe('other-tab');
+    memory.delete(sendHoldKey('e'));
+    // Long after the last wait the count is over: the lock blocks again, with the first wait.
+    vi.setSystemTime(Date.now() + TURN_LOCK_REFUSALS_END_MS + 1);
+    expect(await store().claim('e', 'e1')).toBe(false);
+    expect(store().foreignHold('e')!.expiresAt - Date.now()).toBe(turnLockRetryDelay(1));
+    store().forgetSession('e');
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
