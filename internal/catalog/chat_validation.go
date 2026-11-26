@@ -793,7 +793,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateImageMask(schema); err != nil {
 		return err
 	}
-	if err := validateImageCrop(schema); err != nil {
+	if err := validateImageCrop(schema, runtime); err != nil {
 		return err
 	}
 	if err := validateWorkLedger(schema); err != nil {
@@ -1825,10 +1825,29 @@ func validateImageMask(schema ChatSchema) error {
 // validateImageCrop checks the read-only crop_image_regions declaration
 // (#331): the tool it names exists as the declared control tool and every
 // error code the tool result can carry has its Agent-facing copy.
-func validateImageCrop(schema ChatSchema) error {
+func validateImageCrop(schema ChatSchema, runtime RuntimeSchema) error {
 	crop := schema.ImageCrop
 	if strings.TrimSpace(crop.Tool) == "" {
 		return nil
+	}
+	// #642: the tool's own crop limits. The region cap stays within the
+	// source decode bound and the PNG cap within the input-asset storage cap.
+	// An older Catalog without the section keeps the decompose crop limits.
+	if crop.Limits != (ChatImageCropLimits{}) {
+		maximumRegion := int64(100_000_000)
+		if sourcePixels := schema.ImageMask.Limits.MaxPixels; sourcePixels > 0 && sourcePixels < maximumRegion {
+			maximumRegion = sourcePixels
+		}
+		if crop.Limits.MaximumRegionPixels < 4096 || crop.Limits.MaximumRegionPixels > maximumRegion {
+			return fmt.Errorf("chat.image_crop.limits.maximum_region_pixels 必须在 4096 到 %d（chat.image_mask.limits.max_pixels）之间", maximumRegion)
+		}
+		maximumPNG := int64(256 << 20)
+		if upload := runtime.InputAssets.UploadMaxBytes; upload > 0 && upload < maximumPNG {
+			maximumPNG = upload
+		}
+		if crop.Limits.MaximumPNGBytes < 1 || crop.Limits.MaximumPNGBytes > maximumPNG {
+			return fmt.Errorf("chat.image_crop.limits.maximum_png_bytes 必须在 1 到 %d（runtime.input_assets.upload_max_bytes）之间", maximumPNG)
+		}
 	}
 	declared := false
 	for _, tool := range schema.AgentTools {

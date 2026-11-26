@@ -930,6 +930,21 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("裁剪服务: %w", err)
 	}
+	// #642: the Agent crop tool keeps its own region and PNG caps
+	// (application.chat.image_crop.limits) so a whole 4096x4096 board can be
+	// cut; the asset-list decompose crop above keeps the smaller decompose
+	// caps. Both services share the crop store, so the per-source storage
+	// guardrail and the rectangle dedup stay common.
+	toolCropService := cropService
+	if limits := applicationSchema.Chat.ImageCrop.Limits; limits.MaximumRegionPixels > 0 && limits.MaximumPNGBytes > 0 {
+		toolCropConfig := cropConfig
+		toolCropConfig.MaximumRegionPixels = limits.MaximumRegionPixels
+		toolCropConfig.UploadMaxBytes = limits.MaximumPNGBytes
+		toolCropService, err = listcrop.New(toolCropConfig)
+		if err != nil {
+			return nil, fmt.Errorf("裁剪工具服务: %w", err)
+		}
+	}
 	// Production lists (#327): the service reuses the plan's offering
 	// selection through the chat adapters, so an explicit model lock and an
 	// unavailable provider are reflected in the availability snapshot. The
@@ -1129,7 +1144,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
 			Context:  applicationSchema.Chat.Context,
 			Schema:   applicationSchema.Chat.ImageCrop,
-			Crops:    cropService,
+			Crops:    toolCropService,
 			Localize: texts.Text,
 			// #552: every crop is shown to the person as a reply picture.
 			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
