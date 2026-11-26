@@ -6670,6 +6670,10 @@
           "default_page_size": 50,
           "maximum_page_size": 200
         },
+        "turn_idempotency": {
+          "retention_seconds": 86400,
+          "maximum_key_bytes": 200
+        },
         "prompt_enhance": {
           "prompt_field": "prompt",
           "capability_field": "capability",

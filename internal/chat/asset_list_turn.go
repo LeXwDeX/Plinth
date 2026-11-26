@@ -86,7 +86,7 @@ func (service *Service) StartItemTurn(
 	if projectID != input.ProjectID {
 		return Message{}, TurnOptions{}, ErrAssetListItemProjectMismatch
 	}
-	assistant, err := service.startTurn(ctx, StartTurn{
+	assistant, _, err := service.startTurn(ctx, StartTurn{
 		OwnerID:   input.OwnerID,
 		SessionID: input.SessionID,
 	}, "", &ServerTurnOptions{

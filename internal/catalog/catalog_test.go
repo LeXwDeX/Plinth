@@ -535,6 +535,7 @@ const minimalApplication = `"application":{
 		"api":{
 			"session_list":{"default_page_size":15,"maximum_page_size":100},
 			"message_list":{"default_page_size":50,"maximum_page_size":200},
+			"turn_idempotency":{"retention_seconds":86400,"maximum_key_bytes":200},
 			"fields":{
 				"title":"title","content":"content","image_urls":"image_urls",
 				"aspect_ratio":"aspect_ratio","pose_mode":"pose_mode",

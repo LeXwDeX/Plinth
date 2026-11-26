@@ -499,6 +499,9 @@ var chatSessionVisionExcludedMigration string
 //go:embed migrations/0115_user_project_group.sql
 var userProjectGroupMigration string
 
+//go:embed migrations/0116_chat_turn_keys.sql
+var chatTurnKeysMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -615,6 +618,8 @@ func migrations() []migration {
 			sql: chatSessionVisionExcludedMigration},
 		migration{version: 115, name: "user_project_group",
 			sql: userProjectGroupMigration},
+		migration{version: 116, name: "chat_turn_keys",
+			sql: chatTurnKeysMigration},
 	)
 }
 
@@ -648,7 +653,8 @@ func migrations() []migration {
 // (#478) and 113 the credits_metered flag of the task summary projection, which
 // the failure attribution of the external MCP reads (#517), 114 the
 // session's vision exclusions, the images the chat model refused to read (#522)
-// and 115 the nullable project group key of a user (#599).
+// 115 the nullable project group key of a user (#599) and 116 the
+// Idempotency-Key records of the sends that started a chat turn (#665).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

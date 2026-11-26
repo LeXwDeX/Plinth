@@ -4733,6 +4733,10 @@ type ChatAPISchema struct {
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+	// TurnIdempotency bounds the optional Idempotency-Key of the request that
+	// starts a turn (#665): how long a key keeps naming the turn it started and
+	// the longest key accepted. Server side only.
+	TurnIdempotency ChatTurnIdempotencySchema `json:"turn_idempotency"`
 	// SessionGroups is how the browser groups the session list by where a
 	// session came from (#332): the declared order is the order the groups are
 	// shown in, and each group's label is the content.messages key of its name.
@@ -4905,6 +4909,16 @@ type ChatStyleLockAPIFields struct {
 type ChatMessageListSchema struct {
 	DefaultPageSize int `json:"default_page_size"`
 	MaximumPageSize int `json:"maximum_page_size"`
+}
+
+// ChatTurnIdempotencySchema is the contract of the Idempotency-Key a browser
+// sends with the request that starts a turn (#665). A repeat of the same key
+// with the same request, within RetentionSeconds of the turn it started,
+// answers that turn again instead of starting another; a key longer than
+// MaximumKeyBytes is refused before anything is read.
+type ChatTurnIdempotencySchema struct {
+	RetentionSeconds int `json:"retention_seconds"`
+	MaximumKeyBytes  int `json:"maximum_key_bytes"`
 }
 
 // ChatSessionListSchema is the paging contract of the session list: the page

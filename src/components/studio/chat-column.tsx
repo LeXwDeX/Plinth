@@ -108,6 +108,7 @@ import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
 import { turnFailureText } from '@/lib/chat/turn-error-text';
+import { newSendKey, sendKeyFor, sendSignature, type UncertainSend } from '@/lib/chat/send-key';
 import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
@@ -493,6 +494,8 @@ export function ChatColumn() {
   // #665: the session whose queued turn this page is claiming or sending, or null.
   const drainingRef = useRef<string | null>(null);
   const startedTurnsRef = useRef(0);
+  // #665: the last send whose answer never came, until a send of another request or an answered one replaces it.
+  const uncertainSend = useRef<UncertainSend | null>(null);
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
@@ -1029,7 +1032,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string } },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1232,6 +1235,7 @@ export function ChatColumn() {
       if (turnRunning) {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          idempotencyKey: newSendKey(),
           text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
@@ -1368,27 +1372,29 @@ export function ChatColumn() {
           // (转 3D) or a choice-card answer also carries its own selection, but was never in the box or the queue.
           const queued = extra?.queued === true;
           try {
-            await chatClient.startTurn(
-              sessionId,
-              text,
-              {
-                ...(selectedModel ? { model: selectedModel } : {}),
-                creativeDomain: domain,
-                ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
-                ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
-                ...(images.length > 0 ? { imageURLs: images } : {}),
-                ...(claims.length > 0 ? { attachments: claims } : {}),
-                ...(selection.length > 0 ? { selection } : {}),
-                ...(mentions.length > 0 ? { mentions } : {}),
-                ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
-                ...(inputSource ? { inputSource } : {}),
-                ...(selectionMask ? { selectionMask } : {}),
-                ...(choiceAnswer ? { choiceAnswer } : {}),
-                ...(multiview ? { multiview } : {}),
-                ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
-              },
-              controller.signal,
-            );
+            const turnOptions: ChatTurnOptions = {
+              ...(selectedModel ? { model: selectedModel } : {}),
+              creativeDomain: domain,
+              ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
+              ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
+              ...(images.length > 0 ? { imageURLs: images } : {}),
+              ...(claims.length > 0 ? { attachments: claims } : {}),
+              ...(selection.length > 0 ? { selection } : {}),
+              ...(mentions.length > 0 ? { mentions } : {}),
+              ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
+              ...(inputSource ? { inputSource } : {}),
+              ...(selectionMask ? { selectionMask } : {}),
+              ...(choiceAnswer ? { choiceAnswer } : {}),
+              ...(multiview ? { multiview } : {}),
+              ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
+            };
+            // #665: the same request as a send whose answer never came goes out under that send's key, so the server
+            // answers the turn it may already have started; any other send gets a key of its own.
+            const signature = sendSignature(sessionId, text, turnOptions);
+            const uncertain = { signature, key: sendKeyFor(uncertainSend.current, signature, extra?.idempotencyKey) };
+            uncertainSend.current = uncertain;
+            await chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: uncertain.key }, controller.signal);
+            if (uncertainSend.current === uncertain) uncertainSend.current = null;
             sent = true;
             extra?.onSent?.();
             // A one-shot Skill (declared in the Schema) is spent once the server has the turn; a failed send keeps it.
@@ -1649,7 +1655,7 @@ export function ChatColumn() {
         return;
       }
       const started = startedTurnsRef.current;
-      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
         drainingRef.current = null;
         if (startedTurnsRef.current === started) {
           if (useChatStore.getState().activeSessionId === sessionId) {

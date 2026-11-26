@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -413,6 +415,16 @@ func (s *Server) legacySendChatMessage(
 	request *http.Request,
 	principal access.Principal,
 ) {
+	// #665: the Idempotency-Key header is optional here. Without it the send
+	// starts a turn as before; with it a repeat answers the turn it started.
+	idempotencyKey := strings.TrimSpace(request.Header.Get(idempotencyKeyHeader))
+	if idempotencyKey != "" {
+		rule := idempotencyKeyRule{minimum: 1, maximum: s.application.Chat.API.TurnIdempotency.MaximumKeyBytes}
+		if refusal := rule.refusal(idempotencyKey); refusal != nil {
+			writeProblem(writer, http.StatusBadRequest, idempotencyKeyRequiredCode, s.message(idempotencyKeyRequiredMessage), refusal)
+			return
+		}
+	}
 	body, ok := s.decodeRequiredChatObject(writer, request)
 	if !ok {
 		return
@@ -506,7 +518,11 @@ func (s *Server) legacySendChatMessage(
 		options.Multiview = &multiview
 	}
 	selectionMask := s.chatSelectionMask(body, requestFields.SelectionMask)
-	assistant, err := s.chat.StartTurn(request.Context(), chat.StartTurn{
+	fingerprint := ""
+	if idempotencyKey != "" {
+		fingerprint = chatSendFingerprint(body, requestLocale(request))
+	}
+	assistant, replayed, err := s.chat.StartKeyedTurn(request.Context(), chat.StartTurn{
 		OwnerID:   principal.ID(),
 		SessionID: sessionID,
 		Content:   chatString(body, s.application.Chat.API.Fields.Content),
@@ -522,12 +538,25 @@ func (s *Server) legacySendChatMessage(
 		OnMentionsDropped: func(tokens []string) {
 			s.logger.InfoContext(request.Context(), "Chat 提及未采用，保持原文", "session_id", sessionID, "count", len(tokens))
 		},
-		ChoiceAnswer: choiceAnswer,
+		ChoiceAnswer:       choiceAnswer,
+		IdempotencyKey:     idempotencyKey,
+		RequestFingerprint: fingerprint,
 	})
 	if err != nil && s.writeChoiceAnswerError(writer, err) {
 		return
 	}
 	switch {
+	case errors.Is(err, chat.ErrIdempotencyConflict):
+		writeProblem(writer, http.StatusConflict, string(generation.ErrIdempotencyConflict), s.message("error.idempotency_conflict"), err)
+	case err == nil && replayed:
+		// The key already started this turn: the first request's answer again,
+		// and the turn is not scheduled a second time.
+		s.logger.InfoContext(request.Context(), "Chat 发送按幂等键返回原回合", "session_id", sessionID, "assistant_message_id", assistant.ID)
+		responseFields := s.application.Chat.API.ResponseFields
+		writeJSON(writer, http.StatusAccepted, map[string]any{
+			responseFields.MessageID: assistant.ID,
+			responseFields.SessionID: sessionID,
+		})
 	case errors.Is(err, chat.ErrInvalidAttachmentPurpose):
 		writeProblem(writer, http.StatusBadRequest, "attachment_purpose_invalid", s.application.Content.Messages["error.attachment_purpose_invalid"])
 	case errors.Is(err, chat.ErrAttachmentPurposeAttachmentInvalid):
@@ -604,6 +633,11 @@ func (s *Server) legacySendChatMessage(
 				"assistant_message_id", assistant.ID,
 				"error", scheduleErr,
 			)
+			// The turn was failed at once and never ran: a repeat of this send
+			// starts a fresh turn instead of answering the failed one (#665).
+			if releaseErr := s.chat.ReleaseTurnKey(context.WithoutCancel(request.Context()), principal.ID(), sessionID, idempotencyKey, assistant.ID); releaseErr != nil {
+				s.logger.ErrorContext(request.Context(), "释放 Chat 发送幂等键失败", "session_id", sessionID, "error", releaseErr)
+			}
 			s.writeChatError(
 				writer,
 				http.StatusServiceUnavailable,
@@ -1332,6 +1366,19 @@ func chatParameters(
 		return nil, false
 	}
 	return parameters, true
+}
+
+// chatSendFingerprint is the digest a keyed send is compared by (#665): the
+// request body with its top-level members in name order, and the request
+// language the turn is started in. A browser repeating a send sends the same
+// bytes, so the same request always has the same digest.
+func chatSendFingerprint(body map[string]json.RawMessage, locale string) string {
+	canonical, _ := json.Marshal(body)
+	digest := sha256.New()
+	digest.Write([]byte(locale))
+	digest.Write([]byte{0})
+	digest.Write(canonical)
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func (s *Server) writeChatError(

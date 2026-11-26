@@ -521,6 +521,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		runtime.Frontend.ChatMessagePageSize > list.MaximumPageSize {
 		return errors.New("api.message_list 的默认页大小必须为正数且不超过上限，chat_message_page_size 不能超过上限")
 	}
+	if keys := schema.API.TurnIdempotency; keys.RetentionSeconds <= 0 || keys.MaximumKeyBytes <= 0 {
+		return errors.New("api.turn_idempotency 的 retention_seconds 与 maximum_key_bytes 必须为正数")
+	}
 	if schema.Agent.TitleMaxChars <= 0 || schema.Agent.TitleTimeoutSeconds <= 0 {
 		return errors.New("agent.title_max_characters 与 title_timeout_seconds 必须为正数")
 	}

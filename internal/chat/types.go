@@ -221,6 +221,10 @@ type Turn struct {
 	// of why the turn ended (#328). Empty while the turn runs, for a turn that
 	// ended before reasons were recorded, and when the Schema declares none.
 	EndReason string
+	// Key is the record of the Idempotency-Key the turn was started with
+	// (#665). Repository.StartTurn writes it with the turn; no read of a turn
+	// returns it.
+	Key *TurnKey
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.

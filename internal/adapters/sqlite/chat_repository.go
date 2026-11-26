@@ -1383,6 +1383,23 @@ func (r *Repository) StartTurn(
 		return chat.Message{}, chat.Event{}, err
 	}
 	defer tx.Rollback()
+	// #665: a keyed send first clears the expired records and looks for its
+	// key. The DELETE is this transaction's first write, so the lookup reads
+	// under the write lock: a copy of the same send in another transaction
+	// either committed before it (and is found) or waits for this one.
+	if key := turn.Key; key != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM go_chat_turn_keys WHERE expires_at <= ?`,
+			formatTaskTime(key.CreatedAt)); err != nil {
+			return chat.Message{}, chat.Event{}, err
+		}
+		existing, found, err := readTurnKey(ctx, tx, key.OwnerID, key.SessionID, key.Key, key.CreatedAt)
+		if err != nil {
+			return chat.Message{}, chat.Event{}, err
+		}
+		if found {
+			return chat.Message{}, chat.Event{}, &chat.TurnKeyTakenError{Existing: existing}
+		}
+	}
 	// The session is busy while the stream row is active and the turn that owns
 	// it is in a busy state. A stream row the finished turn left active is
 	// stale and gives way to the new turn (#384); without the states the stream
@@ -1461,6 +1478,19 @@ func (r *Repository) StartTurn(
 	); err != nil {
 		return chat.Message{}, chat.Event{}, err
 	}
+	if key := turn.Key; key != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO go_chat_turn_keys (
+				owner_id, session_id, idempotency_key, fingerprint,
+				user_message_id, assistant_message_id, created_at, expires_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			key.OwnerID, key.SessionID, key.Key, key.Fingerprint,
+			key.UserMessageID, key.AssistantMessageID,
+			formatTaskTime(key.CreatedAt), formatTaskTime(key.ExpiresAt),
+		); err != nil {
+			return chat.Message{}, chat.Event{}, err
+		}
+	}
 	storedEvent, err := appendChatEventFrom(ctx, tx, event, nextEventID)
 	if err != nil {
 		return chat.Message{}, chat.Event{}, err
@@ -1476,6 +1506,60 @@ func (r *Repository) StartTurn(
 		return chat.Message{}, chat.Event{}, err
 	}
 	return assistant, storedEvent, nil
+}
+
+// TurnKey reads the owner's live Idempotency-Key record of the session
+// (#665); a record expired at now is not found.
+func (r *Repository) TurnKey(
+	ctx context.Context,
+	ownerID, sessionID, key string,
+	now time.Time,
+) (chat.TurnKey, bool, error) {
+	return readTurnKey(ctx, r.db, ownerID, sessionID, key, now)
+}
+
+// ReleaseTurnKey removes the owner's record of key in the session when it
+// names assistantMessageID (#665).
+func (r *Repository) ReleaseTurnKey(
+	ctx context.Context,
+	ownerID, sessionID, key, assistantMessageID string,
+) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM go_chat_turn_keys
+		WHERE owner_id = ? AND session_id = ? AND idempotency_key = ? AND assistant_message_id = ?`,
+		ownerID, sessionID, key, assistantMessageID)
+	return err
+}
+
+func readTurnKey(
+	ctx context.Context,
+	reader interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	},
+	ownerID, sessionID, key string,
+	now time.Time,
+) (chat.TurnKey, bool, error) {
+	record := chat.TurnKey{OwnerID: ownerID, SessionID: sessionID, Key: key}
+	var createdAt, expiresAt string
+	err := reader.QueryRowContext(ctx, `
+		SELECT fingerprint, user_message_id, assistant_message_id, created_at, expires_at
+		FROM go_chat_turn_keys
+		WHERE owner_id = ? AND session_id = ? AND idempotency_key = ? AND expires_at > ?`,
+		ownerID, sessionID, key, formatTaskTime(now),
+	).Scan(&record.Fingerprint, &record.UserMessageID, &record.AssistantMessageID, &createdAt, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return chat.TurnKey{}, false, nil
+	}
+	if err != nil {
+		return chat.TurnKey{}, false, err
+	}
+	if record.CreatedAt, err = parseTime(createdAt); err != nil {
+		return chat.TurnKey{}, false, err
+	}
+	if record.ExpiresAt, err = parseTime(expiresAt); err != nil {
+		return chat.TurnKey{}, false, err
+	}
+	return record, true, nil
 }
 
 // ListSessionTurns 只列指定会话的活动轮次（B16 读路径修复：
