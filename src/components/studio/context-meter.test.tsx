@@ -162,16 +162,19 @@ describe('the tool call counter (#553: this turn only, no limit)', () => {
     expect(shown).toBe('思考强度：high，工具调用次数：11');
     expect(tag(html, 'composer-tool-calls')).toContain(PICKER_UPPERCASE_CLASS);
     expect(shown).not.toContain('本轮对话');
-    // No pick falls back to the model's own default; a model without levels shows the count alone.
+    // No pick falls back to the model's own default; a model without levels (or levels not read yet) says so.
     useSessionContextStore.setState({ reasoning: { s1: { effort: '', levels: ['low', 'high'], defaultLevel: 'low' } } });
     expect(renderToStaticMarkup(<ContextMeter />)).toContain('思考强度：low，工具调用次数：11');
     useSessionContextStore.setState({ reasoning: { s1: { effort: '', levels: [], defaultLevel: '' } } });
-    expect(renderToStaticMarkup(<ContextMeter />)).toContain('>工具调用次数：11<');
+    expect(renderToStaticMarkup(<ContextMeter />)).toContain('>思考强度：无档位，工具调用次数：11<');
+    // Levels not read yet: the same words, never a bare count.
+    useSessionContextStore.setState({ reasoning: {} });
+    expect(renderToStaticMarkup(<ContextMeter />)).toContain('>思考强度：无档位，工具调用次数：11<');
   });
 
   const assistant = (toolCallCount: number | undefined) => ({ id: 'm1', role: 'assistant' as const, content: 'ok', createdAt: 1, ...(toolCallCount === undefined ? {} : { toolCallCount }) });
   const render = () => renderToStaticMarkup(<ContextMeter />);
-  const text = (count: number) => messages['ui.studio.tool_calls.turn'].replace('{count}', String(count));
+  const text = (count: number) => messages['ui.studio.tool_calls.turn_with_effort'].replace('{effort}', messages['ui.studio.reasoning.none_value']).replace('{count}', String(count));
   const counter = (html: string) => html.match(/data-testid="composer-tool-calls"[^>]*>([^<]*)</)?.[1] ?? '';
 
   beforeEach(() => {

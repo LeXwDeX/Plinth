@@ -93,11 +93,10 @@ export function ContextMeter() {
   const visionTokens = context?.visionTokens ?? null;
   const visionTokenBudget = context?.visionTokenBudget ?? null;
   const visionImages = context?.visionBudget ?? null;
-  // The counter row: "thinking level, tool calls". A model that offers no level has none to show.
-  const effort = reasoning?.effort || reasoning?.defaultLevel || '';
-  const toolCallText = effort
-    ? schemaCountMessage(schema, 'ui.studio.tool_calls.turn_with_effort', toolCalls, { effort, count: toolCalls })
-    : schemaCountMessage(schema, 'ui.studio.tool_calls.turn', toolCalls, { count: toolCalls });
+  // The counter row: "thinking level, tool calls". The level is always named: a model that offers none (or whose
+  // levels are not read yet) says so in the Schema's words instead of leaving it out.
+  const effort = reasoning?.effort || reasoning?.defaultLevel || schemaText(schema, 'ui.studio.reasoning.none_value');
+  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn_with_effort', toolCalls, { effort, count: toolCalls });
   const compactLabel = schemaText(schema, compacting ? 'ui.studio.context.compacting' : 'ui.studio.context.compact');
 
   const run = () => {

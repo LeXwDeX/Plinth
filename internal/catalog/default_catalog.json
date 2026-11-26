@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-26.09.20",
+    "revision": "2026-11-26.09.40",
     "terminology": {
       "user_facing": [
         {
@@ -5110,6 +5110,7 @@
         "ui.studio.context.compact_busy": "回复进行中，结束后再压缩",
         "ui.studio.tool_calls.turn": "工具调用次数：{count}",
         "ui.studio.tool_calls.turn_one": "工具调用次数：{count}",
+        "ui.studio.reasoning.none_value": "无档位",
         "ui.studio.tool_calls.turn_with_effort": "思考强度：{effort}，工具调用次数：{count}",
         "ui.studio.tool_calls.turn_with_effort_one": "思考强度：{effort}，工具调用次数：{count}",
         "ui.chat.context_compacted": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
@@ -19844,6 +19845,7 @@
             "ui.studio.context.compact_busy": "A reply is running; compact after it ends",
             "ui.studio.tool_calls.turn": "Tool calls: {count}",
             "ui.studio.tool_calls.turn_one": "Tool calls: {count}",
+            "ui.studio.reasoning.none_value": "none",
             "ui.studio.tool_calls.turn_with_effort": "Thinking: {effort}, tool calls: {count}",
             "ui.studio.tool_calls.turn_with_effort_one": "Thinking: {effort}, tool calls: {count}",
             "ui.chat.context_compacted": "Context compacted: the earliest {rounds} rounds are now a summary; the chat history is unchanged",
