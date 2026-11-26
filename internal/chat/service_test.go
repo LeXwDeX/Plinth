@@ -615,7 +615,12 @@ type memoryChatRepository struct {
 	// the conditional replace; it runs under the repository lock (#103 review
 	// C5).
 	interposeBrief func(current chat.ProductionBrief) (chat.ProductionBrief, bool)
+	// turnKeys holds the Idempotency-Key records of keyed sends (#665), by
+	// owner, session and key, with the same rules as go_chat_turn_keys.
+	turnKeys map[memoryTurnKeyID]chat.TurnKey
 }
+
+type memoryTurnKeyID struct{ owner, session, key string }
 
 func newMemoryChatRepository() *memoryChatRepository {
 	return &memoryChatRepository{
@@ -1196,6 +1201,11 @@ func (r *memoryChatRepository) DeleteSession(
 	delete(r.preferences, sessionID)
 	delete(r.messages, sessionID)
 	delete(r.events, sessionID)
+	for id := range r.turnKeys {
+		if id.session == sessionID {
+			delete(r.turnKeys, id)
+		}
+	}
 	// The SQLite schema cascades the stream and the turns with the session.
 	delete(r.streams, sessionID)
 	for id, turn := range r.turns {
@@ -1294,6 +1304,23 @@ func (r *memoryChatRepository) StartTurn(
 	if !r.ownsSession(ownerID, user.SessionID) {
 		return chat.Message{}, chat.Event{}, chat.ErrSessionNotFound
 	}
+	if record := turn.Key; record != nil {
+		// As in SQLite: expired records go, a live one of the same key wins.
+		for id, existing := range r.turnKeys {
+			if !existing.ExpiresAt.After(record.CreatedAt) {
+				delete(r.turnKeys, id)
+			}
+		}
+		id := memoryTurnKeyID{record.OwnerID, record.SessionID, record.Key}
+		if existing, taken := r.turnKeys[id]; taken {
+			return chat.Message{}, chat.Event{}, &chat.TurnKeyTakenError{Existing: existing}
+		}
+		if r.turnKeys == nil {
+			r.turnKeys = map[memoryTurnKeyID]chat.TurnKey{}
+		}
+		r.turnKeys[id] = *record
+		turn.Key = nil
+	}
 	r.messages[user.SessionID] = append(
 		r.messages[user.SessionID],
 		user,
@@ -1306,6 +1333,30 @@ func (r *memoryChatRepository) StartTurn(
 	r.turns[assistant.ID] = turn
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return assistant, event, nil
+}
+
+func (r *memoryChatRepository) TurnKey(
+	_ context.Context, owner, session, key string, now time.Time,
+) (chat.TurnKey, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	record, found := r.turnKeys[memoryTurnKeyID{owner, session, key}]
+	if !found || !record.ExpiresAt.After(now) {
+		return chat.TurnKey{}, false, nil
+	}
+	return record, true, nil
+}
+
+func (r *memoryChatRepository) ReleaseTurnKey(
+	_ context.Context, owner, session, key, assistantMessageID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := memoryTurnKeyID{owner, session, key}
+	if record, found := r.turnKeys[id]; found && record.AssistantMessageID == assistantMessageID {
+		delete(r.turnKeys, id)
+	}
+	return nil
 }
 
 func (r *memoryChatRepository) ListSessionTurns(

@@ -1459,6 +1459,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		StreamCleanupTTL: time.Duration(
 			applicationSchema.Chat.Stream.CleanupTTLMilliseconds,
 		) * time.Millisecond,
+		TurnKeyRetention: time.Duration(
+			applicationSchema.Chat.API.TurnIdempotency.RetentionSeconds,
+		) * time.Second,
 		SubscriberBufferSize: applicationSchema.Chat.Stream.
 			SubscriberBufferSize,
 		EventFields: chat.EventFieldPolicy{

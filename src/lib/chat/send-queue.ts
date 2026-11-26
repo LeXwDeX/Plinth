@@ -29,6 +29,11 @@ export interface QueuedTurn {
   multiview?: MultiviewTurnRequest;
   /** #154: the one-turn style-lock exemption the turn was queued with. */
   styleLockSkipped?: boolean;
+  /**
+   * #665: the send's Idempotency-Key, chosen when the message is queued and stored with it, so whichever tab or page
+   * load finally sends it sends it under the same key. A message stored before keys existed goes out under its `id`.
+   */
+  idempotencyKey?: string;
 }
 
 export type QueueBySession = Readonly<Record<string, readonly QueuedTurn[]>>;

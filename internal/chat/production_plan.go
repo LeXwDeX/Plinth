@@ -69,7 +69,7 @@ func (service *Service) StartPlanContinuation(ctx context.Context, ownerID, sess
 		}
 	}
 	content := strings.ReplaceAll(policy.Budget.Continuation.Message, "{title}", summary.Plan.Title)
-	assistant, err := service.startTurn(ctx, StartTurn{OwnerID: ownerID, SessionID: sessionID,
+	assistant, _, err := service.startTurn(ctx, StartTurn{OwnerID: ownerID, SessionID: sessionID,
 		Content: content, Options: options}, budgetID, nil)
 	if err != nil {
 		return Message{}, TurnOptions{}, err

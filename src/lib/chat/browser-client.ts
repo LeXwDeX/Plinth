@@ -76,6 +76,11 @@ export interface ChatTurnOptions {
   choiceAnswer?: { choiceId: string; optionId?: string; useDefault?: boolean };
   /** #65: a structured multiview request (Schema `chat.api.fields.multiview`). */
   multiview?: MultiviewTurnRequest;
+  /**
+   * #665: the send's Idempotency-Key. A repeat with the same key and the same request is answered with the turn the
+   * key started; the client itself repeats a keyed send once when the network failed before any answer arrived.
+   */
+  idempotencyKey?: string;
 }
 
 /** One page of a conversation, oldest first; `nextCursor` reads the page before it ('' when none). */
@@ -1364,19 +1369,26 @@ export function createChatBrowserClient(
           [fields.skill_name]: options.skill.name,
         };
       }
-      const response = await fetcher(
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+      const send = () => fetcher(
         route(schema.runtime.http.legacy_routes.chat_messages, { sessionID }),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal,
-        },
+        { method: 'POST', headers, body: JSON.stringify(body), signal },
       );
+      let response: Response;
+      try {
+        response = await send();
+      } catch (error) {
+        // #665: no answer arrived, so the server may have started the turn. Only a keyed send is repeated: the key makes
+        // the repeat answer that turn instead of starting another.
+        if (!options.idempotencyKey || signal?.aborted || (error as Error)?.name === 'AbortError') throw error;
+        response = await send();
+      }
       const payload = await responseObject(response);
       if (!response.ok) {
-        const purposeError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid';
-        const message = purposeError ? payload.detail : payload[responseFields.error];
+        const problemError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid' ||
+          payload.code === 'idempotency_conflict' || payload.code === 'idempotency_key_required';
+        const message = problemError ? payload.detail : payload[responseFields.error];
         throw new ChatBrowserError(
           typeof message === 'string'
             ? message

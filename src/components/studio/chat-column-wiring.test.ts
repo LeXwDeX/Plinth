@@ -289,6 +289,17 @@ describe('the conversation is read a page at a time', () => {
     expect(chatMessage).toContain('data-testid="chat-status-bubble"');
     expect(chatMessage).toContain("data-thinking={thinking ? 'true' : undefined}");
   });
+
+  it('sends every turn under an Idempotency-Key that a repeat of an unanswered send reuses (#665)', () => {
+    expect(agentDialog).toContain('const signature = sendSignature(sessionId, text, turnOptions);');
+    expect(agentDialog).toContain('key: sendKeyFor(uncertainSend.current, signature, extra?.idempotencyKey)');
+    expect(agentDialog).toContain('{ ...turnOptions, idempotencyKey: uncertain.key }');
+    // Only an answered send forgets its key; a failed one keeps it for the repeat of the same request.
+    expect(agentDialog).toContain('if (uncertainSend.current === uncertain) uncertainSend.current = null;');
+    // A queued message is stored with its own key and goes out under it.
+    expect(agentDialog).toContain('idempotencyKey: newSendKey(),');
+    expect(agentDialog).toContain('idempotencyKey: turn.idempotencyKey ?? turn.id,');
+  });
 });
 
 describe('session preference wiring (#241)', () => {
