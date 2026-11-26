@@ -25,7 +25,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 ## 架构约束
 
 1. **Schema 驱动**：可变产品配置（含运行策略、权限、路由、Provider/Offering 参数、约束、默认值、费用、文案、UI 控件及上游映射）由 Product Schema 声明。业务状态机、通用校验和不可约的 wire 解析可写代码，不能建立前端或 Handler 的第二份产品配置。
-2. **Provider 轻代码**：同协议 Provider 优先登记连接与 Offering，并复用 Adapter；仅新 wire 协议需要隔离 Adapter 与契约测试。不得复制任务管理、状态机或页面分支。
+2. **Provider 轻代码**：同协议 Provider 优先登记连接与 Offering，并复用 Adapter；仅新 wire 协议需要隔离 Adapter 与契约测试。不得复制任务管理、状态机或页面分支，专属 Provider 逻辑在本层处理。
 3. **统一公开任务**：生成、处理及其他独立公开 Offering 都由 `internal/generation` 管理 Task/Attempt。Provider 为履行单一公开步骤而运行的上传、转换等私有子作业留在 Adapter 检查点内；HTTP、Agent 和 Processing Plan 不自行推进 Task 状态。HTTP/兼容层读取 Task 与产物须经内核或其投影/资产模块，不另建旁路查询与生命周期。
 4. **UI 消费公开 Schema**：`/api/v1/schema`、扩展 Provider discovery 与任务投影提供前端可用的能力、控件、费用提示和状态文案。`application.runtime.configuration` 与密钥只留服务端，不进入首屏和公开投影。未注册或运行配置不可用的 Offering 明示不可用，不静默换模型。前端任务状态展示只读 Product Schema `task_states`，不得在前端另建任务状态枚举表。
 
