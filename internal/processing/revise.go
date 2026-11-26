@@ -130,6 +130,14 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 	if contingency == nil || contingency.ID != command.ContingencyID {
 		return Plan{}, ErrRevisionOutsidePlan
 	}
+	// A declared contingency is one approved repair, not a loop: once its
+	// step is in the plan, the same contingency cannot be inserted again
+	// (#665). A further repair is the person's decision.
+	for _, existing := range plan.Steps {
+		if existing.ContingencyID == contingency.ID {
+			return Plan{}, ErrRevisionOutsidePlan
+		}
+	}
 	triggered := false
 	for _, trigger := range contingency.Trigger {
 		switch trigger {
@@ -258,6 +266,11 @@ func (s *Service) reviseRetry(ctx context.Context, plan *Plan, command ReviseCom
 	if plan.State != Failed || command.StepIndex < 0 || command.StepIndex >= len(plan.Steps) ||
 		plan.Steps[command.StepIndex].State != Failed {
 		return Plan{}, ErrConflict
+	}
+	// Every retry is a new paid attempt: the Agent may start one step again
+	// only so often; after that the person decides (#665).
+	if plan.Steps[command.StepIndex].Retry >= MaxAgentStepRetries {
+		return Plan{}, ErrRevisionRetryPerson
 	}
 	return s.retryStep(ctx, plan, command.StepIndex, plan.Steps[command.StepIndex].Revision)
 }

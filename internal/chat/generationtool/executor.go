@@ -1049,28 +1049,7 @@ func admissionRetryAfter(err error) time.Duration {
 // KnownNotSubmitted reports a submission the kernel refused before writing a
 // Task, so the operation ended without one.
 func KnownNotSubmitted(err error) bool {
-	if errors.Is(err, generation.ErrConversionInProgress) {
-		// The repository refused before writing anything: an overlapping
-		// conversion is active, so the turn must not wait for a Task that
-		// does not exist.
-		return true
-	}
-	if errors.Is(err, generation.ErrNotSubmitted) {
-		// SubmitPrepared confirmed no Task holds the key and then refused the
-		// frozen input for good (#516): a replay meets the same refusal.
-		return true
-	}
-	for _, code := range []generation.ErrorCode{
-		generation.ErrInvalidCapability, generation.ErrInvalidInput,
-		generation.ErrUnknownOffering, generation.ErrNoOffering,
-		generation.ErrNotFound, generation.ErrForbidden,
-		generation.ErrTooManyRequests,
-	} {
-		if generation.IsCode(err, code) {
-			return true
-		}
-	}
-	return false
+	return generation.RefusedBeforeSubmission(err)
 }
 
 func (executor *Executor) observeBoundTask(

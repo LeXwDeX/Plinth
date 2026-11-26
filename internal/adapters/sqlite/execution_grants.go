@@ -406,8 +406,13 @@ func (r *Repository) ApproveExecutionGrantByPolicy(ctx context.Context, owner, r
 		}
 	}()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Like a person's approval, the policy's is refused in the same statement
+	// when the grant's trigger turn was stopped while it still owns the grant:
+	// a Stop that commits between the mode read and this write must not leave
+	// an approved grant nobody can claim (#665).
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status='approved', decided_by=?, decided_at=?, updated_at=?
- WHERE request_id=? AND owner_id=? AND source IN (`+sources+`) AND status='pending'`,
+ WHERE request_id=? AND owner_id=? AND source IN (`+sources+`) AND status='pending'
+ AND `+turnOwnsStoppedGrantNot,
 		decidedBy, now, now, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, err

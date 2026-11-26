@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -65,6 +66,8 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
 	}
 	created := false
+	// release ends the duplicate guard's lock of a new group (#665).
+	release := func() {}
 	if errors.Is(err, skillrun.ErrMissing) {
 		// Mutable model/reference/recipe selection applies only to a new run.
 		// Existing runs keep their original recipe and frozen source.
@@ -72,13 +75,19 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			return chat.ToolResult{Error: "three-view skill unavailable", NoSubmission: true}, nil
 		}
 		var args struct {
-			ReferenceImageIndices []int    `json:"reference_image_indices"`
-			ReferenceHandles      []string `json:"reference_handles"`
-			SubjectType           string   `json:"subject_type"`
-			Purpose               string   `json:"purpose"`
+			ReferenceImageIndices []int           `json:"reference_image_indices"`
+			ReferenceHandles      []string        `json:"reference_handles"`
+			SubjectType           string          `json:"subject_type"`
+			Purpose               string          `json:"purpose"`
+			IncludeRight          json.RawMessage `json:"include_right"`
 		}
 		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
 			return chat.ToolResult{Error: "invalid three-view arguments", NoSubmission: true}, nil
+		}
+		// A four-view request must say so with a JSON boolean: a string "true"
+		// silently made three views before (#665).
+		if _, err := threeViewIncludeRight(args.IncludeRight); err != nil {
+			return chat.ToolResult{Error: err.Error(), NoSubmission: true}, nil
 		}
 		// The use decides the recipe: a design sheet keeps the source's shape
 		// and pose, a model input renders the orthographic set for 3D (#409).
@@ -126,6 +135,19 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			command.Call.ID, command.PriorGenerationCalls) {
 			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
+		// One group per source picture at a time (#665): a parallel call or a
+		// re-ask while the earlier group waits on its card or runs would start
+		// a second front view, charge it and raise a second card. The lock is
+		// held until this call's own first grant is recorded on its run.
+		releaseSource := e.lockThreeViewSession(command.OwnerID, command.SessionID)
+		defer releaseSource()
+		if active, found, err := e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0]); err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		} else if found {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
+				NoSubmission: true}, nil
+		}
+		release = releaseSource
 		// The frame of every view follows the source subject's shape instead
 		// of the Offering's default square (#283), or the source picture's own
 		// shape for a use that declares it (#409). It is frozen with the run;
@@ -170,6 +192,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		_, _, err = e.skillRuntime.RequestAgentGrant(ctx, generation.OwnerID(command.OwnerID),
 			run.ID, stepKey, command.AssistantMessageID)
 	}
+	release()
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
@@ -234,6 +257,99 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	result.AwaitTask = true
 	result.WaitUntil = e.threeViewWaitUntil(command, offering)
 	return result, nil
+}
+
+// threeViewIncludeRight reads the include_right argument strictly: absent or
+// null is false, a JSON boolean is its value, and anything else (a string
+// "true", a number) is an error naming the expected type (#665).
+func threeViewIncludeRight(raw json.RawMessage) (bool, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false, nil
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, fmt.Errorf("include_right must be a JSON boolean (true or false), got %s", trimmed)
+	}
+	return value, nil
+}
+
+// lockThreeViewSession serializes the start of new groups in one session and
+// returns an idempotent release.
+func (e *Executor) lockThreeViewSession(owner, session string) func() {
+	value, _ := e.threeViewSources.LoadOrStore(owner+"\x00"+session, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	var once sync.Once
+	return func() { once.Do(lock.Unlock) }
+}
+
+// activeThreeViewForSource finds another group of the session, of the same
+// recipe and source picture, that still waits on a card or has a view in
+// flight (#665): a view whose grant is pending, approved or being claimed, or
+// whose Task has not ended. A finished, failed or paused group is not active:
+// asking again for it starts a new group as before.
+func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
+	source generation.AssetID,
+) (skillrun.Run, bool, error) {
+	owner := generation.OwnerID(command.OwnerID)
+	limit := e.threeView.MaximumListed
+	if limit <= 0 {
+		limit = 20
+	}
+	runs, err := e.skillRuntime.List(ctx, owner, command.SessionID, "", limit)
+	if err != nil {
+		return skillrun.Run{}, false, err
+	}
+	key := threeViewRunKey(command)
+	for _, run := range runs {
+		if run.RecipeID != recipeID || run.SourceAssetID != source || run.IdempotencyKey == key {
+			continue
+		}
+		for _, step := range run.Steps {
+			active, err := e.threeViewStepActive(ctx, owner, step)
+			if err != nil {
+				return skillrun.Run{}, false, err
+			}
+			if active {
+				return run, true, nil
+			}
+		}
+	}
+	return skillrun.Run{}, false, nil
+}
+
+func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, error) {
+	taskActive := func(id generation.TaskID) (bool, error) {
+		task, err := e.skillRuntime.Generation.Get(ctx, owner, id)
+		if err != nil {
+			return false, err
+		}
+		return !task.State.Terminal(), nil
+	}
+	switch step.Phase {
+	case skillrun.GrantPending:
+		if step.GrantRequestID == "" {
+			return false, nil
+		}
+		grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), step.GrantRequestID)
+		if err != nil {
+			return false, err
+		}
+		switch grant.Status {
+		case executiongrant.Pending:
+			return !e.skillRuntime.Grants.Expired(grant), nil
+		case executiongrant.Approved, executiongrant.Claimed:
+			return true, nil
+		case executiongrant.Bound:
+			return taskActive(generation.TaskID(grant.TaskID))
+		}
+	case skillrun.TaskBound:
+		if step.TaskID != "" {
+			return taskActive(step.TaskID)
+		}
+	}
+	return false, nil
 }
 
 func threeViewRunKey(command chat.ToolCommand) string {
@@ -491,12 +607,14 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 	// The call replays with the arguments it was made with: a four-view request
 	// (include_right) also makes the right view when the session approves every
 	// paid step (#663).
+	// The value was checked when the group was created (threeViewIncludeRight).
 	var args struct {
-		IncludeRight bool `json:"include_right"`
+		IncludeRight json.RawMessage `json:"include_right"`
 	}
 	_ = json.Unmarshal(command.Call.Arguments, &args)
+	includeRight, _ := threeViewIncludeRight(args.IncludeRight)
 	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID, args.IncludeRight)
+		command.BoundTaskID, command.AssistantMessageID, includeRight)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}

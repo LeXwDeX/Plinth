@@ -974,6 +974,9 @@ func (s *Service) settleDenied(ctx context.Context, op generationtool.Operation,
 	switch {
 	case grant.CancelledByStop():
 		content = s.text(ctx, s.schema.PendingApprovals.Messages.Cancelled)
+	case grant.ExpiredUndecided():
+		// An expiry whose post failed after the grant was denied (#665).
+		content = s.text(ctx, s.schema.PendingApprovals.Messages.Expired)
 	default:
 		if extra, ok := s.deniedExtraCredits(ctx, op); ok {
 			content = extra
@@ -1409,6 +1412,18 @@ func (s *Service) expire(ctx context.Context, op generationtool.Operation) error
 	}
 	if !s.grants.Expired(grant) {
 		return nil
+	}
+	// The grant is denied as expired before the card is settled, so it does not
+	// stay pending behind a card that says it can no longer be approved (#665).
+	// A decision that committed first comes back unchanged and is finished by
+	// the ordinary path.
+	grant, err = s.grants.ExpirePending(ctx, grant)
+	if err != nil {
+		return err
+	}
+	if grant.Status != executiongrant.Pending && !grant.ExpiredUndecided() {
+		_, err = s.continueLocked(ctx, stored)
+		return err
 	}
 	_, err = s.settleExpired(ctx, stored)
 	return err

@@ -962,8 +962,10 @@ func TestAgentFlowExpiredApprovalCannotBeApprovedLate(t *testing.T) {
 	if late.Code != http.StatusConflict || !strings.Contains(late.Body.String(), "pending_approval_expired") {
 		t.Fatalf("late approval = %d %s, want 409 pending_approval_expired", late.Code, late.Body)
 	}
-	if stack.grant(card.RequestID).Status != "pending" {
-		t.Fatalf("an expired grant must not become approved: %+v", stack.grant(card.RequestID))
+	// #665: the sweep denies the expired grant as the system instead of
+	// leaving it pending behind the expired card.
+	if got := stack.grant(card.RequestID); got.Status != "denied" || got.DecidedBy != "system:approval_expired" {
+		t.Fatalf("an expired grant must be denied as expired, never approved: %+v", got)
 	}
 	if stack.tasks(session) != 0 || stack.rodin.calls.Load() != 0 {
 		t.Fatalf("an expired card submitted work: tasks=%d provider calls=%d", stack.tasks(session), stack.rodin.calls.Load())

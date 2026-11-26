@@ -4374,8 +4374,12 @@ type ChatThreeViewMultiviewSchema struct {
 // the Agent's receipt when a view stayed refused by admission past the queue
 // deadline (#59): nothing was submitted or charged.
 type ChatThreeViewMessages struct {
-	AgentStarted      string `json:"agent_started"`
-	AdmissionFull     string `json:"admission_full"`
+	AgentStarted  string `json:"agent_started"`
+	AdmissionFull string `json:"admission_full"`
+	// DuplicateRun refuses a second group of the same source picture while
+	// an earlier group of the session still waits on its card or runs
+	// (#665): nothing new is created, submitted or charged. Fields: {run}.
+	DuplicateRun      string `json:"duplicate_run"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
@@ -6186,6 +6190,10 @@ type ChatToolProcessingPlanSchema struct {
 type ChatToolProcessingRevisionSchema struct {
 	MaxReasonCharacters  int `json:"max_reason_characters"`
 	MaxWaivedCheckpoints int `json:"max_waived_checkpoints"`
+	// MaxAgentRetriesPerStep bounds how often the Agent's revise retry may
+	// start one step again (#665); the person's own Retry is not counted
+	// against it. Aligned with processing.MaxAgentStepRetries.
+	MaxAgentRetriesPerStep int `json:"max_agent_retries_per_step"`
 }
 
 // ChatProcessingSchema is application.chat.processing: server-only wording for

@@ -304,6 +304,11 @@ type Executor struct {
 	limitContent     string
 	reconcileContent string
 	texts            *catalog.TextLocalizer
+
+	// threeViewSources serializes the start of new three-view groups of one
+	// session, so two parallel calls on the same source picture cannot both
+	// pass the duplicate guard (#665). Keys are owner and session.
+	threeViewSources sync.Map
 }
 
 // limitText and reconcileText are the consent texts in the turn's locale.

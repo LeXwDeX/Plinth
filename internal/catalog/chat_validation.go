@@ -1448,7 +1448,8 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 		// #251: the Agent revision's reason bound and waived-checkpoint limit.
 		// A historical plan tool without the block falls back to the runtime
 		// constants, so it stays readable.
-		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 {
+		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 ||
+			plan.Revision.MaxAgentRetriesPerStep < 0 {
 			return nil, errors.New("plan.revision 的上限无效")
 		}
 		for step, capability := range processing.Steps {
@@ -2018,6 +2019,7 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	messages := schema.Messages
 	required := map[string]string{
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
+		"duplicate_run":   messages.DuplicateRun,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,

@@ -9945,7 +9945,8 @@
               "not_found_content": "本会话没有可读取的加工计划。请使用工具结果给出的 plan_id。",
               "revision": {
                 "max_reason_characters": 400,
-                "max_waived_checkpoints": 1
+                "max_waived_checkpoints": 1,
+                "max_agent_retries_per_step": 2
               }
             },
             "messages": {
@@ -12205,6 +12206,7 @@
         "messages": {
           "agent_started": "三视图运行 {run} 的 {view} 步骤已提交（{approval}，估算 {credits} 积分），任务 {task}。严格模式下其余视图不会自动开始，用户在三视图卡片上逐个点“继续生成”才会开始；在必需视角都完成之前，不要说三视图已全部完成。",
           "admission_full": "进行中的生成任务较多，这个三视图步骤排队等待超过了时限，任务没有提交，也没有扣积分。请告诉用户稍后再试，或在三视图卡片上点“继续生成”重新开始这个视图；不要说三视图已经开始生成。",
+          "duplicate_run": "同一张源图的三视图（{run}）还在卡片上等用户决定或正在生成；没有再建第二组，也没有提交任务或扣积分。告诉用户它在那组三视图卡片上，不要为它再次调用 create_three_view。",
           "approval_human": "用户已批准",
           "approval_policy": "按会话批准方式自动批准，不是用户点的批准",
           "model_source_not_yet": "这组三视图的正面图还没有生成完成，不能用它做 3D 模型。请等正面图完成，或在三视图卡片上重试正面图。",
