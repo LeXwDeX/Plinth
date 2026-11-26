@@ -5,9 +5,11 @@
 // enforced, and Validate checks a value against a parsed schema.
 //
 // The subset: type (one name or a list, with "null"), enum, minimum, maximum,
-// minLength, maxLength, items, minItems, maxItems, uniqueItems, properties,
-// required and additionalProperties (a boolean; true only on a free-form map
-// when Options.FreeFormObjects allows it). description, title, default
+// exclusiveMinimum, exclusiveMaximum (numbers), minLength, maxLength, items,
+// minItems, maxItems, uniqueItems, properties, required and
+// additionalProperties (a boolean, true only on a free-form map when
+// Options.FreeFormObjects allows it; or the schema of every value of a map
+// that declares no property of its own, also only on such a map). description, title, default
 // and examples are annotations and are kept but never enforced. There are no
 // references, no combinators and no patterns.
 //
@@ -29,19 +31,24 @@ import (
 
 // Schema is one parsed schema node.
 type Schema struct {
-	Types                []string
-	Description          string
-	Enum                 []any
-	Minimum, Maximum     *float64
-	MinLength, MaxLength *int
-	Items                *Schema
-	MinItems, MaxItems   *int
-	UniqueItems          bool
-	Properties           map[string]*Schema
-	Required             []string
+	Types            []string
+	Description      string
+	Enum             []any
+	Minimum, Maximum *float64
+	// ExclusiveMinimum and ExclusiveMaximum are strict bounds (#665).
+	ExclusiveMinimum, ExclusiveMaximum *float64
+	MinLength, MaxLength               *int
+	Items                              *Schema
+	MinItems, MaxItems                 *int
+	UniqueItems                        bool
+	Properties                         map[string]*Schema
+	Required                           []string
 	// AdditionalProperties is nil when the schema does not say (an object then
 	// accepts other properties, as in JSON Schema).
 	AdditionalProperties *bool
+	// AdditionalSchema is the schema every value of a map must match, when
+	// additionalProperties is a schema rather than a boolean (#665).
+	AdditionalSchema *Schema
 }
 
 // Options tune what Parse accepts.
@@ -143,7 +150,7 @@ func parseNode(value any, path string, options Options) (*Schema, error) {
 				return nil, fmt.Errorf("%s.enum: must be a non-empty list", path)
 			}
 			node.Enum = values
-		case "minimum", "maximum":
+		case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum":
 			number, isNumber := item.(json.Number)
 			if !isNumber {
 				return nil, fmt.Errorf("%s.%s: must be a number", path, key)
@@ -152,10 +159,15 @@ func parseNode(value any, path string, options Options) (*Schema, error) {
 			if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
 				return nil, fmt.Errorf("%s.%s: is not a finite number", path, key)
 			}
-			if key == "minimum" {
+			switch key {
+			case "minimum":
 				node.Minimum = &parsed
-			} else {
+			case "maximum":
 				node.Maximum = &parsed
+			case "exclusiveMinimum":
+				node.ExclusiveMinimum = &parsed
+			default:
+				node.ExclusiveMaximum = &parsed
 			}
 		case "minLength", "maxLength", "minItems", "maxItems":
 			count, err := nonNegativeInt(item)
@@ -210,9 +222,19 @@ func parseNode(value any, path string, options Options) (*Schema, error) {
 				node.Required = append(node.Required, name)
 			}
 		case "additionalProperties":
+			if values, isSchema := item.(map[string]any); isSchema {
+				child, err := parseNode(values, path+".additionalProperties", options)
+				if err != nil {
+					return nil, err
+				}
+				node.AdditionalSchema = child
+				open := true
+				node.AdditionalProperties = &open
+				continue
+			}
 			flag, isBool := item.(bool)
 			if !isBool {
-				return nil, fmt.Errorf("%s.additionalProperties: must be a boolean", path)
+				return nil, fmt.Errorf("%s.additionalProperties: must be a boolean or a schema", path)
 			}
 			node.AdditionalProperties = &flag
 		default:
@@ -250,11 +272,22 @@ func (s *Schema) check(path string, options Options) error {
 		return false
 	}
 	numeric := has("integer") || has("number")
-	if (s.Minimum != nil || s.Maximum != nil) && !numeric {
+	if (s.Minimum != nil || s.Maximum != nil || s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil) && !numeric {
 		return fmt.Errorf("%s: minimum and maximum need a numeric type", path)
 	}
-	if s.Minimum != nil && s.Maximum != nil && *s.Minimum > *s.Maximum {
+	lower, upper := s.Minimum, s.Maximum
+	if s.ExclusiveMinimum != nil && (lower == nil || *s.ExclusiveMinimum >= *lower) {
+		lower = s.ExclusiveMinimum
+	}
+	if s.ExclusiveMaximum != nil && (upper == nil || *s.ExclusiveMaximum <= *upper) {
+		upper = s.ExclusiveMaximum
+	}
+	if lower != nil && upper != nil && (*lower > *upper ||
+		(*lower == *upper && (s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil))) {
 		return fmt.Errorf("%s: minimum is above maximum", path)
+	}
+	if s.AdditionalSchema != nil && len(s.Properties) > 0 {
+		return fmt.Errorf("%s: a map with a value schema declares no properties", path)
 	}
 	if (s.MinLength != nil || s.MaxLength != nil) && !has("string") {
 		return fmt.Errorf("%s: minLength and maxLength need the string type", path)
@@ -364,6 +397,12 @@ func (s *Schema) validate(value any, path string) error {
 		if s.Maximum != nil && number > *s.Maximum {
 			return fail(path, "must be at most %s", trimFloat(*s.Maximum))
 		}
+		if s.ExclusiveMinimum != nil && number <= *s.ExclusiveMinimum {
+			return fail(path, "must be above %s", trimFloat(*s.ExclusiveMinimum))
+		}
+		if s.ExclusiveMaximum != nil && number >= *s.ExclusiveMaximum {
+			return fail(path, "must be below %s", trimFloat(*s.ExclusiveMaximum))
+		}
 	case string:
 		length := utf8.RuneCountInString(typed)
 		if s.MinLength != nil && length < *s.MinLength {
@@ -411,6 +450,11 @@ func (s *Schema) validate(value any, path string) error {
 			if !declared {
 				if s.AdditionalProperties != nil && !*s.AdditionalProperties {
 					return fail(path+"."+name, "is not an allowed property")
+				}
+				if s.AdditionalSchema != nil {
+					if err := s.AdditionalSchema.validate(typed[name], path+"."+name); err != nil {
+						return err
+					}
 				}
 				continue
 			}

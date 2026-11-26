@@ -4369,7 +4369,25 @@ type ChatThreeViewMultiviewSchema struct {
 // the Agent's receipt when a view stayed refused by admission past the queue
 // deadline (#59): nothing was submitted or charged.
 type ChatThreeViewMessages struct {
-	AgentStarted      string `json:"agent_started"`
+	// AgentStarted is the receipt of the first view when the other views wait
+	// for the person on the card (the strict mode, or the budget mode without a
+	// plan covering every required view); AgentStartedContinuing is the same
+	// receipt when the server finishes the required views in the turn (the
+	// auto mode, or a covering budget plan) (#665). Both take {run}, {view},
+	// {approval}, {credits} and {task}.
+	AgentStarted           string `json:"agent_started"`
+	AgentStartedContinuing string `json:"agent_started_continuing,omitempty"`
+	// The texts the three-view tool answers with when it submits nothing
+	// (#665): the turn was stopped, the session's model has no image-to-image
+	// Offering for the recipe, the chosen picture cannot be used, the
+	// arguments do not have the declared shape, and the person denied the
+	// step. They are the Agent's recovery guidance, so they live here, not in
+	// code.
+	TurnStopped       string `json:"turn_stopped,omitempty"`
+	ModelUnavailable  string `json:"model_unavailable,omitempty"`
+	ImageUnavailable  string `json:"image_unavailable,omitempty"`
+	ArgumentsInvalid  string `json:"arguments_invalid,omitempty"`
+	Denied            string `json:"denied,omitempty"`
 	AdmissionFull     string `json:"admission_full"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
@@ -6807,6 +6825,10 @@ type ChatMessageTexts struct {
 	// (#378).
 	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
 	ToolUnavailable      string `json:"tool_unavailable"`
+	// ToolArgumentsSchemaInvalid ({tool}, {reason}) is the result of a call
+	// to an Agent tool whose arguments are valid JSON but break the tool's
+	// declared parameters; {reason} names the field and the rule (#665).
+	ToolArgumentsSchemaInvalid string `json:"tool_arguments_schema_invalid,omitempty"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or

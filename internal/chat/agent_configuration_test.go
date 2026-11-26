@@ -50,7 +50,7 @@ func TestSuspendedTurnKeepsConfigurationAcrossNewOrchestrator(t *testing.T) {
 		return chat.AgentConfigurationSnapshot{Revision: revision, SystemPrompt: "prompt-" + revision, DomainContext: map[string]string{}, Skills: []catalog.SkillSchema{{ID: "personal-style", Prompt: style}}, AgentTools: []catalog.ChatAgentToolSchema{schema.AgentTools[0]}}, nil
 	}
 	name := schema.AgentTools[0].Name
-	agent := &scriptedSuspendAgent{initial: agents.Completion{ToolCalls: []agents.ToolCall{{ID: "frozen-call", Name: name, Arguments: json.RawMessage(`{}`)}}}, resume: []agents.Completion{{Content: "finished"}}}
+	agent := &scriptedSuspendAgent{initial: agents.Completion{ToolCalls: []agents.ToolCall{{ID: "frozen-call", Name: name, Arguments: json.RawMessage(`{"offering_id":"configured","params":{}}`)}}}, resume: []agents.Completion{{Content: "finished"}}}
 	makeOrchestrator := func() *chat.Orchestrator {
 		o, err := chat.NewOrchestrator(chat.OrchestratorConfig{Service: service, Schema: schema, Model: "configured-model", Agent: agent, Tools: tool, Configuration: configured})
 		if err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -217,6 +218,9 @@ type proposedPlanStep struct {
 	EstimatedCredits *int                    `json:"estimated_credits"`
 	Check            string                  `json:"check"`
 	Candidates       *proposedPlanCandidates `json:"candidates"`
+	// Optional marks a step the plan is complete without (#410), such as the
+	// right view of a four-view recipe; the plan keeps the flag (#665).
+	Optional bool `json:"optional"`
 }
 
 // proposedPlanCandidates declares where a step's parallel candidates differ
@@ -238,9 +242,14 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 	var arguments proposedPlanArguments
 	decoder := json.NewDecoder(strings.NewReader(string(command.Call.Arguments)))
 	decoder.DisallowUnknownFields()
-	if len(command.Call.Arguments) == 0 || decoder.Decode(&arguments) != nil ||
-		decoder.Decode(new(any)) != io.EOF {
+	if len(command.Call.Arguments) == 0 {
 		return planRefusal("arguments must match the declared plan object"), nil
+	}
+	if err := decoder.Decode(&arguments); err != nil {
+		return planRefusal(planArgumentsRefusal(err)), nil
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return planRefusal("arguments must match the declared plan object: trailing content after the object"), nil
 	}
 	plan, limits, refusal := policy.buildPlan(command, arguments)
 	if refusal != "" {
@@ -266,6 +275,43 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 		return ToolResult{NoSubmission: true}, err
 	}
 	return ToolResult{AgentContent: string(content), NoSubmission: true}, nil
+}
+
+// planArgumentsRefusal names the field that broke the declared plan object
+// (#665), so the Agent can fix that field instead of guessing. It never echoes
+// a value the model wrote.
+func planArgumentsRefusal(err error) string {
+	const prefix = "arguments must match the declared plan object"
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &typeErr) && typeErr.Field != "":
+		if typeErr.Type == reflect.TypeOf(json.Number("")) {
+			return prefix + ": field " + typeErr.Field + " must be a number"
+		}
+		return prefix + ": field " + typeErr.Field + " must be " + jsonKindName(typeErr.Type.Kind())
+	case errors.As(err, &typeErr):
+		return prefix + ": the arguments must be one JSON object"
+	case strings.HasPrefix(err.Error(), "json: unknown field "):
+		return prefix + ": " + strings.TrimPrefix(err.Error(), "json: ") + " is not declared"
+	default:
+		return prefix
+	}
+}
+
+// jsonKindName is the JSON type a Go kind decodes from.
+func jsonKindName(kind reflect.Kind) string {
+	switch kind {
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.String:
+		return "a string"
+	case reflect.Slice, reflect.Array:
+		return "an array"
+	case reflect.Struct, reflect.Map, reflect.Pointer:
+		return "an object"
+	default:
+		return "a number"
+	}
 }
 
 // productionPlanRequestKey is the proposal's stable identity. It includes the
@@ -437,6 +483,7 @@ func (policy *ProductionPlanPolicy) planStepCandidates(command ToolCommand, step
 			Purpose:    purpose,
 			Estimate:   estimated,
 			Check:      check,
+			Optional:   step.Optional,
 		}
 		if declared != nil {
 			stepPlan.CandidateGroup = group

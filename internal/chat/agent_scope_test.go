@@ -228,8 +228,17 @@ func TestServerRefusesAnOutOfScopeToolCallEvenWhenTheModelNamesIt(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.scope+"/"+tc.tool, func(t *testing.T) {
+			// #665: the server checks an offered Agent tool's arguments against
+			// its declaration, so each call carries what that tool requires.
+			arguments := map[string]string{
+				"update_session_notes": `{"notes":"x"}`,
+				"get_task":             `{"task_id":"x"}`,
+			}[tc.tool]
+			if arguments == "" {
+				arguments = `{"prompt":"x"}`
+			}
 			rig := newScopeRig(t,
-				agents.Completion{ToolCalls: []agents.ToolCall{{ID: "call-1", Name: tc.tool, Arguments: []byte(`{"prompt":"x"}`)}}},
+				agents.Completion{ToolCalls: []agents.ToolCall{{ID: "call-1", Name: tc.tool, Arguments: []byte(arguments)}}},
 				agents.Completion{Content: "explained"},
 			)
 			sessionID := rig.turn(t, tc.scope)
