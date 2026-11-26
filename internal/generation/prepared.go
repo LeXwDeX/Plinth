@@ -270,6 +270,20 @@ func RefusedBeforeSubmission(err error) bool {
 	return false
 }
 
+// RefusedPermanently is the part of RefusedBeforeSubmission that a replay of
+// the same authorization can never overcome: it excludes an overlapping
+// conversion (ErrConversionInProgress ends when the other run ends) and every
+// admission refusal (ErrTooManyRequests, with or without a RetryAfter), which
+// are transient. Only such a refusal may deny an approved grant: denying it on
+// a transient refusal would throw away a person's approval that a later submit
+// could still use (#665).
+func RefusedPermanently(err error) bool {
+	if errors.Is(err, ErrConversionInProgress) || IsCode(err, ErrTooManyRequests) {
+		return false
+	}
+	return RefusedBeforeSubmission(err)
+}
+
 // refusedBeforeWrite is a SubmitPrepared refusal marked ErrNotSubmitted. The
 // Detail and Code stay what callers already read.
 func refusedBeforeWrite(code ErrorCode, detail string, cause error) *Error {

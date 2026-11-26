@@ -473,14 +473,15 @@ func (r *Runtime) SubmitStep(ctx context.Context, owner generation.OwnerID, runI
 		PlanStepID: execution.PlanStepID, AuthorizationRef: grant.RequestID,
 	})
 	if err != nil {
-		if (generation.RefusedBeforeSubmission(err) || errors.Is(err, harness.ErrStale)) &&
-			generation.AdmissionRetryAfter(err) == 0 {
+		if generation.RefusedPermanently(err) || errors.Is(err, harness.ErrStale) {
 			// The kernel refused this authorization for good before writing a
 			// Task (a stale frozen input, #516, a stale harness, an input or
 			// Offering it no longer accepts): deny the approval and give back
 			// the plan reservation (and the 3D step) it holds (#665). The
 			// grant is denied whoever approved it, so the step is not counted
-			// as in flight and can be started again. Idempotent.
+			// as in flight and can be started again. Idempotent. A transient
+			// refusal (an overlapping conversion, a full admission) keeps the
+			// approval for the next submit.
 			_ = r.Grants.AbandonRefusedGrant(context.WithoutCancel(ctx), string(owner), grant.RequestID)
 		}
 		return Run{}, generation.Accepted{}, err
