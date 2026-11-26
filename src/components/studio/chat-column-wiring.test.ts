@@ -127,7 +127,15 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     // #134: the turn the server starts for an approved plan is followed by re-running the session recovery.
     const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
     expect(decidePlan).toMatch(/if \(result\.turnMessageId &&[\s\S]{0,120}\{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
-    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,300}= recoverChatSession\(/);
+    // The effect that runs the session recovery lists serverTurnTick among its dependencies, so a tick re-runs it,
+    // however much else the effect grows to hold.
+    const recovery = agentDialog.indexOf('recoverChatSession({');
+    const effectStart = agentDialog.lastIndexOf('useEffect(() => {', recovery);
+    const dependencies = agentDialog.indexOf('}, [', recovery);
+    expect(recovery).toBeGreaterThan(0);
+    expect(agentDialog.indexOf('useEffect(', effectStart + 1)).toBeGreaterThan(dependencies);
+    const dependencyList = agentDialog.slice(dependencies + 4, agentDialog.indexOf(']);', dependencies));
+    expect(dependencyList.split(',').map((name) => name.trim())).toContain('serverTurnTick');
     expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });
