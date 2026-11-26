@@ -401,6 +401,11 @@ export class ChatBrowserError extends Error {
   readonly requestId: string;
   /** 429 时服务端 `Retry-After` 给出的等待秒数；缺失、非法或不大于 0 时不设置。 */
   readonly retryAfterSeconds?: number;
+  /**
+   * #665: the failure carried the API's own error body, so the status is the server's answer rather than a gateway's
+   * or proxy's (a 404 page during a deploy). Set by the reads that need to tell them apart.
+   */
+  serverAnswered = false;
 
   constructor(message: string, status: number, requestId = '', retryAfterSeconds?: number) {
     super(message);
@@ -1208,10 +1213,12 @@ export function createChatBrowserClient(
       const payload = record(await responseValue(response));
       if (!response.ok) {
         const message = payload[responseFields.error];
-        throw new ChatBrowserError(
+        const error = new ChatBrowserError(
           typeof message === 'string' ? message : schema.chat.presentation.messages.internal_error,
           response.status,
         );
+        error.serverAnswered = typeof message === 'string';
+        throw error;
       }
       return normalizeSession(schema, payload);
     },

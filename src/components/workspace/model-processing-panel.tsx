@@ -116,7 +116,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   }, [plans, registerTask, schema.runtime.frontend.percentage_multiplier, sessionID]);
   const steps = useMemo(() => source && asset
     ? processingSourceSteps(schema.task_states, availableCapabilities, selected, offerings, source, asset, chosen)
-    : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
+    : [], [schema.task_states, source, asset, availableCapabilities, selected, offerings, chosen]);
   // What the session purpose gives the parameters that follow it (#306), for the chosen steps of the person's own
   // session: an untouched one says "按会话用途：2K" instead of only that it follows the purpose. The server fills the
   // plan with the same values on confirm; the request itself still leaves such a parameter out.
@@ -173,7 +173,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     const prerequisite = source && asset ? processingPrerequisite(schema.task_states, capabilityID, availableCapabilities, offerings, source, asset) : null;
     if (prerequisite && !next.includes(prerequisite)) next.push(prerequisite);
     return next;
-  }, [asset, availableCapabilities, offerings, source]);
+  }, [schema.task_states, asset, availableCapabilities, offerings, source]);
   const toggle = (capabilityID: string) => setSelected((current) => (current.includes(capabilityID)
     ? current.filter((id) => id !== capabilityID)
     : withStep(current, capabilityID)));

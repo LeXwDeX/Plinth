@@ -74,12 +74,20 @@ describe('expiry on the server clock (#665)', () => {
     expect(serverClockOffset(new Response(null), now)).toBe(0);
   });
 
-  it('ignores a lead within the header precision or too large to be a clock, and counts a cache Age', () => {
+  it('ignores a lead within the header precision or from a cached copy of unknown age, and counts a cache Age', () => {
     const at = (date: number, extra: Record<string, string> = {}) =>
       new Response(null, { headers: { Date: new Date(date).toUTCString(), ...extra } });
     expect(serverClockOffset(at(now), now + 900)).toBe(0);
-    // A Date header a proxy kept for two hours is stale, not a clock two hours slow.
-    expect(serverClockOffset(at(now), now + 2 * 60 * 60_000)).toBe(0);
+    // A browser clock two hours fast (or a day slow) is exactly when the server's time matters: a fresh answer counts.
+    expect(serverClockOffset(at(now), now + 2 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
+    expect(serverClockOffset(at(now), now - 24 * 60 * 60_000)).toBe(24 * 60 * 60_000);
+    // A Date header a cache kept for two hours without saying how old it is: stale, not a clock two hours slow.
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT from proxy' }), now + 2 * 60 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { 'CF-Cache-Status': 'STALE' }), now + 2 * 60 * 60_000)).toBe(0);
+    expect(serverClockOffset(at(now, { 'X-Cache': 'MISS' }), now + 2 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
+    // Within an hour a cache hit still counts, and with an Age header its Date is corrected, whatever the size.
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT' }), now + 10 * 60_000)).toBe(-10 * 60_000);
+    expect(serverClockOffset(at(now, { 'X-Cache': 'HIT', Age: '7200' }), now + 4 * 60 * 60_000)).toBe(-2 * 60 * 60_000);
     // A cached answer: its Date is as old as its Age says.
     expect(serverClockOffset(at(now, { Age: '600' }), now + 10 * 60_000)).toBe(0);
     expect(serverClockOffset(at(now, { Age: '60' }), now + 10 * 60_000)).toBe(-9 * 60_000);

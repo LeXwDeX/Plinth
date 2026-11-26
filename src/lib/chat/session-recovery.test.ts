@@ -22,6 +22,7 @@ function fixture(sessionId = 'session-a') {
   const onLoading = vi.fn();
   const onLoadError = vi.fn();
   const onGaveUp = vi.fn();
+  const onRead = vi.fn();
   // The recoverer reads only the newest page; each fixture response is a whole conversation.
   const pageQueries: Array<{ before?: string; limit: number }> = [];
   const listMessagePage = (id: string, query: { before?: string; limit: number }, signal?: AbortSignal) => {
@@ -30,9 +31,9 @@ function fixture(sessionId = 'session-a') {
   };
   const start = () => recoverChatSession({
     sessionId, client: { listMessagePage }, pageSize: 50, connect, pollMilliseconds: 500,
-    onLoading, onLoadError, onGaveUp,
+    onLoading, onLoadError, onGaveUp, onRead,
   });
-  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError, onGaveUp };
+  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError, onGaveUp, onRead };
 }
 
 describe('history session recovery', () => {
@@ -59,6 +60,20 @@ describe('history session recovery', () => {
     expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
     expect(f.listMessages).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  // #665: the send queue of the page waits for a read applied after another tab's send.
+  it('reports every applied read of the newest page, not a failed one', async () => {
+    const f = fixture();
+    f.listMessages.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(complete);
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).not.toHaveBeenCalled();
+    stop();
+    const again = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).toHaveBeenCalledTimes(1);
+    again();
   });
 
   it('reads only the newest page and keeps earlier pages the person already loaded', async () => {

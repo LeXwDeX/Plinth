@@ -88,8 +88,11 @@ func (service *Service) SetProductionBrief(
 // leaves every other field as it was. The choice-card continuation replays
 // update_production_brief with only the purpose argument, so treating that
 // replay as a whole replacement would clear the style, notes and triangle
-// budget the person had already set (#103 review C2). A present empty value
-// clears that field.
+// budget the person had already set (#103 review C2). A present empty string
+// clears that field. A JSON null leaves it as stored, like an omitted field:
+// tool-argument validation treats a null optional property as absent (#665,
+// toolschema.OptionalNullAbsent), and models often send null for every
+// optional field, which must not wipe the confirmed style or transparency.
 func (service *Service) UpdateProductionBrief(
 	ctx context.Context,
 	ownerID string,
@@ -107,10 +110,13 @@ func (service *Service) UpdateProductionBrief(
 		}
 		for name, value := range patch {
 			if briefValueEmpty(value) {
-				delete(merged, name)
 				continue
 			}
-			merged[name] = normalized[name]
+			if normalized, present := normalized[name]; present {
+				merged[name] = normalized
+				continue
+			}
+			delete(merged, name)
 		}
 		return merged, nil
 	})

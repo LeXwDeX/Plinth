@@ -114,6 +114,29 @@ describe('workspace chat message wiring', () => {
   });
 });
 
+describe('queued messages across tabs (#665)', () => {
+  it('awaits the claim, waits for another tab\'s hold and a fresh read, and keeps its own hold alive until its turn ends', () => {
+    const drain = agentDialog.slice(agentDialog.indexOf('const drainMessages ='), agentDialog.indexOf('// 「从这里继续」：', agentDialog.indexOf('const drainMessages =')));
+    expect(drain).toContain('await useSendQueueStore.getState().claim(sessionId, turn.id)');
+    expect(drain).not.toMatch(/if \(!useSendQueueStore\.getState\(\)\.claim\(/);
+    expect(drain.indexOf('.foreignHold(activeSessionId)')).toBeLessThan(drain.indexOf('.claim(sessionId, turn.id)'));
+    expect(drain.indexOf('drainAwaitsRead(drainGate, activeSessionId)')).toBeLessThan(drain.indexOf('.claim(sessionId, turn.id)'));
+    expect(drain).toContain('holdDrainForRead(gate, sessionId, next)');
+    expect(drain).toContain('.refreshHold(held), SEND_HOLD_MS / 3)');
+    expect(drain).toContain('.releaseHold(held)');
+    // The recovery's reads open the gate; another tab's hold change closes it.
+    expect(agentDialog).toContain('setDrainGate((gate) => readCompleted(gate, activeSessionId, read));');
+    expect(agentDialog).toContain('setDrainGate((gate) => holdDrainForRead(gate, activeSessionId, next));');
+  });
+
+  it('dismisses the stalled-reply notice once the reply settles, and aborts the queue pruning on unmount', () => {
+    expect(agentDialog).toMatch(/if \(activeSessionId && !activeTurnRunning\) toast\.dismiss\(`reply-stalled:\$\{activeSessionId\}`\);/);
+    const prune = agentDialog.slice(agentDialog.indexOf('void pruneQueuedSessions('), agentDialog.indexOf('}, [sessionsLoaded, chatClient]);'));
+    expect(prune).toContain('controller.signal');
+    expect(prune).toContain('return () => controller.abort();');
+  });
+});
+
 describe('plan reload and explicit 3D lock wiring (#103)', () => {
   it('re-reads the session after a plan decision, retries, and offers a reload instead of a stale card', () => {
     expect(agentDialog).toContain('reloadSessionBudget(chatClient, sessionId)');
@@ -127,7 +150,15 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     // #134: the turn the server starts for an approved plan is followed by re-running the session recovery.
     const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
     expect(decidePlan).toMatch(/if \(result\.turnMessageId &&[\s\S]{0,120}\{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
-    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,300}= recoverChatSession\(/);
+    // The effect that runs the session recovery lists serverTurnTick among its dependencies, so a tick re-runs it,
+    // however much else the effect grows to hold.
+    const recovery = agentDialog.indexOf('recoverChatSession({');
+    const effectStart = agentDialog.lastIndexOf('useEffect(() => {', recovery);
+    const dependencies = agentDialog.indexOf('}, [', recovery);
+    expect(recovery).toBeGreaterThan(0);
+    expect(agentDialog.indexOf('useEffect(', effectStart + 1)).toBeGreaterThan(dependencies);
+    const dependencyList = agentDialog.slice(dependencies + 4, agentDialog.indexOf(']);', dependencies));
+    expect(dependencyList.split(',').map((name) => name.trim())).toContain('serverTurnTick');
     expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });

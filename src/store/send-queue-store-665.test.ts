@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cancelQueuedTurn, enqueueTurn, pruneQueuedSessions, queueMayDrain, type QueuedTurn } from '@/lib/chat/send-queue';
 import type { ChatMessage } from './chat-store';
 import { useChatStore } from './chat-store';
+import { sendHoldKey } from '@/lib/chat/send-queue';
 import { onSendQueueStorage, reloadSendQueue, SEND_QUEUE_KEY, useSendQueueStore } from './send-queue-store';
 
 const turn = (id: string): QueuedTurn => ({ id, text: `message ${id}`, images: [], claims: [], selection: [] });
@@ -64,15 +65,45 @@ describe('messages queued while a turn runs (#665)', () => {
     expect(useSendQueueStore.getState().queue.s1).toHaveLength(3);
   });
 
-  it('are claimed once: a turn another tab already took is not sent again', () => {
+  it('are claimed once: a turn another tab already took is not sent again', async () => {
     useSendQueueStore.getState().update((queue) => enqueueTurn(queue, 's1', turn('q1')));
     // The other tab claimed it first; this tab has not seen the storage event yet.
     memory.delete(SEND_QUEUE_KEY);
-    expect(useSendQueueStore.getState().claim('s1', 'q1')).toBe(false);
+    expect(await useSendQueueStore.getState().claim('s1', 'q1')).toBe(false);
     useSendQueueStore.getState().update((queue) => enqueueTurn(queue, 's1', turn('q2')));
-    expect(useSendQueueStore.getState().claim('s1', 'q2')).toBe(true);
-    expect(useSendQueueStore.getState().claim('s1', 'q2')).toBe(false);
+    expect(await useSendQueueStore.getState().claim('s1', 'q2')).toBe(true);
+    expect(await useSendQueueStore.getState().claim('s1', 'q2')).toBe(false);
     expect(memory.has(SEND_QUEUE_KEY)).toBe(false);
+    useSendQueueStore.getState().releaseHold('s1');
+    expect(memory.has(sendHoldKey('s1'))).toBe(false);
+  });
+
+  it('hold the session\'s send for the claiming tab, under a Web Lock when the browser has one', async () => {
+    const requested: string[] = [];
+    vi.stubGlobal('navigator', { locks: { request: async (name: string, callback: () => unknown) => { requested.push(name); return callback(); } } });
+    useSendQueueStore.getState().update((queue) => enqueueTurn(enqueueTurn(queue, 's1', turn('q1')), 's1', turn('q2')));
+    expect(await useSendQueueStore.getState().claim('s1', 'q1')).toBe(true);
+    expect(requested).toEqual([`${SEND_QUEUE_KEY}:claim`]);
+    // This tab's own hold is not another tab's: it neither blocks this tab nor shows as foreign.
+    expect(useSendQueueStore.getState().foreignHold('s1')).toBeNull();
+    const own = JSON.parse(memory.get(sendHoldKey('s1')) ?? 'null');
+    expect(own.expiresAt).toBeGreaterThan(Date.now());
+    // Another tab takes the hold over (say after this one lapsed): this tab now waits, and its claim is refused.
+    memory.set(sendHoldKey('s1'), JSON.stringify({ owner: 'other-tab', expiresAt: Date.now() + 60_000 }));
+    expect(useSendQueueStore.getState().foreignHold('s1')?.owner).toBe('other-tab');
+    expect(await useSendQueueStore.getState().claim('s1', 'q2')).toBe(false);
+    // Releasing leaves another tab's hold alone.
+    useSendQueueStore.getState().releaseHold('s1');
+    expect(memory.has(sendHoldKey('s1'))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('count another tab\'s hold changes per session, so the page reads the session again', () => {
+    const before = useSendQueueStore.getState().foreignChanges.s9 ?? 0;
+    onSendQueueStorage({ key: sendHoldKey('s9') });
+    onSendQueueStorage({ key: sendHoldKey('s9') });
+    expect(useSendQueueStore.getState().foreignChanges.s9).toBe(before + 2);
+    expect(useSendQueueStore.getState().foreignChanges.s1 ?? 0).toBe(0);
   });
 
   it('are cleared from the page and storage', () => {
@@ -83,16 +114,17 @@ describe('messages queued while a turn runs (#665)', () => {
   });
 
   it('leave with sessions the server no longer gives this account', async () => {
-    useSendQueueStore.getState().update((queue) => ['s1', 'gone', 'foreign', 'offline'].reduce(
+    useSendQueueStore.getState().update((queue) => ['s1', 'gone', 'gateway', 'offline'].reduce(
       (current, id) => enqueueTurn(current, id, turn(`q-${id}`)), queue));
     const getSession = vi.fn(async (id: string) => {
-      if (id === 'gone') throw Object.assign(new Error('not found'), { status: 404 });
-      if (id === 'foreign') throw Object.assign(new Error('forbidden'), { status: 403 });
+      if (id === 'gone') throw Object.assign(new Error('not found'), { status: 404, serverAnswered: true });
+      // A proxy's 404 page during a deploy is not the server saying the session is gone.
+      if (id === 'gateway') throw Object.assign(new Error('not found'), { status: 404, serverAnswered: false });
       throw new Error('offline');
     });
     await pruneQueuedSessions(Object.keys(useSendQueueStore.getState().queue), new Set(['s1']), getSession,
       (id) => useSendQueueStore.getState().forgetSession(id));
-    expect(Object.keys(useSendQueueStore.getState().queue).sort()).toEqual(['offline', 's1']);
+    expect(Object.keys(useSendQueueStore.getState().queue).sort()).toEqual(['gateway', 'offline', 's1']);
     expect(getSession).not.toHaveBeenCalledWith('s1');
   });
 
@@ -109,14 +141,14 @@ describe('messages queued while a turn runs (#665)', () => {
     expect(queueMayDrain({ ...idle, messages: [doneReply] })).toBe(true);
   });
 
-  it('live for the page when storage is blocked', () => {
+  it('live for the page when storage is blocked', async () => {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: () => { throw new Error('blocked'); } });
     reloadSendQueue();
     expect(() => useSendQueueStore.getState().update((queue) => enqueueTurn(queue, 's1', turn('q1')))).not.toThrow();
     expect(useSendQueueStore.getState().queue.s1).toHaveLength(1);
     expect(() => useSendQueueStore.getState().update((queue) => enqueueTurn(queue, 's1', turn('q2')))).not.toThrow();
     expect(useSendQueueStore.getState().queue.s1).toHaveLength(2);
-    expect(useSendQueueStore.getState().claim('s1', 'q1')).toBe(true);
+    expect(await useSendQueueStore.getState().claim('s1', 'q1')).toBe(true);
   });
 
   it('keep the page\'s queue when storage refuses writes', () => {

@@ -63,17 +63,24 @@ func TestCatalogWithoutThe665KeysStillLoads(t *testing.T) {
 	}
 	chat := loaded.Application().Chat
 	messages, presentation := chat.ThreeView.Messages, chat.Presentation.Messages
+	builtIn := builtInThreeViewMessages()
 	for name, pair := range map[string][2]string{
+		// The same meaning, declared by the Catalog itself.
 		"turn_stopped":      {messages.TurnStopped, presentation.TurnStopped},
 		"arguments_invalid": {messages.ArgumentsInvalid, presentation.ToolArgumentsInvalid},
-		"model_unavailable": {messages.ModelUnavailable, presentation.MultiviewModelUnavailable},
 		"image_unavailable": {messages.ImageUnavailable, messages.ReferenceRequired},
-		"denied":            {messages.Denied, chat.PendingApprovals.Messages.Denied},
-		"duplicate_run":     {messages.DuplicateRun, messages.AdmissionFull},
+		// No text of another meaning is borrowed: the release's own.
+		"model_unavailable": {messages.ModelUnavailable, builtIn.ModelUnavailable},
+		"denied":            {messages.Denied, builtIn.Denied},
+		"duplicate_run":     {messages.DuplicateRun, builtIn.DuplicateRun},
 	} {
 		if pair[0] == "" || pair[0] != pair[1] {
-			t.Errorf("%s = %q, want the borrowed %q", name, pair[0], pair[1])
+			t.Errorf("%s = %q, want %q", name, pair[0], pair[1])
 		}
+	}
+	if messages.DuplicateRun == messages.AdmissionFull || messages.Denied == chat.PendingApprovals.Messages.Denied ||
+		messages.ModelUnavailable == presentation.MultiviewModelUnavailable || !strings.Contains(messages.DuplicateRun, "{run}") {
+		t.Errorf("a text of another meaning was borrowed: %+v", messages)
 	}
 	// The shipped Catalog keeps its own texts.
 	shipped, err := LoadDefault()
@@ -179,4 +186,20 @@ func agentToolDescriptions(tools []ChatAgentToolSchema) []string {
 		out = append(out, tool.Description)
 	}
 	return out
+}
+
+// #665 (wave 3): the built-in Catalog document itself declares every
+// three-view text an older Catalog may lack, since a missing one is filled
+// from it; the fill must never hide a missing declaration in the release.
+func TestDefaultCatalogDeclaresThe665ThreeViewTexts(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal(DefaultDocument(), &document); err != nil {
+		t.Fatal(err)
+	}
+	messages := document["application"].(map[string]any)["chat"].(map[string]any)["three_view"].(map[string]any)["messages"].(map[string]any)
+	for _, key := range []string{"turn_stopped", "model_unavailable", "image_unavailable", "arguments_invalid", "denied", "duplicate_run"} {
+		if text, _ := messages[key].(string); strings.TrimSpace(text) == "" {
+			t.Errorf("default_catalog.json three_view.messages.%s is not declared", key)
+		}
+	}
 }

@@ -2029,7 +2029,8 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
 		// #665: the recovery texts of a call that submits nothing. A Catalog
-		// written before #665 gets them from fillThreeViewMessageFallbacks.
+		// written before #665 gets them from fillThreeViewMessageFallbacks
+		// (a declared text of the same meaning, else the built-in Catalog's).
 		"turn_stopped": messages.TurnStopped, "model_unavailable": messages.ModelUnavailable,
 		"image_unavailable": messages.ImageUnavailable, "arguments_invalid": messages.ArgumentsInvalid,
 		"denied": messages.Denied,
