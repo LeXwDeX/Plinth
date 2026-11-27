@@ -148,7 +148,9 @@ import {
 } from '@/store/chat-store';
 import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
-import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
+import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MIN, chatWidthMax, clampChatWidth, rightPanelWidth, useStudioStore } from '@/store/studio-store';
+import { useViewportWidth } from '@/hooks/use-viewport-width';
+import { panelWidth } from '@/lib/workspace/panel-tabs';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { isRunning, statusBubbleShown } from '@/lib/workspace/task-progress';
 import { useSessionContextStore } from '@/store/session-context-store';
@@ -161,6 +163,8 @@ import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
 
 const RESIZE_KEY_STEP = 16;
+/** Shift with an arrow moves the divider this far: the range reaches half the window now (#695). */
+const RESIZE_KEY_STEP_LARGE = 64;
 const SCROLL_SETTLE_MILLISECONDS = 400;
 /** A stored turn that cannot be read back must not keep the live buffer and the stop button forever. */
 const STREAM_SETTLE_FALLBACK_MILLISECONDS = 5000;
@@ -180,22 +184,47 @@ function setPageSelectable(selectable: boolean) {
   document.body.style.setProperty('-webkit-user-select', value);
 }
 
-function ResizeHandle({ width, label, onResize }: { width: number; label: string; onResize: (width: number) => void }) {
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+/**
+ * The divider on the chat column's right edge. A drag shows its width through `onPreview` once per frame and
+ * stores it with `onCommit` only when it ends (#695); arrows step 16px (64px with Shift), Home and End go to
+ * the narrowest and widest. `max` is the widest the window allows now.
+ */
+export function ResizeHandle({ width, max, label, onPreview, onCommit }: {
+  width: number;
+  max: number;
+  label: string;
+  onPreview: (width: number | null) => void;
+  onCommit: (width: number) => void;
+}) {
+  const drag = useRef<{ startX: number; startWidth: number; last: number | null; frame: number } | null>(null);
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
     drag.current = null;
     setPageSelectable(true);
+    if (current) {
+      if (current.frame) cancelAnimationFrame(current.frame);
+      if (current.last !== null) onCommit(current.last);
+      onPreview(null);
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  // Leaving the page mid-drag must not leave text selection switched off.
-  useEffect(() => () => { setPageSelectable(true); }, []);
+  // Leaving the page mid-drag must not leave text selection switched off, nor a width shown that was never stored.
+  useEffect(() => {
+    const state = drag;
+    return () => {
+      setPageSelectable(true);
+      if (state.current?.frame) cancelAnimationFrame(state.current.frame);
+      if (state.current) onPreview(null);
+      state.current = null;
+    };
+  }, [onPreview]);
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
       aria-valuemin={CHAT_WIDTH_MIN}
-      aria-valuemax={CHAT_WIDTH_MAX}
+      aria-valuemax={max}
       aria-valuenow={width}
       tabIndex={0}
       data-testid="chat-resize-handle"
@@ -203,18 +232,32 @@ function ResizeHandle({ width, label, onResize }: { width: number; label: string
         // A drag must not start a text selection: the browser would highlight the stage and its title.
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
-        drag.current = { startX: event.clientX, startWidth: width };
+        drag.current = { startX: event.clientX, startWidth: width, last: null, frame: 0 };
         setPageSelectable(false);
       }}
       onPointerMove={(event) => {
-        if (drag.current) onResize(drag.current.startWidth + event.clientX - drag.current.startX);
+        const current = drag.current;
+        if (!current) return;
+        current.last = clampChatWidth(current.startWidth + event.clientX - current.startX, max);
+        if (current.frame) return;
+        current.frame = requestAnimationFrame(() => {
+          current.frame = 0;
+          if (drag.current === current && current.last !== null) onPreview(current.last);
+        });
       }}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onLostPointerCapture={endDrag}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') { event.preventDefault(); onResize(width - RESIZE_KEY_STEP); }
-        if (event.key === 'ArrowRight') { event.preventDefault(); onResize(width + RESIZE_KEY_STEP); }
+        const step = event.shiftKey ? RESIZE_KEY_STEP_LARGE : RESIZE_KEY_STEP;
+        const next = event.key === 'ArrowLeft' ? width - step
+          : event.key === 'ArrowRight' ? width + step
+            : event.key === 'Home' ? CHAT_WIDTH_MIN
+              : event.key === 'End' ? max
+                : null;
+        if (next === null) return;
+        event.preventDefault();
+        onCommit(clampChatWidth(next, max));
       }}
       className="absolute inset-y-0 -right-1 z-sticky w-2 cursor-col-resize select-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent hover:after:bg-primary/60 focus-visible:after:bg-primary"
     />
@@ -282,6 +325,13 @@ export function ChatColumn() {
   const collapsed = useStudioStore((state) => state.chatCollapsed);
   const setChatWidth = useStudioStore((state) => state.setChatWidth);
   const setCollapsed = useStudioStore((state) => state.setChatCollapsed);
+  // #695/#696: the stored width is shown up to what the window allows now, never written back, so it returns
+  // when the window is wide again; a drag in progress is shown before it is stored.
+  const panelCollapsed = useStudioStore((state) => state.panelCollapsed);
+  const viewportWidth = useViewportWidth();
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const chatWidthCap = chatWidthMax(viewportWidth, rightPanelWidth(panelWidth(schema), panelCollapsed));
+  const shownChatWidth = clampChatWidth(dragWidth ?? chatWidth, chatWidthCap);
   const composerPrefill = useStudioStore((state) => state.composerPrefill);
   const clearComposerPrefill = useStudioStore((state) => state.clearComposerPrefill);
   const turnRequest = useStudioStore((state) => state.turnRequest);
@@ -2450,7 +2500,7 @@ export function ChatColumn() {
       aria-label={title}
       data-testid="studio-chat-column"
       data-collapsed={collapsed}
-      style={{ width: collapsed ? CHAT_RAIL_WIDTH : chatWidth }}
+      style={{ width: collapsed ? CHAT_RAIL_WIDTH : shownChatWidth }}
       className="relative flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-sidebar"
     >
       {collapsed ? (
@@ -2835,7 +2885,13 @@ export function ChatColumn() {
         </>
       )}
       {!collapsed ? (
-        <ResizeHandle width={chatWidth} label={schemaText(schema, 'ui.studio.chat.resize')} onResize={setChatWidth} />
+        <ResizeHandle
+          width={shownChatWidth}
+          max={chatWidthCap}
+          label={schemaText(schema, 'ui.studio.chat.resize')}
+          onPreview={setDragWidth}
+          onCommit={setChatWidth}
+        />
       ) : null}
     </aside>
   );
