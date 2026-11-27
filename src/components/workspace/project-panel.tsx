@@ -310,7 +310,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       {failed ? (
         <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 px-2 py-1.5 text-xs">
           <span>{text('load_failed')}</span>
-          <button type="button" className="font-medium underline" onClick={() => void load()}>{text('save')}</button>
+          <button type="button" className="font-medium underline" onClick={() => void load()}>{text('retry')}</button>
         </div>
       ) : null}
 
@@ -378,7 +378,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       <section data-testid="project-assets-section">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-semibold">{text('assets_section')}</h3>
-          <span className="text-[11px] text-muted-foreground">{schemaText(schema, 'ui.project.asset_count').replace('{count}', String(assets.length))}</span>
+          <span className="text-[11px] text-muted-foreground">{schemaCountMessage(schema, 'ui.project.asset_count', assets.length, { count: assets.length })}</span>
         </div>
         {assets.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">{text('asset_empty')}</p> : (
           <ul className="mt-2 flex flex-col gap-1.5" data-testid="project-asset-list">

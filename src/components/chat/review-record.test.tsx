@@ -126,6 +126,12 @@ describe('the self-check record of one reply (#103)', () => {
     expect(details.textContent).toContain('面数不符合预算');
     expect(details.textContent).toContain('UV符合预算');
     expect(details.textContent).toContain('减面到 2 万以内');
+    // #670: the status sentence already names the check, so the name is not written twice.
+    const rows = Array.from(details.querySelectorAll('li')).map((row) => row.textContent ?? '');
+    expect(rows[0].startsWith('面数不符合预算')).toBe(true);
+    expect(rows[0].split('面数').length - 1).toBe(1);
+    expect(rows.some((row) => row.startsWith('UV符合预算'))).toBe(true);
+    expect(rows.slice(0, -1).join('\n')).not.toContain('·');
     expect(details.textContent).toContain('游戏道具');
     expect(details.textContent).toContain('只适用于移动端');
     // A non-inspection line opens the views it rendered instead.

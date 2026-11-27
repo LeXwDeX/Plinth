@@ -485,6 +485,11 @@ export function GenerationsPanel() {
       ...legacyOptions,
     ];
   }, [copy, schema.capabilities, schema.task_stream.aliases]);
+  // #670: the type column names the capability (or the legacy type), not its id.
+  const taskTypeLabel = (type: string) =>
+    schema.capabilities.find((capability) => capability.id === type)?.label_cn ??
+    (type ? taskTypeOptions.find((option) => option.value === type)?.label : undefined) ??
+    type;
   const statusOptions = useMemo(
     () => [
       { value: '', label: text('all_statuses') },
@@ -789,7 +794,7 @@ export function GenerationsPanel() {
                           )}
                         </td>
                         <td className="py-3 text-muted-foreground">
-                          {record.taskType}
+                          {taskTypeLabel(record.taskType)}
                         </td>
                         <td className="py-3">
                           <HintTooltip name={formatParamsTooltip(record.params)}>

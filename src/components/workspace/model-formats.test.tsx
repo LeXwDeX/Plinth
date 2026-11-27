@@ -74,6 +74,15 @@ it('offers the completion action with the credit estimate only when something ca
   expect(without).toContain('data-reason="no_route"');
 });
 
+// #670: under native pricing the button still says what it does, with the unit amounts in brackets.
+it('keeps the completion verb when the estimate is in native units', () => {
+  const html = view({ formats: rows, can_complete: true, price_totals: [{ unit: 'vendor.credit', unit_label: 'Vendor credits', amount: '0.5' }] });
+  const button = html.slice(html.indexOf('data-testid="model-formats-complete"'), html.indexOf('</button>', html.indexOf('data-testid="model-formats-complete"')));
+  const totals = `${schemaMessage(schema, 'ui.pricing.totals_heading', {})}: 0.5 Vendor credits`;
+  expect(button).toContain(schemaMessage(schema, 'ui.workspace.model_formats.complete_native', { totals }));
+  expect(button).toContain('补齐格式');
+});
+
 it('shows progress, pause and failure with a retry action', () => {
   const converting = view({ formats: rows, steps: [{ state: 'RUNNING', plan_id: 'p1' }] });
   expect(converting).toContain('data-testid="model-formats-converting"');

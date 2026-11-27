@@ -210,9 +210,9 @@ export function WorkspaceCanvasBoard() {
     },
   }), [schema]);
   const ui = useMemo(() => ({
-    loading: schemaText(schema, 'ui.workspace.harness.loading'),
-    loadFailed: schemaText(schema, 'ui.workspace.history.load_failed'),
-    saveFailed: schemaText(schema, 'ui.workspace.harness.save_failed'),
+    loading: schemaText(schema, 'ui.workspace.canvas.loading'),
+    loadFailed: schemaText(schema, 'ui.workspace.canvas.load_failed'),
+    saveFailed: schemaText(schema, 'ui.workspace.canvas.save_failed'),
     conflict: schemaText(schema, 'ui.workspace.canvas.conflict'),
     exportFailed: schemaText(schema, 'ui.workspace.canvas.export_failed'),
     inpaintBoardEmpty: schemaText(schema, 'ui.studio.stage.action.inpaint_board_empty'),

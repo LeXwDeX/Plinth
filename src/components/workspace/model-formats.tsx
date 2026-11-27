@@ -413,7 +413,10 @@ export function ModelFormatsView({
       data-testid="model-formats-complete"
     >
       {coverage.priceTotals !== undefined
-        ? `${schemaMessage(schema, 'ui.pricing.totals_heading', {})}: ${coverage.priceTotals.map(formatPriceTotal).filter((value): value is string => value !== null).join(' · ') || schemaMessage(schema, 'ui.pricing.unknown', {})}`
+        // #670: native units keep the action verb; the amounts go in the brackets.
+        ? schemaMessage(schema, 'ui.workspace.model_formats.complete_native', {
+          totals: `${schemaMessage(schema, 'ui.pricing.totals_heading', {})}: ${coverage.priceTotals.map(formatPriceTotal).filter((value): value is string => value !== null).join(' · ') || schemaMessage(schema, 'ui.pricing.unknown', {})}`,
+        })
         : completionIsFree(coverage)
           ? schemaMessage(schema, 'ui.workspace.model_formats.complete_free', {})
           : schemaCountMessage(schema, 'ui.workspace.model_formats.complete', coverage.completionCredits, { credits: coverage.completionCredits })}
