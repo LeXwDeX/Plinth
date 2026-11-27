@@ -753,7 +753,6 @@ describe('Go Product Schema frontend projection', () => {
     expect(schema.canvas.frontend.clipboard.offset_y).toBe(20);
     for (const key of [
       'context.copy',
-      'context.send_to_chat',
       'context.group',
       'context.ungroup',
       'context.paste',
