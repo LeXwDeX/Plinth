@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,7 +11,7 @@ import { ThreeViewCardView, useTurnButtonsPending, type ThreeViewCardViewProps }
 import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
 import { useStudioStore } from '@/store/studio-store';
 import type { ProductSchema } from '@/lib/product-schema';
-import { parseThreeViews, type MultiviewModel, type ThreeViewGroup } from '@/lib/workspace/three-view';
+import { parseThreeViews, threeViewAutoContinuing, type MultiviewModel, type ThreeViewGroup } from '@/lib/workspace/three-view';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = (defaultCatalog.application as { content: { messages: Record<string, string> } }).content.messages;
@@ -151,6 +153,27 @@ describe('#693: while the automatic continuation carries the group on', () => {
 
   it('keeps every manual start where the session asks for each one', () => {
     card({ ...props, autoContinuing: false });
+    expect(slotOf('back').querySelector('[data-testid="three-view-start"]')).not.toBeNull();
+    expect(screen.queryByTestId('three-view-auto-later')).toBeNull();
+    expect(screen.getByTestId('three-view-start-remaining')).toBeTruthy();
+  });
+});
+
+describe('#693: the card says 稍后自动生成 only while the session\'s turn runs', () => {
+  it('reads the approval mode and the turn, not whether one of its views runs', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/studio/three-view-card.tsx'), 'utf8');
+    expect(source).toMatch(/const autoContinuing = threeViewAutoContinuing\(approvalMode, turnRunning\);/);
+    expect(source).not.toMatch(/autoContinuing[\s\S]{0,200}slot\.status === 'running'/);
+  });
+
+  it('an automatic-approval session with a view running and no turn offers the manual starts', () => {
+    const running = four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'running', task_id: 't2' },
+      { status: 'not_started', startable: true, estimated_credits: 9, credits_metered: true },
+      { status: 'not_started', startable: true, estimated_credits: 9, credits_metered: true },
+    ]);
+    card({ group: running, onStartRemaining: () => {}, autoContinuing: threeViewAutoContinuing('auto', false) });
     expect(slotOf('back').querySelector('[data-testid="three-view-start"]')).not.toBeNull();
     expect(screen.queryByTestId('three-view-auto-later')).toBeNull();
     expect(screen.getByTestId('three-view-start-remaining')).toBeTruthy();

@@ -258,6 +258,15 @@ export function multiviewPickState(model: MultiviewModel | null, picked: string 
   return model && model.modelId === picked ? 'picked' : 'single';
 }
 
+/**
+ * #693: whether the server carries a three-view group on by itself, so its required views not started yet say they
+ * come later instead of offering a manual start. That happens only inside the session's turn (continueThreeView) of an
+ * automatic-approval session; a view the person started that runs without a turn does not start the others.
+ */
+export function threeViewAutoContinuing(approvalMode: string | undefined, turnRunning: boolean): boolean {
+  return approvalMode === 'auto' && turnRunning;
+}
+
 /** The finished views of a group the model takes, in the group's order; the request the button sends. */
 export function groupMultiview(group: ThreeViewGroup, model: MultiviewModel): {
   slots: ThreeViewSlot[];

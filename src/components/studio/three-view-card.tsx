@@ -16,7 +16,7 @@ import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } 
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import {
-  fourViewRequested, groupMultiview, groupProgress, multiviewPickState, pickMultiviewModel, remainingCredits, remainingSlots, requestedView, slotAction, slotReplaceable,
+  fourViewRequested, groupMultiview, groupProgress, multiviewPickState, pickMultiviewModel, remainingCredits, remainingSlots, requestedView, slotAction, slotReplaceable, threeViewAutoContinuing,
   type MultiviewModel, type ThreeViewGroup, type ThreeViewSlot,
 } from '@/lib/workspace/three-view';
 import { cn } from '@/lib/utils';
@@ -389,9 +389,9 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   const { schema } = useProductSchema();
   const { busy, queued, advance, startRemaining, replace, turnRunning } = useThreeViews();
   const approvalMode = useChatStore((state) => state.sessions.find((item) => item.id === state.activeSessionId)?.approvalMode) ?? defaultApprovalMode(schema);
-  // #693: in an automatic-approval session the server starts the remaining views itself while the turn or a view runs.
-  const autoContinuing = approvalMode === 'auto'
-    && (turnRunning || group.slots.some((slot) => slot.status === 'starting' || slot.status === 'running'));
+  // #693: in an automatic-approval session the server starts the remaining views itself, inside the session's turn
+  // (continueThreeView). Without a turn nobody carries the group on, even while a view the person started runs.
+  const autoContinuing = threeViewAutoContinuing(approvalMode, turnRunning);
   const turnPending = useTurnButtonsPending();
   const { viewOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD } = useObjectActions();
   const { proxyAssetUrl } = useAssetURLRewriter();

@@ -4,7 +4,7 @@ import type { OfferingWire } from '@/lib/agent-offerings';
 
 import {
   fourViewRequested, groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, multiviewPickState, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
-  remainingSlots, slotAction, succeededCount, viewLabelOfTask, type ThreeViewGroup,
+  remainingSlots, slotAction, succeededCount, threeViewAutoContinuing, viewLabelOfTask, type ThreeViewGroup,
 } from './three-view';
 
 const wire = (statuses: Array<[string, Record<string, unknown>]>, extra: Record<string, unknown> = {}) => ({
@@ -235,5 +235,19 @@ describe('#691: which 3D model 用三视图生成 3D runs with', () => {
     expect(multiviewPickState(model, null)).toBe('none');
     expect(multiviewPickState(model, 'single-image-model')).toBe('single');
     expect(multiviewPickState(null, 'single-image-model')).toBe('single');
+  });
+});
+
+describe('#693: when the server carries a three-view group on by itself', () => {
+  it('only inside the session\'s turn of an automatic-approval session', () => {
+    expect(threeViewAutoContinuing('auto', true)).toBe(true);
+    expect(threeViewAutoContinuing('manual', true)).toBe(false);
+    expect(threeViewAutoContinuing('budget', true)).toBe(false);
+    expect(threeViewAutoContinuing(undefined, true)).toBe(false);
+  });
+
+  it('not while a view the person started runs without a turn: nobody would start the others', () => {
+    // The card passes only whether the turn runs; a running view on its own is not a reason.
+    expect(threeViewAutoContinuing('auto', false)).toBe(false);
   });
 });
