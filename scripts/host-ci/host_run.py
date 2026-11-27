@@ -316,11 +316,16 @@ def checkout_source(run_dir, args):
     return src
 
 
-def event_payload(event, sha):
+def event_payload(event, sha, repo):
+    # The pull request is replayed as one from a branch of this repository (head.repo.full_name equals
+    # github.repository, which act takes from the origin remote): the CI runner route sends exactly
+    # those, and pushes to main, to the self-hosted label set, which is mapped to the same image (#685).
+    repository = {'full_name': repo}
     if event == 'pull_request':
-        return {'action': 'synchronize', 'number': 1, 'pull_request': {
-            'number': 1, 'head': {'sha': sha, 'ref': 'plinth-host-ci'}, 'base': {'ref': 'main'}}}
-    return {'ref': 'refs/heads/main', 'after': sha, 'before': '0' * 40}
+        return {'action': 'synchronize', 'number': 1, 'repository': repository, 'pull_request': {
+            'number': 1, 'head': {'sha': sha, 'ref': 'plinth-host-ci', 'repo': repository},
+            'base': {'ref': 'main', 'repo': repository}}}
+    return {'ref': 'refs/heads/main', 'after': sha, 'before': '0' * 40, 'repository': repository}
 
 
 def parse_size(text):
@@ -432,10 +437,12 @@ def ensure_runner_image(args):
 
 
 def act_command(act, src, event, event_file, args):
-    # Only the CI workflow is replayed. The plinth-azure label mapping remains for older commits whose
-    # race job still routed to the Azure runner (#78); current commits use ubuntu-latest only.
+    # Only the CI workflow is replayed. Every runner label the workflow can route to maps to the same
+    # limited runner image: ubuntu-latest (fork PRs, manual runs), azure-f16 (the self-hosted label for
+    # push to main and same-repository PRs, #685; a plain custom label, not Azure), and plinth-azure for
+    # older commits whose race job still routed to the retired Azure runner (#78).
     command = [str(act), event, '-C', str(src), '-W', str(src / '.github' / 'workflows' / 'ci.yml'), '-e', str(event_file),
-               '-P', f'ubuntu-latest={args.runner_name}', '-P', f'plinth-azure={args.runner_name}',
+               '-P', f'ubuntu-latest={args.runner_name}', '-P', f'azure-f16={args.runner_name}', '-P', f'plinth-azure={args.runner_name}',
                '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm', '--pull=false',
                '--action-cache-path', str(args.act_cache),
                '--container-options', f'--cpus {args.cpus:g} --memory {args.memory_gib}g --memory-swap {args.memory_gib}g --pids-limit 4096 '
@@ -469,7 +476,7 @@ def run_workflows(ctx):
             if not expected:
                 raise RuntimeError(f'job {args.act_job} is not part of the {event} event')
             event_file = run_dir / f'event-{event}.json'
-            event_file.write_text(json.dumps(event_payload(event, args.sha)))
+            event_file.write_text(json.dumps(event_payload(event, args.sha, args.repo_slug)))
             say(f'workflows: replaying {event} ({len(expected)} jobs: {", ".join(job_id for job_id, _ in expected)})')
             stop = threading.Event()
             peak = {'value': 0}

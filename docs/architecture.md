@@ -3205,10 +3205,11 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 
 **`legacy-formal`。** 不是可部署环境（存档 #74）；仓库不包含其脚本、Compose 文件、smoke 或环境文件条目。
 
-**CI 运行位置与主机自检（#79、#97、#86）。**
+**CI 运行位置与主机自检（#79、#97、#86、#685）。**
 
-- `.github/workflows/ci.yml` 的三个门禁作业（`frontend`、`go check`、`go test race`）全部选择 `ubuntu-latest`，即 GitHub 托管的 runner。2026-11-04 起 Azure 按需 runner 已下线，工作流不再提供 `use_self_hosted` 输入或自托管路由；门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
-- 路由不是隔离边界：PR 可以修改工作流；合并前须审查工作流改动。静态检查不能证明托管 runner 的实际网络访问，运行环境仍须核验。
+- `.github/workflows/ci.yml` 的三个门禁作业（`frontend`、`go check`、`go test race`）用同一条 `runs-on` 事件路由表达式（#646、#685）：推送到 `main` 与同仓库分支的 PR（`head.repo.full_name == github.repository`）选择自托管标签集 `["self-hosted","Linux","X64","azure-f16"]`，即维护者自己的、多项目共用且非一次性的一台 runner（`azure-f16` 只是沿用的自定义标签，与 Azure 无关）；fork PR 与手动运行（`workflow_dispatch`，不带输入）选择 GitHub 托管的 `ubuntu-latest`。自托管 runner 掉线时，取消排队的运行，在目标分支手动运行该工作流走托管 runner（步骤见 `dev_test.md` §2「自托管 runner」）。门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变，不使用自定义密钥；每个作业由 `actions/checkout` 的默认清理（`clean: true`）从干净工作区开始，门禁结果不依赖 runner 残留状态。`ci-gate-parity.test.ts` 逐字核对这条表达式并按事件求值，`self-hosted` 只允许出现在其中。
+- 分工：开发期合并只要求主机 CI 状态 `host-ci/gates`；GitHub 作业是晋级 `formal-test` 前对精确 `main` revision 的最终完整验证，由自托管 runner 或手动回退的托管 runner 完成。
+- 路由不是隔离边界：同仓库分支的 PR 可以修改工作流，自托管 runner 因此信任所有有写权限的人；合并前须审查工作流改动。静态检查不能证明实际调度、runner 隔离或网络访问；runner 主机的依赖、服务化与权限在仓库之外，由维护者核验。未验证：在自托管 runner 上三个作业多轮稳定全绿与耗时、手动运行实际落到托管 runner、fork PR 实际落到托管 runner（#685 验收项）。
 - 托管 runner 遇到计费墙时：先本机初检，再在指定 `dev-test` 主机对同一精确 SHA 做完整隔离自检，作为 CI 的替代证据（隔离、源码绑定、门禁和报告条件见 `dev_test.md` §2）。自检不生成 GitHub Actions success，不代替 Git hooks 或部署后回归。离线测试不证明实际 runner 调度或隔离。
 
 **主机 CI：干净容器运行门禁（#97，沿用 #79 的裁定）。**
@@ -3217,7 +3218,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - 镜像固定 Node/Go 基础镜像摘要，pnpm 取 `package.json`，并把 pnpm store 与 Go 模块缓存预取进镜像（只访问公共 registry）；运行时无网络。
 - 入口只依赖挂载与变量：只读 bundle、`/work` 与 `/tmp` 两个 tmpfs（wirefixture 测试拒绝绑定挂载下的工作树与证据目录）、可写的 `/scratch` 与 `/out`，以及 `CI_SHA`、`CI_TREE`。它检出并核对 commit/tree、核对工具链、离线安装依赖、运行 `GOFLAGS=-p=4 python3 scripts/verify-local.py --race --force` 与外链检查、前后核对源码未变，并写 `result.json`。
 - `scripts/host-ci/run.py` 是本机侧的薄封装：打 bundle，经 SSH 传到 `dev-test` 主机上的专用目录（环境文件可选字段 `host_ci.dir`，缺省 `/var/lib/plinth-ci`）。该目录与同一主机（`ssh` 的主机部分相同）上各环境的发布根和受保护路径重叠即拒绝，其他主机上的环境不参与比较；唯一例外是本环境发布根下专用的 `<发布根>/ci`：只允许写项目目录的主机（`dev-test`）用它，发布步骤只管理 `app`、`app.prev-*`、`releases`、`backups`、`production`、`tmp`，不触碰 `ci/`；`<发布根>/ci` 若列为受保护路径仍被拒绝，发布根本身、发布根下其他子目录与同主机其他环境发布根下的 `ci` 均拒绝（离线单测 `test_host_ci.py` 覆盖）。`host_run.py` 在主机上完成：持槽位 `flock`（默认 1 个槽位，`slots` 可选 1–4 并行；槽位 0 沿用 `.lock`，其余 `.lock-<k>`；构建、镜像与结果保留在短时 `.maint.lock` 下串行；每个容器带 `plinth.host-ci.slot` 标签，清理只限本槽位，槽位 0 另清无槽位标签的遗留容器；#5）；资源预检（阈值外再预留其他运行的剩余余量）；镜像复用（`plinth-ci:<hash>`，hash 取自 `Dockerfile.ci`、`entry.sh` 与依赖清单）或构建；一次性容器（`--network none`、4 CPU、10 GiB 无 swap、UID 10001、移除全部 capability、只读根）；创建后核对实际参数，身份不一致时重试一次；结果收集与清理。
-- 依赖方向：它只调用 Docker 与 `verify-local.py`，不读 Plinth 栈的数据、镜像或 Compose 项目，只清理带 `plinth.host-ci` 标签的容器、自己的 run/results 目录和精确名称的 `plinth-ci:<hash>` 镜像（保留最新两个）。它不是 GitHub self-hosted runner（fork PR 能把任意代码送到内网主机），只由维护者手动触发。
+- 依赖方向：它只调用 Docker 与 `verify-local.py`，不读 Plinth 栈的数据、镜像或 Compose 项目，只清理带 `plinth.host-ci` 标签的容器、自己的 run/results 目录和精确名称的 `plinth-ci:<hash>` 镜像（保留最新两个）。它不是 GitHub self-hosted runner（不注册、不监听平台事件，fork PR 无法把代码送到这台主机），只由维护者手动触发；它与上文 CI 的自托管 runner 是两回事。
 - 资源预检阈值、容器上限和超时可配置（命令行、环境文件 `host_ci` 字段、默认值三级），主机侧必须拒绝削弱门禁的取值（内存阈值须不低于容器上限加 1 GiB）。默认 11 GiB（容器上限 10 GiB 加 1 GiB）的依据与待验证项（10 GiB 能否容纳完整一轮，记录在 #5）见 `dev_test.md` §2。共用测试主机上限过高会引发主机级 OOM、波及同机其他业务进程，因此除开跑前预检外还有运行中 `MemAvailable` 下限保护（默认 2 GiB，跌破即停掉本次容器，状态 `host_memory_low`，退出 70；该保护目前只覆盖门禁模式）。并行槽位默认关闭（1 个），调大须以记录的峰值和主机余量为依据。
 - 验证范围：在 `dev-test` 主机上对 `main` 合并结果实跑通过、对注入失败的临时提交实跑被检出（证据在 #97）。离线单测 `scripts/host-ci/test_host_ci.py`（由 `src/__tests__/ci-gate-parity.test.ts` 随 `pnpm test` 运行，#86）覆盖哈希、上下文、环境文件路径检查、判定逻辑，以及用桩 Docker 复现的 OOM（`OOMKilled` 与 cgroup `oom_kill`）、超时（计时器触发 `docker stop`）、预检阈值边界（含对其他运行剩余余量的预留）、swap 近满警告、槽位锁与按槽位的清理、运行中内存下限触发 `host_memory_low`、`memory_peak_bytes`/`mem_available_min_bytes` 的记录和限制值校验；桩不证明真实 cgroup 与 Docker 守护进程行为，真实证据仍是主机实跑。未验证：镜像在其他 runner 上构建或作为平台 container job 运行（非 root 用户的兼容性）。
 
@@ -3228,7 +3229,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `ci.yml` 用 `yaml` 库（开发依赖）结构化解析；门禁步骤或作业上的 `if`、`continue-on-error`、`shell`、`env`、`needs`、`strategy` 等字段、锚点别名、非 `-timeout=Nm` 的 `GOFLAGS` 必须被拒绝，引号键或流式写法的额外步骤因归一化而无法绕过。
 - 主机 CI 入口的门禁集合来自同一份 `selected_gates(race=True)`，其 `GOFLAGS` 只能是并行度；Node/Go 版本以 `ci.yml` 为准并与 `Dockerfile.ci` 核对。
 - 门禁集合含第 10 项「scripts tests」：发布与门禁脚本的 Python 单测（`scripts/tests`）进入 `verify-local.py`、`ci.yml` 的 `go check` 作业与 `dev_test.md` §2，主机 CI 的两种模式随之运行。依赖 macOS FSEvents 的监视/指纹测试类在非 macOS 上跳过（该部分覆盖只在 macOS 本机体现）；`Dockerfile.ci` 装有 `sqlite3`。
-- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows/ci.yml` 的 `pull_request` 与 `push` 事件；`plinth-azure` 标签仍映射到同一个受限运行器镜像，供重放旧提交中的 race 路由使用。作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
+- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows/ci.yml` 的 `pull_request` 与 `push` 事件；`ubuntu-latest`、自托管标签 `azure-f16`（#685）与旧提交中 race 路由的 `plinth-azure` 都映射到同一个受限运行器镜像；重放的 `pull_request` 事件带 `head.repo.full_name`，按同仓库 PR 走自托管标签。作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
 - 范围限制：act 与官方 runner 的行为差异（调度、令牌、缓存服务、隔离）未验证，不能视为 Actions success；静态解析不证明 GitHub 的实际运行、runner 隔离或网络访问。镜像 hash 随 `pnpm-lock.yaml` 变化（`yaml` 属前端开发依赖），依赖变更后首次运行需要重建一次镜像。
 
 **账号密码登录（#249）。**

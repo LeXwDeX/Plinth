@@ -16,7 +16,9 @@ import { isAlias, parseDocument, visit } from 'yaml';
  *   `verify-local.py --race`，其 GOFLAGS 不得带入跳过或削弱测试的开关；
  * - ci.yml 用 yaml 库结构化解析（#86）：引号键、流式 `{}`、锚点别名等写法都归一成同一结构，
  *   门禁步骤上出现 if、continue-on-error、shell、env 等字段，或作业级 if/needs/strategy，都会被拒绝。
- * 其余检查（托管 runner、并发分组、权限）仍按文本解析，只依赖这些文件现有的固定写法；写法变了先改这里的解析。
+ * - runner 路由（#685）：三个作业的 runs-on 都等于同一条受控表达式（push main 与同仓库 PR 走自托管，
+ *   fork PR 与手动运行走 ubuntu-latest），并按事件求值核对；`self-hosted` 只允许出现在这条表达式里。
+ * 其余检查（并发分组、权限）仍按文本解析，只依赖这些文件现有的固定写法；写法变了先改这里的解析。
  */
 const read = (path: string) => readFileSync(path, 'utf8');
 
@@ -99,16 +101,89 @@ function localArgvProblems(local: LocalGate, gate: Gate): string[] {
 }
 
 /**
- * All gate jobs run on GitHub-hosted runners. The workflow must not route a job to a
- * self-hosted label set: the Azure runner and the trusted manual opt-in were removed (#100).
- * This is a routing rule, not an isolation boundary: a pull request can still edit this workflow.
+ * Runner routing (#646, #685). Every gate job uses this one expression: a push to main and a pull
+ * request from a branch of this repository run on the self-hosted runner (label azure-f16, a plain
+ * custom label that no longer means Azure); a fork pull request and a manual run fall back to
+ * GitHub-hosted ubuntu-latest, so fork code never reaches the self-hosted machine and a manual
+ * dispatch is the fallback when that runner is offline. `self-hosted` may appear nowhere else.
+ * This is a routing rule, not an isolation boundary: a same-repository pull request can still edit
+ * this workflow, so workflow changes are reviewed before merge.
  */
 const hostedRunner = 'ubuntu-latest';
+const selfHostedLabels = ['self-hosted', 'Linux', 'X64', 'azure-f16'];
+const forkCheck = ' && github.event.pull_request.head.repo.full_name == github.repository';
+const runnerRoute = "${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request'"
+  + `${forkCheck}) && fromJSON('${JSON.stringify(selfHostedLabels)}') || '${hostedRunner}' }}`;
 const concurrencyGroup = 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
 
+/** The workflow text with the controlled route expression cut out: what is left must not mention a self-hosted runner. */
+const outsideRoute = (text: string) => text.split(runnerRoute).join('');
+const SELF_HOSTED_MARKERS = /self-hosted|plinth-azure|plinth-trusted-ci|use_self_hosted/;
+
 function hasRunnerRoute(text: string): boolean {
+  let workflow: Json;
+  try {
+    workflow = parseWorkflow(text);
+  } catch {
+    return false;
+  }
+  const jobs = isMap(workflow.jobs) ? Object.values(workflow.jobs) : [];
   const expressions = [...text.matchAll(/^ {4}runs-on: (.+)$/gm)].map((match) => match[1].trim());
-  return expressions.length === 3 && expressions.every((expression) => expression === hostedRunner);
+  return jobs.length === 3 && jobs.every((job) => isMap(job) && job['runs-on'] === runnerRoute)
+    && expressions.length === 3 && expressions.every((expression) => expression === runnerRoute)
+    && !SELF_HOSTED_MARKERS.test(outsideRoute(text));
+}
+
+interface RouteContext {
+  event_name: string;
+  ref: string;
+  repository: string;
+  event: { pull_request?: { head: { repo: { full_name: string } } } };
+}
+
+/**
+ * Evaluates a runs-on expression of the route's shape for one event. Only `github.*` paths, string
+ * literals, `==`, `&&`, `||`, parentheses and `fromJSON('[...]')` are accepted; `&&` binds tighter
+ * than `||` and both return an operand, as in GitHub expressions. Missing paths read as null.
+ * String comparison is exact here (GitHub's is case-insensitive); the cases below do not differ by case.
+ */
+function evaluateRoute(expression: string, github: RouteContext): unknown {
+  const body = /^\$\{\{ (.+) \}\}$/.exec(expression)?.[1];
+  if (!body) throw new Error(`not a single expression: ${expression}`);
+  const withoutStrings = body.replace(/'[^']*'/g, "''");
+  if (!/^(?:\s|github(?:\.\w+)+|''|==|&&|\|\||[()]|fromJSON\(''\))+$/.test(withoutStrings)) {
+    throw new Error(`unsupported expression: ${expression}`);
+  }
+  const lookup = (path: string) => path.split('.').slice(1).reduce<unknown>((value, key) => (isMap(value) ? value[key] ?? null : null), github);
+  const js = body
+    .replace(/fromJSON\('([^']*)'\)/g, (_, json: string) => JSON.stringify(JSON.parse(json)))
+    .replace(/'([^']*)'/g, (_, literal: string) => JSON.stringify(literal))
+    .replace(/github(?:\.\w+)+/g, (path) => JSON.stringify(lookup(path)))
+    .replace(/==/g, '===');
+  return new Function(`return (${js});`)();
+}
+
+const ROUTE_CASES: { name: string; github: RouteContext; selfHosted: boolean }[] = [
+  { name: 'push to main', github: { event_name: 'push', ref: 'refs/heads/main', repository: 'owner/repo', event: {} }, selfHosted: true },
+  { name: 'push to another branch', github: { event_name: 'push', ref: 'refs/heads/topic', repository: 'owner/repo', event: {} }, selfHosted: false },
+  { name: 'same-repository pull request', github: { event_name: 'pull_request', ref: 'refs/pull/1/merge', repository: 'owner/repo', event: { pull_request: { head: { repo: { full_name: 'owner/repo' } } } } }, selfHosted: true },
+  { name: 'fork pull request', github: { event_name: 'pull_request', ref: 'refs/pull/2/merge', repository: 'owner/repo', event: { pull_request: { head: { repo: { full_name: 'someone/repo' } } } } }, selfHosted: false },
+  { name: 'manual run on main', github: { event_name: 'workflow_dispatch', ref: 'refs/heads/main', repository: 'owner/repo', event: {} }, selfHosted: false },
+  { name: 'manual run on a fallback branch', github: { event_name: 'workflow_dispatch', ref: 'refs/heads/ci-verify-0123abcd', repository: 'owner/repo', event: {} }, selfHosted: false },
+];
+
+/** Events the expression routes to the wrong runner, or to anything but the two allowed label sets. */
+function routeProblems(expression: string): string[] {
+  return ROUTE_CASES.flatMap(({ name, github, selfHosted }) => {
+    let runner: unknown;
+    try {
+      runner = evaluateRoute(expression, github);
+    } catch (error) {
+      return [`${name}: ${(error as Error).message}`];
+    }
+    const expected = selfHosted ? selfHostedLabels : hostedRunner;
+    return JSON.stringify(runner) === JSON.stringify(expected) ? [] : [`${name}: routed to ${JSON.stringify(runner)}, expected ${JSON.stringify(expected)}`];
+  });
 }
 
 function hasConcurrencyGroup(text: string): boolean {
@@ -312,12 +387,40 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     uses.forEach((ref) => expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/));
   });
 
-  it('runs every gate job on a GitHub-hosted runner', () => {
+  it('routes every gate job with the one controlled runner expression', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasRunnerRoute(text)).toBe(true);
-    expect(hasRunnerRoute(text.replaceAll(hostedRunner, 'self-hosted'))).toBe(false);
-    expect(hasRunnerRoute(text.replaceAll(hostedRunner, "fromJSON('[\"self-hosted\",\"Linux\",\"X64\",\"plinth-trusted-ci\"]')"))).toBe(false);
-    expect(text).not.toMatch(/self-hosted|plinth-azure|plinth-trusted-ci|use_self_hosted/);
+    expect(text.split(runnerRoute)).toHaveLength(4);
+    expect(outsideRoute(text)).not.toMatch(SELF_HOSTED_MARKERS);
+    // Any other runs-on fails: a bare label, a fixed label set, the old routes, one job off the route.
+    const withRoute = (replacement: string) => text.replaceAll(runnerRoute, replacement);
+    expect(hasRunnerRoute(withRoute(hostedRunner))).toBe(false);
+    expect(hasRunnerRoute(withRoute('self-hosted'))).toBe(false);
+    expect(hasRunnerRoute(withRoute(`\${{ fromJSON('${JSON.stringify(selfHostedLabels)}') }}`))).toBe(false);
+    expect(hasRunnerRoute(withRoute("${{ fromJSON('[\"self-hosted\",\"Linux\",\"X64\",\"plinth-trusted-ci\"]') }}"))).toBe(false);
+    expect(hasRunnerRoute(text.replace(runnerRoute, hostedRunner))).toBe(false);
+    // Dropping the fork check would send fork pull requests to the self-hosted runner.
+    expect(hasRunnerRoute(text.replaceAll(forkCheck, ''))).toBe(false);
+    // self-hosted is allowed only inside the route expression, not in a comment, env or step.
+    expect(hasRunnerRoute(text.replace('\nname: CI\n', '\n# runs-on: [self-hosted]\nname: CI\n'))).toBe(false);
+    expect(hasRunnerRoute(text.replace('      - run: pnpm test\n', '      - run: pnpm test # self-hosted\n'))).toBe(false);
+  });
+
+  it('sends push to main and same-repository pull requests to the self-hosted runner, everything else to ubuntu-latest', () => {
+    expect(routeProblems(runnerRoute)).toEqual([]);
+    // The model must be able to fail: each weakened variant misroutes at least one event.
+    const variants: [string, string, RegExp][] = [
+      ['fork check removed', runnerRoute.replace(forkCheck, ''), /fork pull request/],
+      ['manual runs self-hosted', runnerRoute.replace(" || github.event_name == 'pull_request'", " || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'"), /manual run/],
+      ['any branch push', runnerRoute.replace(" && github.ref == 'refs/heads/main'", ''), /push to another branch/],
+      ['no hosted fallback', runnerRoute.replace(`'${hostedRunner}'`, "'self-hosted'"), /fork pull request/],
+      ['hosted only', runnerRoute.replace(`fromJSON('${JSON.stringify(selfHostedLabels)}')`, `'${hostedRunner}'`), /push to main/],
+    ];
+    for (const [label, variant, problem] of variants) {
+      expect(variant, label).not.toBe(runnerRoute);
+      expect(routeProblems(variant).join('\n'), label).toMatch(problem);
+    }
+    expect(routeProblems('${{ github.event_name; alert(1) }}').join()).toMatch(/unsupported expression/);
   });
 
   it('keeps workflow_dispatch available without manual runner inputs', () => {
@@ -334,8 +437,9 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasSafePermissions(text)).toBe(true);
     expect(text.match(/^ {10}persist-credentials: false$/gm)).toHaveLength(3);
-    expect(text).not.toMatch(/inputs\.use_self_hosted|self-hosted/);
+    expect(outsideRoute(text)).not.toMatch(/inputs\.use_self_hosted|self-hosted/);
     expect(text).not.toContain('github.event.inputs');
+    expect(text).not.toMatch(/\bsecrets\./);
   });
 
   it('rejects extra top-level permissions', () => {
@@ -436,6 +540,18 @@ describe('CI workflow gate integrity (#86)', () => {
     flagged(mutate(TEST_STEP, `${TEST_STEP}      - uses: ./local-action\n`), /not pinned to a commit/);
     flagged(mutate(TEST_STEP, `${TEST_STEP}      - name: nothing\n`), /neither uses nor run/);
     flagged(mutate('      - run: pnpm exec tsc --noEmit\n', '      - run: pnpm exec tsc --noEmit --skipLibCheck\n'), /not a CI gate command/);
+  });
+
+  it('starts every job from a clean checkout on the shared, non-ephemeral runner (#685)', () => {
+    // actions/checkout cleans the workspace by default (git clean -ffdx, reset --hard); any checkout
+    // input outside the whitelist, such as keeping old files or a different path, is rejected.
+    for (const input of ['clean: false', 'path: ../shared', 'set-safe-directory: false']) {
+      flagged(mutate('          persist-credentials: false\n', `          persist-credentials: false\n          ${input}\n`), /input (clean|path|set-safe-directory) is not allowed/);
+    }
+    const checkouts = (parseWorkflow(text).jobs as Record<string, { steps: Json[] }>);
+    for (const [jobId, job] of Object.entries(checkouts)) {
+      expect(String(job.steps[0].uses), jobId).toMatch(/^actions\/checkout@/);
+    }
   });
 
   it('rejects a gate moved to the wrong order or duplicated across jobs', () => {
