@@ -81,7 +81,6 @@ import { inlineImageFilename, isInlineImage, reportInlineImageFailure, uploadInl
 import { buildChatSelection, type ChatAttachmentClaim, type ChatMentionClaim } from '@/lib/chat/attachments';
 import { formatSizeLimit } from '@/lib/size-text';
 import { cardFromConsent, cardFromPending, type ApprovalCardModel } from '@/lib/chat/approval-card';
-import { attachmentPurposesForTurn, hasMultipleInputPurposes, purposeNote, withPurposeNote, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { handleReferences } from '@/lib/chat/composer-reference';
 import { boardMentionCandidate, buildMentionCandidates, mentionsBoard, mentionsForTurn, overridingHandle, mentionCandidates, withBoardMention, type MentionCandidate } from '@/lib/chat/mentions';
 import { useComposerDraft } from '@/hooks/use-composer-draft';
@@ -486,11 +485,6 @@ export function ChatColumn() {
   useEffect(() => {
     setDeselectedObject(null);
   }, [currentObject, setDeselectedObject]);
-  // What the attached pictures are for; written into the message as one line.
-  const [attachmentPurpose, setAttachmentPurpose] = useSessionState<AttachmentPurpose | null>(null);
-  // Per-picture purposes, aligned with `attachedImages`; `attachmentPurpose` stays the last choice.
-  const [attachmentPurposes, setAttachmentPurposes] = useSessionState<(AttachmentPurpose | null)[]>([]);
-  const [pinnedPurpose, setPinnedPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // 「从这里继续」之后、发出之前：下一个版本接在这个版本后面（芯片可取消）。
   const [branchFrom, setBranchFrom] = useSessionState<{ key: string; label: string } | null>(null);
   // #644 「以画板为主」: this message only, off by default and off again once it has left the box. A selection or
@@ -514,8 +508,6 @@ export function ChatColumn() {
   const draftSources = useWorkspaceStore((state) => state.attachmentSources);
   useComposerDraft({
     sessionId: activeSessionId, text: input, setText: setInput, images: attachedImages, sources: draftSources,
-    purpose: attachmentPurpose, setPurpose: setAttachmentPurpose,
-    purposes: attachmentPurposes, setPurposes: setAttachmentPurposes,
     droppedNote: useCallback((count: number) => schemaCountMessage(schema, 'ui.studio.composer.draft.local_dropped', count, { count }), [schema]),
   });
   // Back from offline: the event stream of the open session is joined again.
@@ -677,14 +669,12 @@ export function ChatColumn() {
       if (prepared.length > 0) {
         // The same picture twice (pasted again, or a file and its copy) is attached once.
         const next = [...new Set([...attachedImages, ...prepared])].slice(0, maximumImages);
-        const added = Math.max(0, next.length - attachedImages.length);
         setAttachedImages(next);
-        setAttachmentPurposes((current) => [...current, ...Array(added).fill(attachmentPurpose)].slice(0, maximumImages));
       }
     } finally {
       if (endAttachmentRead(attachmentReads, scope)) setUploading(false);
     }
-  }, [activeSessionId, attachedImages, attachmentPurpose, hasCanvasReference, maximumImages, maximumImageBytes, schema, setAttachedImages, setAttachmentPurposes, setUploading]);
+  }, [activeSessionId, attachedImages, hasCanvasReference, maximumImages, maximumImageBytes, schema, setAttachedImages, setUploading]);
 
   // Pictures addressed by a pasted rich copy (#281). The read keeps the send locked from this call until
   // every picture is attached; a failure releases it, keeps the words and reports the count in this visit.
@@ -728,10 +718,8 @@ export function ChatColumn() {
     const queued = consumeChatAttachments();
     if (queued.length === 0) return;
     const next = [...attachedImages, ...queued].slice(0, maximumImages);
-    const added = Math.max(0, next.length - attachedImages.length);
     setAttachedImages(next);
-    setAttachmentPurposes((current) => [...current, ...Array(added).fill(attachmentPurpose)].slice(0, maximumImages));
-  }, [pendingChatAttachments, attachedImages, attachmentPurpose, consumeChatAttachments, maximumImages, setAttachedImages, setAttachmentPurposes]);
+  }, [pendingChatAttachments, attachedImages, consumeChatAttachments, maximumImages, setAttachedImages]);
 
   // A named session is the task. After a refresh, reopen the one the address names; else the latest.
   useEffect(() => {
@@ -1086,7 +1074,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1104,14 +1092,6 @@ export function ChatColumn() {
         ...(hasCanvasReference && canvasReference ? [canvasReference] : []),
       ];
       if ((!written && images.length === 0) || !activeSessionId || uploading || attachmentsPending(attachmentReads, scope)) return;
-      // A queued turn carries the purposes it was queued with; a fresh turn reads the cards.
-      const purposes = extra?.attachmentPurposes ?? (reuseImages === undefined
-        ? attachmentPurposesForTurn(attachmentPurposes)
-        : []);
-      if (hasMultipleInputPurposes(purposes)) {
-        toast.error(schemaText(schema, 'ui.unavailable.reason.composer.attachment_purpose_single_input'));
-        return;
-      }
       // A turn is running: the message waits its turn below. Replacing the last round cannot wait.
       const turnRunning = Boolean(useChatStore.getState().streamingBuffers[activeSessionId]);
       if (turnRunning && ((replaceIds && replaceIds.length > 0) || choiceAnswer)) return;
@@ -1141,12 +1121,6 @@ export function ChatColumn() {
       // #678: a model confirmed for this one turn (转 3D without a pick) rides along as that domain's model; no lock.
       const oneTurnModels = extra?.domainModels;
       const sessionId = activeSessionId;
-      // Pictures attached now (not a replayed turn) say what they are for, each its own purpose:
-      // the last choice alone would mislabel the others when they differ (#212).
-      const purposeLine = !reuseImages && images.length > 0
-        ? purposeNote(attachedImages.map((_, index) => attachmentPurposes[index] ?? null), (key) => schemaText(schema, key))
-        : '';
-      const notedText = withPurposeNote(written, purposeLine);
       // What the person sees and selects travels with the turn as claims; the
       // server verifies every ID for this owner and session before use.
       let claims: ChatAttachmentClaim[] = reuseClaims ?? images.flatMap((url, index): ChatAttachmentClaim[] => {
@@ -1246,7 +1220,8 @@ export function ChatColumn() {
       }));
       // `@` references to pictures that have no handle yet travel as claims; the server verifies them, gives
       // the pictures handles and rewrites the tokens, so the text goes out as written (queued turns too).
-      const text = notedText;
+      // #697: attached pictures carry no purpose, so the text goes out as written (no 「附图用途」 line).
+      const text = written;
       const selection = stageSelection;
       const mentions = queuedMentions ?? (reuseImages !== undefined ? [] : mentionsForTurn(text, mentionsRef.current, pickedMentions(scope)));
       // #593: a picture-input Skill (three-view, four-view) is sent with or without a picture; without one the
@@ -1292,7 +1267,7 @@ export function ChatColumn() {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
           idempotencyKey: newSendKey(),
-          text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
+          text, images, claims, selection, mentions,
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
           ...(multiview ? { multiview } : {}),
@@ -1314,9 +1289,7 @@ export function ChatColumn() {
         if (isCurrentSessionScope(scope)) {
           setInput('');
           setAttachedImages([]);
-          setAttachmentPurposes([]);
           setCanvasReference(null);
-          setAttachmentPurpose(null);
           setBranchFrom(null);
           // #644: 以画板为主 is this message's; the next one starts off again.
           setBoardModeChosen(false);
@@ -1438,7 +1411,6 @@ export function ChatColumn() {
               ...(claims.length > 0 ? { attachments: claims } : {}),
               ...(selection.length > 0 ? { selection } : {}),
               ...(mentions.length > 0 ? { mentions } : {}),
-              ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
               ...(inputSource ? { inputSource } : {}),
               ...(selectionMask ? { selectionMask } : {}),
               ...(choiceAnswer ? { choiceAnswer } : {}),
@@ -1482,9 +1454,7 @@ export function ChatColumn() {
               if (isCurrentSessionScope(scope)) {
                 setInput('');
                 setAttachedImages([]);
-                setAttachmentPurposes([]);
                 setCanvasReference(null);
-                setAttachmentPurpose(null);
                 setBranchFrom(null);
                 // #644: 以画板为主 is this message's; the next one starts off again.
                 setBoardModeChosen(false);
@@ -1530,8 +1500,6 @@ export function ChatColumn() {
             if (restore) {
               setInput((current) => (current === '' ? written : current));
               useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(images, claims));
-              setAttachmentPurposes(Array.from({ length: images.length }, (_, index) =>
-                purposes.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
             }
           } finally {
             if (startingRef.current === starting) startingRef.current = null;
@@ -1612,10 +1580,6 @@ export function ChatColumn() {
       deliveryPixels,
       proxyAssetUrl,
       attachedImages,
-      attachmentPurpose,
-      attachmentPurposes,
-      setAttachmentPurpose,
-      setAttachmentPurposes,
       setBranchFrom,
       setBoardModeChosen,
       canvasReference,
@@ -1738,8 +1702,6 @@ export function ChatColumn() {
           if (useChatStore.getState().activeSessionId === sessionId) {
             setInput((current) => (current === '' ? turn.text : current));
             useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
-            setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
-              turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
             setStyleLockSkipped(turn.styleLockSkipped === true);
           }
           toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
@@ -1747,7 +1709,7 @@ export function ChatColumn() {
         setDrainTick((tick) => tick + 1);
       });
     })();
-  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
+  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setInput, uploading]);
 
   // #665: each hold this tab took with a claim lives while the turn it sent runs (the store keeps it alive), and is
   // released once that turn is over or the person left the session, so another tab drains next. A page that goes away
@@ -1878,7 +1840,6 @@ export function ChatColumn() {
     setEditing({ deleteIds: editable.deleteIds });
     setInput(message.content);
     setAttachedImages([]);
-    setAttachmentPurposes([]);
     useWorkspaceStore.getState().queueChatAttachments(editAttachments(message));
     focusComposer();
   }, [displayMessages, editable, focusComposer, recordPreferenceSignal, setAttachedImages, setEditing, setInput]);
@@ -1889,7 +1850,6 @@ export function ChatColumn() {
     setEditing(null);
     setInput(message.content);
     setAttachedImages([]);
-    setAttachmentPurposes([]);
     useWorkspaceStore.getState().queueChatAttachments(editAttachments(message));
     focusComposer();
   }, [focusComposer, setAttachedImages, setEditing, setInput]);
@@ -1900,7 +1860,6 @@ export function ChatColumn() {
     setInput('');
     pickedMentionsRef.current = { scope: captureSessionScope(), picks: [] };
     setAttachedImages([]);
-    setAttachmentPurposes([]);
   }, [setAttachedImages, setEditing, setInput]);
 
   // 删除：先本地移除（乐观），失败时回填服务端列表并提示，不静默吞掉错误。
@@ -2810,22 +2769,9 @@ export function ChatColumn() {
             }}
             mask={maskChip}
             branch={branchChip}
-            attachmentPurpose={attachmentPurpose}
-            onAttachmentPurpose={(purpose) => {
-              setAttachmentPurpose(purpose);
-              setAttachmentPurposes(attachedImages.map(() => purpose));
-            }}
-            attachmentPurposes={attachmentPurposes}
-            onAttachmentPurposeAt={(index, purpose) => {
-              setAttachmentPurpose(purpose);
-              setAttachmentPurposes((current) => current.map((item, at) => (at === index ? purpose : item)));
-            }}
-            pinnedPurpose={pinnedPurpose}
-            onPinnedPurpose={setPinnedPurpose}
             images={attachedImages}
             onRemoveImage={(index) => {
               setAttachedImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
-              setAttachmentPurposes((current) => current.filter((_, imageIndex) => imageIndex !== index));
             }}
             pinnedImage={canvasReference || null}
             onUnpin={() => setCanvasReference(null)}

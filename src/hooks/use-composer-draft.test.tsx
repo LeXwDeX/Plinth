@@ -15,15 +15,18 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it('restores per-picture purposes and saves them by URL after an image is removed', () => {
+// #697: an older draft's purposes are ignored; the pictures come back and the next save writes no purpose.
+it('restores an older draft with purposes and saves it without them', () => {
   useChatStore.setState({ activeSessionId: 'draft-test', activeSessionRevision: 1 });
-  window.localStorage.setItem(draftKey('draft-test'), JSON.stringify({ text: '', images: ['/a', '/b'], purpose: 'style', purposes: { '/a': 'style', '/b': 'layout' } }));
-  const setPurposes = vi.fn();
-  const state = { sessionId: 'draft-test', text: '', setText: vi.fn(), images: [] as string[], sources: {}, purpose: null,
-    setPurpose: vi.fn(), purposes: [] as ('style' | 'layout' | null)[], setPurposes, droppedNote: () => '' };
+  window.localStorage.setItem(draftKey('draft-test'), JSON.stringify({ text: 'hi', images: ['/a', '/b'], purpose: 'style', purposes: { '/a': 'style', '/b': 'layout' } }));
+  const setText = vi.fn();
+  const state = { sessionId: 'draft-test', text: '', setText, images: [] as string[], sources: {}, droppedNote: () => '' };
   const { rerender } = renderHook((props) => useComposerDraft(props), { initialProps: state });
-  expect(setPurposes).toHaveBeenCalledWith(['style', 'layout']);
+  expect(setText).toHaveBeenCalledWith('hi');
   expect(useWorkspaceStore.getState().pendingChatAttachments).toEqual(expect.arrayContaining(['/a', '/b']));
-  rerender({ ...state, images: ['/b'], purposes: ['layout'] });
-  expect(JSON.parse(window.localStorage.getItem(draftKey('draft-test'))!).purposes).toEqual({ '/b': 'layout' });
+  rerender({ ...state, text: 'hi', images: ['/b'] });
+  const stored = JSON.parse(window.localStorage.getItem(draftKey('draft-test'))!);
+  expect(stored.images).toEqual(['/b']);
+  expect(stored).not.toHaveProperty('purpose');
+  expect(stored).not.toHaveProperty('purposes');
 });
