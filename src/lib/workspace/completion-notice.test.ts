@@ -28,6 +28,18 @@ describe('completion notice scan', () => {
     expect(scan.finished).toEqual([]);
   });
 
+  it('does not announce a task the user stopped as a failure, although it carries its cancellation note (#705)', () => {
+    const states = [
+      { internal_state: 'FAILED', public_state: 'FAILED', label: '失败', color: '', terminal: true, outcome: 'failure' as const, progress: { mode: 'hidden' as const } },
+      { internal_state: 'CANCELED', public_state: 'CANCELED', label: '已取消', color: '', terminal: true, outcome: 'canceled' as const, progress: { mode: 'hidden' as const } },
+    ];
+    const scan = scanTasks(new Set(['c', 'f']), [
+      task('c', { state: 'CANCELED', terminal: true, failure: { code: 'rejected', detail: 'failure.rejected' } }),
+      task('f', { state: 'FAILED', terminal: true, failure: { code: 'rejected', detail: 'failure.rejected' } }),
+    ], states);
+    expect(scan.finished.map((item) => [item.task.taskId, item.outcome])).toEqual([['f', 'failed']]);
+  });
+
   it('ignores a task the user cancelled and one that vanished', () => {
     const scan = scanTasks(new Set(['c', 'g']), [task('c', { terminal: true }), task('g', { terminal: true, notFound: true, failure: {} })]);
     expect(scan.finished).toEqual([]);

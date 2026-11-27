@@ -44,7 +44,7 @@ export function useTaskCompletionNotice(): void {
     const label = (outcome: NoticeOutcome) => text(outcome === 'done' ? 'ui.workspace.notice.done' : 'ui.workspace.notice.failed');
 
     const unsubscribe = useWorkspaceStore.subscribe((state) => {
-      const scan = scanTasks(previousActive, state.trackedTasks);
+      const scan = scanTasks(previousActive, state.trackedTasks, schema.task_states);
       previousActive = scan.active;
       if (scan.finished.length === 0) return;
       // In view: failures surface once as a toast that stays as long as every other notice (Schema toaster duration, #651). Hidden: the tab title and, when allowed,
