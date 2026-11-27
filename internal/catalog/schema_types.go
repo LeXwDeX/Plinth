@@ -5880,7 +5880,9 @@ type ChatContextSchema struct {
 	ReferenceOutputSizeNearestTemplate string `json:"reference_output_size_nearest_template,omitempty"`
 	// UnknownHandleTemplate and WrongHandleKindTemplate are the refusals the
 	// Agent reads when a handle names nothing in this session or an object of
-	// the wrong kind. Field: {handle}.
+	// the wrong kind. Field: {handle}. Read-only tools and submitting tools
+	// share them, so they say the step did not run, not that nothing was
+	// charged.
 	UnknownHandleTemplate   string `json:"unknown_handle_template"`
 	WrongHandleKindTemplate string `json:"wrong_handle_kind_template"`
 	// EmptySelectionTemplate is the refusal when the selection alias names
