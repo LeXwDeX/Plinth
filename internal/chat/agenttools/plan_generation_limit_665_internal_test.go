@@ -24,15 +24,15 @@ func TestProcessingPlanAndRevisionsCountAgainstTheTurnLimit665(t *testing.T) {
 		t.Fatalf("a non-plan call weighs %d, want 1", got)
 	}
 	executor := &Executor{maxGeneration: 4, usage: map[string]generationUsage{}}
-	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan", 0, 3) {
+	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan", 0, 3, executor.maxGeneration) {
 		t.Fatal("a three-step plan did not fit a limit of four")
 	}
-	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan-2", 0, 2) {
+	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan-2", 0, 2, executor.maxGeneration) {
 		// 3 + 2 > 4: correctly refused below.
 	} else {
 		t.Fatal("a second plan past the limit was accepted")
 	}
-	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan", 0, 3) {
+	if executor.generationLimitReachedForCallWeighted("s", "turn", "plan", 0, 3, executor.maxGeneration) {
 		t.Fatal("the same plan call was counted twice")
 	}
 

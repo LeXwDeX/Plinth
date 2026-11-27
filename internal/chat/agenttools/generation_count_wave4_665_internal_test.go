@@ -55,7 +55,7 @@ func TestPreparedPlanReplayCountsItsStepsAfterARestart665(t *testing.T) {
 	if err != nil || !replay.Suspend || replay.GenerationUnits != 3 {
 		t.Fatalf("replay after restart = %+v err=%v, want suspended with 3 units", replay, err)
 	}
-	if !restarted.generationLimitWouldBeReached(restarted.scopeKey(planCommand("next", 0)), "turn", "next", 0, 1) {
+	if !restarted.generationLimitWouldBeReached(restarted.scopeKey(planCommand("next", 0)), "turn", "next", 0, 1, restarted.maxGeneration) {
 		t.Fatal("the rebuilt count left room past the limit")
 	}
 }
@@ -90,7 +90,7 @@ func TestRefusedGenerationIsNotCounted665(t *testing.T) {
 			if result.GenerationUnitsTakenBack != (tc.units == 0) {
 				t.Fatalf("taken back = %v, want %v", result.GenerationUnitsTakenBack, tc.units == 0)
 			}
-			if fits := !executor.generationLimitWouldBeReached(executor.scopeKey(planCommand("next", 0)), "turn", "next", 0, 1); fits != (tc.units == 0) {
+			if fits := !executor.generationLimitWouldBeReached(executor.scopeKey(planCommand("next", 0)), "turn", "next", 0, 1, executor.maxGeneration); fits != (tc.units == 0) {
 				t.Fatalf("room for one more = %v, want %v", fits, tc.units == 0)
 			}
 		})

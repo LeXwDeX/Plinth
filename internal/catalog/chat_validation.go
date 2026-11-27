@@ -555,6 +555,18 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
 		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
 	}
+	// #694: every mode's generation checkpoint must fit inside the round
+	// bound too, and a reply stopped there says why.
+	if checkpoints := schema.ApprovalPolicy.GenerationCheckpoint; len(checkpoints) > 0 {
+		for mode, count := range checkpoints {
+			if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds > 0 && rounds < count {
+				return fmt.Errorf("agent 的 max_tool_rounds_per_turn 不得小于 approval_policy.generation_checkpoint[%s]", mode)
+			}
+		}
+		if !strings.Contains(schema.Presentation.Messages.GenerationCheckpointReached, "{count}") {
+			return errors.New("声明了 approval_policy.generation_checkpoint 时 presentation.messages.generation_checkpoint_reached 必须包含 {count}")
+		}
+	}
 	// #665: a bounded tool result needs the note that tells the Agent what
 	// was cut and how to narrow the request.
 	if limit := schema.Agent.MaxToolResultCharacters; limit < 0 {
@@ -1220,6 +1232,16 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 	// by leaving the field out.
 	if policy.ManualCreditsThreshold < 0 {
 		return fmt.Errorf("approval_policy.manual_credits_threshold 不能为负数: %d", policy.ManualCreditsThreshold)
+	}
+	// A known mode the Catalog does not offer is ignored, so removing a mode
+	// keeps an older Catalog readable.
+	for mode, count := range policy.GenerationCheckpoint {
+		if !known[mode] {
+			return fmt.Errorf("approval_policy.generation_checkpoint 引用了未知模式 %q", mode)
+		}
+		if count <= 0 {
+			return fmt.Errorf("approval_policy.generation_checkpoint[%s] 必须为正数", mode)
+		}
 	}
 	if err := validateApprovalPrompt(policy.Prompt, offered); err != nil {
 		return err

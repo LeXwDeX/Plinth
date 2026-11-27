@@ -55,6 +55,10 @@ type ToolCommand struct {
 	// before this call, rebuilt from the units the turn checkpoint keeps
 	// (TurnCheckpoint.GenerationUnits, #665).
 	PriorGenerationCalls int
+	// ApprovalMode is the session's approval mode read when the round's tools
+	// start (#694): the turn's generation checkpoint depends on it. Empty when
+	// it cannot be read, which keeps max_generation_calls_per_turn.
+	ApprovalMode string
 	// ConsentWaitDeadline 非零表示本轮已因等待同意而挂起过：工具在
 	// 决定未出且已过该时刻时应返回等待文案，而不是再次登记挂起。
 	ConsentWaitDeadline time.Time
@@ -150,6 +154,11 @@ type ToolResult struct {
 	// then drops the call's units from the turn checkpoint, so an entry an
 	// earlier suspension persisted no longer counts for later calls (#665).
 	GenerationUnitsTakenBack bool `json:"-"`
+	// GenerationCheckpoint, when positive, says the call was refused at the
+	// turn's generation checkpoint of that count (#694): the orchestrator
+	// ends the reply after this round with
+	// presentation.messages.generation_checkpoint_reached.
+	GenerationCheckpoint int `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -2249,6 +2258,18 @@ func (orchestrator *Orchestrator) Process(
 		if len(toolContent) == 0 {
 			break
 		}
+		if turn.generationCheckpoint > 0 {
+			// #694: a call of this round reached the approval mode's
+			// generation checkpoint. The reply ends here with the Schema's
+			// note instead of relying on the model to ask; the person's next
+			// message is a new turn with a fresh count.
+			orchestrator.logger.Info("本轮生成次数到达确认点，回合到此结束",
+				"session_id", command.SessionID,
+				"assistant_message_id", command.AssistantMessageID,
+				"checkpoint", turn.generationCheckpoint,
+			)
+			break
+		}
 		followUp := orchestrator.followUpRequest(
 			request,
 			completion,
@@ -2335,7 +2356,7 @@ func (orchestrator *Orchestrator) Process(
 	}
 	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
 	inlineText, _ := orchestrator.agentInlineImageMessage(ctx, agents.ErrInlineImageOutput)
-	if note := orchestrator.endingNote(ctx, cutReply, roundsCapped); note != "" {
+	if note := orchestrator.endingNote(ctx, cutReply, roundsCapped, turn.generationCheckpoint); note != "" {
 		// #665: a reply the upstream cut, or one stopped at the tool round
 		// bound, keeps what it wrote and says why it ends there.
 		emptyReply = false
@@ -2408,12 +2429,31 @@ func (orchestrator *Orchestrator) Process(
 	return nil
 }
 
+// turnApprovalMode reads the session's approval mode for a round's tools
+// (#694); a read failure leaves it empty, which keeps the default bound.
+func (orchestrator *Orchestrator) turnApprovalMode(ctx context.Context, command ProcessTurn) string {
+	if orchestrator.service == nil || command.SessionID == "" {
+		return ""
+	}
+	mode, err := orchestrator.service.SessionApprovalMode(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		orchestrator.logger.Warn("读取会话批准方式失败，本轮生成次数按默认上限计",
+			"session_id", command.SessionID, "error", err)
+		return ""
+	}
+	return mode
+}
+
 // endingNote is the Schema note of a reply that ends early (#665): the round
-// the upstream cut at its output limit or by its content filter, or the tool
-// round bound. Empty when none applies or the Schema declares no text.
-func (orchestrator *Orchestrator) endingNote(ctx context.Context, cutReply string, roundsCapped bool) string {
+// the upstream cut at its output limit or by its content filter, the tool
+// round bound, or the approval mode's generation checkpoint (#694). Empty
+// when none applies or the Schema declares no text.
+func (orchestrator *Orchestrator) endingNote(ctx context.Context, cutReply string, roundsCapped bool, checkpoint int) string {
 	messages := orchestrator.schema.Presentation.Messages
 	switch {
+	case checkpoint > 0 && messages.GenerationCheckpointReached != "":
+		return strings.ReplaceAll(orchestrator.text(ctx, messages.GenerationCheckpointReached),
+			"{count}", strconv.Itoa(checkpoint))
 	case roundsCapped && messages.ToolRoundsCapped != "":
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.ToolRoundsCapped),
 			"{limit}", strconv.Itoa(orchestrator.schema.Agent.MaxToolRoundsPerTurn))
@@ -3261,6 +3301,7 @@ func (orchestrator *Orchestrator) executeTools(
 	}
 	results := append([]agents.Message(nil), turn.Checkpoint.Completed...)
 	imageURLs := append([]string(nil), turn.Checkpoint.ImageURLs...)
+	approvalMode := orchestrator.turnApprovalMode(ctx, command)
 	// A resumed round already ran some calls: their pictures are this reply's
 	// results too, numbered as they were when the Agent read them.
 	orchestrator.recordTurnResult(ctx, command.OwnerID, produced, "", "", turn.Checkpoint.ImageURLs)
@@ -3490,6 +3531,7 @@ func (orchestrator *Orchestrator) executeTools(
 				FrozenIdempotencyKey: frozenKey,
 				TaskWaitDeadline:     waitDeadline,
 				PriorGenerationCalls: priorGenerationCalls,
+				ApprovalMode:         approvalMode,
 				ConsentWaitDeadline:  command.ConsentWaitDeadline,
 				Call:                 call,
 				Tool:                 tool,
@@ -3530,6 +3572,10 @@ func (orchestrator *Orchestrator) executeTools(
 			turn.Checkpoint.takeBackGenerationUnits(call.ID)
 		} else {
 			turn.Checkpoint.recordGenerationUnits(call.ID, result.GenerationUnits)
+		}
+		if result.GenerationCheckpoint > 0 {
+			// #694: the reply stops after this round at the checkpoint.
+			turn.generationCheckpoint = result.GenerationCheckpoint
 		}
 		if err != nil && !result.NoSubmission && result.TaskID == "" && paidTool(tool.Execution) {
 			// Task acceptance may have committed while the response or chat

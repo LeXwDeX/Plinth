@@ -4527,6 +4527,12 @@ type ChatApprovalPolicySchema struct {
 	// that does not declare the field (every one written before #490) reads as 0.
 	// Server-only: the browser cannot price a step before it is frozen.
 	ManualCreditsThreshold int `json:"manual_credits_threshold"`
+	// GenerationCheckpoint is, per approval mode, how many paid generations
+	// one reply runs before it stops at a checkpoint (#694): the reply ends
+	// with presentation.messages.generation_checkpoint_reached and the
+	// person's next message starts a fresh count. A mode it does not name
+	// keeps agent.max_generation_calls_per_turn. Server-only.
+	GenerationCheckpoint map[string]int `json:"generation_checkpoint,omitempty"`
 	// Budget is the production-plan budget of budget mode. Server-only.
 	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
@@ -6844,6 +6850,10 @@ type ChatMessageTexts struct {
 	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
 	// Optional: without it the reply ends without a note.
 	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
+	// GenerationCheckpointReached ends a reply stopped at its approval mode's
+	// generation checkpoint (#694); {count} is that checkpoint. Required when
+	// approval_policy.generation_checkpoint is declared.
+	GenerationCheckpointReached string `json:"generation_checkpoint_reached,omitempty"`
 	// ToolResultTruncated is the note on a tool result shortened to
 	// chat.agent.max_tool_result_characters (#665): {tool} is the tool name,
 	// {size} the original length and {limit} the bound, both in characters,

@@ -108,9 +108,10 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
 		}
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
-				GenerationUnitsTakenBack: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.generationLimit(command)) {
+			result := e.limitResult(command)
+			result.GenerationUnitsTakenBack = true
+			return result, nil
 		}
 		superseded, counted, resumed, release = ended, true, true, releaseSource
 	}
@@ -207,8 +208,8 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// reach here and is not counted again. A call the duplicate guard
 		// refused starts no run and is not counted (#665).
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.generationLimit(command)) {
+			return e.limitResult(command), nil
 		}
 		counted = true
 		release = releaseSource

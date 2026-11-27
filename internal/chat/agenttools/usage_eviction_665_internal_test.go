@@ -11,7 +11,7 @@ func TestGenerationUsageIsBounded(t *testing.T) {
 	executor := &Executor{maxGeneration: 5, usage: map[string]generationUsage{}}
 	for index := range maxUsageScopes + 10 {
 		scope := fmt.Sprintf("session-%d", index)
-		if executor.generationLimitReachedForCall(scope, "turn", "call", 0) {
+		if executor.generationLimitReachedForCall(scope, "turn", "call", 0, executor.maxGeneration) {
 			t.Fatalf("%s: limit reached on its first call", scope)
 		}
 	}
