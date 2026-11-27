@@ -589,13 +589,32 @@ class ReleaseVersionTest(unittest.TestCase):
 
         with mock.patch.object(release_env, "run", fake_run):
             self.assertEqual(release_env.release_version(None, "b" * 40), "v1.9.4-12-gfbf5000")
-        self.assertEqual(calls, [("git", "describe", "--tags", "--always", "b" * 40 + "^{commit}")])
+        # A promoted revision may be missing from this clone: it is fetched first too.
+        self.assertEqual(calls, [("git", "fetch", "-q", "origin"),
+                                 ("git", "describe", "--tags", "--always", "b" * 40 + "^{commit}")])
         calls.clear()
         # Without a promotion revision the release is origin/main, fetched first.
         with mock.patch.object(release_env, "run", fake_run):
             self.assertEqual(release_env.release_version(None, None), "v1.9.4-12-gfbf5000")
         self.assertEqual(calls, [("git", "fetch", "-q", "origin"),
                                  ("git", "describe", "--tags", "--always", "origin/main^{commit}")])
+
+    def test_an_unknown_revision_says_how_to_go_on(self):
+        def describe_fails(*args, **kwargs):
+            if args[1] == "describe":
+                raise release_env.EnvironmentError_("git failed (exit 128)")
+            return ""
+
+        with mock.patch.object(release_env, "run", describe_fails), \
+                self.assertRaisesRegex(release_env.EnvironmentError_, "c{40}.*--release-version"):
+            release_env.release_version(None, "c" * 40)
+
+        def fetch_fails(*args, **kwargs):
+            raise release_env.EnvironmentError_("git failed (exit 128)")
+
+        with mock.patch.object(release_env, "run", fetch_fails), \
+                self.assertRaisesRegex(release_env.EnvironmentError_, "fetch origin failed.*--release-version"):
+            release_env.release_version(None, "c" * 40)
 
     def test_the_release_string_rides_in_the_server_environment(self):
         environment = load(BASE)["environments"]["alone"]
