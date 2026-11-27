@@ -83,7 +83,8 @@ describe('workspace chat message wiring', () => {
 
   it('sends the models chosen in the other domains and never narrows tools to the tab in view', () => {
     expect(agentDialog).toContain('domainModels: otherDomainModels');
-    expect(agentDialog).toMatch(/entry\[0\] !== domain/);
+    // The split itself (stage domain as `model`, the others as domain models) is turnModels, tested on its own.
+    expect(agentDialog).toMatch(/domainModels: otherDomainModels \} = turnModels\(domain,/);
   });
 
   it('opens chat pictures in the shared result detail instead of a private lightbox', () => {

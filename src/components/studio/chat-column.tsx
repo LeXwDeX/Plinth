@@ -149,6 +149,7 @@ import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MIN, chatWidthMax, clampChatWidth, rightPanelWidth, useStudioStore } from '@/store/studio-store';
 import { useViewportWidth } from '@/hooks/use-viewport-width';
+import { turnModels } from '@/lib/workspace/turn-models';
 import { panelWidth } from '@/lib/workspace/panel-tabs';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { isRunning, statusBubbleShown } from '@/lib/workspace/task-progress';
@@ -1113,12 +1114,11 @@ export function ChatColumn() {
           return;
         }
       }
-      const otherDomainModels = Object.fromEntries(
-        Object.entries({ ...workspace.modelByDomain, ...extra?.domainModels }).filter(
-          (entry): entry is [string, string] => entry[0] !== domain && Boolean(entry[1]),
-        ),
-      );
       // #678: a model confirmed for this one turn (转 3D without a pick) rides along as that domain's model; no lock.
+      // With a 3D model on the stage (只用正面转 3D) it is the stage domain's model and becomes the turn's model;
+      // a queued turn keeps it and is read the same way against the stage it goes out under. It never becomes
+      // `selectedModel`: the checks below compare the person's own pick.
+      const { model: turnModel, domainModels: otherDomainModels } = turnModels(domain, workspace.modelByDomain, extra?.domainModels);
       const oneTurnModels = extra?.domainModels;
       const sessionId = activeSessionId;
       // What the person sees and selects travels with the turn as claims; the
@@ -1305,7 +1305,7 @@ export function ChatColumn() {
         const request = { sessionId, controller: new AbortController() };
         preflightRef.current = request; setPreparingSession(sessionId);
         try {
-          const current = await configurationClient.effective(domain, selectedModel, sessionId, request.controller.signal);
+          const current = await configurationClient.effective(domain, turnModel, sessionId, request.controller.signal);
           if (!selectedSkill || !current.skills.some(item => item.id === skillId)) {
             toast.error(schemaText(schema, 'ui.workspace.skills.unavailable')); return;
           }
@@ -1403,7 +1403,7 @@ export function ChatColumn() {
           const queued = extra?.queued === true;
           try {
             const turnOptions: ChatTurnOptions = {
-              ...(selectedModel ? { model: selectedModel } : {}),
+              ...(turnModel ? { model: turnModel } : {}),
               creativeDomain: domain,
               ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
               ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
