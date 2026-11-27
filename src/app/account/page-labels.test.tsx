@@ -87,7 +87,7 @@ describe('account page labels', () => {
     state.pages = [resources];
     render(<AccountPage />);
     expect(screen.getByText(messages['ui.account.usage_by_type'])).toBeTruthy();
-    expect(screen.queryByText(messages['ui.account.usage_range'])).toBeNull();
+    expect(screen.queryByText('用量范围')).toBeNull();
     expect(screen.getByText(`${label('text-to-image')}: 3 · ${label('image-to-3d')}: 1`)).toBeTruthy();
   });
 
