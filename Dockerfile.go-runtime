@@ -28,10 +28,13 @@ COPY cmd ./cmd
 COPY internal ./internal
 
 # 与运行镜像 OCI revision 标签同源：/api/version 返回链接进二进制的这个提交（#229）。
+# 版本串（#676）由发布脚本经同一通道传入：--release-version 或待发布 revision 的
+# git describe --tags --always；顶栏与 /api/version 的 release 显示它，未传时为空不显示。
 ARG GO_SOURCE_COMMIT=unknown
+ARG GO_RELEASE_VERSION=
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags="-s -w -X github.com/LeXwDeX/Plinth/internal/app.sourceRevision=${GO_SOURCE_COMMIT}" \
+    -ldflags="-s -w -X github.com/LeXwDeX/Plinth/internal/app.sourceRevision=${GO_SOURCE_COMMIT} -X github.com/LeXwDeX/Plinth/internal/app.releaseVersion=${GO_RELEASE_VERSION}" \
     -o /out/art-ai \
     ./cmd/art-ai
 RUN CGO_ENABLED=0 GOOS=linux go build \

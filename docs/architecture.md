@@ -2756,6 +2756,7 @@ Schema 与行为：`application.agent_configuration.mcp_presets[].default_enable
 - `internal/catalog/default_catalog.json` 是 Product Schema 真源。Catalog 提供 Provider/Model/Capability/Offering、参数与输入输出契约、运行接线、公开文案和 UI 元数据。运行时可用性须结合 Adapter 与实际配置判断，不能只看 Schema 已登记。
 
 - 运行版本（#229）：`Dockerfile.go-runtime` 用同一个 `GO_SOURCE_COMMIT` 构建参数既写 OCI 标签 `org.opencontainers.image.revision`，又以 `-ldflags -X github.com/LeXwDeX/Plinth/internal/app.sourceRevision=<sha>` 链接进 `art-ai`。`/api/version` 兼容响应形状 `{"version": ...}` 不变，值为该完整 40 位小写 SHA；本地或未注入完整 SHA 的构建返回 `unknown`，不回退到文件。原 `PRODUCT_VERSION_FILE` 运行设置、`runtime.frontend.product_version_file` 及 `web-data/build-version.txt` 写入已删除；前端仍按 `product_version_refresh_milliseconds` 轮询该接口。发布后 `smoke-l1-agent-mode.sh` 严格断言 `/api/version` = `EXPECT_SHA` = 容器 revision。
+- 版本串（#676）：发布脚本给出的版本串（`release-env.py --release-version`，缺省为待发布 revision 的 `git describe --tags --always`）与提交哈希走同一通道：服务器段参数 `RELEASE_VERSION` → 构建参数 `GO_RELEASE_VERSION` → `-ldflags -X github.com/LeXwDeX/Plinth/internal/app.releaseVersion=<版本串>`。`/api/version` 在 `version`（提交哈希，用于冒烟、错误上报与排障）旁增加 `release`；未注入或不是简单名称时为空。版本串不进 Go Catalog 与公开 Schema 投影：前端只在浏览器里由 `withRuntimeVersion` 把 `release` 合并进 `content.service.release`，顶栏品牌名旁与登录页显示 `brand.version_prefix` 加版本串（版本串已以该前缀开头时不重复），缺 `release` 时都不显示；错误上报仍用 `content.service.version` 的哈希。发布 `formal-test` 时传入的版本串即之后的 tag 与 GitHub Release 名，约定见 `docs/deployment.md`「版本号与 tag」，脚本不校验 tag。
 
 ## 12. 三方隔离与 3D 产物契约
 

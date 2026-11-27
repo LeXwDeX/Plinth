@@ -147,6 +147,23 @@
 
 `dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
 
+### 版本号与 tag（#676）
+
+每次发布都给构建一个版本串，顶栏品牌名旁与登录页显示它，`/api/version` 以 `release` 字段返回；原有的 `version` 字段仍是完整提交 SHA，冒烟、错误上报与排障继续用它。
+
+- 版本串来源：`release-env.py release <环境> --release-version <名称>` 显式给出；不传时取待发布 revision 的 `git describe --tags --always`（形如 `v1.9.4-12-gfbf5000`，即 v1.9.4 之后第 12 个提交）。只允许字母、数字、点、下划线和连字符，最长 64 个字符。
+- 通道与提交哈希相同：`release-env.py` 把它作为 `RELEASE_VERSION` 放进服务器段参数 → `release-server-steps.sh` 以 `--build-arg GO_RELEASE_VERSION` 构建 → `Dockerfile.go-runtime` 用 `-ldflags -X …/internal/app.releaseVersion` 链接进二进制。本地构建不传时为空，界面不显示版本。
+
+约定：发布 `formal-test` 时传入的版本串，就是人工 Review 通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
+
+```bash
+git tag v1.9.5 <revision>
+git push origin v1.9.5
+gh release create v1.9.5 --title v1.9.5 --verify-tag
+```
+
+别漏 `git push origin <tag>`：只在本地打的 tag 不会出现在远端，Release 也建不起来。脚本不校验 tag，名字一致靠发布负责人按上述约定执行。
+
 ### fake 上游形态（`data: ephemeral` 缺省，#219）
 
 `dev-test`（`"data": "ephemeral"`）的发布缺省是 fake 上游形态，所有上游请求打到同一 Compose 项目里的 fake 服务，真实 Provider 零请求、零扣费：
