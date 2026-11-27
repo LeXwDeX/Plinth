@@ -10,8 +10,7 @@ import { useChatStore } from '@/store/chat-store';
 
 // #405 (the scope note): the strips that show what a turn is about (the picture on the stage or board, the pictures
 // attached, the mask, the branch, the Skill) sit on a two-column grid and are all exactly as wide, say a repeated word
-// once, and show their whole text on hover when it is cut; the purpose rows under them share one label column and one
-// segmented control width.
+// once, and show their whole text on hover when it is cut. #697 removed the purpose rows that used to sit under them.
 const schema = defaultCatalog.application;
 const messages = schema.content.messages as Record<string, string>;
 const hints: Array<Record<string, unknown>> = [];
@@ -264,50 +263,17 @@ describe('the strips above the box', () => {
     expect(chip.textContent).not.toContain('2D v3');
   });
 
-  it('keeps the purpose controls under the chips, with the notices after them', () => {
-    render(<Composer {...props} images={['/a.png']} onAttachmentPurpose={noop} />);
+  // #697: no purpose rows; the group under the chips holds only the notices and takes no room without them.
+  it('keeps the notices under the chips, with no purpose rows and no empty gap when there are none', () => {
+    render(<Composer {...props} images={['/a.png', '/b.png']} pinnedImage="/board.png" />);
     const row = screen.getByTestId('composer-chips');
-    const purposes = screen.getByTestId('composer-attachments');
-    expect(Boolean(row.compareDocumentPosition(purposes) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(within(purposes).getByTestId('composer-attachment-purposes')).toBeTruthy();
-    expect(within(purposes).queryByTestId('composer-attachment-chip')).toBeNull();
-  });
-
-  it('puts every purpose row on one shared grid: one label column and equally wide segmented controls of three equal segments', () => {
-    render(<Composer {...props} images={['/a.png', '/b.png']} pinnedImage="/board.png"
-      attachmentPurposes={['style', null]} pinnedPurpose="input" onAttachmentPurposeAt={noop} onPinnedPurpose={noop} onAttachmentPurpose={noop} />);
     const group = screen.getByTestId('composer-attachments');
-    // Labels in a column as wide as the longest of them (at most two fifths of the row), the controls in the rest.
-    expect(group.className).toMatch(/\bgrid\b/);
-    expect(group.className).toContain('grid-cols-[fit-content(40%)_minmax(0,1fr)]');
-    const rows = within(group).getAllByTestId('composer-attachment-purpose-row');
-    expect(rows).toHaveLength(3);
-    const overall = within(group).getByTestId('composer-attachment-purpose');
-    const segmented = [...rows, overall].map((row) => {
-      // The row has no box of its own: its label and its control are cells of the shared grid.
-      expect(row.className).toMatch(/\bcontents\b/);
-      const control = row.querySelector('[role=group], [role=radiogroup]') as HTMLElement;
-      expect(control.className).toMatch(/\bgrid-cols-3\b/);
-      const segments = [...control.querySelectorAll('button')] as HTMLElement[];
-      expect(segments.map((button) => button.textContent)).toEqual(['参考风格', '参考构图', '当作输入图']);
-      for (const button of segments) for (const name of [/\bw-full\b/, /\bmin-w-0\b/, /\btruncate\b/]) expect(button.className).toMatch(name);
-      return control.className;
-    });
-    // The same control class on every row (the "用途" row of the whole set included), so they start at one edge and are equally wide.
-    expect(new Set(segmented).size).toBe(1);
-    // The label of each row is one cell that is cut, with its whole text on hover, instead of widening the column.
-    for (const row of rows) expect(within(row).getAllByTestId('hint-wrapper')[0].getAttribute('data-name')).toMatch(/上传的图 \d|画板上的图/);
-    expect(within(overall).getAllByTestId('hint-wrapper')[0].getAttribute('data-name')).toBe(messages['ui.studio.composer.attachment.purpose']);
-    // The note about the whole set sits under its control, in the second column.
-    expect(within(overall).getByText(messages['ui.studio.composer.attachment.purpose_note']).className).toMatch(/\bcol-start-2\b/);
-  });
-
-  it('keeps the notices full width between the purpose rows and the whole-set row, without an empty gap when there are none', () => {
-    const view = render(<Composer {...props} images={['/a.png']} onAttachmentPurpose={noop} />);
-    const group = within(view.container).getByTestId('composer-attachments');
-    const notices = [...group.children].find((child) => /\bcol-span-2\b/.test(child.className)) as HTMLElement;
-    expect(notices.className).toMatch(/\bempty:hidden\b/);
-    expect(notices.childElementCount).toBe(0);
+    expect(Boolean(row.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(within(group).queryByTestId('composer-attachment-chip')).toBeNull();
+    expect(within(group).queryByTestId('composer-attachment-purposes')).toBeNull();
+    expect(within(group).queryAllByRole('button')).toHaveLength(0);
+    expect(group.className).toMatch(/\bempty:hidden\b/);
+    expect(group.childElementCount).toBe(0);
   });
 
   it('shows no chip row at all when there is nothing to show', () => {

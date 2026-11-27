@@ -1,10 +1,9 @@
-import { ATTACHMENT_PURPOSES, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
-
 /**
  * The unsent part of a session's composer, kept in the browser so that switching session, a refresh or an
- * expired login does not lose it. Only what can be rebuilt is kept: text, the purpose, and pictures that are
- * server assets (addressed by URL with their platform IDs). A picture read from the person's disk lives in
- * memory as a data address and is dropped; the count is kept so the next visit can say so.
+ * expired login does not lose it. Only what can be rebuilt is kept: text and pictures that are server assets
+ * (addressed by URL with their platform IDs). A picture read from the person's disk lives in memory as a data
+ * address and is dropped; the count is kept so the next visit can say so. A draft stored before #697 may still
+ * carry `purpose`/`purposes`; they are ignored on read and never written again.
  */
 export interface ComposerDraftSource {
   assetId?: string;
@@ -16,8 +15,6 @@ export interface ComposerDraft {
   text: string;
   images: string[];
   sources: Record<string, ComposerDraftSource>;
-  purpose: AttachmentPurpose | null;
-  purposes?: Record<string, AttachmentPurpose | null>;
   /** Local pictures that could not be kept. */
   dropped: number;
 }
@@ -43,8 +40,8 @@ export function draftKey(sessionId: string): string {
   return `${DRAFT_KEY_PREFIX}${sessionId}`;
 }
 
-export function isEmptyDraft(draft: Pick<ComposerDraft, 'text' | 'images' | 'dropped' | 'purpose'>): boolean {
-  return draft.text.trim() === '' && draft.images.length === 0 && draft.dropped === 0 && draft.purpose === null;
+export function isEmptyDraft(draft: Pick<ComposerDraft, 'text' | 'images' | 'dropped'>): boolean {
+  return draft.text.trim() === '' && draft.images.length === 0 && draft.dropped === 0;
 }
 
 /** Keeps the persistable part of the live composer state. */
@@ -52,11 +49,8 @@ export function draftFromState(state: {
   text: string;
   images: readonly string[];
   sources: Readonly<Record<string, ComposerDraftSource | undefined>>;
-  purpose: AttachmentPurpose | null;
-  purposes?: Readonly<Record<string, AttachmentPurpose | null>>;
 }): ComposerDraft {
   const images = state.images.filter((url) => !isLocalOnlyImage(url));
-  const purposes = state.purposes;
   const sources: Record<string, ComposerDraftSource> = {};
   for (const url of images) {
     const source = state.sources[url];
@@ -66,8 +60,6 @@ export function draftFromState(state: {
     text: state.text,
     images,
     sources,
-    purpose: state.purpose,
-    ...(purposes ? { purposes: Object.fromEntries(images.filter((url) => Object.hasOwn(purposes, url)).map((url) => [url, purposes[url]])) } : {}),
     dropped: state.images.length - images.length,
   };
 }
@@ -106,19 +98,11 @@ export function loadDraft(sessionId: string, storage: DraftStorage | null = defa
       if (typeof source.captureId === 'string') entry.captureId = source.captureId;
       sources[url] = entry;
     }
-    const purpose = ATTACHMENT_PURPOSES.find((item) => item === value.purpose) ?? null;
-    const storedPurposes = value.purposes;
-    const purposeEntries: [string, AttachmentPurpose | null][] = [];
-    for (const url of images) {
-      const raw = storedPurposes && typeof storedPurposes === 'object' ? storedPurposes[url] : purpose;
-      if (raw === null || ATTACHMENT_PURPOSES.some((item) => item === raw)) purposeEntries.push([url, raw as AttachmentPurpose | null]);
-    }
+    // An older draft's `purpose`/`purposes` (#697) are left unread.
     const draft: ComposerDraft = {
       text: typeof value.text === 'string' ? value.text : '',
       images,
       sources,
-      purpose,
-      ...(storedPurposes || purpose ? { purposes: Object.fromEntries(purposeEntries) } : {}),
       dropped: typeof value.dropped === 'number' && value.dropped > 0 ? Math.floor(value.dropped) : 0,
     };
     return isEmptyDraft(draft) ? null : draft;

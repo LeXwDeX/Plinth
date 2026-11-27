@@ -46,7 +46,7 @@ describe('stage header wiring', () => {
     expect(chat).toContain('objectKey(sessionSelection) !== branchFrom.key');
     // Cancelling deselects the object too (#557), so the new version does not attach to it.
     expect(chat).toMatch(/setBranchFrom\(null\);\s*setDeselectedObject\(branchFrom\.key\);/);
-    expect(chat.match(/setAttachmentPurpose\(null\);\s*setBranchFrom\(null\);/g)?.length).toBe(2);
+    expect(chat.match(/setCanvasReference\(null\);\s*setBranchFrom\(null\);/g)?.length).toBe(2);
   });
 
   it('turns a three-view group into 3D from its front view only, whichever view is on the stage', () => {

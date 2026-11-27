@@ -946,20 +946,18 @@ scenarios.s2 = async (page) => {
     return `版本条：${labels}；堆叠组：${stacked}`;
   }, { needs: ['1'], key: true });
 
-  await step(page, S, '4', '回形针上传草图；在附件芯片选“参考构图”', '芯片带缩略图；版本条和全部产出里标“上传”，不出现“来源未知”', async () => {
+  // #697: the purpose choice was removed from the composer; what a picture is for is said in the message (step 5).
+  await step(page, S, '4', '回形针上传草图（附件没有用途选择）', '芯片带缩略图，附图下方没有用途控件；版本条和全部产出里标“上传”，不出现“来源未知”', async () => {
     const sketch = path.join(OUT, 'sketch-input.png');
     fs.writeFileSync(sketch, sketchPng());
     await page.locator('[data-testid=studio-composer] input[type=file]').setInputFiles(sketch);
     await page.waitForTimeout(1200);
     const thumbs = await page.locator('[data-testid=studio-composer] img[alt*="附件"], [data-testid=studio-composer] img').count();
-    const roleChoices = await page.locator('[data-testid=studio-composer]').getByText(/参考构图|参考|构图/).count();
+    const purposeControls = await page.locator('[data-testid=studio-composer] [data-testid^=composer-attachment-purpose]').count();
     fs.unlinkSync(sketch);
     const problems = [];
     if (thumbs === 0) problems.push('上传后输入框里没有缩略图');
-    if (roleChoices === 0) {
-      problems.push('附件芯片上没有“参考构图”之类的用途选择，只有缩略图和删除按钮');
-      friction('上传的图在输入框里只是一枚缩略图，没有“参考构图 / 风格参考 / 要修改的图”的用途选择；用途只能写在话里。');
-    }
+    if (purposeControls > 0) problems.push('附图下方仍有用途控件（#697 已删除）');
     expect(problems.length === 0, problems.join('；'));
   }, { needs: ['1'], key: true });
 
