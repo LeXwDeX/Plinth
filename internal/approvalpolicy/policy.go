@@ -141,6 +141,17 @@ func RequiresHumanForCredits(policy Policy, mode, capability string, credits int
 	return credits >= policy.ManualCreditsThreshold
 }
 
+// StrictSparesPersonClick reports whether the strict mode lets a step the
+// person started in the browser run on that click (#702): strict asks for
+// every step the Agent starts, while the person's own click on a 2D step is
+// their consent. A 3D step (the policy's card list or a counted 3D step
+// capability) and a capability the Schema does not know still ask on a card.
+func (p Policy) StrictSparesPersonClick(capability string) bool {
+	return capability != "" && slices.Contains(p.KnownCapabilities, capability) &&
+		!slices.Contains(p.ManualApprovalCapabilities, capability) &&
+		(p.Steps == nil || !p.Steps.Counts(capability))
+}
+
 // WithCheckpoints returns the policy with the checkpoint window of each mode
 // (application.chat.approval_policy.generation_checkpoint, #702).
 func (p Policy) WithCheckpoints(checkpoints map[string]int) Policy {

@@ -99,3 +99,17 @@ func TestCheckpointDue(t *testing.T) {
 		t.Error("a policy without windows reached a checkpoint")
 	}
 }
+
+// #702: strict spares the person's own click on a known 2D step only; the
+// card list, a counted 3D step and an unknown capability still ask.
+func TestStrictSparesPersonClick(t *testing.T) {
+	policy := testPolicy().WithSteps(StepsPolicy{Counted: []string{"text-to-3d", "image-to-3d", "retexture", "remesh"}})
+	for capability, want := range map[string]bool{
+		"text-to-image": true, "image-to-image": true, "background-removal": true,
+		"text-to-3d": false, "retexture": false, "remesh": false, "mystery": false, "": false,
+	} {
+		if got := policy.StrictSparesPersonClick(capability); got != want {
+			t.Fatalf("StrictSparesPersonClick(%q) = %v, want %v", capability, got, want)
+		}
+	}
+}

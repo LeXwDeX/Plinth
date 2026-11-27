@@ -99,3 +99,33 @@ func TestCheckpointCountFailureIsAnError(t *testing.T) {
 		t.Fatalf("a failed count approved the step: %v %+v", err, store.grant)
 	}
 }
+
+// #702: strict asks for every step the Agent starts. A 2D step the person
+// started in the browser was their own click, so it runs; a 3D step they
+// started, and a step of an Agent-created plan, still ask on a card.
+func TestStrictSparesThePersonsOwnTwoDClick(t *testing.T) {
+	approved := 3
+	cases := []struct {
+		name       string
+		capability string
+		source     string
+		eligible   bool
+		human      bool
+	}{
+		{"browser 2D", "text-to-image", HumanBrowser, false, false},
+		{"browser 3D", "image-to-3d", HumanBrowser, false, true},
+		{"agent 2D", "text-to-image", AgentPending, false, true},
+		{"agent plan 2D", "text-to-image", HumanBrowser, true, true},
+	}
+	for _, c := range cases {
+		store := policyFixture(c.capability)
+		store.grant.Source, store.grant.BudgetEligible = c.source, c.eligible
+		got, err := checkpointService(store, &approved).ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual")
+		if c.human && (!errors.Is(err, ErrHumanRequired) || store.grant.Status != Pending) {
+			t.Fatalf("%s: err=%v grant=%+v, want left to a person", c.name, err, store.grant)
+		}
+		if !c.human && (err != nil || got.Status != Approved || got.DecidedBy != PolicyActorPrefix+"manual") {
+			t.Fatalf("%s: %+v err=%v, want approved on the click", c.name, got, err)
+		}
+	}
+}

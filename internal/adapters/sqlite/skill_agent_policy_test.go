@@ -133,12 +133,13 @@ func TestSkillRunRequestGrantManualModeThreeDWaitsForHuman(t *testing.T) {
 	}
 }
 
-// #702: strict asks for every step, a view the person starts on the card too;
-// the budget ("approve") mode approves the 2D step by policy.
-func TestSkillRunRequestGrantManualModeImageStepWaitsForHuman(t *testing.T) {
+// #702: strict asks for every step the Agent starts; a view the person starts
+// on the card is their own 2D click, so it runs on it without a second card.
+// The budget ("approve") mode approves the 2D step by policy too.
+func TestSkillRunRequestGrantManualModeImageStepRunsOnThePersonsClick(t *testing.T) {
 	grant := requestSkillGrant(t, "manual", generation.ImageToImage)
-	if grant.Status != executiongrant.Pending || grant.DecidedBy != "" {
-		t.Fatalf("strict image step must wait for a person: %+v", grant)
+	if grant.Status != executiongrant.Approved || grant.DecidedBy != "policy:manual" {
+		t.Fatalf("strict image step the person started was not approved on the click: %+v", grant)
 	}
 }
 

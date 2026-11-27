@@ -60,8 +60,10 @@ func TestApproveByPolicyMatrix(t *testing.T) {
 		name, mode, capability string
 		approved               bool
 	}{
-		// #702: strict asks for every step; budget ("approve") for the 3D list.
-		{"manual image", "manual", "text-to-image", false},
+		// #702: strict asks for every step the Agent starts; these grants are
+		// the person's own browser steps, so a 2D one runs on the click and a
+		// 3D one still asks. Budget ("approve") asks for the 3D list.
+		{"manual image", "manual", "text-to-image", true},
 		{"manual image-to-3d", "manual", "image-to-3d", false},
 		{"budget image", "budget", "text-to-image", true},
 		{"budget image-to-3d", "budget", "image-to-3d", false},
@@ -70,7 +72,7 @@ func TestApproveByPolicyMatrix(t *testing.T) {
 		{"auto image-to-3d", "auto", "image-to-3d", true},
 		{"auto retexture", "auto", "retexture", true},
 		{"unknown mode is manual", "bogus", "image-to-3d", false},
-		{"unknown mode asks for an image too", "bogus", "text-to-image", false},
+		{"unknown mode spares the person's image click as manual does", "bogus", "text-to-image", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

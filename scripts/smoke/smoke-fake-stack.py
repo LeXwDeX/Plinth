@@ -2299,8 +2299,8 @@ def _wait_view_grant(api, session, key, seconds=45):
 def _three_view_budget_and_strict(work, api, offerings):
     """#243: an approved budget finishes front, left and back without a click,
     feeds the front output into the later views and submits a P2 multiview 3D
-    step; manual mode asks a card for the front view (#702) and starts only it
-    until the person asks for the next one, which asks a card again. #283: the reference is a tall character (32x144 in a 96x192
+    step; manual mode asks a card for the Agent's front view (#702) and starts
+    only it until the person clicks the next one, which starts on that click. #283: the reference is a tall character (32x144 in a 96x192
     picture), so the frozen size of every view is a portrait one instead of the
     model's default square."""
     picture = upload_asset(api, "reference.png",
@@ -2428,9 +2428,10 @@ def _three_view_budget_and_strict(work, api, offerings):
            f"task {task.get('id') if task else None} state {task.get('state') if task else None} "
            f"offering {task.get('offering_id') if task else None}")
 
-    # Manual (strict) mode asks for every step, 2D too (#702): the front view
-    # waits on a card first and starts once the person approves it; the person
-    # then starts the left view, whose frozen input names the front output.
+    # Manual (strict) mode asks for every step the Agent starts, 2D too (#702):
+    # the front view waits on a card first and starts once the person approves
+    # it; the person then clicks the left view, which starts on that click (no
+    # second card), and whose frozen input names the front output.
     strict = new_session(api)
     status, _ = api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
     if status != 200:
@@ -2487,15 +2488,10 @@ def _three_view_budget_and_strict(work, api, offerings):
     status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
     left_status = next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
                         if slot.get("key") == "left"), "")
-    # Strict asks for the clicked view too (#702): its card is approved as a person.
-    request_id = _wait_view_grant(api, strict, "left")
-    record("three-view strict: the person starts the left view and it waits on its card",
-           status == 200 and left_status in ("awaiting_approval", "starting") and bool(request_id),
-           f"POST {status}, left {left_status}, grant {request_id or 'none'}")
-    # Approved on its card, the clicked view must run without a second click
-    # (the card offers none while the view waits).
-    if request_id:
-        _approve_view_card(api, strict, request_id)
+    # The person's own click on a 2D view is the consent (#702): no second card.
+    record("three-view strict: the person's click starts the left view without a card",
+           status == 200 and left_status in ("starting", "running", "succeeded"),
+           f"POST {status}, left {left_status}")
     end = time.time() + 90
     group = None
     while time.time() < end:
@@ -2569,13 +2565,9 @@ def _three_view_heavy_front(work, api, offerings):
             record("three-view heavy front: upload the reference picture", False, "upload refused")
             return
         session = new_session(api)
-        # The review (budget) mode without a plan: the Agent's front view and the
-        # person's left and back clicks are 2D steps the policy approves, and the
-        # server does not continue the views by itself (#702: strict now asks a
-        # card for every view, which is not what this scenario is about).
-        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
         if status != 200:
-            record("three-view heavy front: budget approval mode", False, f"PUT {status}")
+            record("three-view heavy front: manual approval mode", False, f"PUT {status}")
             return
         views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
         status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
@@ -2584,6 +2576,10 @@ def _three_view_heavy_front(work, api, offerings):
         if status not in (200, 201, 202):
             record("three-view heavy front: start the front view", False, f"send {status}")
             return
+        # Strict asks a card for the Agent's front view (#702); the person approves it.
+        front_card = _wait_view_grant(api, session, "front")
+        if front_card:
+            _approve_view_card(api, session, front_card)
         group, front = None, {}
         end = time.time() + 120
         while time.time() < end:

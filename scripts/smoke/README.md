@@ -67,7 +67,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
 - 会话批准方式由 Schema `chat.approval_policy` 声明（公开投影有 `default_mode`、`modes` 和 `manual_approval_capabilities`）；新会话取 `default_mode`，当前是 `auto`（#406），已有会话保持存值。
   - `auto`（新会话默认）：所有付费步骤自动批准，包括严格方式要人批准的四类和带额外积分的步骤。仍要人决定的只有 #294 的再扣费保护：同一会话再次生成“已计费但没保存”的同类结果时出批准卡。自动方式没有制作计划、额度或三视图连续推进。
   - `budget`（界面「审批」，#702）：`manual_approval_capabilities` 声明的四类（当前 `text-to-3d`、`image-to-3d`、`image-to-splat`、`retexture`）需要人工批准；此外 `manual_credits_threshold`（当前 20）使任何单步积分达到该值的步骤也出卡，所以重拓扑、绑骨、分割、补面这类加工步骤不再因为能力未列入而直接扣费。2D、动画和格式转换（基础估算低于阈值）由策略批准（`grant.decided_by` 为 `policy:budget`），不出现待批准同意，直接产生真实任务。Agent 不主动提议制作计划；用户明确要求并批准计划后，计划内步骤自动连续执行，计划外、超出该单位剩余额度、服务端无法报价或会再次扣费的步骤仍出批准卡。`auto` 与 `budget` 下本会话每批准满 100 步（`generation_checkpoint`），下一步出一次批准卡。
-  - `manual`（严格）：每一个付费步骤都需要人工批准，2D 也一样（#702）。格式转换包括免费的本地 GLB↔glTF 和上传 GLB→STL（当前 Schema 基础估算 5 积分）；具体费用以 Offering 和冻结授权为准，策略批准不表示免费；Agent 步骤带额外积分（如附加导出格式、有计费的转换选项）时，审批方式下也要在对话里的批准卡上人工批准。
+  - `manual`（严格）：Agent 发起的每一个付费步骤都需要人工批准，2D 也一样（#702）；用户自己在浏览器里点的 2D 按钮（三视图“继续生成”、重试等）不再确认第二次，3D 仍逐张批准。格式转换包括免费的本地 GLB↔glTF 和上传 GLB→STL（当前 Schema 基础估算 5 积分）；具体费用以 Offering 和冻结授权为准，策略批准不表示免费；Agent 步骤带额外积分（如附加导出格式、有计费的转换选项）时，审批方式下也要在对话里的批准卡上人工批准。
 - 冒烟脚本不把「新会话默认值」当成隐含前提，但也不是每个脚本都显式切换：需要特定方式时显式 `PUT /api/v1/chat/sessions/{id}/approval`；保留默认时，要么先读公开 Schema 的 `default_mode` 核对新会话，要么由策略直接批准、不需要切换。各脚本的处理方式：
   - `smoke-l1-agent-mode.sh`：读 Schema `default_mode` 核对新会话与 `GET approval`，再依次 `PUT` `budget`、`auto`、`manual` 并各自回读。
   - `smoke-l1-free.sh`、`smoke-l2-livemodel.sh`、`smoke-l3-batch.sh`、`smoke-public-mock.sh`、`seed-fake-3d-task.py`：先 `PUT` `manual`，再等 3D 待批准卡或核对策略批准来源。

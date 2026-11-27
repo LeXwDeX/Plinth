@@ -417,7 +417,12 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	// manual mode the policy's per-step credit threshold cards the expensive
 	// processing steps that the capability list does not name (#490). The
 	// estimate is the frozen one the approval card shows.
-	if approvalpolicy.RequiresHumanForCredits(s.Policy, mode, snapshot.Capability, snapshot.EstimatedCredits) {
+	// #702: strict asks for every step the Agent starts; a 2D step the person
+	// started in the browser (not one of an Agent-created plan) was their own
+	// click, which is the consent, so it does not ask a second time.
+	personClick := normalized == approvalpolicy.ModeManual && grant.Source == HumanBrowser &&
+		!grant.AgentOriginated() && s.Policy.StrictSparesPersonClick(snapshot.Capability)
+	if !personClick && approvalpolicy.RequiresHumanForCredits(s.Policy, mode, snapshot.Capability, snapshot.EstimatedCredits) {
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
 	// An Agent step that spends extra credits is the person's to approve in

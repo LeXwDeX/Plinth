@@ -29,7 +29,9 @@ const (
 	ReasonViewAwaitingApproval = "view_awaiting_approval"
 	ReasonConsistencyExhausted = "consistency_retries_exhausted"
 	// ReasonGenerationCheckpoint stops a bounded continuation before it
-	// submits past the turn's generation checkpoint (#693, #694).
+	// submits past the turn's per-turn generation guard
+	// (max_generation_calls_per_turn, #693). The name stays from #694; the
+	// session's approval window (#702) pauses as ReasonViewAwaitingApproval.
 	ReasonGenerationCheckpoint = "generation_checkpoint"
 )
 

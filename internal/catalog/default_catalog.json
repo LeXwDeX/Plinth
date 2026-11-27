@@ -4188,7 +4188,7 @@
         "ui.workspace.approval.mode_manual": "严格（逐步批准）",
         "ui.workspace.approval.tooltip_auto": "自动：付费步骤自动批准，每一步都会显示它消耗的积分；本会话每批准满 100 步，下一步会请你确认一次。",
         "ui.workspace.approval.tooltip_budget": "审批：3D 步骤每一步都需要你批准；2D 等其余步骤自动批准，本会话每批准满 100 步，下一步会请你确认一次。三视图的后续视角在卡片上点「继续生成」。",
-        "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：每一个付费步骤（包括 2D 生图）都需要你批准。",
+        "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：Agent 的每一个付费步骤（包括 2D 生图）都需要你批准；你自己点的 2D 按钮不再确认第二次。",
         "ui.workspace.approval.step_credits": "本步消耗 {credits} 积分",
         "ui.workspace.approval.step_credits_one": "本步消耗 {credits} 积分",
         "ui.workspace.approval.round_credits": "本轮消耗 {credits} 积分（{steps} 步）",
@@ -12245,7 +12245,7 @@
             "view_already_started": "这个视角已经开始，正在准备或生成，不是失败",
             "view_awaiting_approval": "这个视角在等待批准（卡片上的批准，或超出已批准计划的预算），不是失败",
             "consistency_retries_exhausted": "自动重做次数已用完，这一张仍与正面图不一致",
-            "generation_checkpoint": "这一轮的连续生成次数已到确认点"
+            "generation_checkpoint": "这一轮的生成次数已达上限"
           }
         },
         "frame": {
@@ -19050,7 +19050,7 @@
             "ui.workspace.approval.mode_manual": "Strict (approve each step)",
             "ui.workspace.approval.tooltip_auto": "Auto: paid steps are approved automatically, and each step shows the credits it uses; after every 100 approved steps of the session, the next one asks you once.",
             "ui.workspace.approval.tooltip_budget": "Approve: every 3D step needs your approval; 2D and other steps are approved automatically, and after every 100 approved steps of the session, the next one asks you once. Three-view: continue each later view on its card.",
-            "ui.workspace.approval.tooltip_manual": "Strict (approve each step): every paid step, 2D images included, needs your approval.",
+            "ui.workspace.approval.tooltip_manual": "Strict (approve each step): every paid step of the Agent, 2D images included, needs your approval; a 2D button you click yourself does not ask again.",
             "ui.workspace.approval.step_credits": "This step uses {credits} credits",
             "ui.workspace.approval.step_credits_one": "This step uses {credits} credit",
             "ui.workspace.approval.round_credits": "This turn uses {credits} credits ({steps} steps)",
