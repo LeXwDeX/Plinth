@@ -118,6 +118,8 @@ const concurrencyGroup = 'ci-${{ github.workflow }}-${{ github.event.pull_reques
 
 /** The workflow text with the controlled route expression cut out: what is left must not mention a self-hosted runner. */
 const outsideRoute = (text: string) => text.split(runnerRoute).join('');
+/** Any mention of the `secrets` context: `secrets.X`, `secrets['X']`, `toJSON(secrets)` and `secrets: inherit` alike. */
+const referencesSecrets = (text: string) => /\bsecrets\b/.test(text);
 const SELF_HOSTED_MARKERS = /self-hosted|plinth-azure|plinth-trusted-ci|use_self_hosted/;
 
 function hasRunnerRoute(text: string): boolean {
@@ -444,7 +446,14 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     expect(text.match(/^ {10}persist-credentials: false$/gm)).toHaveLength(3);
     expect(outsideRoute(text)).not.toMatch(/inputs\.use_self_hosted|self-hosted/);
     expect(text).not.toContain('github.event.inputs');
-    expect(text).not.toMatch(/\bsecrets\./);
+    expect(referencesSecrets(text)).toBe(false);
+  });
+
+  it('rejects every form of the secrets context', () => {
+    const text = read('.github/workflows/ci.yml');
+    for (const reference of ['${{ secrets.TOKEN }}', "${{ secrets['TOKEN'] }}", '${{ toJSON(secrets) }}', 'secrets: inherit']) {
+      expect(referencesSecrets(text.replace('  frontend:\n', `  frontend:\n    # ${reference}\n`)), reference).toBe(true);
+    }
   });
 
   it('rejects extra top-level permissions', () => {

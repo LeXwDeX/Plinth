@@ -1628,17 +1628,6 @@ async function installBrushProbe(page) {
         context.fillRect(0, 0, 1, 1);
         return { token: mask.tint_color_token, color, rgb: [...context.getImageData(0, 0, 1, 1).data].slice(0, 3), opacity: mask.tint_opacity };
       },
-      /** The Schema selection tint (canvas.frontend.selection), kept by a pure marquee / lasso selection. */
-      selectionTint() {
-        const selection = window.__ART_AI_PRODUCT_SCHEMA__.canvas.frontend.selection;
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        context.fillStyle = selection.tint_color;
-        context.fillRect(0, 0, 1, 1);
-        return { color: selection.tint_color, rgb: [...context.getImageData(0, 0, 1, 1).data].slice(0, 3), opacity: selection.tint_opacity };
-      },
       frame: () => window.__maskStore.getState().draft?.frame ?? null,
       /** Average colour (3x3 device pixels) of the composited board under each world point. */
       sample(points) {
@@ -1810,10 +1799,19 @@ async function maskBrushContract(browser, engine, viewport) {
     const maskPixel = (world) => [Math.round((world.x - board.x) * size.width / board.width), Math.round((world.y - board.y) * size.height / board.height)];
     const sampled = await page.evaluate(async (points) => {
       const mask = await window.__probe.mask();
-      return { width: mask.width, height: mask.height, alpha: points.map(([x, y]) => mask.alpha[y * mask.width + x]) };
+      // #692: the submitted mask is binarized, so no pixel anywhere (stroke rims included) is partly kept.
+      let partial = 0;
+      let editable = 0;
+      for (const value of mask.alpha) {
+        if (value > 0 && value < 255) partial += 1;
+        if (value === 0) editable += 1;
+      }
+      return { width: mask.width, height: mask.height, partial, editable, alpha: points.map(([x, y]) => mask.alpha[y * mask.width + x]) };
     }, [at(board, 0.2, 0.15), at(board, 0.35, 0.07), at(board, 0.35, 0.15), at(board, 0.55, 0.15), at(board, 0.75, 0.15), at(board, 0.95, 0.5)].map(maskPixel));
     assert.deepEqual([sampled.width, sampled.height], [size.width, size.height]);
     assert.deepEqual(sampled.alpha, [0, 0, 0, 0, 0, 255], 'overlaps export exactly like a single pass');
+    assert(sampled.editable > 0, 'the submitted mask has an editable area');
+    assert.equal(sampled.partial, 0, 'the submitted mask is binary: no pixel has 0 < alpha < 255');
     await page.getByRole('button', { name: text('ui.canvas.inpaint.cancel') }).click();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
 
