@@ -151,7 +151,12 @@ function evaluateRoute(expression: string, github: RouteContext): unknown {
   const body = /^\$\{\{ (.+) \}\}$/.exec(expression)?.[1];
   if (!body) throw new Error(`not a single expression: ${expression}`);
   const withoutStrings = body.replace(/'[^']*'/g, "''");
-  if (!/^(?:\s|github(?:\.\w+)+|''|==|&&|\|\||[()]|fromJSON\(''\))+$/.test(withoutStrings)) {
+  // Strip every allowed token one kind at a time (no nested quantifiers); anything left over is unsupported.
+  const leftover = withoutStrings
+    .replace(/fromJSON\(''\)/g, '')
+    .replace(/github(?:\.\w+)+/g, '')
+    .replace(/''|==|&&|\|\||[()\s]/g, '');
+  if (leftover !== '') {
     throw new Error(`unsupported expression: ${expression}`);
   }
   const lookup = (path: string) => path.split('.').slice(1).reduce<unknown>((value, key) => (isMap(value) ? value[key] ?? null : null), github);
