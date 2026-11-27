@@ -106,11 +106,14 @@ export default function AdminUsersPage() {
     variables: Record<string, string | number> = {},
   ) => formatSchemaText(copy[key], variables);
 
-  const formatDate = (value: string): string =>
-    new Intl.DateTimeFormat(
+  const formatDate = (value: string): string => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return presentation.empty_placeholder;
+    return new Intl.DateTimeFormat(
       presentation.date_locale,
       presentation.date_time_options as Intl.DateTimeFormatOptions,
-    ).format(new Date(value));
+    ).format(date);
+  };
 
   const openCreate = () => {
     setEditingUser(null);

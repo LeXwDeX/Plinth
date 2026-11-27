@@ -208,7 +208,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       const key = lastSubmit.current?.body === body ? lastSubmit.current.key : randomKey();
       lastSubmit.current = { body, key };
       const response = await fetch(schema.runtime.http.routes.processing_plans, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body });
-      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || `HTTP ${response.status}`); }
+      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || schemaText(schema, 'ui.workspace.processing.submit_failed')); }
       await reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : schemaText(schema, 'ui.workspace.processing.submit_failed')); }
     finally { setBusy(false); }
@@ -263,7 +263,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       const route = schema.runtime.http.routes.processing_plan_retry.replace('{planID}', encodeURIComponent(currentPlan.id));
       const response = await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expected_plan_version: currentPlan.version, expected_offering_revision: failedOffering.revision }) });
-      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || `HTTP ${response.status}`); }
+      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || schemaText(schema, 'ui.workspace.processing.submit_failed')); }
       await reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : schemaText(schema, 'ui.workspace.processing.submit_failed')); }
     finally { setBusy(false); }
@@ -355,7 +355,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
             {schemaText(schema, 'ui.workspace.processing.plan_waiting_alternative')}
           </p>}
           {checkpointStep && <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')} className="mt-3"
-            reason={!working && !schema.runtime.http.routes.processing_plan_resume ? reasonText('unavailable') : undefined}>
+            reason={!working && !schema.runtime.http.routes.processing_plan_resume ? schemaText(schema, 'ui.workspace.processing.unavailable_reason.unavailable') : undefined}>
             <Action type="button"
               loading={working} disabled={working || !schema.runtime.http.routes.processing_plan_resume} onClick={() => void continueCheckpoint()}>
               {schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')}

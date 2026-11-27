@@ -115,6 +115,16 @@ describe('Administration users page project group (#599)', () => {
     expect(groupOf('dave')).toBe('configured-none');
   });
 
+  // #670: an unreadable time shows the placeholder instead of throwing a RangeError.
+  it('shows the placeholder for an unreadable creation or login time', () => {
+    usersCopy().empty_placeholder = 'configured-none';
+    state.users = [user({ id: 'user-9', username: 'erin', createdAt: 'not a date', lastLogin: 'also bad' })];
+    render(<AdminUsersPage />);
+    const row = within(screen.getByRole('table')).getByText('erin').closest('tr')!;
+    const cells = within(row).getAllByRole('cell').map((cell) => cell.textContent);
+    expect(cells.filter((text) => text === 'configured-none').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('creates a user with a project group picked from the existing KEYs', async () => {
     const presentation = usersCopy();
     presentation.text.project_group_label = 'Configured group';
