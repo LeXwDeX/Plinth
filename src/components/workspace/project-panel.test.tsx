@@ -148,6 +148,29 @@ describe('project panel', () => {
     expect(screen.getByTestId('project-panel-empty').textContent).toBe(messages['ui.project.no_project_hint']);
   });
 
+  // #668: the free-form convention texts show their declared label, not the field name.
+  it('labels the convention texts with the Schema copy instead of the field names', async () => {
+    render(<ProjectPanel sessionId="s1" />);
+    const input = await screen.findByTestId('project-conventions-text-naming');
+    const label = input.closest('label')?.textContent ?? '';
+    expect(label).toContain(messages['ui.project.convention.naming']);
+    expect(label).not.toMatch(/naming/);
+    for (const name of ['pipeline', 'coordinates']) {
+      const text = screen.getByTestId(`project-conventions-text-${name}`).closest('label')?.textContent ?? '';
+      expect(text).toContain(messages[`ui.project.convention.${name}`]);
+      expect(text).not.toContain(name);
+    }
+  });
+
+  // The palette counter belongs to the palette; the reference line counts references.
+  it('counts palette colours on the palette row and references on the reference row', async () => {
+    render(<ProjectPanel sessionId="s1" />);
+    await screen.findByTestId('project-style-text');
+    const maxPalette = (schema as unknown as { project: { style_guide: { maximum_palette_colors: number; maximum_references: number } } }).project.style_guide;
+    expect(screen.getByTestId('project-style-palette-count').textContent).toBe(`1/${maxPalette.maximum_palette_colors}`);
+    expect(screen.getByTestId('project-style-reference-count').textContent).toBe(`1/${maxPalette.maximum_references}`);
+  });
+
   it('loads the style guide, conventions and assets and saves only a changed guide', async () => {
     render(<ProjectPanel sessionId="s1" />);
     const textarea = await screen.findByTestId('project-style-text') as HTMLTextAreaElement;

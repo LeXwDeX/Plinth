@@ -36,6 +36,13 @@ func TestDefaultProjectSchemaLoadsAndProjectsSafeMembers(t *testing.T) {
 		len(public.Conventions.Texts) == 0 {
 		t.Fatalf("public conventions = %+v", public.Conventions)
 	}
+	// #668: every free-form text publishes the key of its label, which the
+	// browser resolves instead of showing the field name.
+	for _, text := range public.Conventions.Texts {
+		if text.Name == "" || text.LabelKey == "" || application.Content.Messages[text.LabelKey] == "" {
+			t.Fatalf("public convention text = %+v", text)
+		}
+	}
 	if !strings.Contains(application.Public().Chat.StyleLock.Sources[2], "off") {
 		t.Fatalf("public style-lock sources = %v", application.Public().Chat.StyleLock.Sources)
 	}

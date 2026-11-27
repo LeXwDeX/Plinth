@@ -35,7 +35,7 @@ export interface ProjectProductSchema {
   };
   assets: { kinds: Array<{ id: string; label_key: string }> };
   /** Field names; the raw Catalog declares objects, the public projection strings. */
-  conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string }> };
+  conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string; label_key?: string }> };
 }
 
 /**
@@ -122,7 +122,8 @@ export interface AccessKeysProductSchema {
 
 /** The browser contract after convention names are reduced to strings. */
 export type NormalizedProjectProductSchema = Omit<ProjectProductSchema, 'conventions'> & {
-  conventions: { fields: string[]; texts: string[] };
+  /** textLabels maps a text name to its label message key (#668); a name without one shows as its name. */
+  conventions: { fields: string[]; texts: string[]; textLabels: Record<string, string> };
 };
 
 /**
@@ -141,6 +142,8 @@ export function projectContract(schema: ProductSchema): NormalizedProjectProduct
     conventions: {
       fields: names(source.conventions.fields),
       texts: names(source.conventions.texts),
+      textLabels: Object.fromEntries((Array.isArray(source.conventions.texts) ? source.conventions.texts : [])
+        .flatMap((value) => (value && typeof value === 'object' && typeof value.label_key === 'string' && value.label_key !== '' ? [[String(value.name), value.label_key]] : []))),
     },
   };
 }
