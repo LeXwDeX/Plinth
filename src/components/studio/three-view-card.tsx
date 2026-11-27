@@ -65,7 +65,7 @@ function SlotThumb({ src, status, label, onDropPicture }: {
       {...drop}
     >
       {src && !failed
-        ? <img src={src} alt={label} onError={() => setFailed(true)} className="size-full object-cover" />
+        ? <img src={src} alt={label} onError={() => setFailed(true)} className="size-full object-contain" />
         : <ImageIcon aria-hidden className="size-5 text-muted-foreground" />}
       {working ? <span className="absolute inset-0 animate-pulse bg-primary/10" aria-hidden /> : null}
       {status === 'failed' || status === 'denied' || status === 'rejected' ? (
