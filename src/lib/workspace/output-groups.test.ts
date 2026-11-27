@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clearSelection, escapeClearsSelection, groupByDay, selectedCount, selectionAfterClick, toggleSelection } from './output-groups';
+import { clearSelection, escapeClearsSelection, escapeOutcome, groupByDay, selectedCount, selectionAfterClick, toggleSelection } from './output-groups';
 
 const at = (year: number, month: number, day: number, hour = 12) => new Date(year, month - 1, day, hour).toISOString();
 const item = (key: string, createdAt: string) => ({ key, createdAt });
@@ -72,5 +72,14 @@ describe('tile selection helpers', () => {
     expect(escapeClearsSelection(2, { ...free, lightbox: true })).toBe(false);
     expect(escapeClearsSelection(2, { ...free, popupOpen: true })).toBe(false);
     expect(escapeClearsSelection(2, { ...free, editable: true })).toBe(false);
+  });
+
+  it('#705: Esc clears a selection first, then closes the panel, and leaves the key to anything above it', () => {
+    const free = { lightbox: false, popupOpen: false, editable: false };
+    expect(escapeOutcome(2, free)).toBe('clear');
+    expect(escapeOutcome(0, free)).toBe('close');
+    expect(escapeOutcome(0, { ...free, lightbox: true })).toBeNull();
+    expect(escapeOutcome(0, { ...free, popupOpen: true })).toBeNull();
+    expect(escapeOutcome(0, { ...free, editable: true })).toBeNull();
   });
 });

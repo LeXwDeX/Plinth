@@ -62,7 +62,7 @@ export function ProjectSwitcher() {
   return (
     <div className="flex min-w-0 items-center" data-testid="project-switcher">
       <Popover.Root open={open} onOpenChange={setOpen}>
-        <HintTooltip name={text('switch')} className="shrink-0">
+        <HintTooltip name={text('switch')} className="min-w-0">
           <Popover.Trigger
             aria-label={text('switch')}
             data-testid="project-switcher-trigger"

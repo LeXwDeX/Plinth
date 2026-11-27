@@ -92,5 +92,14 @@ export function selectedCount(order: readonly string[], selected: ReadonlySet<st
  * the large view, an open popup or dialog, or a text field.
  */
 export function escapeClearsSelection(count: number, blockers: { lightbox: boolean; popupOpen: boolean; editable: boolean }): boolean {
-  return count > 0 && !blockers.lightbox && !blockers.popupOpen && !blockers.editable;
+  return escapeOutcome(count, blockers) === 'clear';
+}
+
+/**
+ * #705: what Esc does on the panel. A selection is dropped first; with nothing selected Esc closes the panel, as
+ * its close button does. Anything above the panel that owns the key (see escapeClearsSelection) keeps it.
+ */
+export function escapeOutcome(count: number, blockers: { lightbox: boolean; popupOpen: boolean; editable: boolean }): 'clear' | 'close' | null {
+  if (blockers.lightbox || blockers.popupOpen || blockers.editable) return null;
+  return count > 0 ? 'clear' : 'close';
 }

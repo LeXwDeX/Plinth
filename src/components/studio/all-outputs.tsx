@@ -24,7 +24,7 @@ import {
   type ArchiveProgress,
   type ArchiveSummary,
 } from '@/lib/workspace/batch-export';
-import { clearSelection, escapeClearsSelection, groupByDay, selectionAfterClick } from '@/lib/workspace/output-groups';
+import { clearSelection, escapeOutcome, groupByDay, selectionAfterClick } from '@/lib/workspace/output-groups';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
@@ -77,10 +77,10 @@ export function AllOutputs() {
     setSelected((current) => selectionAfterClick(pageOrder, current, anchor.current, key, shift));
     anchor.current = key;
   };
-  // Esc drops the selection first; it runs in the capture phase so the stage's own Esc (leave focus mode) does not also fire.
+  // Esc drops the selection first, then closes the panel (#705); it runs in the capture phase so the stage's own Esc
+  // (leave focus mode) does not also fire.
   const chosenCount = chosen.length;
   useEffect(() => {
-    if (chosenCount === 0) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       const blockers = {
@@ -88,14 +88,19 @@ export function AllOutputs() {
         popupOpen: document.querySelector('[data-base-ui-portal] [role=dialog][data-open], [data-base-ui-portal] [role=menu][data-open], [data-base-ui-portal] [role=listbox][data-open], [role=alertdialog]') !== null,
         editable: isEditableTarget(event.target),
       };
-      if (!escapeClearsSelection(chosenCount, blockers)) return;
+      const outcome = escapeOutcome(chosenCount, blockers);
+      if (outcome === null) return;
       event.stopPropagation();
+      if (outcome === 'close') {
+        setAllOutputsOpen(false);
+        return;
+      }
       setSelected(clearSelection());
       anchor.current = null;
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [chosenCount]);
+  }, [chosenCount, setAllOutputsOpen]);
   const toggleAll = () => setSelected((current) => {
     const next = new Set(current);
     for (const tile of selectable) { if (allChosen) next.delete(tile.key); else next.add(tile.key); }
