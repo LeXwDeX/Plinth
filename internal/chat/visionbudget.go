@@ -222,6 +222,9 @@ type visionPick struct {
 	Label     string
 	RoleID    string
 	TokenCost int
+	// Handle names a picture of the current selection (#679), so its own
+	// text label is not emitted a second time.
+	Handle string
 	// index is the history image number, used to show assistant pictures
 	// oldest first whichever roles picked them.
 	index int
@@ -235,6 +238,9 @@ type visionPlan struct {
 	// newest user message, oldest first. Style are the style lock references.
 	Generated []visionPick
 	Style     []visionPick
+	// Selected are the current selection's pictures that no message carries
+	// (#679), shown after the newest user message before the generated ones.
+	Selected []visionPick
 	// Dropped names the pictures the budget refused or could not read, in
 	// priority order. A visual anchor's unreadable picture is named here too
 	// (#250); the style lock keeps its historical silence.
@@ -293,6 +299,12 @@ type visionCandidate struct {
 	// assistant marks a picture of an assistant message, whether the role is
 	// the declared generated/render one or the legacy combined pool.
 	assistant bool
+	// selected marks a picture of the current selection without a picture
+	// slot (#679). object is the attachment a picture shows, when known: a
+	// selected picture that is already shown by another role is not shown
+	// twice, and the other role skips the object a selected picture showed.
+	selected bool
+	object   *Attachment
 }
 
 // planVision selects the pictures of a request under the effective budget.
@@ -327,6 +339,9 @@ func (orchestrator *Orchestrator) planVision(
 	if invalid.MaximumExcluded > 0 {
 		refused = orchestrator.visionExclusions(ctx, ownerID, sessionID)
 	}
+	// shownObjects and shownSelection deduplicate the current selection's
+	// pictures against every other role (#679), in both directions.
+	var shownObjects, shownSelection []Attachment
 	for _, role := range budget.Roles {
 		// The legacy fallback keeps the historical split (#247): generated and
 		// render pictures have their own recent_generated_image_limit and do
@@ -334,6 +349,14 @@ func (orchestrator *Orchestrator) planVision(
 		legacyAssistants := budget.Legacy && role.ID == visionRoleLegacyAI
 		picked := 0
 		for _, candidate := range visionRoleCandidates(candidates, role) {
+			if candidate.object != nil {
+				if candidate.selected && shownAmong(shownObjects, *candidate.object) {
+					continue
+				}
+				if !candidate.selected && shownAmong(shownSelection, *candidate.object) {
+					continue
+				}
+			}
 			if picked >= role.MaximumImages ||
 				(!legacyAssistants && plan.Spend.Images >= budget.MaximumImages) {
 				plan.Dropped = append(plan.Dropped, candidate.dropped)
@@ -372,7 +395,17 @@ func (orchestrator *Orchestrator) planVision(
 				URL: url, Detail: role.Detail, Label: candidate.label,
 				RoleID: role.ID, TokenCost: tokenCost, index: candidate.index,
 			}
+			if candidate.object != nil {
+				if candidate.selected {
+					shownSelection = append(shownSelection, *candidate.object)
+				} else {
+					shownObjects = append(shownObjects, *candidate.object)
+				}
+			}
 			switch {
+			case candidate.selected:
+				pick.Handle = candidate.object.Handle
+				plan.Selected = append(plan.Selected, pick)
 			case candidate.style:
 				plan.Style = append(plan.Style, pick)
 			case candidate.assistant:
@@ -395,6 +428,32 @@ func (orchestrator *Orchestrator) planVision(
 		return plan.Generated[left].index < plan.Generated[right].index
 	})
 	return plan
+}
+
+// shownAmong reports whether an object is one of the shown ones: the same
+// handle, or the same platform object under another handle.
+func shownAmong(shown []Attachment, object Attachment) bool {
+	for _, other := range shown {
+		if (object.Handle != "" && strings.EqualFold(other.Handle, object.Handle)) || SameObject(other, object) {
+			return true
+		}
+	}
+	return false
+}
+
+// plannedSelectionParts renders the current selection's pictures the plan
+// kept (#679), behind the Schema's intro, each followed by its handle label.
+func (orchestrator *Orchestrator) plannedSelectionParts(plan visionPlan) []agents.ContentPart {
+	if len(plan.Selected) == 0 {
+		return nil
+	}
+	parts := []agents.ContentPart{}
+	if intro := orchestrator.schema.Context.Vision.SelectionIntro; intro != "" {
+		parts = append(parts, agents.ContentPart{
+			Kind: orchestrator.schema.Context.TextPartKind, Text: intro,
+		})
+	}
+	return append(parts, orchestrator.pictureParts(plan.Selected)...)
 }
 
 // plannedGeneratedParts renders the assistant pictures the plan kept after the
@@ -608,6 +667,7 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 			}
 		}
 	}
+	orchestrator.selectionVisionCandidates(history, lastUser, options, add)
 	for messageIndex := len(history) - 1; messageIndex >= 0; messageIndex-- {
 		message := history[messageIndex]
 		if message.Role != orchestrator.schema.Roles.Assistant {
@@ -674,6 +734,52 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 	}
 }
 
+// selectionVisionCandidates adds the current selection's pictures that have no
+// picture slot and are not the artboard snapshot (#679): a board raster the
+// stage sends as the selection of an ordinary turn, or any other selected
+// picture the message does not carry. Without them the model only read a
+// handle and guessed the picture from older ones. The label names the handle
+// only: no canvas size or layout, and the picture is never a reference input
+// (the canvas note stays on canvas turns).
+func (orchestrator *Orchestrator) selectionVisionCandidates(
+	history []Message,
+	lastUser int,
+	options TurnOptions,
+	add func(string, visionCandidate),
+) {
+	vision := orchestrator.schema.Context.Vision
+	if vision == nil || !orchestrator.handlePolicy().Enabled() {
+		return
+	}
+	for _, attachment := range options.Selection {
+		if attachment.Kind != AttachmentKindImage || attachment.Role == AttachmentRoleCanvas ||
+			attachment.ImageSlot != 0 || attachment.Handle == "" {
+			continue
+		}
+		url := attachment.URL
+		if url == "" && lastUser >= 0 && lastUser < len(history) {
+			for _, stored := range history[lastUser].Attachments {
+				if strings.EqualFold(stored.Handle, attachment.Handle) {
+					url = AttachmentURL(history[lastUser], stored)
+					break
+				}
+			}
+		}
+		if url == "" || !orchestrator.visionCandidate(url) {
+			continue
+		}
+		object := attachment
+		add(catalog.ChatVisionSourceSelection, visionCandidate{
+			source:   catalog.ChatVisionSourceSelection,
+			url:      url,
+			label:    strings.ReplaceAll(vision.SelectionLabelTemplate, "{handle}", attachment.Handle),
+			dropped:  attachment.Handle,
+			selected: true,
+			object:   &object,
+		})
+	}
+}
+
 func (orchestrator *Orchestrator) userCandidate(
 	message Message,
 	image indexedChatImage,
@@ -688,7 +794,17 @@ func (orchestrator *Orchestrator) userCandidate(
 		url:          image.url,
 		label:        orchestrator.visionUserLabel(message, image),
 		dropped:      orchestrator.visionDroppedLabel(message, image),
+		object:       slotObject(message, image),
 	}
+}
+
+// slotObject is the attachment of a message picture, if it has one.
+func slotObject(message Message, image indexedChatImage) *Attachment {
+	attachment, found := AttachmentForSlot(message, image.slot)
+	if !found {
+		return nil
+	}
+	return &attachment
 }
 
 // selectedVisionImages indexes the history pictures by their global index,
@@ -724,6 +840,7 @@ func (orchestrator *Orchestrator) assistantCandidate(
 		url:       image.url,
 		label:     orchestrator.visionAssistantLabel(message, image),
 		dropped:   orchestrator.visionDroppedLabel(message, image),
+		object:    slotObject(message, image),
 	}
 }
 

@@ -8252,6 +8252,12 @@ type ChatVisionSchema struct {
 	StyleAnchorLabelTemplate   string `json:"style_anchor_label_template,omitempty"`
 	StyleAnchorDroppedTemplate string `json:"style_anchor_dropped_template,omitempty"`
 	UnnamedPictureLabel        string `json:"unnamed_picture_label,omitempty"`
+	// SelectionIntro and SelectionLabelTemplate frame the pictures of the
+	// current selection that have no picture slot (#679): a board raster or
+	// another newly selected picture the message itself does not carry
+	// ({handle} is its handle). Both are required with a selection role.
+	SelectionIntro         string `json:"selection_intro,omitempty"`
+	SelectionLabelTemplate string `json:"selection_label_template,omitempty"`
 	// ContactSheet folds pictures of one tool result over their quota into one
 	// labelled sheet with every handle.
 	ContactSheet ChatVisionContactSheetSchema `json:"contact_sheet"`
@@ -8291,9 +8297,12 @@ type ChatVisionInvalidPictureSchema struct {
 // Vision role sources. A picture belongs to exactly one source: the artboard
 // snapshot, the current user's references, the style lock, a render of the
 // model-review tools, another generated picture, or an older user picture.
+// Selection is a picture of the current selection that no message carries as
+// a picture slot and that is not the artboard snapshot (#679).
 const (
 	ChatVisionSourceCanvas    = "canvas"
 	ChatVisionSourceTurn      = "turn"
+	ChatVisionSourceSelection = "selection"
 	ChatVisionSourceStyle     = "style"
 	ChatVisionSourceRender    = "render"
 	ChatVisionSourceGenerated = "generated"

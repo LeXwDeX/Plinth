@@ -2712,6 +2712,23 @@ func (orchestrator *Orchestrator) agentRequest(
 	// with the latest user message: image parts are not valid in assistant turns.
 	generatedParts := orchestrator.plannedGeneratedParts(plan)
 	styleParts := orchestrator.plannedStyleParts(plan)
+	// The current selection's pictures without a picture slot (#679) ride
+	// after the newest user message, before the generated results; their own
+	// text labels are not repeated.
+	selectedParts := orchestrator.plannedSelectionParts(plan)
+	var selectedShown map[int]bool
+	if len(plan.Selected) > 0 && lastUserMessage >= 0 {
+		for position, attachment := range history[lastUserMessage].Attachments {
+			for _, pick := range plan.Selected {
+				if attachment.Handle != "" && strings.EqualFold(attachment.Handle, pick.Handle) {
+					if selectedShown == nil {
+						selectedShown = map[int]bool{}
+					}
+					selectedShown[position] = true
+				}
+			}
+		}
+	}
 	overflowNote := budget.overflowText(plan.Dropped) + budget.skippedText(plan.Skipped)
 	visionOffNote := ""
 	if plan.Off {
@@ -2782,7 +2799,17 @@ func (orchestrator *Orchestrator) agentRequest(
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			shown = canvasShown
 		}
-		appendText(orchestrator.unpicturedLabelsExcept(message, shown))
+		labelled := shown
+		if messageIndex == lastUserMessage && len(selectedShown) > 0 {
+			labelled = map[int]bool{}
+			for position := range shown {
+				labelled[position] = true
+			}
+			for position := range selectedShown {
+				labelled[position] = true
+			}
+		}
+		appendText(orchestrator.unpicturedLabelsExcept(message, labelled))
 		if len(shown) > 0 {
 			if len(parts) == 0 && content != "" {
 				parts = append(parts, agents.ContentPart{
@@ -2821,6 +2848,16 @@ func (orchestrator *Orchestrator) agentRequest(
 			} else {
 				content += hint
 			}
+		}
+		if messageIndex == lastUserMessage && len(selectedParts) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, selectedParts...)
 		}
 		if messageIndex == lastUserMessage && len(generatedParts) > 0 {
 			if len(parts) == 0 && content != "" {

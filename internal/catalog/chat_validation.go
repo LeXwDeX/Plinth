@@ -4271,7 +4271,7 @@ func validateChatVision(schema ChatSchema) error {
 		}
 		for _, source := range role.Sources {
 			switch source {
-			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceStyle,
+			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceSelection, ChatVisionSourceStyle,
 				ChatVisionSourceRender, ChatVisionSourceGenerated, ChatVisionSourceHistory:
 			default:
 				return fmt.Errorf("context.vision.roles[%d] 的 source %q 无效", index, source)
@@ -4314,6 +4314,14 @@ func validateChatVision(schema ChatSchema) error {
 	}
 	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
 		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
+	}
+	// A selection role shows a picture beside its handle (#679): without the
+	// intro and the handle label the model could not tell it from a result.
+	if seenSources[ChatVisionSourceSelection] {
+		if strings.TrimSpace(vision.SelectionIntro) == "" ||
+			!strings.Contains(vision.SelectionLabelTemplate, "{handle}") {
+			return errors.New("context.vision 声明 selection 角色时必须提供 selection_intro，且 selection_label_template 必须包含 {handle}")
+		}
 	}
 	if err := validateVisionInvalidPicture(vision.InvalidPicture); err != nil {
 		return err
