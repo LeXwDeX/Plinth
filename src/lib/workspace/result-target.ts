@@ -77,6 +77,20 @@ export function targetOfTile(tile: VersionTile, sessionId: string, title: string
     });
     return { ...target, group };
   }
+  if (tile.status === 'ready' && tile.domain !== 'model' && tile.slots.length > 1) {
+    // A three-view batch (#690): one Task per view, paged in view order (front, left, back, right), not finish order.
+    // Only views with their own Task and a picture take part; a view replaced by an upload has no Task and is left out.
+    const group = tile.views.flatMap((view) => {
+      const slot = view.taskId ? tile.slots.find((entry) => entry.taskId === view.taskId) : undefined;
+      if (!slot) return [];
+      const label = view.label || slot.label || slot.slot;
+      const member = singleTargetOfTile(tile, sessionId, label ? `${title} · ${label}` : title, { taskId: slot.taskId, assetId: slot.assetId }, prompt);
+      return member.url ? [member] : [];
+    });
+    // The detail opens on the view being looked at, else on the front (the tile's own Task).
+    const head = group.find((member) => member.taskId === pick.taskId) ?? group.find((member) => member.taskId === tile.taskId) ?? group[0];
+    if (group.length > 1 && head) return { ...head, group };
+  }
   return target;
 }
 

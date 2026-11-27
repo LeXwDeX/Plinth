@@ -94,6 +94,23 @@ describe('output strip navigation and details', () => {
     expect(state.stage).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'side', assetId: 'a' }));
     expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'side', assetId: 'a' }));
   });
+  it('opens a three-view batch detail on the viewed view with the whole batch to page through, touching nothing else (#690)', () => {
+    const side = { ...tile().assets[0], id: 'side-asset', url: '/side' };
+    state.tiles = [tile({
+      taskIds: ['side', 'old'], assets: [side, tile().assets[0]],
+      slots: [{ taskId: 'side', assetId: 'side-asset', slot: 'left', label: '左侧' }, { taskId: 'old', assetId: 'a', slot: 'front', label: '正面' }],
+      views: [
+        { key: 'front', label: '正面', optional: false, status: 'succeeded', taskId: 'old', assetId: 'a' },
+        { key: 'left', label: '左侧', optional: false, status: 'succeeded', taskId: 'side', assetId: 'side-asset' },
+      ],
+    })];
+    state.object = { kind: 'image', taskId: 'side', assetId: 'side-asset', url: '/side', sessionId: 'session' };
+    renderToStaticMarkup(<VersionStrip />); detail().props.onClick(click);
+    const target = state.detail.mock.calls[0][0];
+    expect(target).toMatchObject({ taskId: 'side', assetId: 'side-asset', url: '/side' });
+    expect(target.group.map((item: { taskId: string }) => item.taskId)).toEqual(['old', 'side']);
+    expect(state.stage).not.toHaveBeenCalled();
+  });
   it('looks at the version on a click and never asks to place it on the board (#559)', () => {
     renderToStaticMarkup(<VersionStrip />);
     primary().props.onClick(click);
