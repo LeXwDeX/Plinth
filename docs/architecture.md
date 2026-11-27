@@ -2491,7 +2491,7 @@ Agent 上下文新增项目段（`application.project.agent.context_template`）
 
 `internal/chat/references` 的 `Resolve` 改为接收服务端 `ReferenceScope{Owner, SessionID, ProjectID}`：Task 图片只接受本会话、分支祖先（`TaskInSession`）或项目登记内的精确 `(task, asset)`（`ProjectReferenceChecker.RegisteredPicture`，读 `project_assets.images_json` 与 `project_style_guides.references_json`）。客户端 claim 的 `VerifyAttachment` 不放宽；客户端不能自行指定项目 scope。直提交流程（`POST /api/v1/tasks/prepare`）用 `EffectiveStyleLock` 读同一组合锁，把项目参考图经同一解析器复制为本人输入资产后注入；解析失败按 `project.messages.reference_invalid` 返回 400，不静默丢图、不跳过 Grant/预算。
 
-前端：公开投影只含限额、资产种类（id/label_key）、风格指南限额与色板规则、约定字段名；Agent 模板、审计动作与错误文案留在服务端。项目 client 消费 `runtime.http.routes.project*` 与 `chat_session_project`；`src/store/project-store.ts` 保存项目列表与下一次新建会话要加入的项目，`use-projects` 把选择写入当前会话（HTTP 404 即未知/他人项目）。顶栏会话菜单左侧是项目切换器，右侧栏「项目」标签显示并保存风格指南/色板/参考图、约定与资产列表，提升入口先显示确认弹窗，来源缩略图与名称/种类/描述齐全；风格锁定面板提供 `project/session/off` 三态单选，继承或关闭时禁编辑本会话文字与参考图。新建会话带当前项目。
+前端：公开投影只含限额、资产种类（id/label_key）、风格指南限额与色板规则、约定字段名与自由文本的标签键（#668）；Agent 模板、审计动作与错误文案留在服务端。项目 client 消费 `runtime.http.routes.project*` 与 `chat_session_project`；`src/store/project-store.ts` 保存项目列表与下一次新建会话要加入的项目，`use-projects` 把选择写入当前会话（HTTP 404 即未知/他人项目）。顶栏会话菜单左侧是项目切换器，右侧栏「项目」标签显示并保存风格指南/色板/参考图、约定与资产列表，提升入口先显示确认弹窗，来源缩略图与名称/种类/描述齐全；风格锁定面板提供 `project/session/off` 三态单选，继承或关闭时禁编辑本会话文字与参考图。新建会话带当前项目。
 
 项目里的 3D 模型引用本期只保存、展示并在 `list_project_assets` 中列出，不作为 `process_model` / `retexture_model` / `inspect_model` / lineage / pendingapproval 的来源；这些路径仍按会话校验来源 Task，跨会话放宽留独立 Issue。
 

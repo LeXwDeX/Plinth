@@ -141,8 +141,17 @@ type PublicProjectSchema struct {
 }
 
 // PublicProjectConventionsSchema publishes the allowed convention field names
-// and free-form text names without their server-side validation rules.
+// and the free-form texts (name and label message key) without their
+// server-side validation rules.
 type PublicProjectConventionsSchema struct {
-	Fields []string `json:"fields"`
-	Texts  []string `json:"texts"`
+	Fields []string                      `json:"fields"`
+	Texts  []PublicProjectConventionText `json:"texts"`
+}
+
+// PublicProjectConventionText names one free-form convention text and the
+// message key of its label, so the browser shows the declared copy instead of
+// the field name (#668).
+type PublicProjectConventionText struct {
+	Name     string `json:"name"`
+	LabelKey string `json:"label_key"`
 }
