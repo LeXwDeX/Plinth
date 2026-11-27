@@ -148,7 +148,7 @@ import {
 import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MIN, chatWidthMax, clampChatWidth, rightPanelWidth, useStudioStore } from '@/store/studio-store';
-import { useViewportWidth } from '@/hooks/use-viewport-width';
+import { useViewportValue } from '@/hooks/use-viewport-width';
 import { turnModels } from '@/lib/workspace/turn-models';
 import { panelWidth } from '@/lib/workspace/panel-tabs';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -328,9 +328,10 @@ export function ChatColumn() {
   // #695/#696: the stored width is shown up to what the window allows now, never written back, so it returns
   // when the window is wide again; a drag in progress is shown before it is stored.
   const panelCollapsed = useStudioStore((state) => state.panelCollapsed);
-  const viewportWidth = useViewportWidth();
+  // The cap, not the width, is what the column reads: dragging the window renders the column only when it changes.
+  const rightWidth = rightPanelWidth(panelWidth(schema), panelCollapsed);
+  const chatWidthCap = useViewportValue((viewportWidth) => chatWidthMax(viewportWidth, rightWidth));
   const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const chatWidthCap = chatWidthMax(viewportWidth, rightPanelWidth(panelWidth(schema), panelCollapsed));
   const shownChatWidth = clampChatWidth(dragWidth ?? chatWidth, chatWidthCap);
   const composerPrefill = useStudioStore((state) => state.composerPrefill);
   const clearComposerPrefill = useStudioStore((state) => state.clearComposerPrefill);
