@@ -27,7 +27,7 @@ import {
 import { clearSelection, escapeClearsSelection, groupByDay, selectionAfterClick } from '@/lib/workspace/output-groups';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { targetOfTile } from '@/lib/workspace/result-target';
-import { versionCaption, versionLabel } from '@/lib/workspace/version-label';
+import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
 import { shownVersionTiles, versionStatusLabel, type VersionTile } from '@/lib/workspace/versions';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
@@ -143,7 +143,8 @@ export function AllOutputs() {
     if (!sessionId) return;
     // A candidate group shows the candidate that was picked there.
     const picked = pick?.kind === 'image' && pick.taskId && tile.taskIds.includes(pick.taskId) ? { taskId: pick.taskId, assetId: pick.assetId } : {};
-    openResultDetail(targetOfTile(tile, sessionId, labelOf(tile), picked, '', schema));
+    // #690: the details title is the strip's own, label and caption ("2D v2 · 三视图 · 正面").
+    openResultDetail(targetOfTile(tile, sessionId, versionTitle(schema, tile, tiles), picked, '', schema));
   };
 
   return (
@@ -270,7 +271,8 @@ interface OutputCardProps {
 function OutputCard({ tile, sessionId, label, selected, current, schemaCaption, src, whole, packing, onCheck, onDetail, onGroupDownload }: OutputCardProps) {
   const { schema } = useProductSchema();
   const shiftHeld = useRef(false);
-  const target = targetOfTile(tile, sessionId, label, {}, '', schema);
+  const title = schemaCaption ? [label, schemaCaption].join(' · ') : label;
+  const target = targetOfTile(tile, sessionId, title, {}, '', schema);
   const dragSource = useCanvasDragSource(target);
   return (
     <ResultContextMenu target={target} render={<li className="group/card relative" data-testid="all-outputs-card" />}>
