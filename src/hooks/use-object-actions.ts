@@ -118,16 +118,17 @@ export function useObjectActions() {
   /**
    * The Agent does the conversion, so a manual-approval session shows its usual
    * approval card with the cost before anything is spent. When the board holds anything, the board is what
-   * gets converted, never the object's handle.
+   * gets converted, never the object's handle. #691: `pictureOnly` (the three-view card's 只用正面转 3D) converts the
+   * picture itself whatever the board holds.
    */
-  const toThreeD = useCallback((object: CurrentObject): boolean => {
+  const toThreeD = useCallback((object: CurrentObject, options: { pictureOnly?: boolean } = {}): boolean => {
     if (object.kind !== 'image') return false;
     if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
       toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
       return false;
     }
     if (!openOnStage(object)) return false;
-    const delivery = object.sessionId ? boardDeliveryOf(object.sessionId) : null;
+    const delivery = object.sessionId && !options.pictureOnly ? boardDeliveryOf(object.sessionId) : null;
     // #610: the board is converted only while it holds this picture's layer; otherwise the picture itself.
     if (delivery && object.sessionId
       && currentObjectSource(useCanvasStore.getState().getNodes(object.sessionId), delivery.artboard, object, proxyAssetUrl) === 'canvas') {

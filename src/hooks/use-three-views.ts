@@ -199,7 +199,7 @@ export function useThreeViews() {
     }
   }, [chat, mutate, schema, sessionId]);
 
-  return { groups: data ?? NONE, busy, queued, advance, startRemaining, replace, refresh: () => mutate() };
+  return { groups: data ?? NONE, busy, queued, advance, startRemaining, replace, refresh: () => mutate(), turnRunning };
 }
 
 /**

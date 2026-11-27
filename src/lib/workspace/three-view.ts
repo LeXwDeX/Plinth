@@ -151,13 +151,18 @@ export function succeededCount(group: ThreeViewGroup): number {
   return group.slots.filter((slot) => !slot.optional && slot.status === 'succeeded').length;
 }
 
+/** #691: the states in which an optional view counts as asked for: past its approval and not given up. */
+const OPTIONAL_REQUESTED: ReadonlySet<ThreeViewStatus> = new Set<ThreeViewStatus>(['starting', 'running', 'succeeded', 'rejected']);
+
 /**
  * The views the group is asked for (#633): every required view, and the optional one (the right view) once it was
  * asked for — a four-view request starts it, so it is no longer "可选" and counts in the denominator. An optional
- * view nobody started stays out, so a three-view group reads 3 / 3, not 3 / 4.
+ * view nobody started stays out, so a three-view group reads 3 / 3, not 3 / 4. #691: a right view only waiting for
+ * its approval (nothing spent yet), or denied, failed or canceled, is not asked for either, so the title and the
+ * denominator go back to the three-view and agree with each other.
  */
 export function requestedView(slot: Pick<ThreeViewSlot, 'optional' | 'status'>): boolean {
-  return !slot.optional || slot.status !== 'not_started';
+  return !slot.optional || OPTIONAL_REQUESTED.has(slot.status);
 }
 
 /**
@@ -165,7 +170,7 @@ export function requestedView(slot: Pick<ThreeViewSlot, 'optional' | 'status'>):
  * title instead of "三视图". The group's own label is the Schema's one fixed three-view name.
  */
 export function fourViewRequested(slots: readonly Pick<ThreeViewSlot, 'optional' | 'status'>[]): boolean {
-  return slots.some((slot) => slot.optional && slot.status !== 'denied' && requestedView(slot));
+  return slots.some((slot) => slot.optional && requestedView(slot));
 }
 
 /** Finished and asked-for views of a group, the one count the card and the version strip both show (#633). */
@@ -228,7 +233,10 @@ export function multiviewModelOf(offering: OfferingWire): MultiviewModel | null 
   };
 }
 
-/** The multiview model to use: the person's 3D pick when it is one, else the first available. */
+/**
+ * The multiview model to use: the person's 3D pick when it is one, else the first available. #691: the card only
+ * offers it; what a press does without a pick, or with a pick that takes one picture, is `multiviewPickState`.
+ */
 export function pickMultiviewModel(
   offeringsByCapability: Record<string, OfferingWire[]> | undefined,
   picked: string | undefined,
@@ -238,6 +246,16 @@ export function pickMultiviewModel(
     .map(multiviewModelOf)
     .filter((model): model is MultiviewModel => model !== null);
   return models.find((model) => model.modelId === picked) ?? models[0] ?? null;
+}
+
+/**
+ * #691: whether 用三视图生成 3D may run with the 3D model the person picked: `picked` when it is the multiview model
+ * shown, `none` when no 3D model is picked (the press asks first, never falls back silently), `single` when the pick
+ * takes one picture (the button is off and says why).
+ */
+export function multiviewPickState(model: MultiviewModel | null, picked: string | null | undefined): 'picked' | 'none' | 'single' {
+  if (!picked) return 'none';
+  return model && model.modelId === picked ? 'picked' : 'single';
 }
 
 /** The finished views of a group the model takes, in the group's order; the request the button sends. */

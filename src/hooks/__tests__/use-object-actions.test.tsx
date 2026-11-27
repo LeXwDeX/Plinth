@@ -89,6 +89,15 @@ describe('转 3D on a result', () => {
     expect(mocks.rasterise).not.toHaveBeenCalled();
   });
 
+  it('#691: 只用正面转 3D converts the picture itself even while the board holds its layer, and never places it', async () => {
+    useCanvasStore.setState({ nodesBySession: { [SESSION]: [picture(), picture({ id: 'p2', imageUrl: '/other.png' })] } });
+    expect(actions().toThreeD(object, { pictureOnly: true })).toBe(true);
+    await flush();
+    expect(mocks.rasterise).not.toHaveBeenCalled();
+    expect(useStudioStore.getState().turnRequest?.text).toContain('@img3');
+    expect(useWorkspaceStore.getState().currentObject).toMatchObject({ taskId: 't1', placement: 'view' });
+  });
+
   it('requests a dedicated Gaussian Splat Agent turn with exactly the selected owned image and no board rasterization', () => {
     const source = { ...object, assetId: 'asset-image' };
     expect(actions().toGaussianSplat(source)).toBe(true);
