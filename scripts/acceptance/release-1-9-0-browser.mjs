@@ -980,15 +980,20 @@ async function itemN5() {
   const seed = await seedSessionA();
   const crops = await seedSessionB();
   await openSession(crops.sid);
-  await check('N5', '聊天栏拖到最窄宽度 ≥ 440（最宽 ≤ 640）', async () => {
+  await check('N5', '聊天栏拖到最窄宽度 ≥ 440（最宽 ≤ min(页面宽 50%, 给舞台留 320 后的宽度)，#695）', async () => {
     await dragChat(500);
     const widest = await chatWidth();
+    // #695: the widest is half the window, less when the stage would get under 320; never under 440.
+    const viewport = await page.evaluate(() => window.innerWidth);
+    const cap = Number(await chatHandle().getAttribute('aria-valuemax'));
     await dragChat(-800);
     const narrowest = await chatWidth();
     const file = await shot('N5', 'chat-narrowest');
     return {
-      ok: narrowest.column >= 439 && narrowest.value >= 440 && widest.value <= 640 && widest.value > narrowest.value,
-      detail: `最窄：栏宽 ${narrowest.column}px aria-valuenow=${narrowest.value}；最宽：栏宽 ${widest.column}px aria-valuenow=${widest.value} 截图 ${file}`,
+      ok: narrowest.column >= 439 && narrowest.value >= 440 && widest.value > narrowest.value
+        && widest.value <= cap && cap <= Math.max(440, Math.floor(viewport / 2)),
+      detail: `最窄：栏宽 ${narrowest.column}px aria-valuenow=${narrowest.value}；最宽：栏宽 ${widest.column}px aria-valuenow=${widest.value}`
+        + `（上限 ${cap}px，页面宽 ${viewport}px）截图 ${file}`,
     };
   });
   for (const [name, sid] of [['裁图卡（两张候选）', crops.sid], ['生成结果卡', seed.sid]]) {

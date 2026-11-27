@@ -14,8 +14,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   viewer and multi-format downloads (GLB, glTF, OBJ, STL, FBX, USDZ and more, depending on
   what each Provider supports).
 - **Agent**: describe what you want in plain language; the Agent picks models and
-  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, budget
-  plan or strict). The Agent works with any multimodal model behind an OpenAI chat completions
+  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, approve
+  or strict). The Agent works with any multimodal model behind an OpenAI chat completions
   compatible API.
 - **Built-in Providers**: Meshy, Tripo, Hyper3D, Jimeng, Gemini, plus OpenAI images and a
   self-hosted matting service. Providers become available when a valid key and any
@@ -111,7 +111,9 @@ curl http://127.0.0.1:13333/api/version   # {"version":"<the full SHA above>"}
 
 In a source archive without `.git` (for example a downloaded zip), `git rev-parse HEAD`
 fails: replace it with the full 40-character commit SHA, or drop the
-`ART_AI_SOURCE_COMMIT=...` prefix (`/api/version` then reports `unknown`). The build uses
+`ART_AI_SOURCE_COMMIT=...` prefix (`/api/version` then reports `unknown`).
+To show a version number in the top bar and in the `release` field of `/api/version`, also add the optional
+`ART_AI_RELEASE_VERSION=$(git describe --tags --always)` (letters, digits, dots, underscores and hyphens only); when unset it is empty and the UI shows no version. The build uses
 Docker's default BuildKit. BuildKit does not support `docker build --network <NETWORK>`
 (it fails with `network mode ... not supported by buildkit`); when you need to isolate or
 observe the network during the build, build the image on its own with the classic builder and

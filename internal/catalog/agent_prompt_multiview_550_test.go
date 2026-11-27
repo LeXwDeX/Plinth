@@ -246,8 +246,8 @@ func TestThreeAndFourViewSkillsMatchTheirOwnViews(t *testing.T) {
 		t.Error("the three-view Skill still says it makes the right view")
 	}
 	for id, want := range map[string][]string{
-		"system-three-view": {"不传 include_right", "要四视图", "include_right=true", "不要写 model", "严格（逐步批准）", "预算（制作计划）", "自动："},
-		"system-four-view":  {"传 include_right=true", "只要三视图", "不要写 model", "optional=true", "留在三视图卡片上", "严格（逐步批准）"},
+		"system-three-view": {"不传 include_right", "要四视图", "include_right=true", "严格（逐步批准）", "审批：", "自动："},
+		"system-four-view":  {"传 include_right=true", "只要三视图", "右侧", "严格（逐步批准）", "审批："},
 	} {
 		for _, phrase := range want {
 			if !strings.Contains(skills[id].Prompt, phrase) {

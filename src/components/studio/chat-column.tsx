@@ -74,14 +74,13 @@ import { canvasSnapshotClaim } from '@/lib/canvas/current-object';
 import { boardInputSource, boardMode } from '@/lib/chat/board-mode';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
-import { inpaintGeometry, paintMask } from '@/lib/canvas/inpaint-export';
+import { inpaintGeometry, paintSubmittedMask } from '@/lib/canvas/inpaint-export';
 import { exportAndUploadSnapshot, reportSnapshotFailure, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { uploadWorkspaceInputAsset, uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { inlineImageFilename, isInlineImage, reportInlineImageFailure, uploadInlineImages } from '@/lib/chat/inline-images';
 import { buildChatSelection, type ChatAttachmentClaim, type ChatMentionClaim } from '@/lib/chat/attachments';
 import { formatSizeLimit } from '@/lib/size-text';
 import { cardFromConsent, cardFromPending, type ApprovalCardModel } from '@/lib/chat/approval-card';
-import { attachmentPurposesForTurn, hasMultipleInputPurposes, purposeNote, withPurposeNote, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { handleReferences } from '@/lib/chat/composer-reference';
 import { boardMentionCandidate, buildMentionCandidates, mentionsBoard, mentionsForTurn, overridingHandle, mentionCandidates, withBoardMention, type MentionCandidate } from '@/lib/chat/mentions';
 import { useComposerDraft } from '@/hooks/use-composer-draft';
@@ -104,7 +103,7 @@ import {
   cancelQueuedTurn, enqueueTurn, holdDrainForRead, holdsToRelease, nextDrainStep, pruneQueuedSessions, queueMayDrain, queuedFor,
   readCompleted, takeQueuedTurn, type DrainGate, type QueueBySession,
 } from '@/lib/chat/send-queue';
-import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
+import { chatErrorToastId, requestTurnStop, sendStageRequest, stageRequestStep } from '@/lib/chat/turn-signals';
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
 import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
@@ -148,7 +147,10 @@ import {
 } from '@/store/chat-store';
 import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
-import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
+import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MIN, chatWidthMax, clampChatWidth, rightPanelWidth, useStudioStore } from '@/store/studio-store';
+import { useViewportValue } from '@/hooks/use-viewport-width';
+import { turnModels } from '@/lib/workspace/turn-models';
+import { panelWidth } from '@/lib/workspace/panel-tabs';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { isRunning, statusBubbleShown } from '@/lib/workspace/task-progress';
 import { useSessionContextStore } from '@/store/session-context-store';
@@ -161,6 +163,8 @@ import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
 
 const RESIZE_KEY_STEP = 16;
+/** Shift with an arrow moves the divider this far: the range reaches half the window now (#695). */
+const RESIZE_KEY_STEP_LARGE = 64;
 const SCROLL_SETTLE_MILLISECONDS = 400;
 /** A stored turn that cannot be read back must not keep the live buffer and the stop button forever. */
 const STREAM_SETTLE_FALLBACK_MILLISECONDS = 5000;
@@ -180,22 +184,47 @@ function setPageSelectable(selectable: boolean) {
   document.body.style.setProperty('-webkit-user-select', value);
 }
 
-function ResizeHandle({ width, label, onResize }: { width: number; label: string; onResize: (width: number) => void }) {
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+/**
+ * The divider on the chat column's right edge. A drag shows its width through `onPreview` once per frame and
+ * stores it with `onCommit` only when it ends (#695); arrows step 16px (64px with Shift), Home and End go to
+ * the narrowest and widest. `max` is the widest the window allows now.
+ */
+export function ResizeHandle({ width, max, label, onPreview, onCommit }: {
+  width: number;
+  max: number;
+  label: string;
+  onPreview: (width: number | null) => void;
+  onCommit: (width: number) => void;
+}) {
+  const drag = useRef<{ startX: number; startWidth: number; last: number | null; frame: number } | null>(null);
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
     drag.current = null;
     setPageSelectable(true);
+    if (current) {
+      if (current.frame) cancelAnimationFrame(current.frame);
+      if (current.last !== null) onCommit(current.last);
+      onPreview(null);
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  // Leaving the page mid-drag must not leave text selection switched off.
-  useEffect(() => () => { setPageSelectable(true); }, []);
+  // Leaving the page mid-drag must not leave text selection switched off, nor a width shown that was never stored.
+  useEffect(() => {
+    const state = drag;
+    return () => {
+      setPageSelectable(true);
+      if (state.current?.frame) cancelAnimationFrame(state.current.frame);
+      if (state.current) onPreview(null);
+      state.current = null;
+    };
+  }, [onPreview]);
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
       aria-valuemin={CHAT_WIDTH_MIN}
-      aria-valuemax={CHAT_WIDTH_MAX}
+      aria-valuemax={max}
       aria-valuenow={width}
       tabIndex={0}
       data-testid="chat-resize-handle"
@@ -203,18 +232,32 @@ function ResizeHandle({ width, label, onResize }: { width: number; label: string
         // A drag must not start a text selection: the browser would highlight the stage and its title.
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
-        drag.current = { startX: event.clientX, startWidth: width };
+        drag.current = { startX: event.clientX, startWidth: width, last: null, frame: 0 };
         setPageSelectable(false);
       }}
       onPointerMove={(event) => {
-        if (drag.current) onResize(drag.current.startWidth + event.clientX - drag.current.startX);
+        const current = drag.current;
+        if (!current) return;
+        current.last = clampChatWidth(current.startWidth + event.clientX - current.startX, max);
+        if (current.frame) return;
+        current.frame = requestAnimationFrame(() => {
+          current.frame = 0;
+          if (drag.current === current && current.last !== null) onPreview(current.last);
+        });
       }}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onLostPointerCapture={endDrag}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') { event.preventDefault(); onResize(width - RESIZE_KEY_STEP); }
-        if (event.key === 'ArrowRight') { event.preventDefault(); onResize(width + RESIZE_KEY_STEP); }
+        const step = event.shiftKey ? RESIZE_KEY_STEP_LARGE : RESIZE_KEY_STEP;
+        const next = event.key === 'ArrowLeft' ? width - step
+          : event.key === 'ArrowRight' ? width + step
+            : event.key === 'Home' ? CHAT_WIDTH_MIN
+              : event.key === 'End' ? max
+                : null;
+        if (next === null) return;
+        event.preventDefault();
+        onCommit(clampChatWidth(next, max));
       }}
       className="absolute inset-y-0 -right-1 z-sticky w-2 cursor-col-resize select-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent hover:after:bg-primary/60 focus-visible:after:bg-primary"
     />
@@ -282,6 +325,14 @@ export function ChatColumn() {
   const collapsed = useStudioStore((state) => state.chatCollapsed);
   const setChatWidth = useStudioStore((state) => state.setChatWidth);
   const setCollapsed = useStudioStore((state) => state.setChatCollapsed);
+  // #695/#696: the stored width is shown up to what the window allows now, never written back, so it returns
+  // when the window is wide again; a drag in progress is shown before it is stored.
+  const panelCollapsed = useStudioStore((state) => state.panelCollapsed);
+  // The cap, not the width, is what the column reads: dragging the window renders the column only when it changes.
+  const rightWidth = rightPanelWidth(panelWidth(schema), panelCollapsed);
+  const chatWidthCap = useViewportValue((viewportWidth) => chatWidthMax(viewportWidth, rightWidth));
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const shownChatWidth = clampChatWidth(dragWidth ?? chatWidth, chatWidthCap);
   const composerPrefill = useStudioStore((state) => state.composerPrefill);
   const clearComposerPrefill = useStudioStore((state) => state.clearComposerPrefill);
   const turnRequest = useStudioStore((state) => state.turnRequest);
@@ -436,11 +487,6 @@ export function ChatColumn() {
   useEffect(() => {
     setDeselectedObject(null);
   }, [currentObject, setDeselectedObject]);
-  // What the attached pictures are for; written into the message as one line.
-  const [attachmentPurpose, setAttachmentPurpose] = useSessionState<AttachmentPurpose | null>(null);
-  // Per-picture purposes, aligned with `attachedImages`; `attachmentPurpose` stays the last choice.
-  const [attachmentPurposes, setAttachmentPurposes] = useSessionState<(AttachmentPurpose | null)[]>([]);
-  const [pinnedPurpose, setPinnedPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // 「从这里继续」之后、发出之前：下一个版本接在这个版本后面（芯片可取消）。
   const [branchFrom, setBranchFrom] = useSessionState<{ key: string; label: string } | null>(null);
   // #644 「以画板为主」: this message only, off by default and off again once it has left the box. A selection or
@@ -464,8 +510,6 @@ export function ChatColumn() {
   const draftSources = useWorkspaceStore((state) => state.attachmentSources);
   useComposerDraft({
     sessionId: activeSessionId, text: input, setText: setInput, images: attachedImages, sources: draftSources,
-    purpose: attachmentPurpose, setPurpose: setAttachmentPurpose,
-    purposes: attachmentPurposes, setPurposes: setAttachmentPurposes,
     droppedNote: useCallback((count: number) => schemaCountMessage(schema, 'ui.studio.composer.draft.local_dropped', count, { count }), [schema]),
   });
   // Back from offline: the event stream of the open session is joined again.
@@ -627,14 +671,12 @@ export function ChatColumn() {
       if (prepared.length > 0) {
         // The same picture twice (pasted again, or a file and its copy) is attached once.
         const next = [...new Set([...attachedImages, ...prepared])].slice(0, maximumImages);
-        const added = Math.max(0, next.length - attachedImages.length);
         setAttachedImages(next);
-        setAttachmentPurposes((current) => [...current, ...Array(added).fill(attachmentPurpose)].slice(0, maximumImages));
       }
     } finally {
       if (endAttachmentRead(attachmentReads, scope)) setUploading(false);
     }
-  }, [activeSessionId, attachedImages, attachmentPurpose, hasCanvasReference, maximumImages, maximumImageBytes, schema, setAttachedImages, setAttachmentPurposes, setUploading]);
+  }, [activeSessionId, attachedImages, hasCanvasReference, maximumImages, maximumImageBytes, schema, setAttachedImages, setUploading]);
 
   // Pictures addressed by a pasted rich copy (#281). The read keeps the send locked from this call until
   // every picture is attached; a failure releases it, keeps the words and reports the count in this visit.
@@ -678,10 +720,8 @@ export function ChatColumn() {
     const queued = consumeChatAttachments();
     if (queued.length === 0) return;
     const next = [...attachedImages, ...queued].slice(0, maximumImages);
-    const added = Math.max(0, next.length - attachedImages.length);
     setAttachedImages(next);
-    setAttachmentPurposes((current) => [...current, ...Array(added).fill(attachmentPurpose)].slice(0, maximumImages));
-  }, [pendingChatAttachments, attachedImages, attachmentPurpose, consumeChatAttachments, maximumImages, setAttachedImages, setAttachmentPurposes]);
+  }, [pendingChatAttachments, attachedImages, consumeChatAttachments, maximumImages, setAttachedImages]);
 
   // A named session is the task. After a refresh, reopen the one the address names; else the latest.
   useEffect(() => {
@@ -1036,7 +1076,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1054,14 +1094,6 @@ export function ChatColumn() {
         ...(hasCanvasReference && canvasReference ? [canvasReference] : []),
       ];
       if ((!written && images.length === 0) || !activeSessionId || uploading || attachmentsPending(attachmentReads, scope)) return;
-      // A queued turn carries the purposes it was queued with; a fresh turn reads the cards.
-      const purposes = extra?.attachmentPurposes ?? (reuseImages === undefined
-        ? attachmentPurposesForTurn(attachmentPurposes)
-        : []);
-      if (hasMultipleInputPurposes(purposes)) {
-        toast.error(schemaText(schema, 'ui.unavailable.reason.composer.attachment_purpose_single_input'));
-        return;
-      }
       // A turn is running: the message waits its turn below. Replacing the last round cannot wait.
       const turnRunning = Boolean(useChatStore.getState().streamingBuffers[activeSessionId]);
       if (turnRunning && ((replaceIds && replaceIds.length > 0) || choiceAnswer)) return;
@@ -1083,18 +1115,13 @@ export function ChatColumn() {
           return;
         }
       }
-      const otherDomainModels = Object.fromEntries(
-        Object.entries(workspace.modelByDomain).filter(
-          (entry): entry is [string, string] => entry[0] !== domain && Boolean(entry[1]),
-        ),
-      );
+      // #678: a model confirmed for this one turn (转 3D without a pick) rides along as that domain's model; no lock.
+      // With a 3D model on the stage (只用正面转 3D) it is the stage domain's model and becomes the turn's model;
+      // a queued turn keeps it and is read the same way against the stage it goes out under. It never becomes
+      // `selectedModel`: the checks below compare the person's own pick.
+      const { model: turnModel, domainModels: otherDomainModels } = turnModels(domain, workspace.modelByDomain, extra?.domainModels);
+      const oneTurnModels = extra?.domainModels;
       const sessionId = activeSessionId;
-      // Pictures attached now (not a replayed turn) say what they are for, each its own purpose:
-      // the last choice alone would mislabel the others when they differ (#212).
-      const purposeLine = !reuseImages && images.length > 0
-        ? purposeNote(attachedImages.map((_, index) => attachmentPurposes[index] ?? null), (key) => schemaText(schema, key))
-        : '';
-      const notedText = withPurposeNote(written, purposeLine);
       // What the person sees and selects travels with the turn as claims; the
       // server verifies every ID for this owner and session before use.
       let claims: ChatAttachmentClaim[] = reuseClaims ?? images.flatMap((url, index): ChatAttachmentClaim[] => {
@@ -1155,7 +1182,7 @@ export function ChatColumn() {
         maskCanvas.height = geometry.size.height;
         const maskContext = maskCanvas.getContext('2d');
         if (!maskContext || !maskDraftNow) return;
-        paintMask(maskContext, geometry, maskDraftNow.strokes, '#000000');
+        paintSubmittedMask(maskContext, geometry, maskDraftNow.strokes, '#000000');
         let maskAssetId = '';
         try {
           await exportAndUploadSnapshot({
@@ -1194,7 +1221,8 @@ export function ChatColumn() {
       }));
       // `@` references to pictures that have no handle yet travel as claims; the server verifies them, gives
       // the pictures handles and rewrites the tokens, so the text goes out as written (queued turns too).
-      const text = notedText;
+      // #697: attached pictures carry no purpose, so the text goes out as written (no 「附图用途」 line).
+      const text = written;
       const selection = stageSelection;
       const mentions = queuedMentions ?? (reuseImages !== undefined ? [] : mentionsForTurn(text, mentionsRef.current, pickedMentions(scope)));
       // #593: a picture-input Skill (three-view, four-view) is sent with or without a picture; without one the
@@ -1240,10 +1268,11 @@ export function ChatColumn() {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
           idempotencyKey: newSendKey(),
-          text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
+          text, images, claims, selection, mentions,
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
           ...(multiview ? { multiview } : {}),
+          ...(oneTurnModels ? { domainModels: oneTurnModels } : {}),
           ...(styleLockSkipped ? { styleLockSkipped: true } : {}),
         }));
         useWorkspaceStore.getState().forgetAttachmentSources(images);
@@ -1261,9 +1290,7 @@ export function ChatColumn() {
         if (isCurrentSessionScope(scope)) {
           setInput('');
           setAttachedImages([]);
-          setAttachmentPurposes([]);
           setCanvasReference(null);
-          setAttachmentPurpose(null);
           setBranchFrom(null);
           // #644: 以画板为主 is this message's; the next one starts off again.
           setBoardModeChosen(false);
@@ -1279,7 +1306,7 @@ export function ChatColumn() {
         const request = { sessionId, controller: new AbortController() };
         preflightRef.current = request; setPreparingSession(sessionId);
         try {
-          const current = await configurationClient.effective(domain, selectedModel, sessionId, request.controller.signal);
+          const current = await configurationClient.effective(domain, turnModel, sessionId, request.controller.signal);
           if (!selectedSkill || !current.skills.some(item => item.id === skillId)) {
             toast.error(schemaText(schema, 'ui.workspace.skills.unavailable')); return;
           }
@@ -1377,7 +1404,7 @@ export function ChatColumn() {
           const queued = extra?.queued === true;
           try {
             const turnOptions: ChatTurnOptions = {
-              ...(selectedModel ? { model: selectedModel } : {}),
+              ...(turnModel ? { model: turnModel } : {}),
               creativeDomain: domain,
               ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
               ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
@@ -1385,7 +1412,6 @@ export function ChatColumn() {
               ...(claims.length > 0 ? { attachments: claims } : {}),
               ...(selection.length > 0 ? { selection } : {}),
               ...(mentions.length > 0 ? { mentions } : {}),
-              ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
               ...(inputSource ? { inputSource } : {}),
               ...(selectionMask ? { selectionMask } : {}),
               ...(choiceAnswer ? { choiceAnswer } : {}),
@@ -1429,9 +1455,7 @@ export function ChatColumn() {
               if (isCurrentSessionScope(scope)) {
                 setInput('');
                 setAttachedImages([]);
-                setAttachmentPurposes([]);
                 setCanvasReference(null);
-                setAttachmentPurpose(null);
                 setBranchFrom(null);
                 // #644: 以画板为主 is this message's; the next one starts off again.
                 setBoardModeChosen(false);
@@ -1477,8 +1501,6 @@ export function ChatColumn() {
             if (restore) {
               setInput((current) => (current === '' ? written : current));
               useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(images, claims));
-              setAttachmentPurposes(Array.from({ length: images.length }, (_, index) =>
-                purposes.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
             }
           } finally {
             if (startingRef.current === starting) startingRef.current = null;
@@ -1559,10 +1581,6 @@ export function ChatColumn() {
       deliveryPixels,
       proxyAssetUrl,
       attachedImages,
-      attachmentPurpose,
-      attachmentPurposes,
-      setAttachmentPurpose,
-      setAttachmentPurposes,
       setBranchFrom,
       setBoardModeChosen,
       canvasReference,
@@ -1622,10 +1640,18 @@ export function ChatColumn() {
       toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
       return;
     }
-    clearTurnRequest();
-    if (step === 'drop') return;
-    void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
-      turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
+    // #691: the request stays pending (the three-view card's turn buttons stay off) until this send is over, a turn
+    // that ran or a send that returned without one; a dropped request is no longer pending.
+    const studio = useStudioStore.getState();
+    void sendStageRequest(step, {
+      clear: clearTurnRequest,
+      begin: studio.beginStageTurn,
+      end: studio.endStageTurn,
+      send: () => sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
+        turnRequest.multiview || turnRequest.models
+          ? { ...(turnRequest.multiview ? { multiview: turnRequest.multiview } : {}), ...(turnRequest.models ? { domainModels: turnRequest.models } : {}) }
+          : undefined),
+    });
   }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
@@ -1677,14 +1703,12 @@ export function ChatColumn() {
         return;
       }
       const started = startedTurnsRef.current;
-      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.domainModels ? { domainModels: turn.domainModels } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
         drainingRef.current = null;
         if (startedTurnsRef.current === started) {
           if (useChatStore.getState().activeSessionId === sessionId) {
             setInput((current) => (current === '' ? turn.text : current));
             useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
-            setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
-              turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
             setStyleLockSkipped(turn.styleLockSkipped === true);
           }
           toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
@@ -1692,7 +1716,7 @@ export function ChatColumn() {
         setDrainTick((tick) => tick + 1);
       });
     })();
-  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
+  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setInput, uploading]);
 
   // #665: each hold this tab took with a claim lives while the turn it sent runs (the store keeps it alive), and is
   // released once that turn is over or the person left the session, so another tab drains next. A page that goes away
@@ -1823,7 +1847,6 @@ export function ChatColumn() {
     setEditing({ deleteIds: editable.deleteIds });
     setInput(message.content);
     setAttachedImages([]);
-    setAttachmentPurposes([]);
     useWorkspaceStore.getState().queueChatAttachments(editAttachments(message));
     focusComposer();
   }, [displayMessages, editable, focusComposer, recordPreferenceSignal, setAttachedImages, setEditing, setInput]);
@@ -1834,7 +1857,6 @@ export function ChatColumn() {
     setEditing(null);
     setInput(message.content);
     setAttachedImages([]);
-    setAttachmentPurposes([]);
     useWorkspaceStore.getState().queueChatAttachments(editAttachments(message));
     focusComposer();
   }, [focusComposer, setAttachedImages, setEditing, setInput]);
@@ -1845,7 +1867,6 @@ export function ChatColumn() {
     setInput('');
     pickedMentionsRef.current = { scope: captureSessionScope(), picks: [] };
     setAttachedImages([]);
-    setAttachmentPurposes([]);
   }, [setAttachedImages, setEditing, setInput]);
 
   // 删除：先本地移除（乐观），失败时回填服务端列表并提示，不静默吞掉错误。
@@ -2391,13 +2412,22 @@ export function ChatColumn() {
       }
     };
   }, [activeSessionId, boardTurnOn, hasReference, objectDeselected]);
-  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644).
+  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644). #677: the press always shows what it
+  // did: the toggle lights up, the composer takes focus and a note says so, or says it was already on.
   const boardModeRequest = useWorkspaceStore((state) => state.boardModeRequest);
+  const boardTurnOnRef = useRef(boardTurnOn);
+  boardTurnOnRef.current = boardTurnOn;
   useEffect(() => {
     if (!boardModeRequest || boardModeRequest !== activeSessionId) return;
     useWorkspaceStore.getState().clearBoardModeRequest();
-    setBoardModeChosen(true);
-  }, [activeSessionId, boardModeRequest, setBoardModeChosen]);
+    if (boardTurnOnRef.current) toast.info(schemaText(schema, 'ui.studio.stage.action.send_chat_already_on'));
+    else {
+      setBoardModeChosen(true);
+      toast.success(schemaText(schema, 'ui.studio.stage.action.send_chat_done'));
+    }
+    if (useStudioStore.getState().chatCollapsed) setCollapsed(false);
+    window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
+  }, [activeSessionId, boardModeRequest, schema, setBoardModeChosen, setCollapsed]);
   const mentions = useMemo((): ComposerMention[] => mentionList.map((candidate) => {
     let thumbnail = '';
     if (candidate.kind === 'image') {
@@ -2450,7 +2480,7 @@ export function ChatColumn() {
       aria-label={title}
       data-testid="studio-chat-column"
       data-collapsed={collapsed}
-      style={{ width: collapsed ? CHAT_RAIL_WIDTH : chatWidth }}
+      style={{ width: collapsed ? CHAT_RAIL_WIDTH : shownChatWidth }}
       className="relative flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-sidebar"
     >
       {collapsed ? (
@@ -2746,22 +2776,9 @@ export function ChatColumn() {
             }}
             mask={maskChip}
             branch={branchChip}
-            attachmentPurpose={attachmentPurpose}
-            onAttachmentPurpose={(purpose) => {
-              setAttachmentPurpose(purpose);
-              setAttachmentPurposes(attachedImages.map(() => purpose));
-            }}
-            attachmentPurposes={attachmentPurposes}
-            onAttachmentPurposeAt={(index, purpose) => {
-              setAttachmentPurpose(purpose);
-              setAttachmentPurposes((current) => current.map((item, at) => (at === index ? purpose : item)));
-            }}
-            pinnedPurpose={pinnedPurpose}
-            onPinnedPurpose={setPinnedPurpose}
             images={attachedImages}
             onRemoveImage={(index) => {
               setAttachedImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
-              setAttachmentPurposes((current) => current.filter((_, imageIndex) => imageIndex !== index));
             }}
             pinnedImage={canvasReference || null}
             onUnpin={() => setCanvasReference(null)}
@@ -2835,7 +2852,13 @@ export function ChatColumn() {
         </>
       )}
       {!collapsed ? (
-        <ResizeHandle width={chatWidth} label={schemaText(schema, 'ui.studio.chat.resize')} onResize={setChatWidth} />
+        <ResizeHandle
+          width={shownChatWidth}
+          max={chatWidthCap}
+          label={schemaText(schema, 'ui.studio.chat.resize')}
+          onPreview={setDragWidth}
+          onCommit={setChatWidth}
+        />
       ) : null}
     </aside>
   );

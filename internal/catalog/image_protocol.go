@@ -82,6 +82,9 @@ func validateImageProtocol(offering schemacontract.Offering) error {
 			return fmt.Errorf("参数 %s 的 wire_template 无效", parameter.Name)
 		}
 	}
+	if err := validatePromptWraps(offering, protocol.PromptWraps); err != nil {
+		return err
+	}
 	if protocol.RequestEncoding == "multipart" {
 		for field, value := range object {
 			if !multipartFieldPattern.MatchString(field) {
@@ -91,6 +94,38 @@ func validateImageProtocol(offering schemacontract.Offering) error {
 			case map[string]any, []any:
 				return fmt.Errorf("multipart 请求模板字段 %q 必须是标量", field)
 			}
+		}
+	}
+	return nil
+}
+
+// validatePromptWraps checks the prompt_wraps of an image protocol (#687): the
+// Offering has exactly one prompt parameter to wrap, every condition names a
+// parameter of the Offering with a valid operator, and every template holds
+// the {prompt} slot exactly once.
+func validatePromptWraps(offering schemacontract.Offering, wraps []schemacontract.PromptWrap) error {
+	if len(wraps) == 0 {
+		return nil
+	}
+	prompts := 0
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == schemacontract.SemanticPrompt && parameter.Type == "text" {
+			prompts++
+		}
+	}
+	if prompts != 1 {
+		return fmt.Errorf("prompt_wraps 需要恰好一个 semantic=prompt 的文本参数")
+	}
+	for index, wrap := range wraps {
+		if strings.Count(wrap.Template, schemacontract.PromptPlaceholder) != 1 {
+			return fmt.Errorf("prompt_wraps[%d] 的 template 必须恰好包含一次 %s", index, schemacontract.PromptPlaceholder)
+		}
+		target, exists := offeringParameter(offering.Parameters, wrap.When.Parameter)
+		if !exists {
+			return fmt.Errorf("prompt_wraps[%d] 引用了未知参数 %q", index, wrap.When.Parameter)
+		}
+		if err := validateParameterCondition(wrap.When, target); err != nil {
+			return fmt.Errorf("prompt_wraps[%d]: %w", index, err)
 		}
 	}
 	return nil

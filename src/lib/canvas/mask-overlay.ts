@@ -2,8 +2,8 @@
  * #310: the mask on the board is ONE layer. Every step of the selection — finished brush strokes, marquee /
  * lasso regions, erasing, inversion and the stroke being drawn — is painted at full strength into one
  * scratch raster with the same `paintMask` that builds the submitted mask, and that raster is laid over the
- * board once with the mask's own Schema tint (`canvas.frontend.mask.*`: the pre-#310 single-stroke look, kept
- * apart from the lighter `selection.tint_*` so the mask stays clearly readable). Overlapping or repeated
+ * board once with the mask's own Schema tint (`canvas.frontend.mask.*`; since #692 marquee and lasso regions
+ * carry the same tint, the layers-panel thumbnail alone keeps `selection.tint_*`). Overlapping or repeated
  * strokes therefore only widen the editable area; they never darken it or stack into visible layers.
  *
  * The scratch raster has the board canvas's own device-pixel size and transform, so the tint stays sharp
@@ -49,15 +49,6 @@ type ScratchContext = Parameters<typeof paintSelectionTint>[0] & {
 export function maskOverlaySteps(strokes: readonly MaskStroke[] | undefined, current: MaskStroke | null | undefined): MaskStroke[] {
   const finished = strokes ? [...strokes] : [];
   return current ? [...finished, current] : finished;
-}
-
-/**
- * Which Schema tint the merged area carries: a pure marquee / lasso / inversion selection keeps the
- * selection tint (`selection.tint_*`); once the brush has painted or erased (mixed steps included) the whole
- * area is the quick mask and carries the mask tint (`mask.*`), still laid over it only once.
- */
-export function overlayTintKind(steps: readonly MaskStroke[]): 'mask' | 'selection' {
-  return steps.some((step) => !step.region && !step.invert) ? 'mask' : 'selection';
 }
 
 /**

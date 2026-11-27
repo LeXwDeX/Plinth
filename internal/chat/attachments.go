@@ -228,6 +228,20 @@ func (policy HandlePolicy) Format(kind string, number int) string {
 	return policy.Prefixes[kind] + strconv.Itoa(number)
 }
 
+// HandleRefusalTemplate is the Schema refusal for a handle that cannot be
+// used: the wrong kind, the selection alias on a turn without a selected
+// object of the wanted kind (#684), or a handle that names nothing here. The
+// caller fills {handle}.
+func HandleRefusalTemplate(context catalog.ChatContextSchema, handle, reason string) string {
+	switch {
+	case reason == "kind":
+		return context.WrongHandleKindTemplate
+	case context.EmptySelectionTemplate != "" && NewHandlePolicy(context).IsSelectionAlias(handle):
+		return context.EmptySelectionTemplate
+	}
+	return context.UnknownHandleTemplate
+}
+
 // IsSelectionAlias reports whether the token names the whole selection.
 func (policy HandlePolicy) IsSelectionAlias(token string) bool {
 	return policy.SelectionAlias != "" &&

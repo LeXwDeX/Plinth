@@ -52,6 +52,14 @@ describe('send queue', () => {
     expect(taken?.inputSource).toBe('canvas');
     expect(taken?.selectionMask).toEqual({ maskAssetId: 'mask-asset' });
   });
+
+  // #697: a turn queued before the purpose control was removed still carries `attachmentPurposes`; it reads as a turn.
+  it('reads a turn stored with attachment purposes before #697 without error', () => {
+    const stored = JSON.stringify({ a: [{ ...turn('old'), images: ['/a', '/b'], attachmentPurposes: [{ imageSlot: 1, purpose: 'input' }, { imageSlot: 2, purpose: 'input' }] }] });
+    const taken = takeQueuedTurn(parseQueue(stored), 'a').turn;
+    expect(taken?.id).toBe('old');
+    expect(taken?.images).toEqual(['/a', '/b']);
+  });
 });
 
 describe('send queue across tabs (#665)', () => {

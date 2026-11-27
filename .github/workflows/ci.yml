@@ -1,8 +1,13 @@
 # CI（#257；本仓库唯一的 CI）。门禁真源：dev_test.md §2「自动化门禁项」。
 # 门禁作业（frontend、go check、go test race）执行 §2 标为 CI 的各项；
-# src/__tests__/ci-gate-parity.test.ts 校验 CI、本地入口与 §2 一致。作业之间没有依赖，同时排队。
-# 2026-11-04 起不再使用自托管 runner：原来的 Azure runner 已下线，
-# 所有门禁作业统一在 GitHub 托管的 ubuntu-latest 上运行。
+# src/__tests__/ci-gate-parity.test.ts 校验 CI、本地入口与 §2 一致。作业之间没有依赖，同时排队
+# （自托管只有一台 runner，三个作业在其上依次执行，耗时约为各作业之和）。
+# runner 路由（#646、#685，三个作业同一条表达式，守门测试逐字核对并按事件求值）：
+# push main 与同仓库 PR 走维护者的自托管 runner（标签 azure-f16 只是自定义标签，与 Azure 无关）；
+# fork PR 与手动运行（workflow_dispatch）落回 GitHub 托管的 ubuntu-latest，fork 代码不进自建机器。
+# 自托管 runner 掉线时，取消排队的运行，在目标分支手动运行本工作流走托管 runner（dev_test.md §2）。
+# 该 runner 多项目共用、不是一次性的：每个作业由 actions/checkout 清理工作区后开始（不得关闭 clean），
+# 门禁结果只能依赖仓库内容；不使用自定义密钥。
 # CI 不构建镜像（#257）：运行镜像由发布流程从源码构建。
 # Action 固定到发布标签对应的完整提交 SHA（注释为标签），升级时一并核对。
 
@@ -29,7 +34,7 @@ env:
 jobs:
   frontend:
     name: frontend
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","azure-f16"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,7 +56,7 @@ jobs:
 
   go-check:
     name: go check
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","azure-f16"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,7 +80,7 @@ jobs:
   # 非 race 的 go test 不在 CI：race 跑同一批测试且更严格（dev_test.md §2）。
   go-test-race:
     name: go test race
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","azure-f16"]') || 'ubuntu-latest' }}
     timeout-minutes: 120
     # httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
     # 用 GOFLAGS 放宽，门禁命令本身保持与 dev_test.md §2 逐字一致。

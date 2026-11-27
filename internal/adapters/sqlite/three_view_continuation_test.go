@@ -192,6 +192,10 @@ type continuationFixture struct {
 	run     skillrun.Run
 	schema  catalog.ChatThreeViewSchema
 	review  catalog.ChatImageReviewSchema
+	// toolConfig, when set, changes the Agent tool's config in toolFor.
+	toolConfig func(*agenttools.Config)
+	// toolSchema, when set, changes the Agent tool's three-view Schema.
+	toolSchema func(*catalog.ChatThreeViewSchema)
 }
 
 // useSchema rebuilds the fixture's service with a changed Schema, over the
@@ -551,7 +555,6 @@ func TestReplacingARejectedFrontViewReopensTheDependentViews(t *testing.T) {
 // Strict (manual) mode never continues the views from an approved plan, even
 // when the plan covers them: the person still starts each view. The front view
 // itself keeps the shipped 2D policy (an image step is auto-approved), so the
-// per-view human gate is the three-view card action, not a budget grant.
 func TestStrictModeNeverContinuesViewsByBudget(t *testing.T) {
 	f := newContinuationFixtureWithMode(t, true, "manual")
 	ctx := context.Background()
@@ -561,9 +564,13 @@ func TestStrictModeNeverContinuesViewsByBudget(t *testing.T) {
 	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
 		t.Fatal(err)
 	}
+	// #702: strict asks for every step, the front view too; the person approves it.
 	_, grant, err := f.runtime.RequestAgentGrant(ctx, "owner-a", f.run.ID, "front", "turn-a")
-	if err != nil || grant.Status != executiongrant.Approved || grant.ApprovedByBudget() {
+	if err != nil || grant.Status != executiongrant.Pending || grant.ApprovedByBudget() {
 		t.Fatalf("front grant = %+v err=%v", grant, err)
+	}
+	if _, err := f.repo.DecideExecutionGrant(ctx, "owner-a", grant.RequestID, "owner-a", executiongrant.Approve); err != nil {
+		t.Fatal(err)
 	}
 	_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front")
 	if err != nil {
@@ -819,9 +826,13 @@ func TestStrictModeIgnoresIncludeRight(t *testing.T) {
 	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
 		t.Fatal(err)
 	}
+	// #702: strict asks for every step, the front view too; the person approves it.
 	_, grant, err := f.runtime.RequestAgentGrant(ctx, "owner-a", f.run.ID, "front", "turn-a")
-	if err != nil || grant.Status != executiongrant.Approved {
+	if err != nil || grant.Status != executiongrant.Pending {
 		t.Fatalf("front grant = %+v err=%v", grant, err)
+	}
+	if _, err := f.repo.DecideExecutionGrant(ctx, "owner-a", grant.RequestID, "owner-a", executiongrant.Approve); err != nil {
+		t.Fatal(err)
 	}
 	_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front")
 	if err != nil {
@@ -841,10 +852,14 @@ func TestStrictModeIgnoresIncludeRight(t *testing.T) {
 // turn runs it, and the command of one call with the given arguments.
 func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttools.Executor, chat.ToolCommand) {
 	t.Helper()
-	executor, err := agenttools.New(agenttools.Config{Params: agentparams.NewStore(),
+	config := agenttools.Config{Params: agentparams.NewStore(),
 		Generate: unusedSkillGenerator{}, TaskObservationTimeout: time.Minute,
 		Context:                 catalog.ChatContextSchema{AssetURLTemplate: "/api/v1/tasks/{task_id}/assets/{asset_id}"},
-		ConsentReconcileContent: "Task observation unavailable"})
+		ConsentReconcileContent: "Task observation unavailable"}
+	if f.toolConfig != nil {
+		f.toolConfig(&config)
+	}
+	executor, err := agenttools.New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +868,7 @@ func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttoo
 		f.repo.TurnStopRequested); err != nil {
 		t.Fatal(err)
 	}
-	executor.SetThreeView(catalog.ChatThreeViewSchema{
+	schema := catalog.ChatThreeViewSchema{
 		RecipeID: "image-three-view", ModelSourceStepKey: "front", Label: "views", MaximumListed: 5,
 		ModelSourceNote: "front", DefaultSubjectType: "generic", SubjectArgument: "subject_type",
 		SubjectTypes: []catalog.ChatThreeViewSubjectType{
@@ -870,7 +885,11 @@ func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttoo
 				"view_already_started": "busy", "consistency_retries_exhausted": "exhausted"}},
 		Multiview: catalog.ChatThreeViewMultiviewSchema{ViewOrder: []string{"front", "left", "back", "right"},
 			ViewSeparator: " / "},
-	})
+	}
+	if f.toolSchema != nil {
+		f.toolSchema(&schema)
+	}
+	executor.SetThreeView(schema)
 	executor.SetThreeViewService(f.views)
 	return executor, chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
 		Call:    agents.ToolCall{ID: "auto-call", Name: "create_three_view", Arguments: []byte(arguments)},
@@ -929,13 +948,14 @@ func TestAgentToolMakesAllFourViewsInOneCallInAutoMode(t *testing.T) {
 	}
 }
 
-// #663: the strict mode keeps the card: the call ends after the front view and
-// the later views wait for the person.
+// #663: the strict mode keeps the card: the call does not continue the views.
+// Since #702 strict asks for every step, so the call already stops at the
+// front view's approval card and submits nothing.
 func TestAgentToolStopsAfterTheFrontViewInStrictMode(t *testing.T) {
 	f := newContinuationFixtureWithMode(t, false, "manual")
 	executor, command := f.toolFor(t, `{"subject_type":"humanoid","include_right":true}`)
 	first, err := executor.Execute(context.Background(), command, func(chat.ToolObservation) error { return nil })
-	if err != nil || first.AwaitTask || f.gateway.submits != 1 {
+	if err != nil || first.AwaitTask || f.gateway.submits != 0 {
 		t.Fatalf("strict first call: %+v err=%v submissions=%d", first, err, f.gateway.submits)
 	}
 }

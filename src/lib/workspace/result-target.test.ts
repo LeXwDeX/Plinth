@@ -27,7 +27,7 @@ describe('result groups', () => {
 });
 
 import { targetOfTaskAssets, targetOfTile, objectOfTarget } from './result-target';
-import { blankTile } from './versions';
+import { blankTile, type VersionTile, type VersionView } from './versions';
 import type { TrackedAsset } from './task-projection';
 import type { ProductSchema } from '@/lib/product-schema';
 
@@ -91,4 +91,82 @@ it('opens an upload or an Agent crop as a file with no Task that still reaches t
   expect(task.taskId).toBe('t'); expect(task.stageObjectId).toBeUndefined();
   // An object id never makes a model or a file a stage object.
   expect(objectOfTarget({ ...target, kind: 'other' })).toBeNull();
+});
+
+describe('three-view batch detail paging (#690)', () => {
+  const picture = (id: string, ordinal = 0): TrackedAsset => ({ id, role: 'image', variant: '', delivery: 'required', ordinal, mediaType: 'image/png', size: 10, url: `/api/${id}`, kind: 'image' });
+  const view = (key: string, label: string, taskId: string, assetId: string, status: VersionView['status'] = 'succeeded'): VersionView => ({ key, label, optional: key === 'right', status, taskId, assetId });
+  // Slots arrive in finish order; views carry the group's own order.
+  const batch = (overrides: Partial<VersionTile> = {}) => blankTile({
+    key: 'g:run', taskId: 't-front', taskIds: ['t-right', 't-front', 't-back', 't-left'], domain: 'image', status: 'ready', groupLabel: '三视图',
+    assets: [picture('a-right'), picture('a-front'), picture('a-back'), picture('a-left')],
+    slots: [
+      { slot: 'right', label: '右侧', taskId: 't-right', assetId: 'a-right' },
+      { slot: 'front', label: '正面', taskId: 't-front', assetId: 'a-front' },
+      { slot: 'back', label: '背面', taskId: 't-back', assetId: 'a-back' },
+      { slot: 'left', label: '左侧', taskId: 't-left', assetId: 'a-left' },
+    ],
+    views: [
+      view('front', '正面', 't-front', 'a-front'), view('left', '左侧', 't-left', 'a-left'),
+      view('back', '背面', 't-back', 'a-back'), view('right', '右侧', 't-right', 'a-right'),
+    ],
+    ...overrides,
+  });
+
+  it('pages through the finished views in view order with their names in the title', () => {
+    const target = targetOfTile(batch(), 's1', '2D v2 · 三视图');
+    expect(target.group?.map((item) => [item.taskId, item.assetId, item.url, item.title])).toEqual([
+      ['t-front', 'a-front', '/api/a-front', '2D v2 · 三视图 · 正面'],
+      ['t-left', 'a-left', '/api/a-left', '2D v2 · 三视图 · 左侧'],
+      ['t-back', 'a-back', '/api/a-back', '2D v2 · 三视图 · 背面'],
+      ['t-right', 'a-right', '/api/a-right', '2D v2 · 三视图 · 右侧'],
+    ]);
+    // It opens on the front when nothing is being looked at.
+    expect(target).toMatchObject({ taskId: 't-front', assetId: 'a-front', title: '2D v2 · 三视图 · 正面' });
+    expect(groupPosition(target)).toEqual({ index: 0, count: 4 });
+  });
+
+  it('opens on the view being looked at', () => {
+    const target = targetOfTile(batch(), 's1', '三视图', { taskId: 't-right', assetId: 'a-right' });
+    expect(target).toMatchObject({ taskId: 't-right', assetId: 'a-right', url: '/api/a-right', title: '三视图 · 右侧' });
+    expect(groupPosition(target)).toEqual({ index: 3, count: 4 });
+    expect(stepResultTarget(target, -1)?.taskId).toBe('t-back');
+  });
+
+  it('leaves out unfinished views and views replaced by an upload', () => {
+    const tile = batch({
+      slots: [
+        { slot: 'front', label: '', taskId: 't-front', assetId: 'a-front' },
+        { slot: 'back', label: '', taskId: 't-back', assetId: 'a-back' },
+      ],
+      assets: [picture('a-front'), picture('a-back')],
+      views: [
+        view('front', '', 't-front', 'a-front'), view('left', '左侧', '', 'upload-left'),
+        view('back', '背面', 't-back', 'a-back'), view('right', '右侧', 't-right', '', 'running'),
+      ],
+    });
+    const target = targetOfTile(tile, 's1', '三视图');
+    // A view without its own label falls back to the slot's name.
+    expect(target.group?.map((item) => [item.taskId, item.title])).toEqual([['t-front', '三视图 · front'], ['t-back', '三视图 · 背面']]);
+  });
+
+  it('gives a batch left with a single view of its own no group', () => {
+    // The other views were replaced by uploads: their slots remain, but the views no longer name a Task.
+    const tile = batch({ views: [
+      view('front', '正面', 't-front', 'a-front'), view('left', '左侧', '', 'upload-left'),
+      view('back', '背面', '', 'upload-back'), view('right', '右侧', '', 'upload-right'),
+    ] });
+    const target = targetOfTile(tile, 's1', '三视图');
+    expect(target.group).toBeUndefined();
+    expect(target).toMatchObject({ taskId: 't-front', assetId: 'a-front', title: '三视图' });
+  });
+
+  it('keeps an ordinary candidate group and a single picture as they were', () => {
+    const candidates = blankTile({ key: 'n:t1', taskId: 't1', taskIds: ['t1'], domain: 'image', status: 'ready', assets: [picture('c1', 0), picture('c2', 1)] });
+    const target = targetOfTile(candidates, 's1', '2D v1', { taskId: 't1', assetId: 'c2' });
+    expect(target.group?.map((item) => [item.assetId, item.title])).toEqual([['c1', '2D v1'], ['c2', '2D v1']]);
+    expect(target.assetId).toBe('c2');
+    const single = blankTile({ key: 'n:t2', taskId: 't2', taskIds: ['t2'], domain: 'image', status: 'ready', assets: [picture('only')] });
+    expect(targetOfTile(single, 's1', '2D v2').group).toBeUndefined();
+  });
 });

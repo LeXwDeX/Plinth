@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/schema"
@@ -131,4 +132,83 @@ func TestCanvasArtboardBackgroundIsTransparentAndValidated(t *testing.T) {
 	if err := ValidateApplicationSchema(application); err != nil {
 		t.Fatalf("an opaque artboard background may use any media type: %v", err)
 	}
+}
+
+// #687: the inpaint dialog previews the picture the model receives. A masked edit is sent with
+// background=opaque, so its reference is flattened over alpha_flatten.background_color; the preview colour
+// must be that same colour. Every Offering that takes a mask (enabled or not, so one switched on later does
+// not fall back to the distorted path #687 fixed) forces background=opaque when a mask is present, wraps the
+// prompt for the masked area, and flattens its reference over the preview colour.
+func TestInpaintReferencePreviewMatchesTheMaskedOfferingFlatten(t *testing.T) {
+	taskCatalog, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := taskCatalog.Application().Canvas.Frontend.Mask.ReferencePreviewBackground
+	masked := 0
+	for id, offering := range taskCatalog.byID {
+		if problems := maskedOfferingProblems(offering, preview); len(problems) > 0 {
+			t.Errorf("%s: %s", id, strings.Join(problems, "; "))
+		}
+		if maskParameterName(offering) != "" {
+			masked++
+		}
+	}
+	if masked == 0 {
+		t.Fatal("no Offering takes a mask")
+	}
+}
+
+func maskParameterName(offering schema.Offering) string {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == "mask" {
+			return parameter.Name
+		}
+	}
+	return ""
+}
+
+// maskedOfferingProblems lists what a mask-taking Offering lacks of the #687 contract; nil for others.
+func maskedOfferingProblems(offering schema.Offering, preview string) []string {
+	mask := maskParameterName(offering)
+	if mask == "" {
+		return nil
+	}
+	present := func(condition schema.ParameterCondition) bool {
+		return condition.Parameter == mask && condition.Operator == "present"
+	}
+	var problems []string
+	forced, flattened := false, false
+	for _, parameter := range offering.Parameters {
+		if parameter.Name == "background" {
+			for _, rule := range parameter.ForcedWhen {
+				var value string
+				if present(rule.When) && json.Unmarshal(rule.Value, &value) == nil && value == "opaque" {
+					forced = true
+				}
+			}
+		}
+		if parameter.Semantic == "reference-image" && parameter.AlphaFlatten != nil && strings.EqualFold(parameter.AlphaFlatten.BackgroundColor, preview) {
+			flattened = true
+		}
+	}
+	if !forced {
+		problems = append(problems, "background is not forced to opaque when the mask is present")
+	}
+	if !flattened {
+		problems = append(problems, "reference-image is not flattened over "+preview)
+	}
+	var protocol schema.ImageProtocol
+	wrapped := false
+	if len(offering.ProviderOptions) > 0 && json.Unmarshal(offering.ProviderOptions, &protocol) == nil {
+		for _, wrap := range protocol.PromptWraps {
+			if present(wrap.When) {
+				wrapped = true
+			}
+		}
+	}
+	if !wrapped {
+		problems = append(problems, "no prompt_wraps entry for the mask")
+	}
+	return problems
 }

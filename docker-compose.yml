@@ -20,6 +20,9 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
         GO_IMAGE_TAG: ${ART_AI_IMAGE_TAG:-local}
         GO_SOURCE_COMMIT: ${ART_AI_SOURCE_COMMIT:-unknown}
+        # Optional release string shown next to the brand and in /api/version
+        # "release" (#676), e.g. ART_AI_RELEASE_VERSION=$(git describe --tags --always).
+        GO_RELEASE_VERSION: ${ART_AI_RELEASE_VERSION:-}
     image: art-ai:${ART_AI_IMAGE_TAG:-local}
     restart: unless-stopped
     init: true

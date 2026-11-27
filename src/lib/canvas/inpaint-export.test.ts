@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dropPointToWorld } from './drop-placement';
-import { editableAt, rectangleRegion, artboardToPixel, artboardToWorld, inpaintGeometry, paintMask, remapStrokesToFrame, strokeToPixels, strokesTouchFrame, worldToArtboard } from './inpaint-export';
+import { binarizeMaskAlpha, editableAt, rectangleRegion, artboardToPixel, artboardToWorld, inpaintGeometry, MASK_ALPHA_THRESHOLD, paintMask, paintSubmittedMask, remapStrokesToFrame, strokeToPixels, strokesTouchFrame, worldToArtboard, type SubmittedMaskContext } from './inpaint-export';
 
 const artboard = { x: -512, y: -256, width: 1024, height: 512 };
 
@@ -188,5 +188,50 @@ describe('paintMask with regions, erase and invert', () => {
     expect(editableAt([region, brushOut], { x: 10, y: 10 })).toBe(true);
     expect(editableAt([{ points: [30, 30], size: 10 }], { x: 33, y: 30 })).toBe(true);
     expect(editableAt([{ points: [30, 30], size: 10 }], { x: 40, y: 30 })).toBe(false);
+  });
+});
+
+// #692: the submitted mask has no soft rim. A partly transparent edge pixel was read upstream as partly
+// repainted and came back wiped (#687); every pixel is now either kept in full or repainted in full.
+describe('the submitted mask is binary', () => {
+  it('turns every partial alpha into kept (opaque keep colour) or repainted (alpha 0)', () => {
+    const data = new Uint8ClampedArray([
+      233, 233, 235, 255,
+      230, 230, 232, 200,
+      200, 200, 200, MASK_ALPHA_THRESHOLD,
+      100, 100, 100, MASK_ALPHA_THRESHOLD - 1,
+      40, 40, 40, 3,
+      0, 0, 0, 0,
+    ]);
+    binarizeMaskAlpha(data, [233, 233, 235]);
+    expect(Array.from(data)).toEqual([
+      233, 233, 235, 255,
+      233, 233, 235, 255,
+      233, 233, 235, 255,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+    ]);
+  });
+
+  it('paints the mask, then writes back only fully kept or fully repainted pixels', () => {
+    const geometry = inpaintGeometry({ x: 0, y: 0, width: 2, height: 2 }, { width: 2, height: 2 });
+    // A canvas stand-in whose anti-aliased stroke left a soft rim.
+    const pixels = new Uint8ClampedArray([
+      10, 20, 30, 255, 10, 20, 30, 90,
+      10, 20, 30, 170, 0, 0, 0, 0,
+    ]);
+    let written: Uint8ClampedArray | null = null;
+    const context = {
+      fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, stroke() {}, fill() {}, save() {}, restore() {},
+      fillStyle: '', strokeStyle: '', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter', globalCompositeOperation: 'source-over',
+      getImageData: () => ({ data: pixels }),
+      putImageData: (image: { data: Uint8ClampedArray }) => { written = image.data; },
+    } as unknown as SubmittedMaskContext;
+    paintSubmittedMask(context, geometry, [{ points: [0, 0, 1, 1], size: 1 }], '#0a141e');
+    expect(Array.from(written ?? [])).toEqual([
+      10, 20, 30, 255, 0, 0, 0, 0,
+      10, 20, 30, 255, 0, 0, 0, 0,
+    ]);
   });
 });

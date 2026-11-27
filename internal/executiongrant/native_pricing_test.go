@@ -12,7 +12,7 @@ func TestNativeSmallestExtraNeverBecomesFreePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		source, mode string
 		human        bool
-	}{{AgentPending, "manual", true}, {AgentPending, "auto", false}, {HumanBrowser, "manual", false}} {
+	}{{AgentPending, "budget", true}, {AgentPending, "auto", false}, {HumanBrowser, "budget", false}} {
 		t.Run(tc.source+tc.mode, func(t *testing.T) {
 			store := policyFixture("text-to-image")
 			store.grant.Source = tc.source

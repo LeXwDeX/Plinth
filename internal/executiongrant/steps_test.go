@@ -232,9 +232,9 @@ func TestStepsWordWithoutAStepPolicyBehavesAsManual(t *testing.T) {
 	twoD, _, service := stepFixture("text-to-image")
 	service.Policy = approvalpolicy.New("manual", []string{"auto", "manual"},
 		[]string{"image-to-3d"}, []string{"text-to-image", "image-to-3d"})
-	got, err := service.ApproveByPolicy(ctx, "owner-a", "request-a", approvalpolicy.ModeSteps)
-	if err != nil || got.DecidedBy != "policy:manual" || twoD.approved != 1 {
-		t.Fatalf("2D under an unknown mode = %+v err=%v", got, err)
+	// Strict asks for every step, a 2D one included (#702).
+	if _, err := service.ApproveByPolicy(ctx, "owner-a", "request-a", approvalpolicy.ModeSteps); !errors.Is(err, ErrHumanRequired) || twoD.approved != 0 {
+		t.Fatalf("2D under an unknown mode was approved: %v", err)
 	}
 }
 
@@ -262,7 +262,7 @@ func TestEnablingStepsDoesNotChangeTheOtherModes(t *testing.T) {
 		human            bool
 	}{
 		{"manual", "image-to-3d", true},
-		{"manual", "text-to-image", false},
+		{"manual", "text-to-image", true},
 		{"auto", "image-to-3d", false},
 		{"yolo", "image-to-3d", true},
 	} {

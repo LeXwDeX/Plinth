@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import useSWR from 'swr';
-import { Box, Camera, Check, Download, Image as ImageIcon, Info, RefreshCw, ThumbsDown } from 'lucide-react';
+import { Box, Camera, Check, Download, Image as ImageIcon, ImagePlus, Info, RefreshCw, ThumbsDown } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { selfCheckStatus, selfCheckStatusLabel, type SelfCheckRecord } from '@/lib/chat/self-check';
@@ -73,8 +73,9 @@ function columnsFor(count: number): string {
 }
 
 /**
- * 一次出图的结果：候选并排成一个组（不是轮播），每张都有"选用"；点一张图把它放上舞台，
+ * 一次出图的结果：候选并排成一个组（不是轮播），每张都有"选用"；单击一张图选中它（成为舞台上的当前对象），
  * 卡片按钮作用于当前高亮的那一张。选用随时可改，不随后续步骤禁用。
+ * #681：单击与「选用」永不改变画板；只有双击缩略图或「放入画板」按钮把这一张（只这一张）放进画板。
  */
 export function ImageResultCard({
   candidates: delivered, group: imageGroup, attachments, sessionId, pick, pickBusy, onPick,
@@ -82,7 +83,7 @@ export function ImageResultCard({
 }: ImageResultCardProps) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
-  const { openOnStage, toThreeD, toGaussianSplat } = useObjectActions();
+  const { openOnStage, insertOnCanvas, toThreeD, toGaussianSplat } = useObjectActions();
   const { rerolling, awaiting, rerolled, rerollTask } = useTaskReroll();
   const trackedTasks = useWorkspaceStore((state) => state.trackedTasks);
   const splatTool = gaussianSplatTool(schema);
@@ -106,6 +107,8 @@ export function ImageResultCard({
   const [chosen, setChosen] = useState<string | null>(null);
   const [rejectClaim, setRejectClaim] = useState<ChatAttachmentClaim | null>(null);
   const [rejectBusy, setRejectBusy] = useState(false);
+  // A drag that ends over the canvas is followed by a click; it must not also select or insert (as the strip, #593).
+  const dragged = useRef(false);
   const active = activePicturePosition(candidates, chosen, pickedPosition);
   if (candidates.length === 0) return null;
   const canReject = preferencesAvailable(schema) && Boolean(onReject) && Boolean(sessionId);
@@ -200,27 +203,42 @@ export function ImageResultCard({
                   const item = object && cropObject(object) ? uploadDragItem({ url, assetId: object.assetId, label })
                     : object?.assetId ? canvasDragItem({ taskId: object.taskId, assetId: object.assetId, url: url, label })
                       : !object && attachment?.assetId ? uploadDragItem({ url, assetId: attachment.assetId, label }) : null;
-                  return item ? { draggable: true, onDragStart: (event: DragEvent<HTMLElement>) => startCanvasDrag(event.dataTransfer, item, event.currentTarget.querySelector('img') ?? event.currentTarget) } : {};
+                  return item ? { draggable: true, onDragStart: (event: DragEvent<HTMLElement>) => { dragged.current = true; startCanvasDrag(event.dataTransfer, item, event.currentTarget.querySelector('img') ?? event.currentTarget); } } : {};
                 })()}
               >
-                <button
-                  type="button"
-                  aria-pressed={position === active}
-                  aria-label={label}
-                  data-testid="chat-result-picture"
-                  // A click makes it the card's current picture and puts it on the stage; a picture with no task of its own just opens large.
-                  onClick={() => {
-                    setChosen(pictureKey(entry));
-                    const object = objectAt(entry);
-                    if (!object || !openOnStage(object)) onPreview(entry.index);
-                  }}
-                  className="block aspect-square w-full focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  {url
-                    // #290: the card shows the downscaled preview; copying and dragging still carry the original.
-                    ? <img src={previewAssetUrl(entry.image.url)} alt={label} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture={url} />
-                    : <span className="flex size-full items-center justify-center p-2 text-center text-[11px]"><UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'error.unavailable'))} /></span>}
-                </button>
+                <HintTooltip name={label} hint={objectAt(entry) ? schemaText(schema, 'ui.studio.result.picture_hint') : undefined} className="block w-full">
+                  <button
+                    type="button"
+                    aria-pressed={position === active}
+                    aria-label={label}
+                    data-testid="chat-result-picture"
+                    onPointerDown={() => { dragged.current = false; }}
+                    // #681: a click selects it (the card's current picture, on the stage) and never changes the board; a
+                    // picture with no task of its own just opens large.
+                    onClick={(event) => {
+                      if (dragged.current && event.detail !== 0) { dragged.current = false; return; }
+                      // The second click of a double click repeats nothing; the double click itself inserts.
+                      if (event.detail > 1) return;
+                      setChosen(pictureKey(entry));
+                      const object = objectAt(entry);
+                      if (!object || !openOnStage(object)) onPreview(entry.index);
+                    }}
+                    // #681: a double click puts exactly this picture on the board (the same path as 「放入画板」).
+                    onDoubleClick={() => {
+                      if (dragged.current) return;
+                      const object = objectAt(entry);
+                      if (!object) return;
+                      setChosen(pictureKey(entry));
+                      insertOnCanvas(object);
+                    }}
+                    className="block aspect-square w-full focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    {url
+                      // #290: the card shows the downscaled preview; copying and dragging still carry the original.
+                      ? <img src={previewAssetUrl(entry.image.url)} alt={label} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture={url} />
+                      : <span className="flex size-full items-center justify-center p-2 text-center text-[11px]"><UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'error.unavailable'))} /></span>}
+                  </button>
+                </HintTooltip>
                 {(() => {
                   const reference = referenceAt(entry);
                   return reference ? <HandleTag reference={reference} wrapperClassName="absolute left-1 top-1" className="select-none bg-black/60 text-white hover:bg-black/80" /> : null;
@@ -249,7 +267,8 @@ export function ImageResultCard({
                           if (!claim) return;
                           setChosen(pictureKey(entry));
                           void Promise.resolve(onPick(claim)).then((ok) => {
-                            // Picking makes this candidate the one on the stage.
+                            // 选用 only tells the Agent which one the person chose (the session's pick); it also makes
+                            // this candidate the one on the stage, but never puts it on the board (#681).
                             const object = objectAt(entry);
                             if (ok !== false && object) openOnStage(object);
                           });
@@ -297,6 +316,11 @@ export function ImageResultCard({
       ) : null}
       {activeObject ? (
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label={activeHandle ? formatSchemaText(schemaText(schema, 'ui.studio.result.actions_for'), { handle: activeHandle }) : schemaText(schema, 'ui.studio.result.actions')}>
+          <HintTooltip name={schemaText(schema, 'ui.studio.result.insert_canvas')} hint={schemaText(schema, 'ui.studio.result.insert_canvas_hint')}>
+            <Action type="button" variant="outline" size="xs" onClick={() => insertOnCanvas(activeObject)} data-testid="chat-result-insert-canvas">
+              <ImagePlus />{schemaText(schema, 'ui.studio.result.insert_canvas')}
+            </Action>
+          </HintTooltip>
           <Action type="button" variant="outline" size="xs" onClick={() => toThreeD(activeObject)} data-testid="chat-result-to3d">
             <Box />{schemaText(schema, 'ui.studio.result.to_3d')}
           </Action>

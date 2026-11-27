@@ -10,7 +10,7 @@ Plinth 是一个自部署的 AI 美术资产工作台：在一个对话 + 画布
 - **3D**：文生 3D、图生 3D、换贴图、重拓扑、绑骨与动画，3D 查看器与多格式下载
   （GLB、glTF、OBJ、STL、FBX、USDZ 等，以各 Provider 实际支持为准）。
 - **Agent**：用自然语言描述需求，Agent 选择模型和参数并发起任务；付费步骤按会话的
-  批准方式（自动 / 预算 / 严格）执行。Agent 使用任意 OpenAI chat completions 兼容的多模态模型。
+  批准方式（自动 / 审批 / 严格）执行。Agent 使用任意 OpenAI chat completions 兼容的多模态模型。
 - **内置 Provider**：Meshy、Tripo、Hyper3D、即梦（Jimeng）、Gemini，以及 OpenAI 图像与
   自部署抠图服务。配置有效的 key 和所需地址后才可用；配置缺失时明确显示不可用，不会切换模型。
 - **Provider 默认 Mock**：`PROVIDER_MODE` 默认 `mock`，返回内置示例结果，不调用任何付费上游；Agent 默认 `live`，需要配置 `LLM_*`。
@@ -97,6 +97,8 @@ curl http://127.0.0.1:13333/api/version   # {"version":"<上面的完整 SHA>"}
 
 没有 `.git` 的源码包（例如下载的压缩包）里 `git rev-parse HEAD` 会失败：把它换成完整的
 40 位提交 SHA，或者去掉 `ART_AI_SOURCE_COMMIT=...` 前缀（此时 `/api/version` 为 `unknown`）。
+想在顶栏与 `/api/version` 的 `release` 字段显示版本号时，再加可选的
+`ART_AI_RELEASE_VERSION=$(git describe --tags --always)`（只允许字母、数字、点、下划线和连字符）；不传时为空，界面不显示版本。
 构建使用 Docker 默认的 BuildKit。BuildKit 不支持 `docker build --network <NETWORK>`
 （报 `network mode ... not supported by buildkit`）；需要在构建期隔离或观测网络时，改用经典
 构建器单独构建镜像，再用 Compose 启动（镜像名与标签要和 Compose 一致，默认 `art-ai:local`）：

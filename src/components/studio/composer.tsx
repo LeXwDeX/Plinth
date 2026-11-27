@@ -11,7 +11,7 @@ import { ContextMeter } from '@/components/studio/context-meter';
 import { ChatModelNotice } from '@/components/studio/chat-model-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
-import { CHIP_CARD_SQUARE_CLASS, ChipSquare, ContextChip, CutHint } from '@/components/studio/composer-chips';
+import { CHIP_CARD_SQUARE_CLASS, ChipSquare, ContextChip } from '@/components/studio/composer-chips';
 import { KindBadge } from '@/components/studio/kind-badge';
 import { ObjectThumbImage } from '@/components/studio/object-thumb';
 import { ComposerSettings } from '@/components/studio/composer-settings';
@@ -23,7 +23,6 @@ import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Field } from '@/components/ui/field';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
-import { ATTACHMENT_PURPOSES, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { attachedIndex, insertReference, namesHandle } from '@/lib/chat/composer-reference';
 import { activeMention, filterMentions, insertMention, mentionSections, overridingHandle, type MentionCandidate } from '@/lib/chat/mentions';
 import { agentUnavailableReason, formatSchemaText, schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
@@ -124,13 +123,6 @@ export interface ComposerProps {
   mask?: ComposerMask | null;
   /** Set while the next result continues from an older version; null otherwise. */
   branch?: ComposerBranch | null;
-  /** Bulk purpose selection. */
-  attachmentPurpose?: AttachmentPurpose | null;
-  onAttachmentPurpose?: (purpose: AttachmentPurpose | null) => void;
-  attachmentPurposes?: readonly (AttachmentPurpose | null)[];
-  onAttachmentPurposeAt?: (index: number, purpose: AttachmentPurpose | null) => void;
-  pinnedPurpose?: AttachmentPurpose | null;
-  onPinnedPurpose?: (purpose: AttachmentPurpose | null) => void;
   images: readonly string[];
   onRemoveImage: (index: number) => void;
   /** A canvas image pinned as the next turn's reference. */
@@ -167,32 +159,6 @@ function polylinePoints(flat: readonly number[]): string {
   return pairs.join(' ');
 }
 
-/** The three purposes as one segmented control: a grid of equal thirds, so the control is as wide on every row. */
-const PURPOSE_SEGMENTS_CLASS = 'grid min-w-0 grid-cols-3 rounded-md border border-border bg-surface p-0.5';
-
-/** One segment of a purpose control: as wide as the others, its text cut (and shown whole on hover) when it does not fit. */
-function PurposeSegment({ text, selected, disabled, onClick, radio = false, testId }: {
-  text: string; selected: boolean; disabled: boolean; onClick: () => void; radio?: boolean; testId?: string;
-}) {
-  return (
-    <CutHint text={text}>
-      <button
-        type="button"
-        {...(radio ? { role: 'radio', 'aria-checked': selected } : { 'aria-pressed': selected })}
-        disabled={disabled}
-        onClick={onClick}
-        data-testid={testId}
-        className={cn(
-          'h-6 w-full min-w-0 truncate rounded px-1 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
-          selected ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-        )}
-      >
-        {text}
-      </button>
-    </CutHint>
-  );
-}
-
 /**
  * 对话输入区：当前对象芯片、附件、文字框、发送，以及发送键右侧的设置齿轮（#405：生成模型、Skills、生成参数、
  * 对话模型与思考档位都在齿轮打开的设置页里）。Enter 发送，但输入法组词时的 Enter 只是确认候选字。输入 `@` 列出本会话的句柄
@@ -201,7 +167,6 @@ function PurposeSegment({ text, selected, disabled, onClick, radio = false, test
  */
 export function Composer({
   value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, onDeselectChip, mask = null, branch = null,
-  attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
   styleLock = null, boardMode = null,
@@ -239,7 +204,6 @@ export function Composer({
       ? skill.catalog.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId
       : schemaText(schema, 'ui.workspace.skills.loading')
     : '';
-  const purposeLabelId = useId();
   const stopLabel = schemaText(schema, 'ui.workspace.agent.stop');
   const sendLabel = schemaText(schema, 'ui.workspace.agent.send');
   const uploadLabel = schemaText(schema, 'ui.chat.input.upload_title');
@@ -683,7 +647,6 @@ export function Composer({
             />
           ) : null}
           {attachments.map((item) => {
-            const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
             const name = item.pinned
               ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
               : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
@@ -702,7 +665,7 @@ export function Composer({
                 square={(
                   <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} squareClassName={CHIP_CARD_SQUARE_CLASS} />
                 )}
-                // #593: the card shows the picture and its kind badge; the name and purpose are the hint and the screen-reader text.
+                // #593: the card shows the picture and its kind badge; the name is the hint and the screen-reader text.
                 label={name}
                 title={(
                   <span className="flex min-w-0 items-center gap-1">
@@ -710,10 +673,7 @@ export function Composer({
                     <span className="sr-only">{name}</span>
                   </span>
                 )}
-                subtitle={[
-                  schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
-                  purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
-                ].filter(Boolean).join(' · ')}
+                subtitle={schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload')}
                 remove={{
                   label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
                   onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
@@ -726,53 +686,17 @@ export function Composer({
       </div>
       ) : null}
       {hasAttachments ? (
-        // #405: one two-column grid carries every purpose row, so the labels share one column (as wide as the longest label,
-        // at most two fifths of the row) and the segmented controls all start at the same edge and are equally wide.
-        <div className="grid grid-cols-[fit-content(40%)_minmax(0,1fr)] items-center gap-x-1.5 gap-y-1.5" data-testid="composer-attachments">
-          <div className="contents" data-testid="composer-attachment-purposes">
-            {attachments.map((item) => {
-              const selected = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
-              const change = item.pinned ? onPinnedPurpose : onAttachmentPurposeAt && ((purpose: AttachmentPurpose | null) => onAttachmentPurposeAt(item.index, purpose));
-              const label = item.pinned ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
-                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
-              return (
-                <div key={`${item.index}-${item.url}`} className="contents" data-testid="composer-attachment-purpose-row">
-                  <CutHint text={label}><span className="truncate text-[11px] text-muted-foreground">{label}</span></CutHint>
-                  <div role="group" aria-label={`${label} ${schemaText(schema, 'ui.studio.composer.attachment.purpose')}`} className={PURPOSE_SEGMENTS_CLASS}>
-                    {ATTACHMENT_PURPOSES.map((purpose) => (
-                      <PurposeSegment key={purpose} text={schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)} selected={selected === purpose}
-                        disabled={disabled || !change} onClick={() => change?.(selected === purpose ? null : purpose)} />
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        // #697: attached pictures carry no per-picture purpose; only the notices about them remain below the chips.
+        <div className="flex flex-col gap-1.5 empty:hidden" data-testid="composer-attachments">
           {/* #296: what an edit of the one attached picture outputs when no size was chosen. */}
-          <div className="col-span-2 flex flex-col gap-1.5 empty:hidden">
-            <ReferenceSizeNotice delivery={params.canvas?.delivery} />
-            {referenceLimitText ? (
-              <UnavailableNotice
-                testId="composer-reference-limit"
-                className="text-[11px] leading-4"
-                label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.reference_unused'))}
-                detail={referenceLimitText}
-              />
-            ) : null}
-          </div>
-          {onAttachmentPurpose ? (
-            <div className="contents" data-testid="composer-attachment-purpose">
-              <CutHint text={schemaText(schema, 'ui.studio.composer.attachment.purpose')}>
-                <span id={purposeLabelId} className="truncate text-[11px] text-muted-foreground">{schemaText(schema, 'ui.studio.composer.attachment.purpose')}</span>
-              </CutHint>
-              <div role="radiogroup" aria-labelledby={purposeLabelId} className={PURPOSE_SEGMENTS_CLASS}>
-                {ATTACHMENT_PURPOSES.map((purpose) => (
-                  <PurposeSegment key={purpose} radio text={schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)} selected={attachmentPurpose === purpose}
-                    disabled={disabled} onClick={() => onAttachmentPurpose(attachmentPurpose === purpose ? null : purpose)} testId={`composer-attachment-purpose-${purpose}`} />
-                ))}
-              </div>
-              <span className="col-start-2 text-[11px] text-muted-foreground">{schemaText(schema, 'ui.studio.composer.attachment.purpose_note')}</span>
-            </div>
+          <ReferenceSizeNotice delivery={params.canvas?.delivery} />
+          {referenceLimitText ? (
+            <UnavailableNotice
+              testId="composer-reference-limit"
+              className="text-[11px] leading-4"
+              label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.reference_unused'))}
+              detail={referenceLimitText}
+            />
           ) : null}
         </div>
       ) : null}

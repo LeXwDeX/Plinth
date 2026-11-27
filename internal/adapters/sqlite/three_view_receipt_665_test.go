@@ -46,7 +46,9 @@ func TestThreeViewStartedReceiptFollowsTheContinuation(t *testing.T) {
 	}{
 		{"auto mode", false, "auto", "server-continues"},
 		{"budget mode with a covering plan", true, "budget", "server-continues"},
-		{"strict mode", false, "manual", "waits-on-card"},
+		// #702: strict cards the front view itself; the budget ("approve")
+		// mode without a plan is the one whose views wait on the card.
+		{"budget mode without a plan", false, "budget", "waits-on-card"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newContinuationFixtureWithMode(t, test.withPlan, test.mode)

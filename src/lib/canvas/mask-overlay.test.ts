@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps, overlayTintKind } from './mask-overlay';
+import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps } from './mask-overlay';
 import type { MaskStroke } from '@/store/mask-store';
 
 const artboard = { x: -100, y: -50, width: 400, height: 200 };
@@ -97,21 +97,6 @@ describe('mask overlay (#310: one layer, constant strength)', () => {
     const target = recordingContext({ width: 100, height: 100 });
     expect(drawMaskOverlay(target.context, scratchCanvas().canvas, artboard, [], style)).toBe(false);
     expect(target.draws).toHaveLength(0);
-  });
-});
-
-describe('overlay tint kind', () => {
-  const region: MaskStroke = { points: [0, 0, 10, 0, 10, 10, 0, 10], size: 0, region: true };
-  const invert: MaskStroke = { points: [], size: 0, invert: true };
-
-  it('keeps the selection tint for a pure marquee / lasso / inversion selection', () => {
-    expect(overlayTintKind([region])).toBe('selection');
-    expect(overlayTintKind([region, { ...region, erase: true }, invert])).toBe('selection');
-  });
-
-  it('uses the mask tint as soon as the brush painted or erased, mixed steps included', () => {
-    expect(overlayTintKind([{ points: [1, 1, 5, 5], size: 4 }])).toBe('mask');
-    expect(overlayTintKind([region, { points: [1, 1], size: 4, erase: true }, invert])).toBe('mask');
   });
 });
 

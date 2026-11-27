@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 
 import {
-  fourViewRequested, groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
-  remainingSlots, slotAction, succeededCount, viewLabelOfTask, type ThreeViewGroup,
+  fourViewRequested, groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, multiviewPickState, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
+  remainingSlots, slotAction, succeededCount, threeViewAutoContinuing, viewLabelOfTask, type ThreeViewGroup,
 } from './three-view';
 
 const wire = (statuses: Array<[string, Record<string, unknown>]>, extra: Record<string, unknown> = {}) => ({
@@ -99,7 +99,10 @@ describe('group state', () => {
     expect(groupProgress([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('running', true)])).toEqual({ done: 3, total: 4 });
     expect(groupProgress([slot('succeeded'), slot('not_started'), slot('succeeded'), slot('succeeded', true)])).toEqual({ done: 3, total: 4 });
     expect(requestedView(slot('not_started', true))).toBe(false);
-    expect(requestedView(slot('denied', true))).toBe(true);
+    // #691: denied, failed, canceled or only waiting for approval: not asked for, so not in the denominator.
+    for (const status of ['denied', 'failed', 'canceled', 'awaiting_approval']) expect(requestedView(slot(status, true)), status).toBe(false);
+    for (const status of ['starting', 'running', 'succeeded', 'rejected']) expect(requestedView(slot(status, true)), status).toBe(true);
+    expect(groupProgress([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('failed', true)])).toEqual({ done: 3, total: 3 });
   });
 
   // #633: a four-view request names itself; a three-view group whose right view nobody started stays a three-view.
@@ -108,7 +111,11 @@ describe('group state', () => {
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('not_started', true)])).toBe(false);
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded')])).toBe(false);
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('running', true)])).toBe(true);
-    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('failed', true)])).toBe(true);
+    // #691: a right view that failed, was canceled or only waits for its approval goes back to the three-view.
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('failed', true)])).toBe(false);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('canceled', true)])).toBe(false);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('awaiting_approval', true)])).toBe(false);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('succeeded', true)])).toBe(true);
     // A right view the person denied was never started: the card stays a three-view.
     expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('denied', true)])).toBe(false);
   });
@@ -217,5 +224,30 @@ describe('multiview from a three-view group (#65)', () => {
     expect(remainingSlots(group)).toEqual([]);
     const onlyFront = parseThreeViewGroup({ run_id: 'r', slots: [{ key: 'front', status: 'succeeded', task_id: 't', output_asset_id: 'x' }], model_source: { slot: 'front' } })!;
     expect(groupMultiview(onlyFront, model).ready).toBe(false);
+  });
+});
+
+describe('#691: which 3D model 用三视图生成 3D runs with', () => {
+  const model = { modelId: 'mv', modelName: 'MV', views: [], minimumViews: 2, mediaTypes: [] };
+  it('runs only with the multiview model the person picked; no pick asks first, a single-picture pick is off', () => {
+    expect(multiviewPickState(model, 'mv')).toBe('picked');
+    expect(multiviewPickState(model, undefined)).toBe('none');
+    expect(multiviewPickState(model, null)).toBe('none');
+    expect(multiviewPickState(model, 'single-image-model')).toBe('single');
+    expect(multiviewPickState(null, 'single-image-model')).toBe('single');
+  });
+});
+
+describe('#693: when the server carries a three-view group on by itself', () => {
+  it('only inside the session\'s turn of an automatic-approval session', () => {
+    expect(threeViewAutoContinuing('auto', true)).toBe(true);
+    expect(threeViewAutoContinuing('manual', true)).toBe(false);
+    expect(threeViewAutoContinuing('budget', true)).toBe(false);
+    expect(threeViewAutoContinuing(undefined, true)).toBe(false);
+  });
+
+  it('not while a view the person started runs without a turn: nobody would start the others', () => {
+    // The card passes only whether the turn runs; a running view on its own is not a reason.
+    expect(threeViewAutoContinuing('auto', false)).toBe(false);
   });
 });

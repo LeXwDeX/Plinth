@@ -890,7 +890,7 @@ const minimalApplication = `"application":{
 			"initial_layer":{"enabled":true,"fill":"transparent","maximum_bitmap_pixels":16777216},"artboard":{"center_x":600,"center_y":400,"resize":{"default_anchor":"center","anchors":["center","top-left"]},"legacy_max_edge":512,"default_width":2048,"default_height":2048,"ratio_pixels":{"1:1":{"width":1024,"height":1024}},"frame_stroke_width":1,"frame_line_dash":[6,4],"label":{"common_ratios":["1:1","3:2"],"font_size_pixels":10,"offset_pixels":4,"color_token":"--muted-foreground","padding_pixels":3,"background_token":"--background","background_opacity":0.72},"outside_dim":{"color":"#000000","opacity":0.45,"reveal_selected":true},"transparency":{"cell_pixels":8,"light_color":"#ffffff","dark_color":"#000000","opacity":0.08}},
 			"brush":{"minimum_size":1,"maximum_size":200,"default_size":12},
 			"selection":{"ants_dash":[5,5],"ants_tick_milliseconds":120,"tint_color":"#6366f1","tint_opacity":0.3,"preview_max_edge":512},
-			"mask":{"tint_color_token":"--info","tint_opacity":0.75},
+			"mask":{"tint_color_token":"--info","tint_opacity":0.75,"reference_preview_background":"#ffffff"},
 			"snap":{"default_enabled":true,"threshold_pixels":6,"guide_stroke_width":1,"guide_color_token":"--reminder","group_member_targets":false,"bypass_modifier":"mod"},
 			"export_filename_fallback":"canvas","export_extension":".png",
 			"export":{
@@ -956,7 +956,7 @@ const minimalApplication = `"application":{
 				"brush_size_down_key":"[","brush_size_up_key":"]","brush_size_step_ratio":0.1,
 				"swap_colors_key":"x","default_colors_key":"d","help_key":"?","mask_confirm_key":"Enter","mask_exit_key":"Escape","delete_keys":["delete","backspace"],
 				"generate_shortcut":"mod+enter","lock_shortcut":"mod+/","merge_visible_shortcut":"mod+alt+shift+e",
-				"cut_shortcut":"mod+x","duplicate_shortcut":"mod+j","deselect_shortcut":"mod+d","invert_selection_shortcut":"mod+shift+i",
+				"cut_shortcut":"mod+x","duplicate_shortcut":"mod+j","deselect_shortcut":"mod+d",
 				"zoom_in_shortcut":"mod+=","zoom_out_shortcut":"mod+-","zoom_actual_shortcut":"mod+1","zoom_selection_shortcut":"mod+alt+0",
 				"layers_panel_shortcut":"f7","history_panel_shortcut":"alt+f9",
 				"nudge_pixels":1,"nudge_large_pixels":10,"reserved_shortcuts":["mod+a","f7"]
@@ -1067,7 +1067,6 @@ const minimalApplication = `"application":{
 				"node.generated_alt":"生成图片",
 				"node.edit_text_placeholder":"双击编辑文字",
 				"node.frame_default_text":"Frame",
-				"node.send_reference":"发送参考图",
 				"node.reference":"参考图",
 				"toolbar.background":"背景",
 				"toolbar.background.dots":"点阵",
@@ -1129,7 +1128,6 @@ const minimalApplication = `"application":{
 				"layers.hide":"隐藏",
 				"layers.show":"显示",
 				"context.copy":"复制",
-				"context.send_to_chat":"发送到对话",
 				"context.group":"成组",
 				"context.ungroup":"解组",
 				"context.paste":"粘贴",
@@ -3442,6 +3440,79 @@ func TestLoadValidatesMultipartImageProtocolDeclaration(t *testing.T) {
 		)
 		if _, err := catalog.Load(bytes.NewReader(mutated)); err == nil {
 			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// #687: prompt_wraps frames the prompt of a masked edit on the wire. A wrap is
+// accepted only with one {prompt} slot, a condition on a declared parameter and
+// a prompt parameter to wrap.
+func TestLoadValidatesImagePromptWraps(t *testing.T) {
+	document := func(parameters, wraps string) []byte {
+		return testProductDocument(`[
+			{
+				"id":"openai/images","revision":"1","provider_id":"openai","provider_name":"OpenAI","provider_short_label":"GPT",
+				"model_id":"m","model_name":"M","capability":"text-to-image",
+				"domain":"image","display_order":0,"capability_order":0,
+				"adapter_key":"openai-images.v1","enabled":true,
+				"timeout_seconds":1,"poll_interval_seconds":1,
+				"retry":{"max_attempts":1},"materialize_attempts":1,
+				"parameters":[` + parameters + `,
+					{"name":"mask","label":"M","type":"asset","max_bytes":4,"wire_name":"mask"}
+				],
+				"outputs":[{"role":"image","minimum":1}],
+				"provider_options":{
+					"endpoint":"images/edits",
+					"request_encoding":"multipart",
+					"request_template":{"model":"$model"},
+					"prompt_wraps":` + wraps + `,
+					"response":{"images_path":"data.*","base64_field":"b64_json","role":"image","default_media_type":"image/png"},
+					"max_response_bytes":1024
+				}
+			}
+		]`)
+	}
+	prompt := `{"name":"prompt","label":"P","type":"text","required":true,"semantic":"prompt"}`
+	valid := `[{"when":{"parameter":"mask","operator":"present"},"template":"Edit only the masked area: {prompt}."}]`
+	if _, err := catalog.Load(bytes.NewReader(document(prompt, valid))); err != nil {
+		t.Fatalf("valid prompt_wraps rejected: %v", err)
+	}
+	for name, doc := range map[string][]byte{
+		"no slot":           document(prompt, `[{"when":{"parameter":"mask","operator":"present"},"template":"Edit the masked area."}]`),
+		"two slots":         document(prompt, `[{"when":{"parameter":"mask","operator":"present"},"template":"{prompt} {prompt}"}]`),
+		"unknown parameter": document(prompt, `[{"when":{"parameter":"selection","operator":"present"},"template":"{prompt}"}]`),
+		"bad operator":      document(prompt, `[{"when":{"parameter":"mask","operator":"exists"},"template":"{prompt}"}]`),
+		"no prompt":         document(`{"name":"prompt","label":"P","type":"text","required":true}`, valid),
+	} {
+		if _, err := catalog.Load(bytes.NewReader(doc)); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// #687: the shipped GPT Image edit sends a masked edit with background=opaque
+// and the prompt framed on the masked area; an edit without a mask keeps the
+// declared default background.
+func TestDefaultGPTImageMaskedEditForcesOpaqueBackground(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]string{
+		`{"prompt":"p","reference_assets":["a"],"mask":"m"}`:                            "opaque",
+		`{"prompt":"p","reference_assets":["a"],"mask":"m","background":"transparent"}`: "opaque",
+		`{"prompt":"p","reference_assets":["a"]}`:                                       "auto",
+	} {
+		_, input, err := c.Normalize(generation.ImageToImage, "openai/gpt-image-2/image-to-image", []byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var values map[string]any
+		if err := json.Unmarshal(input, &values); err != nil {
+			t.Fatal(err)
+		}
+		if values["background"] != want {
+			t.Fatalf("%s: background = %v, want %s", raw, values["background"], want)
 		}
 	}
 }

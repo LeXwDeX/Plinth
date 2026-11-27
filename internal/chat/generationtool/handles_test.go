@@ -159,3 +159,26 @@ func TestReferencesReachThePicturesThisReplyMade(t *testing.T) {
 		t.Fatalf("implicit references = %v, %v", got, err)
 	}
 }
+
+// #684: the selection alias on a turn without a selected picture is refused
+// with the Schema's empty-selection wording, which says nothing was submitted
+// and asks for an explicit handle, not with the generic "no such object".
+func TestSelectionAliasWithoutSelectionNamesTheMissingSelection(t *testing.T) {
+	executor, schema := handleExecutor(t)
+	alias := schema.Context.SelectionAlias
+	want := strings.ReplaceAll(schema.Context.EmptySelectionTemplate, "{handle}", alias)
+	if schema.Context.EmptySelectionTemplate == "" || want == strings.ReplaceAll(schema.Context.UnknownHandleTemplate, "{handle}", alias) {
+		t.Fatal("the default catalog declares no empty-selection refusal")
+	}
+	for name, selection := range map[string][]chat.Attachment{
+		"none":       nil,
+		"model only": {{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: "task-3d"}},
+	} {
+		command := chat.ToolCommand{History: historyWithHandles(schema), Options: chat.TurnOptions{Selection: selection}}
+		_, err := executor.selectReferences(command, map[string]json.RawMessage{
+			schema.Context.ReferenceHandlesArgument: json.RawMessage(`["` + alias + `"]`)})
+		if err == nil || err.Error() != want {
+			t.Fatalf("%s: err = %v; want %q", name, err, want)
+		}
+	}
+}

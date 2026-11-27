@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tarfile
@@ -447,6 +448,7 @@ class WorkflowReplay(unittest.TestCase):
         for fragment in ('--cpus 4', f'--memory {DEFAULT_MEMORY_GIB}g', f'--memory-swap {DEFAULT_MEMORY_GIB}g', 'no-new-privileges', host_run.LABEL, '--label plinth.host-ci.slot=0'):
             self.assertIn(fragment, options)
         self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
+        self.assertIn('azure-f16=plinth-ci-act:abc', command)  # self-hosted label for push main / same-repo PRs (#685)
         self.assertIn('plinth-azure=plinth-ci-act:abc', command)  # kept for replaying older commits with the Azure race route (#78)
         self.assertEqual(command[command.index('-W') + 1], '/ci/run/r1/src/.github/workflows/ci.yml')  # only ci.yml is replayed
         self.assertIn('--pull=false', command)  # the derived image exists only locally; act must not try to pull it
@@ -454,6 +456,31 @@ class WorkflowReplay(unittest.TestCase):
         self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')
         self.assertNotIn('-j', command)
         self.assertEqual(host_run.act_command(Path('a'), Path('s'), 'push', Path('e'), argparse.Namespace(**{**vars(args), 'act_job': 'frontend'}))[-2:], ['-j', 'frontend'])
+
+    def test_every_runner_label_the_workflow_routes_to_is_mapped_to_the_runner_image(self):
+        # act picks the first label of runs-on that has a -P mapping; generic self-hosted labels are not mapped.
+        workflow = (HERE.parent.parent / '.github' / 'workflows' / 'ci.yml').read_text()
+        routes = re.findall(r'^ {4}runs-on: (.+)$', workflow, re.M)
+        self.assertEqual(len(routes), 3)
+        labels = set()
+        for route in routes:
+            labels.update(label for listed in re.findall(r"fromJSON\('(\[[^']*\])'\)", route) for label in json.loads(listed))
+            labels.update(re.findall(r"\|\| '([\w.-]+)'", route) or [route.strip()])
+        specific = labels - {'self-hosted', 'Linux', 'X64'}
+        self.assertEqual(specific, {'azure-f16', 'ubuntu-latest'})
+        args = preflight_args(act_cache=Path('/c'), runner_image='i', runner_name='plinth-ci-act:abc', act_job='', run_id='r1')
+        command = host_run.act_command(Path('act'), Path('src'), 'push', Path('e.json'), args)
+        mapped = {command[i + 1].split('=')[0] for i, part in enumerate(command) if part == '-P'}
+        self.assertLessEqual(specific, mapped)
+        self.assertEqual({command[i + 1].split('=')[1] for i, part in enumerate(command) if part == '-P'}, {'plinth-ci-act:abc'})
+
+    def test_replayed_pull_request_comes_from_this_repository_so_it_takes_the_self_hosted_route(self):
+        pr = host_run.event_payload('pull_request', 'a' * 40, 'owner/repo')
+        self.assertEqual(pr['pull_request']['head']['repo']['full_name'], 'owner/repo')
+        self.assertEqual(pr['pull_request']['head']['sha'], 'a' * 40)
+        self.assertEqual(pr['repository']['full_name'], 'owner/repo')
+        push = host_run.event_payload('push', 'b' * 40, 'owner/repo')
+        self.assertEqual((push['ref'], push['after'], push['repository']['full_name']), ('refs/heads/main', 'b' * 40, 'owner/repo'))
 
     def test_a_download_that_does_not_match_the_pinned_digest_is_refused_and_removed(self):
         with tempfile.TemporaryDirectory() as base:

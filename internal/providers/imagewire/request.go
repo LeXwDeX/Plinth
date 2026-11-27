@@ -16,6 +16,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/uploadname"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 type Protocol = generation.ImageProtocol
@@ -54,7 +55,7 @@ func EncodeMultipart(
 	form := multipart.NewWriter(writer)
 	contentType := form.FormDataContentType()
 	go func() {
-		writeErr := writeMultipartForm(ctx, form, request, input, resolver)
+		writeErr := writeMultipartForm(ctx, form, request, input, resolver, protocol.PromptWraps)
 		if closeErr := form.Close(); writeErr == nil {
 			writeErr = closeErr
 		}
@@ -69,6 +70,7 @@ func writeMultipartForm(
 	request generation.StartRequest,
 	input map[string]any,
 	resolver generation.InputAssetResolver,
+	wraps []schema.PromptWrap,
 ) error {
 	var template map[string]any
 	if err := json.Unmarshal(request.Offering.ProviderOptions, &struct {
@@ -94,6 +96,7 @@ func writeMultipartForm(
 			if err != nil {
 				return err
 			}
+			text = wrapPrompt(p, input, wraps, text)
 			if err := form.WriteField(field, text); err != nil {
 				return err
 			}
@@ -175,11 +178,26 @@ func writeMultipartForm(
 		if err != nil {
 			return err
 		}
-		if err := form.WriteField(field, text); err != nil {
+		if err := form.WriteField(field, wrapPrompt(p, input, wraps, text)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// wrapPrompt applies the first matching prompt_wraps declaration (#687) to the
+// wire text of the prompt parameter; any other parameter, or a prompt no
+// declaration matches, keeps its text. The frozen input is never changed.
+func wrapPrompt(p generation.Parameter, input map[string]any, wraps []schema.PromptWrap, text string) string {
+	if p.Semantic != schema.SemanticPrompt {
+		return text
+	}
+	for _, wrap := range wraps {
+		if schema.ConditionMatches(wrap.When, input) {
+			return strings.Replace(wrap.Template, schema.PromptPlaceholder, strings.TrimSpace(text), 1)
+		}
+	}
+	return text
 }
 
 // arrayFieldTexts is the form text of each element of a string-array parameter,
@@ -433,6 +451,9 @@ func Build(ctx context.Context, request generation.StartRequest, resolver genera
 				return nil, err
 			}
 			value = expand(template, map[string]any{"$value": value})
+		}
+		if text, ok := value.(string); ok {
+			value = wrapPrompt(p, input, protocol.PromptWraps, text)
 		}
 		var err error
 		root, err = set(root, strings.Split(path, "."), value)

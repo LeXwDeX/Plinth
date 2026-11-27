@@ -122,6 +122,58 @@ export function paintMask(
   context.restore();
 }
 
+/** Alpha at or above this is kept; below it is repainted. The same cut as the image fakes' mask reading. */
+export const MASK_ALPHA_THRESHOLD = 128;
+
+export type SubmittedMaskContext = MaskContext & Pick<CanvasRenderingContext2D, 'getImageData' | 'putImageData'>;
+
+/**
+ * #692: the hard edge of a submitted mask. Canvas strokes are anti-aliased, so their rim carries partial alpha
+ * that an upstream may read as "partly repaint" and wipe out (#687). Every pixel becomes fully kept (opaque in
+ * the keep colour) or fully repainted (alpha 0), so what was not erased is never touched. The board keeps
+ * drawing the soft overlay; only the bytes that are sent are binarized.
+ */
+export function binarizeMaskAlpha(data: Uint8ClampedArray, keep: readonly [number, number, number]): void {
+  for (let index = 0; index + 3 < data.length; index += 4) {
+    if (data[index + 3] >= MASK_ALPHA_THRESHOLD) {
+      data[index] = keep[0];
+      data[index + 1] = keep[1];
+      data[index + 2] = keep[2];
+      data[index + 3] = 255;
+    } else {
+      data[index] = 0;
+      data[index + 1] = 0;
+      data[index + 2] = 0;
+      data[index + 3] = 0;
+    }
+  }
+}
+
+/**
+ * The mask exactly as it is submitted: `paintMask`, then a binary alpha. The keep colour is read back from a
+ * fully kept pixel so a CSS colour of any form works; a mask with no kept pixel has nothing to restore.
+ */
+export function paintSubmittedMask(
+  context: SubmittedMaskContext,
+  geometry: InpaintGeometry,
+  strokes: readonly MaskStroke[],
+  keepColor: string,
+): void {
+  paintMask(context, geometry, strokes, keepColor);
+  const { width, height } = geometry.size;
+  const image = context.getImageData(0, 0, width, height);
+  const { data } = image;
+  let keep: [number, number, number] = [0, 0, 0];
+  for (let index = 3; index < data.length; index += 4) {
+    if (data[index] === 255) {
+      keep = [data[index - 3], data[index - 2], data[index - 1]];
+      break;
+    }
+  }
+  binarizeMaskAlpha(data, keep);
+  context.putImageData(image, 0, 0);
+}
+
 /** Distance from a point to a segment. */
 function distanceToSegment(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
   const dx = x1 - x0;

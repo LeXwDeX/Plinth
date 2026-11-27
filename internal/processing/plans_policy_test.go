@@ -85,7 +85,7 @@ func policyPlanFixture(t *testing.T, capability, mode string) (*Service, *gatewa
 		t.Fatal(err)
 	}
 	grants := &memoryGrants{grants: map[string]executiongrant.Grant{}, gateway: gateway}
-	policy := approvalpolicy.New("manual", []string{"auto", "manual"},
+	policy := approvalpolicy.New("manual", []string{"auto", "budget", "manual"},
 		[]string{"text-to-3d", "image-to-3d", "retexture"},
 		[]string{"text-to-3d", "image-to-3d", "retexture", "remesh"})
 	service.WithGrants(&executiongrant.Service{Grants: grants, Prepared: grants, Policy: policy, Modes: fixedMode(mode)})
@@ -100,7 +100,8 @@ func policyPlanFixture(t *testing.T, capability, mode string) (*Service, *gatewa
 
 func TestProcessingStepApprovedByPolicySubmitsWithoutPausing(t *testing.T) {
 	for _, tc := range []struct{ name, capability, mode string }{
-		{"manual remesh", "remesh", "manual"},
+		// #702: strict asks for every step; budget ("approve") approves remesh.
+		{"budget remesh", "remesh", "budget"},
 		{"auto retexture", "retexture", "auto"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

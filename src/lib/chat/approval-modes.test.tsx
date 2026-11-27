@@ -22,10 +22,10 @@ describe('approval modes', () => {
     const options = approvalModeOptions(schema);
     expect(options.map((option) => option.mode)).toEqual(['auto', 'budget', 'manual']);
     expect(options[0].label).toBe('自动');
-    expect(options[1].label).toBe('预算（制作计划）');
-    expect(options[1].tooltip).toContain('制作计划');
+    expect(options[1].label).toBe('审批');
+    expect(options[1].tooltip).toContain('3D 步骤每一步');
     expect(options[2].label).toBe('严格（逐步批准）');
-    expect(options[2].tooltip).toContain('文生 3D');
+    expect(options[2].tooltip).toContain('每一个付费步骤');
 
     schema.chat.approval_policy.modes = ['manual'];
     expect(approvalModeOptions(schema).map((option) => option.mode)).toEqual(['manual']);

@@ -1221,6 +1221,16 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 	if policy.ManualCreditsThreshold < 0 {
 		return fmt.Errorf("approval_policy.manual_credits_threshold 不能为负数: %d", policy.ManualCreditsThreshold)
 	}
+	// A known mode the Catalog does not offer is ignored, so removing a mode
+	// keeps an older Catalog readable.
+	for mode, count := range policy.GenerationCheckpoint {
+		if !known[mode] {
+			return fmt.Errorf("approval_policy.generation_checkpoint 引用了未知模式 %q", mode)
+		}
+		if count <= 0 {
+			return fmt.Errorf("approval_policy.generation_checkpoint[%s] 必须为正数", mode)
+		}
+	}
 	if err := validateApprovalPrompt(policy.Prompt, offered); err != nil {
 		return err
 	}
@@ -1720,7 +1730,8 @@ func validateChatAttachments(schema ChatSchema) error {
 		!strings.Contains(context.SelectionCaptureTemplate, "{capture_id}") ||
 		strings.TrimSpace(context.SelectionPickedTemplate) == "" ||
 		!strings.Contains(context.UnknownHandleTemplate, "{handle}") ||
-		!strings.Contains(context.WrongHandleKindTemplate, "{handle}") {
+		!strings.Contains(context.WrongHandleKindTemplate, "{handle}") ||
+		(context.EmptySelectionTemplate != "" && !strings.Contains(context.EmptySelectionTemplate, "{handle}")) {
 		return errors.New("context 的选中对象或句柄提示模板缺少占位符")
 	}
 	if context.MaximumAttachmentsPerMessage <= 0 || context.MaximumSelection <= 0 {
@@ -4271,7 +4282,7 @@ func validateChatVision(schema ChatSchema) error {
 		}
 		for _, source := range role.Sources {
 			switch source {
-			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceStyle,
+			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceSelection, ChatVisionSourceStyle,
 				ChatVisionSourceRender, ChatVisionSourceGenerated, ChatVisionSourceHistory:
 			default:
 				return fmt.Errorf("context.vision.roles[%d] 的 source %q 无效", index, source)
@@ -4314,6 +4325,14 @@ func validateChatVision(schema ChatSchema) error {
 	}
 	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
 		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
+	}
+	// A selection role shows a picture beside its handle (#679): without the
+	// intro and the handle label the model could not tell it from a result.
+	if seenSources[ChatVisionSourceSelection] {
+		if strings.TrimSpace(vision.SelectionIntro) == "" ||
+			!strings.Contains(vision.SelectionLabelTemplate, "{handle}") {
+			return errors.New("context.vision 声明 selection 角色时必须提供 selection_intro，且 selection_label_template 必须包含 {handle}")
+		}
 	}
 	if err := validateVisionInvalidPicture(vision.InvalidPicture); err != nil {
 		return err

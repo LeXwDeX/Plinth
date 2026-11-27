@@ -8,6 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { ChatColumn } from '@/components/studio/chat-column';
 import { Lightbox } from '@/components/studio/lightbox';
 import { MaskDiscardDialog } from '@/components/studio/mask-discard-dialog';
+import { Model3DConfirmHost } from '@/components/studio/model3d-confirm-dialog';
 import { RightPanel } from '@/components/studio/right-panel';
 import { ShortcutPanel } from '@/components/studio/shortcut-panel';
 import { Stage } from '@/components/studio/stage';
@@ -20,6 +21,7 @@ import { useAssetListPresence } from '@/hooks/use-asset-list-presence';
 import { useStudioShortcuts } from '@/hooks/use-stage-viewer';
 import { useTaskCompletionNotice } from '@/hooks/use-task-completion-notice';
 import { useTaskTracker } from '@/hooks/use-task-tracker';
+import { useNarrowWindowPanel } from '@/hooks/use-narrow-window-panel';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { useProjectStore } from '@/store/project-store';
 
@@ -32,6 +34,7 @@ export function StudioShell() {
     <Surface variant="base" radius="none" className="flex h-dvh min-h-0 flex-col overflow-clip text-foreground" data-testid="studio-shell">
       <StudioEffects />
       <AssetListPresenceEffect />
+      <NarrowWindowEffect />
       <ConnectivityBanner />
       <StudioTopbar />
       <main className="relative flex min-h-0 flex-1">
@@ -46,6 +49,7 @@ export function StudioShell() {
         <TaskDrawer />
         <Lightbox />
         <ResultDetailHost />
+        <Model3DConfirmHost />
         <ShortcutPanel />
         <MaskDiscardDialog />
       </main>
@@ -81,5 +85,11 @@ function AssetListPresenceEffect() {
     enabled: Boolean(schema.asset_list?.presence?.heartbeat_seconds),
     schema,
   });
+  return null;
+}
+
+/** #696: folds the right panel when the window is too narrow for it; its own component so a resize redraws nothing else. */
+function NarrowWindowEffect() {
+  useNarrowWindowPanel();
   return null;
 }

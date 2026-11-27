@@ -44,7 +44,7 @@ func TestOpenAICurrentProtocolThroughApplication(t *testing.T) {
 				http.Error(w, "bad form", 400)
 				return
 			}
-			if r.FormValue("model") != "gpt-image-2.6-sunburst" || r.FormValue("prompt") != "fox" {
+			if r.FormValue("model") != "gpt-image-2.6-sunburst" || r.FormValue("prompt") != "Edit only the masked area: fox. Keep everything outside the masked area exactly unchanged." {
 				t.Errorf("edit fields: model=%q prompt=%q", r.FormValue("model"), r.FormValue("prompt"))
 			}
 			if file, _, err := r.FormFile("image[]"); err != nil {

@@ -66,10 +66,7 @@ func (executor *Executor) handleFailure(command chat.ToolCommand, err error) err
 	if !errors.As(err, &unknown) {
 		return err
 	}
-	template := executor.localized(command, executor.chat.Context.UnknownHandleTemplate)
-	if unknown.Reason == "kind" {
-		template = executor.localized(command, executor.chat.Context.WrongHandleKindTemplate)
-	}
+	template := executor.localized(command, chat.HandleRefusalTemplate(executor.chat.Context, unknown.Handle, unknown.Reason))
 	return &referenceRefusal{message: strings.ReplaceAll(template, "{handle}", unknown.Handle)}
 }
 

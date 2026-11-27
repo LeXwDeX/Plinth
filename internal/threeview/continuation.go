@@ -19,16 +19,28 @@ var errViewNotFinished = errors.New("threeview: view task did not succeed")
 
 // Reason codes a continuation can stop with. The Schema words each one.
 const (
-	ReasonBudgetNotCovered     = "budget_not_covered"
-	ReasonViewNotFinished      = "view_not_finished"
-	ReasonViewAlreadyStarted   = "view_already_started"
+	ReasonBudgetNotCovered   = "budget_not_covered"
+	ReasonViewNotFinished    = "view_not_finished"
+	ReasonViewAlreadyStarted = "view_already_started"
+	// ReasonViewAwaitingApproval stops at a view whose grant waits for a
+	// decision or for its submit: a person may have started it on the card,
+	// or the continuation itself asked and the plan did not cover it. Neither
+	// is a failure; the Schema words it without naming who started it (#689).
+	ReasonViewAwaitingApproval = "view_awaiting_approval"
 	ReasonConsistencyExhausted = "consistency_retries_exhausted"
+	// ReasonGenerationCheckpoint stops a bounded continuation before it
+	// submits past the turn's per-turn generation guard
+	// (max_generation_calls_per_turn, #693). The name stays from #694; the
+	// session's approval window (#702) pauses as ReasonViewAwaitingApproval.
+	ReasonGenerationCheckpoint = "generation_checkpoint"
 )
 
 // ContinuationResult is what one continuation step did (#243): it either
 // submitted the next view (TaskID), paused without submitting (Paused), or
 // finished the required views (Completed). Retried says the submitted view is
-// a redraw of the same rejected view.
+// a redraw of the same rejected view. Awaiting says TaskID names a view that
+// was already running when the continuation reached it (a person started it
+// on the card, #689/#693): nothing was submitted, the call waits for it.
 type ContinuationResult struct {
 	Group           Group
 	Completed       []View
@@ -37,6 +49,7 @@ type ContinuationResult struct {
 	Retried         bool
 	Attempt         int
 	MaximumAttempts int
+	Awaiting        bool
 	Paused          bool
 	Reason          string
 	View            string
@@ -95,6 +108,19 @@ func (s *Service) Continue(ctx context.Context, owner, session, runID, taskID, t
 func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskID, turnID string,
 	includeRight bool,
 ) (ContinuationResult, error) {
+	return s.ContinueWithin(ctx, owner, session, runID, taskID, turnID, includeRight, -1)
+}
+
+// ContinueWithin is ContinueWith inside the turn's generation checkpoint
+// (#693): remaining is how many more views the continuation may submit before
+// the checkpoint, or negative for no bound. A bounded continuation (the auto
+// mode, or the budget mode inside its plan) never pauses a group because a
+// view stayed inconsistent: it keeps redrawing that view until the
+// checkpoint, where it stops before submitting (ReasonGenerationCheckpoint).
+// Without a bound a redraw stays within consistency.max_attempts_per_view.
+func (s *Service) ContinueWithin(ctx context.Context, owner, session, runID, taskID, turnID string,
+	includeRight bool, remaining int,
+) (ContinuationResult, error) {
 	if !s.schema.Continuation.Enabled {
 		return ContinuationResult{}, ErrInvalid
 	}
@@ -139,7 +165,7 @@ func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskI
 			}
 		}
 	}
-	result, err := s.advanceRequired(ctx, settled, turnID, steps)
+	result, err := s.advanceRequired(ctx, settled, turnID, steps, remaining)
 	if err != nil || !rightDropped || result.Paused || result.TaskID != "" {
 		return result, err
 	}
@@ -203,10 +229,11 @@ func (s *Service) stepsWithOptional(run skillrun.Run, required []skillrun.Step) 
 // advanceRequired walks the given views (the required ones, and with the auto
 // mode's four-view request the right view) in order: it pauses on a view that
 // did not finish, redraws the first rejected view within the attempt limit,
-// submits the first planned view the active plan covers, and reports the group
-// complete when every required view is accepted.
+// submits the first planned view the active plan covers, waits for a view
+// that is already running, and reports the group complete when every
+// required view is accepted. remaining bounds the submissions (ContinueWithin).
 func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID string,
-	steps []skillrun.Step,
+	steps []skillrun.Step, remaining int,
 ) (ContinuationResult, error) {
 	owner := run.OwnerID
 	for _, step := range steps {
@@ -219,7 +246,7 @@ func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID 
 			case skillrun.Accepted:
 				continue
 			case skillrun.Rejected:
-				return s.continueRejected(ctx, run, step, ContinuationResult{View: step.Spec.Key, Attempt: step.Attempt}, turnID)
+				return s.continueRejected(ctx, run, step, ContinuationResult{View: step.Spec.Key, Attempt: step.Attempt}, turnID, remaining)
 			default:
 				updated, err := s.settleStep(ctx, owner, run, step.Spec.Key)
 				if errors.Is(err, errViewNotFinished) {
@@ -233,10 +260,13 @@ func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID 
 					step = run.Steps[index]
 				}
 				if step.Review == skillrun.Rejected {
-					return s.continueRejected(ctx, run, step, ContinuationResult{View: step.Spec.Key, Attempt: step.Attempt}, turnID)
+					return s.continueRejected(ctx, run, step, ContinuationResult{View: step.Spec.Key, Attempt: step.Attempt}, turnID, remaining)
 				}
 			}
 		case skillrun.Planned:
+			if remaining == 0 {
+				return pausedAt(ctx, s, run, step.Spec.Key, ReasonGenerationCheckpoint)
+			}
 			submission, err := s.prepareAndSubmit(ctx, owner, run, step.Spec.Key, turnID)
 			if err != nil {
 				return ContinuationResult{}, err
@@ -266,7 +296,17 @@ func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID 
 				run = updated
 				continue
 			}
+			if !task.State.Terminal() {
+				// A view a person started on the card while the series ran is
+				// not a failure (#689, #693): the call waits for it and goes
+				// on with the views after it.
+				result := ContinuationResult{View: step.Spec.Key, TaskID: string(step.TaskID), Task: task, Awaiting: true}
+				result.Group = projectOrEmpty(ctx, s, run)
+				return result, nil
+			}
 			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewNotFinished)
+		case skillrun.GrantPending:
+			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewAwaitingApproval)
 		default:
 			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewAlreadyStarted)
 		}
@@ -293,8 +333,11 @@ func projectAfter(ctx context.Context, s *Service, owner generation.OwnerID, run
 	return projectOrEmpty(ctx, s, fallback)
 }
 
+// continueRejected redraws a rejected view. Without a bound (remaining < 0)
+// it stops at consistency.max_attempts_per_view; a bounded continuation
+// redraws until the turn's generation checkpoint instead (#693).
 func (s *Service) continueRejected(ctx context.Context, run skillrun.Run, step skillrun.Step,
-	result ContinuationResult, turnID string,
+	result ContinuationResult, turnID string, remaining int,
 ) (ContinuationResult, error) {
 	owner := run.OwnerID
 	consistency := s.consistencyForRecipe(run.RecipeID)
@@ -308,10 +351,18 @@ func (s *Service) continueRejected(ctx context.Context, run skillrun.Run, step s
 	// and the exhausted case (#283); a picture that cannot be read again
 	// leaves them empty.
 	result.FailedReasons, _ = s.rejectionReasons(ctx, owner, run, step)
-	if step.Attempt+1 >= maximum {
+	switch {
+	case remaining == 0:
+		result.Paused, result.Reason = true, ReasonGenerationCheckpoint
+		result.Group, _ = s.project(ctx, run)
+		return result, nil
+	case remaining < 0 && step.Attempt+1 >= maximum:
 		result.Paused, result.Reason = true, ReasonConsistencyExhausted
 		result.Group, _ = s.project(ctx, run)
 		return result, nil
+	case remaining > 0:
+		// No attempt limit here: the checkpoint bounds the redraws.
+		result.MaximumAttempts = 0
 	}
 	if _, err := s.runtime.RestartStep(ctx, owner, run.ID, step.Spec.Key, step.Attempt); err != nil {
 		return result, translate(err)
@@ -347,8 +398,8 @@ type submission struct {
 // prepareAndSubmit prepares one view's frozen input, requests its grant, and
 // submits it only when the basis the series continues on approved the grant: the
 // active plan (budget mode) or the session policy (auto mode, #663). A grant
-// left pending for a person, a denial, or an approval from the other source all
-// stop without submitting.
+// left pending for a person stops as awaiting approval; a denial or an approval
+// from the other source stops as not covered. None of them submits.
 func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	stepKey, turnID string,
 ) (submission, error) {
@@ -373,9 +424,14 @@ func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID
 	if err != nil {
 		return submission{}, translate(err)
 	}
+	// A grant left pending for a person (the auto or budget approval window,
+	// #702) is not a failure: the view waits on its card.
+	if grant.Status == executiongrant.Pending {
+		return submission{Reason: ReasonViewAwaitingApproval}, nil
+	}
 	// The grant must come from the basis the series continues on: the plan's
-	// budget, or (auto mode) the session policy. A grant left pending for a
-	// person, a denial, or an approval from the other source stops here.
+	// budget, or (auto mode) the session policy. A denial or an approval from
+	// the other source stops here.
 	approved := grant.Status == executiongrant.Approved &&
 		((basis == executiongrant.ContinuationBudget && grant.ApprovedByBudget()) ||
 			(basis == executiongrant.ContinuationAuto && grant.ApprovedByPolicy()))

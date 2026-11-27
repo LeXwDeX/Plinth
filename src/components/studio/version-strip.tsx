@@ -1,6 +1,5 @@
 'use client';
 
-import { useCanvasStore } from '@/store/canvas-store';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { AlertTriangle, Box, Brush, Camera, Check, ChevronUp, Columns2, Crop, Eraser, Grid2x2, Link2Off, Maximize2, Merge, Paintbrush, Paperclip, Wand2, type LucideIcon } from 'lucide-react';
@@ -25,7 +24,7 @@ import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/com
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { groupProgress } from '@/lib/workspace/three-view';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
-import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
+import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { objectOfTile, type TilePick } from '@/lib/workspace/version-object';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
@@ -99,7 +98,10 @@ function useTileHandle(tile: VersionTile): string {
   return single ? handleOfPicture(messages, { url: tile.assets[0].url }) : '';
 }
 
-/** The handle badge: over the thumbnail of a regular tile, beside the version label of a compact one. */
+/**
+ * The handle badge: over the thumbnail of a regular tile, beside the version label of a compact one. #680: it reads
+ * as it is typed in the chat (`@img5`); the tile's hover hint says what it is for.
+ */
 function HandleBadge({ handle, className }: { handle: string; className?: string }) {
   const { schema } = useProductSchema();
   return (
@@ -107,7 +109,7 @@ function HandleBadge({ handle, className }: { handle: string; className?: string
       aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
       className={cn('pointer-events-none rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white', className)}
       data-testid="version-handle-badge"
-    >{handleLabel(handle)}</span>
+    >{handle}</span>
   );
 }
 
@@ -234,7 +236,6 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
   const { openOnStage, viewOnStage } = useObjectActions();
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick, busy, choose } = useSessionPick(chat, sessionId);
-  const boardNodes = useCanvasStore((state) => state.nodesBySession[sessionId]);
   const shownAssetId = useWorkspaceStore((state) => state.currentObject?.assetId);
   const { slotOf } = useStageViewer();
   const candidates = candidatesOf(tile, (index) => formatSchemaText(schemaText(schema, 'ui.studio.strip.candidate_n'), { index }), imageResultSlots(schema, tile.capability));
@@ -281,15 +282,13 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
       <ul className="flex gap-2">
         {candidates.map((candidate) => {
           const picked = pick?.kind === 'image' && pick.taskId === candidate.taskId && pick.assetId === candidate.assetId;
-          // Picked on the server but its picture was removed from the board: say so, the pick itself is untouched.
-          const offCanvas = picked && boardNodes !== undefined && !boardNodes.some((node) => node.type === 'image' && node.taskId === candidate.taskId);
           const shown = current && shownAssetId === candidate.assetId;
           return (
             <li key={candidate.key} className="flex w-20 flex-col gap-1">
               <button
                 type="button"
                 onClick={() => {
-                  // Looking at a candidate only shows it (#559); 选用 below still puts it on the board.
+                  // Looking at a candidate only shows it (#559); 选用 below does not put it on the board either (#681).
                   const object = objectOfTile(tile, sessionId, { taskId: candidate.taskId, assetId: candidate.assetId });
                   if (object) viewOnStage(object);
                 }}
@@ -320,14 +319,15 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
                 aria-pressed={picked}
                 data-testid="version-repick"
                 onClick={() => {
-                  // Choosing a candidate also puts it on the stage, so the next request starts from the one picked.
+                  // Choosing a candidate tells the Agent which one (the session's pick) and puts it on the stage, so the
+                  // next request starts from it; it never puts it on the board (#681: openOnStage only views).
                   void choose({ kind: 'image', taskId: candidate.taskId, assetId: candidate.assetId }).then((ok) => {
                     const object = ok ? objectOfTile(tile, sessionId, { taskId: candidate.taskId, assetId: candidate.assetId }) : null;
                     if (object) openOnStage(object);
                   });
                 }}
               >
-                {picked ? <Check /> : null}{picked ? schemaText(schema, offCanvas ? 'ui.chat.image.picked_off_canvas' : 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
+                {picked ? <Check /> : null}{picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
               </Action>
             </li>
           );
@@ -401,7 +401,9 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
       {/* The card shows a short caption; the hover hint carries the whole label and, for a failed one, why it failed.
           The wrapper is block-level and full width, so every tile of a column stays as wide as the column (its
           ring and hover background included), as the bare button was. */}
-      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined}
+      <HintTooltip name={label}
+        hint={tile.status === 'failed' && tile.failure ? tile.failure
+          : handle ? formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.hint'), { handle }) : undefined}
         reason={tile.status === 'ready' && !canDisplay ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined} className="flex w-full">
         <button
           type="button"

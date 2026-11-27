@@ -20,7 +20,7 @@ describe('the painted selection travels with a canvas turn', () => {
 
   it('rasterises the mask with the snapshot geometry and uploads it as an input asset', () => {
     expect(chat).toContain('const geometry = inpaintGeometry(artboard, deliveryPixels);');
-    expect(chat).toContain('paintMask(maskContext, geometry, maskDraftNow.strokes, \'#000000\');');
+    expect(chat).toContain('paintSubmittedMask(maskContext, geometry, maskDraftNow.strokes, \'#000000\');');
     expect(chat).toContain('selectionMask = { maskAssetId };');
     // #644: the mask makes the message a canvas turn whatever the 以画板为主 toggle says.
     expect(chat).toContain('chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,');

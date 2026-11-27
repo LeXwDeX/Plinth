@@ -103,6 +103,11 @@ func (g Grant) AgentOriginated() bool {
 // policy never approves it: it waits for a person on its card (#665).
 type RechargeGuard func(ctx context.Context, ownerID, sessionID, capability string) (string, error)
 
+// SessionApprovedSteps counts the session's grants that a person or the policy
+// approved (approved, claimed or bound), delivery grants excluded (#702). It is
+// the count the approval mode's checkpoint window is measured against.
+type SessionApprovedSteps func(ctx context.Context, ownerID, sessionID string) (int, error)
+
 // Principal is supplied by authenticated server middleware, never decoded from
 // the grant request body. Other client sources require a separate identity and
 // decision policy before they can use this service.
@@ -184,6 +189,9 @@ type Service struct {
 	// Agent-originated step consults (three-view views and their continuation,
 	// Agent processing-plan steps, #665). Nil means no guard.
 	Recharge RechargeGuard
+	// SessionPaidSteps counts the session's approved steps for the checkpoint
+	// window of the auto and budget modes (#702). Nil means no checkpoint.
+	SessionPaidSteps SessionApprovedSteps
 }
 
 func (s Service) now() time.Time {
@@ -371,6 +379,19 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	if normalized == approvalpolicy.ModeSteps {
 		return s.applyStepPolicy(ctx, grant, snapshot)
 	}
+	// Every window of approved steps of the session, the next step asks a
+	// person once, whatever the mode or a plan would decide (#702). Approving
+	// it moves the count on, so the window starts again; denying it leaves the
+	// count where it is, so the step after it asks again.
+	if s.SessionPaidSteps != nil && (normalized == approvalpolicy.ModeAuto || normalized == approvalpolicy.ModeBudget) {
+		approvedSteps, err := s.SessionPaidSteps(ctx, ownerID, grant.SessionID)
+		if err != nil {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err
+		}
+		if s.Policy.CheckpointDue(normalized, approvedSteps) {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman}, ErrHumanRequired
+		}
+	}
 	// A budget-mode Agent step is decided against the approved plan before the
 	// per-capability rules. A browser-started step and a grant created before
 	// budget eligibility existed still follow manual's rules below.
@@ -396,7 +417,12 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	// manual mode the policy's per-step credit threshold cards the expensive
 	// processing steps that the capability list does not name (#490). The
 	// estimate is the frozen one the approval card shows.
-	if approvalpolicy.RequiresHumanForCredits(s.Policy, mode, snapshot.Capability, snapshot.EstimatedCredits) {
+	// #702: strict asks for every step the Agent starts; a 2D step the person
+	// started in the browser (not one of an Agent-created plan) was their own
+	// click, which is the consent, so it does not ask a second time.
+	personClick := normalized == approvalpolicy.ModeManual && grant.Source == HumanBrowser &&
+		!grant.AgentOriginated() && s.Policy.StrictSparesPersonClick(snapshot.Capability)
+	if !personClick && approvalpolicy.RequiresHumanForCredits(s.Policy, mode, snapshot.Capability, snapshot.EstimatedCredits) {
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
 	// An Agent step that spends extra credits is the person's to approve in

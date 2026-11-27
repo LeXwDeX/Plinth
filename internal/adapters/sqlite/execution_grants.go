@@ -473,6 +473,22 @@ func (r *Repository) GetExecutionGrant(ctx context.Context, owner, requestID str
 	return grantByRequest(ctx, r.db, owner, requestID)
 }
 
+// SessionApprovedGrants counts the owner's grants of one session that a person
+// or the session policy approved (approved, claimed or bound), delivery grants
+// excluded: the count the approval mode's checkpoint window is measured
+// against (#702). A denied or still pending grant does not count.
+func (r *Repository) SessionApprovedGrants(ctx context.Context, owner, session string) (int, error) {
+	if owner == "" || session == "" {
+		return 0, executiongrant.ErrInvalid
+	}
+	var count int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_grants
+ WHERE owner_id = ? AND session_id = ? AND status IN (?, ?, ?) AND source <> ?`,
+		owner, session, executiongrant.Approved, executiongrant.Claimed, executiongrant.Bound,
+		executiongrant.Delivery).Scan(&count)
+	return count, err
+}
+
 // ClaimExecutionGrantOnConn runs after BEGIN IMMEDIATE on the SAME connection
 // that inserts generation_tasks. Caller must pass the exact prepared identity
 // and commit only after BindExecutionGrantOnConn succeeds. A bound replay returns

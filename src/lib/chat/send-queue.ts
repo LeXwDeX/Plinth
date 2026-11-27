@@ -1,6 +1,5 @@
 import type { ChatAttachmentClaim, ChatMentionClaim } from '@/lib/chat/attachments';
 import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import type { AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { sessionTurnRunning } from '@/lib/chat/turn-running';
 import type { ChatMessage } from '@/store/chat-store';
 
@@ -10,6 +9,7 @@ import type { ChatMessage } from '@/store/chat-store';
  * next turn, when the running turn ends. What it should act on (pictures, the
  * claims that prove their origin, the object on the stage) is captured when it
  * is queued, so a later change of the stage does not change what was asked.
+ * A turn stored before #697 may still carry `attachmentPurposes`; it is no longer read or sent.
  */
 export interface QueuedTurn {
   id: string;
@@ -19,14 +19,14 @@ export interface QueuedTurn {
   selection: ChatAttachmentClaim[];
   /** The `@` references of the text, resolved by the server when the turn runs. */
   mentions?: ChatMentionClaim[];
-  /** The per-picture purposes the person set before the turn was queued. */
-  attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[];
   /** The source the person chose when the turn was queued (#266): the canvas when `selection` is its snapshot. */
   inputSource?: string;
   /** #244: the frozen selection mask that was uploaded with the queued canvas turn. */
   selectionMask?: { maskAssetId: string };
   /** #65: the structured multiview request the turn was queued with. */
   multiview?: MultiviewTurnRequest;
+  /** #678: the 3D model the person confirmed for this one turn (by workspace domain); no lock was written. */
+  domainModels?: Record<string, string>;
   /** #154: the one-turn style-lock exemption the turn was queued with. */
   styleLockSkipped?: boolean;
   /**

@@ -2,35 +2,35 @@ package approvalpolicy
 
 import "testing"
 
-// #490: manual mode cards a step by what it costs, not only by which capability
-// it is. The amount is the frozen per-step estimate (base plus extra), the same
+// #490: the budget ("approve") mode cards a step by what it costs, not only by
+// which capability it is (#702: strict asks for every step anyway). The amount is the frozen per-step estimate (base plus extra), the same
 // number the approval card shows.
-func TestManualModeCardsAStepByItsCredits(t *testing.T) {
+func TestBudgetModeCardsAStepByItsCredits(t *testing.T) {
 	policy := testPolicy().WithCreditsThreshold(20)
 	// A capability the manual list does not name: the expensive processing step
 	// this rule exists for (rigging 25, remesh 35/40, mesh-completion 50).
-	if !RequiresHumanForCredits(policy, ModeManual, "format-conversion", 50) {
+	if !RequiresHumanForCredits(policy, ModeBudget, "format-conversion", 50) {
 		t.Error("a 50-credit step of an unlisted capability was auto-approved")
 	}
-	if RequiresHumanForCredits(policy, ModeManual, "format-conversion", 19) {
+	if RequiresHumanForCredits(policy, ModeBudget, "format-conversion", 19) {
 		t.Error("a 19-credit step of an unlisted capability was carded")
 	}
 	// The threshold is inclusive: the declared number itself is the number the
 	// policy names.
-	if !RequiresHumanForCredits(policy, ModeManual, "format-conversion", 20) {
+	if !RequiresHumanForCredits(policy, ModeBudget, "format-conversion", 20) {
 		t.Error("a step at exactly the threshold was auto-approved")
 	}
 	// A capability the list names keeps its card at its own price (the 15-credit
 	// text-to-3d).
-	if !RequiresHumanForCredits(policy, ModeManual, "text-to-3d", 15) {
+	if !RequiresHumanForCredits(policy, ModeBudget, "text-to-3d", 15) {
 		t.Error("a listed capability lost its card")
 	}
 	// A free step of an unlisted capability is still automatic, and an unknown
 	// capability is never auto-approved whatever it costs.
-	if RequiresHumanForCredits(policy, ModeManual, "format-conversion", 0) {
+	if RequiresHumanForCredits(policy, ModeBudget, "format-conversion", 0) {
 		t.Error("a free step of an unlisted capability was carded")
 	}
-	if !RequiresHumanForCredits(policy, ModeManual, "text-to-video", 1) {
+	if !RequiresHumanForCredits(policy, ModeBudget, "text-to-video", 1) {
 		t.Error("an unknown capability was auto-approved")
 	}
 }
@@ -61,12 +61,12 @@ func TestCreditsThresholdIsOffWithoutTheOption(t *testing.T) {
 	// #490, which does not declare the field) decides on the capability list
 	// alone, exactly as RequiresHuman does.
 	policy := testPolicy()
-	if RequiresHumanForCredits(policy, ModeManual, "format-conversion", 5000) {
+	if RequiresHumanForCredits(policy, ModeBudget, "format-conversion", 5000) {
 		t.Error("a policy without a threshold carded a step by its credits")
 	}
 	for _, capability := range policy.KnownCapabilities {
-		if got, want := RequiresHumanForCredits(policy, ModeManual, capability, 5000),
-			RequiresHuman(policy, ModeManual, capability); got != want {
+		if got, want := RequiresHumanForCredits(policy, ModeBudget, capability, 5000),
+			RequiresHuman(policy, ModeBudget, capability); got != want {
 			t.Errorf("without a threshold manual %s = %v, want %v", capability, got, want)
 		}
 	}

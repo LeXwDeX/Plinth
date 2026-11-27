@@ -61,16 +61,16 @@ describe('every chip above the composer is one component of one size', () => {
     expect(composer).not.toMatch(/h-8 max-w-full|size-9 shrink-0/);
   });
 
-  it('keeps the attachment purpose controls in the attachment group, after the one row that holds every chip (#405)', () => {
+  it('keeps the notices for attached pictures in the attachment group, after the one row that holds every chip (#405, #697)', () => {
     // The attachment chips joined the other chips in one wrapping row, so two strips can share a line; the group that
-    // follows keeps the purpose controls and the notices for the pictures attached.
+    // follows keeps only the notices for the pictures attached (#697 removed the purpose controls).
     const row = composer.slice(composer.indexOf('data-testid="composer-chips"'), composer.indexOf('data-testid="composer-attachments"'));
     expect(row.indexOf('testId="composer-object-chip"')).toBeGreaterThan(-1);
     expect(row.indexOf('testId="composer-skill-chip"')).toBeLessThan(row.indexOf('testId="composer-attachment-chip"'));
     const group = composer.slice(composer.indexOf('data-testid="composer-attachments"'), composer.indexOf('<input\n        ref={fileInput}'));
     expect(group).not.toContain('composer-attachment-chip');
-    expect(group.indexOf('data-testid="composer-attachment-purposes"')).toBeGreaterThan(-1);
-    expect(group.indexOf('data-testid="composer-attachment-purposes"')).toBeLessThan(group.indexOf('data-testid="composer-attachment-purpose"'));
+    expect(group).toContain('<ReferenceSizeNotice');
+    expect(group).not.toContain('composer-attachment-purpose');
   });
 
   it('says a typed handle takes the turn, greys the object chip, and lets the send leave the object out', () => {
@@ -81,13 +81,15 @@ describe('every chip above the composer is one component of one size', () => {
     expect(chat).toContain("overridingHandle(written, chipHandleRef.current) !== ''");
   });
 
-  it('writes the purpose chosen for an attachment into the message', () => {
+  // #697: the purpose control is gone; nothing about a purpose is shown, sent or written into the message.
+  it('neither shows nor sends an attachment purpose', () => {
     const chat = source('./chat-column.tsx');
-    // Each picture's own purpose, not the last choice for all of them (#212).
-    expect(chat).toContain('withPurposeNote(written, purposeLine)');
-    expect(chat).toContain('purposeNote(attachedImages.map((_, index) => attachmentPurposes[index] ?? null)');
-    expect(chat).not.toContain('`ui.studio.composer.attachment.note_${attachmentPurpose}`');
-    expect(chat).toContain('setAttachmentPurpose(null)');
-    expect(composer).toContain('data-testid="composer-attachment-purpose"');
+    for (const gone of ['withPurposeNote', 'purposeNote', 'attachmentPurposes', 'setAttachmentPurpose', 'pinnedPurpose', 'hasMultipleInputPurposes',
+      'attachment_purpose_single_input', '@/lib/chat/attachment-purpose']) {
+      expect(chat).not.toContain(gone);
+    }
+    for (const gone of ['PurposeSegment', 'composer-attachment-purpose', 'attachment.purpose', 'onAttachmentPurpose', 'pinnedPurpose']) {
+      expect(composer).not.toContain(gone);
+    }
   });
 });

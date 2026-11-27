@@ -35,6 +35,7 @@ const finished = (taskId: string, sessionId: string): TrackedTask => {
 
 const storeState: { trackedTasks: TrackedTask[]; setCurrentObject: () => void } = { trackedTasks: [finished('task-a', 'session-a'), finished('task-b', 'session-b')], setCurrentObject: () => {} };
 vi.mock('@/store/workspace-store', () => ({
+  domainCapabilities: () => [],
   useWorkspaceStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 vi.mock('@/store/chat-store', () => ({

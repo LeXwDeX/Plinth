@@ -18,9 +18,14 @@ import { stepIndex, type LightboxItem, type LightboxState } from '@/lib/workspac
 
 export const CHAT_WIDTH_DEFAULT = 440;
 export const CHAT_WIDTH_MIN = 440;
-export const CHAT_WIDTH_MAX = 640;
+/** #695: the chat column may be widened to half the window, never past the stage's minimum room. */
+export const CHAT_WIDTH_MAX_FRACTION = 0.5;
+/** #696: the stage keeps at least this many pixels; the chat's 440 floor still comes first. */
+export const STAGE_MIN_WIDTH = 320;
 /** 收起后的窄条宽度。 */
 export const CHAT_RAIL_WIDTH = 56;
+/** The right panel's tab rail with its border: all the panel takes while folded. */
+export const PANEL_RAIL_WIDTH = 37;
 
 /** While the studio watches for versions the tracker does not know of, the chain is read this often. */
 export const VERSIONS_WATCH_INTERVAL_MS = 3000;
@@ -66,9 +71,39 @@ interface StudioPrefs {
 
 export const STUDIO_PREFS_KEY = 'art-ai-studio-prefs';
 
-export function clampChatWidth(width: number): number {
+/**
+ * The widest the chat column may be in a window `viewportWidth` wide whose right panel takes `rightWidth`
+ * (#695, #696): half the window, less if the stage would get under its minimum, never under the 440 floor.
+ * Order: the floor first, then the stage's minimum, then the half-window cap.
+ */
+export function chatWidthMax(viewportWidth: number, rightWidth: number): number {
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(rightWidth)) return CHAT_WIDTH_MIN;
+  const half = Math.floor(viewportWidth * CHAT_WIDTH_MAX_FRACTION);
+  const room = Math.floor(viewportWidth - rightWidth - STAGE_MIN_WIDTH);
+  return Math.max(CHAT_WIDTH_MIN, Math.min(half, room));
+}
+
+/** What the right panel takes: its content column (Schema width) and the tab rail, or the rail alone while folded. */
+export function rightPanelWidth(panelContentWidth: number, panelCollapsed: boolean): number {
+  return panelCollapsed ? PANEL_RAIL_WIDTH : panelContentWidth + PANEL_RAIL_WIDTH;
+}
+
+/**
+ * #696: whether the open right panel leaves the stage its minimum beside the chat at its narrowest (the 440 floor,
+ * or the rail while the chat is folded). When it does not, the panel is folded before the chat is narrowed.
+ */
+export function rightPanelFits(viewportWidth: number, panelContentWidth: number, chatCollapsed: boolean): boolean {
+  const chat = chatCollapsed ? CHAT_RAIL_WIDTH : CHAT_WIDTH_MIN;
+  return viewportWidth - chat - rightPanelWidth(panelContentWidth, false) >= STAGE_MIN_WIDTH;
+}
+
+/**
+ * The 440 floor, and `max` when given. The stored width only takes the floor: the cap follows the window, so a
+ * width stored in a wide window comes back when the window is wide again (#695).
+ */
+export function clampChatWidth(width: number, max: number = Number.POSITIVE_INFINITY): number {
   if (!Number.isFinite(width)) return CHAT_WIDTH_DEFAULT;
-  return Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, Math.round(width)));
+  return Math.min(Math.max(CHAT_WIDTH_MIN, max), Math.max(CHAT_WIDTH_MIN, Math.round(width)));
 }
 
 export function readStudioPrefs(): StudioPrefs {
@@ -130,7 +165,10 @@ interface StudioState extends StudioPrefs {
   /** 起步卡片 / 重新发起：把文字放进输入框（不发送）；seq 让相同文字也能再次触发。 */
   composerPrefill: { text: string; seq: number } | null;
   /** 舞台上的动作（如"转 3D"）请 Agent 直接做一件事；由对话栏作为一轮发出。 */
-  turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[]; multiview?: MultiviewTurnRequest } | null;
+  /** `models`: a 3D model the person confirmed for this one turn (#678), by workspace domain; no lock is written. */
+  turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[]; multiview?: MultiviewTurnRequest; models?: Record<string, string> } | null;
+  /** #691: stage requests the chat column took and is still sending (until the turn ends or the send returns without one). */
+  stageTurnsSending: number;
   /** 请 3D 舞台把某个模型当前的视角截图到 2D（对话里的结果卡也能发起）。 */
   captureRequest: { taskId: string; seq: number } | null;
   /** Whether the model on the 3D stage can be captured or have a part exported (#126); `taskId` names the model it describes. */
@@ -183,8 +221,10 @@ interface StudioState extends StudioPrefs {
   prefillComposer: (text: string) => void;
   clearComposerPrefill: () => void;
   /** `selection` names the picture the turn is about (the rasterised board), instead of what the stage shows. */
-  requestTurn: (text: string, selection?: ChatAttachmentClaim[], multiview?: MultiviewTurnRequest) => void;
+  requestTurn: (text: string, selection?: ChatAttachmentClaim[], multiview?: MultiviewTurnRequest, models?: Record<string, string>) => void;
   clearTurnRequest: () => void;
+  beginStageTurn: () => void;
+  endStageTurn: () => void;
   requestCapture: (taskId: string) => void;
   clearCaptureRequest: () => void;
   setStageModelState: (stageModelState: { taskId: string; state: StageModelState } | null) => void;
@@ -235,6 +275,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     viewResetRequest: null,
     composerPrefill: null,
     turnRequest: null,
+    stageTurnsSending: 0,
     captureRequest: null,
     stageModelState: null,
     imageCommand: null,
@@ -284,10 +325,15 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     requestViewReset: () => set((state) => ({ viewResetRequest: { seq: (state.viewResetRequest?.seq ?? 0) + 1 } })),
     prefillComposer: (text) => set((state) => ({ composerPrefill: { text, seq: (state.composerPrefill?.seq ?? 0) + 1 } })),
     clearComposerPrefill: () => set({ composerPrefill: null }),
-    requestTurn: (text, selection, multiview) => set((state) => ({
-      turnRequest: { text, seq: (state.turnRequest?.seq ?? 0) + 1, ...(selection ? { selection } : {}), ...(multiview ? { multiview } : {}) },
+    requestTurn: (text, selection, multiview, models) => set((state) => ({
+      turnRequest: {
+        text, seq: (state.turnRequest?.seq ?? 0) + 1, ...(selection ? { selection } : {}), ...(multiview ? { multiview } : {}),
+        ...(models && Object.keys(models).length > 0 ? { models } : {}),
+      },
     })),
     clearTurnRequest: () => set({ turnRequest: null }),
+    beginStageTurn: () => set((state) => ({ stageTurnsSending: state.stageTurnsSending + 1 })),
+    endStageTurn: () => set((state) => ({ stageTurnsSending: Math.max(0, state.stageTurnsSending - 1) })),
     requestCapture: (taskId) => set((state) => ({ captureRequest: { taskId, seq: (state.captureRequest?.seq ?? 0) + 1 } })),
     clearCaptureRequest: () => set({ captureRequest: null }),
     setStageModelState: (stageModelState) => set({ stageModelState }),
@@ -325,3 +371,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
   };
 });
 
+
+/** #691: a stage action asked for a turn that has not been sent yet, or is still being sent (and run). */
+export function stageTurnPending(state: Pick<StudioState, 'turnRequest' | 'stageTurnsSending'>): boolean {
+  return state.turnRequest !== null || state.stageTurnsSending > 0;
+}

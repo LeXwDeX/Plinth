@@ -55,6 +55,11 @@ type ToolCommand struct {
 	// before this call, rebuilt from the units the turn checkpoint keeps
 	// (TurnCheckpoint.GenerationUnits, #665).
 	PriorGenerationCalls int
+	// OwnGenerationUnits is what the turn checkpoint holds for this call
+	// itself: a three-view continuation adds a unit for every view it submits
+	// on the call that started the group (#693), so a replay after a restart
+	// rebuilds the call's own count too.
+	OwnGenerationUnits int
 	// ConsentWaitDeadline 非零表示本轮已因等待同意而挂起过：工具在
 	// 决定未出且已过该时刻时应返回等待文案，而不是再次登记挂起。
 	ConsentWaitDeadline time.Time
@@ -2712,6 +2717,23 @@ func (orchestrator *Orchestrator) agentRequest(
 	// with the latest user message: image parts are not valid in assistant turns.
 	generatedParts := orchestrator.plannedGeneratedParts(plan)
 	styleParts := orchestrator.plannedStyleParts(plan)
+	// The current selection's pictures without a picture slot (#679) ride
+	// after the newest user message, before the generated results; their own
+	// text labels are not repeated.
+	selectedParts := orchestrator.plannedSelectionParts(plan)
+	var selectedShown map[int]bool
+	if len(plan.Selected) > 0 && lastUserMessage >= 0 {
+		for position, attachment := range history[lastUserMessage].Attachments {
+			for _, pick := range plan.Selected {
+				if attachment.Handle != "" && strings.EqualFold(attachment.Handle, pick.Handle) {
+					if selectedShown == nil {
+						selectedShown = map[int]bool{}
+					}
+					selectedShown[position] = true
+				}
+			}
+		}
+	}
 	overflowNote := budget.overflowText(plan.Dropped) + budget.skippedText(plan.Skipped)
 	visionOffNote := ""
 	if plan.Off {
@@ -2782,7 +2804,17 @@ func (orchestrator *Orchestrator) agentRequest(
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			shown = canvasShown
 		}
-		appendText(orchestrator.unpicturedLabelsExcept(message, shown))
+		labelled := shown
+		if messageIndex == lastUserMessage && len(selectedShown) > 0 {
+			labelled = map[int]bool{}
+			for position := range shown {
+				labelled[position] = true
+			}
+			for position := range selectedShown {
+				labelled[position] = true
+			}
+		}
+		appendText(orchestrator.unpicturedLabelsExcept(message, labelled))
 		if len(shown) > 0 {
 			if len(parts) == 0 && content != "" {
 				parts = append(parts, agents.ContentPart{
@@ -2821,6 +2853,16 @@ func (orchestrator *Orchestrator) agentRequest(
 			} else {
 				content += hint
 			}
+		}
+		if messageIndex == lastUserMessage && len(selectedParts) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, selectedParts...)
 		}
 		if messageIndex == lastUserMessage && len(generatedParts) > 0 {
 			if len(parts) == 0 && content != "" {
@@ -3334,6 +3376,7 @@ func (orchestrator *Orchestrator) executeTools(
 			waitDeadline = entry.Deadline
 		}
 		priorGenerationCalls := turn.Checkpoint.priorGenerationUnits(call.ID, boundTasks, taskBindings)
+		ownGenerationUnits := turn.Checkpoint.ownGenerationUnits(call.ID, boundTaskID != "")
 		tool, found := registry.resolve(call.Name, boundTaskID != "")
 		if !found && boundTaskID == "" {
 			// Current catalog availability cannot hide an already accepted Task.
@@ -3453,6 +3496,7 @@ func (orchestrator *Orchestrator) executeTools(
 				FrozenIdempotencyKey: frozenKey,
 				TaskWaitDeadline:     waitDeadline,
 				PriorGenerationCalls: priorGenerationCalls,
+				OwnGenerationUnits:   ownGenerationUnits,
 				ConsentWaitDeadline:  command.ConsentWaitDeadline,
 				Call:                 call,
 				Tool:                 tool,

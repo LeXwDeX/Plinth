@@ -170,7 +170,7 @@ func TestNewThreeViewGroupDeniesTheEndedGroupsApproval665(t *testing.T) {
 			}
 			// No case here leaves a grant on the new group, so none uses the
 			// turn's only generation.
-			if executor.generationLimitWouldBeReached(executor.scopeKey(command), command.AssistantMessageID, "next", 0, 1) {
+			if executor.generationLimitWouldBeReached(executor.scopeKey(command), command.AssistantMessageID, "next", 0, 1, executor.maxGeneration) {
 				t.Fatal("a call that started no grant used up the turn's generation")
 			}
 			if tt.creates > 0 && !result.GenerationUnitsTakenBack {

@@ -149,10 +149,12 @@ export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 # 1c. release-env.py dev-test == the plain entry for the same target, plus the
 #     Compose project and the other projects on its host (#261: the repository
 #     names no environment's project, so the server steps need them passed),
-#     and the protected directories for the migration tools (#334).
+#     and the protected directories for the migration tools (#334), and the
+#     release string, git describe of origin/main without --release-version (#676).
 : >"$MOCK_TRACE"
 (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test) >/dev/null
-sed "s#^ssh \\([^ ]*\\) RETENTION_SCRIPT=#ssh \\1 RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2 ART_AI_PROTECTED_PATHS=$DEFAULT_ROOT:/srv/legacy-app RETENTION_SCRIPT=#" \
+DESCRIBED=$(git -C "$WORK/repo" describe --tags --always "origin/main^{commit}")
+sed "s#^ssh \\([^ ]*\\) RETENTION_SCRIPT=#ssh \\1 RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2 ART_AI_PROTECTED_PATHS=$DEFAULT_ROOT:/srv/legacy-app RELEASE_VERSION=$DESCRIBED RETENTION_SCRIPT=#" \
   "$WORK/expected-default" >"$WORK/expected-dev-test"
 # The Agent account check after a release (#215) reads production/agent-test.env; compare the release itself.
 diff -u "$WORK/expected-dev-test" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "dev-test via release-env.py differs from the plain entry"

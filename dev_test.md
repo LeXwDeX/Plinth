@@ -67,23 +67,28 @@ CI 作业分组：`frontend`（第 1–4 项，只装一次依赖）、`go check
 
 | | GitHub Actions |
 |---|---|
-| 触发 | 推送到 `main`、所有 Pull Request、手动；全部使用 GitHub 托管的 `ubuntu-latest` |
+| 触发 | 推送到 `main`、所有 Pull Request、手动 |
+| runner | 三个作业用同一条 `runs-on` 路由表达式（#646、#685）：推送到 `main` 与同仓库分支的 PR 走维护者的自托管 runner（标签 `azure-f16`）；fork PR 与手动运行（`workflow_dispatch`）走 GitHub 托管的 `ubuntu-latest`。规则见下方「自托管 runner」 |
 | 依赖源 | 门禁作业仅使用公共 npm registry（`registry.npmjs.org`）与公共 Go proxy，不访问内网主机；须核验运行时配置与网络，静态工作流检查不能证明实际访问 |
 | 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager`（与 `Dockerfile.go-runtime` 一致） |
-| 作业 | 三个门禁作业，全部在 `ubuntu-latest` 上运行；不新增平行作业，不构建镜像（#257） |
-| 用途 | 所有 PR 的门禁；不承担发布。托管 runner 受计费墙影响时，按下方「主机自检替代 CI」执行本机初检与主机自检 |
+| 作业 | 三个门禁作业；不新增平行作业，不构建镜像（#257）。自托管只有一台 runner，三个作业在其上依次执行，耗时约为各作业之和 |
+| 用途 | 所有 PR 的门禁与晋级前的最终完整验证；不承担发布。托管 runner 受计费墙影响时，按下方「主机自检替代 CI」执行本机初检与主机自检 |
 
 - **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地、CI 和主机 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py`（经 `--list-gates` 输出 JSON）、`scripts/host-ci` 与 `.github/workflows/ci.yml`，要求：
   - 标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；
   - **参数一致（#86）**：本地每个门禁的命令去掉已登记的“只放宽、不跳过”的本地专用参数（`--incremental false`、`-timeout=30m`、`-o /dev/null`）后须等于本节所列命令，环境变量（`CGO_ENABLED`）相同；主机 CI 跑完整的 `verify-local.py --race --force`（门禁集合与本地入口同源），单独跑的外链检查就是本节第 4 项的命令，其 `GOFLAGS` 只能是并行度 `-p=N`；Node/Go 版本以 `ci.yml` 的 `env` 为准，入口脚本读取它们的 `sed` 写法、`Dockerfile.ci` 的基础镜像版本都与之核对；
   - **工作流按结构解析（#86）**：用 `yaml` 库解析 `ci.yml`，带引号的键、流式 `{}`、块标量等写法归一成同一结构，所以额外步骤无论怎么写都会被“不是本节门禁命令”拒绝；锚点、别名和重复键直接拒绝。步骤只允许 `run`（或固定到完整提交 SHA 的 `uses` 与 `with` 白名单）加 `name`，门禁步骤上出现 `if`、`continue-on-error`、`shell`、`env`、`working-directory`、`timeout-minutes` 等字段，或作业级 `if`、`needs`、`strategy`、`continue-on-error`、`container`、`defaults` 等字段，一律拒绝；`GOFLAGS` 只允许作业级的 `-timeout=Nm`（N 不小于 10），工作流级 `env` 只允许 Node/Go 版本；
-  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业都使用 `ubuntu-latest`，并对并发分组建模。
+  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业的 `runs-on` 都逐字等于那条路由表达式，并按事件对它求值（推送 `main`、同仓库 PR 走自托管标签集；推送其他分支、fork PR、手动运行走 `ubuntu-latest`），去掉 fork 判断、让手动运行走自托管或去掉托管回退都会失败；`self-hosted` 只允许出现在这条表达式里；检出步骤不得带 `clean`、`path` 等白名单外的输入，工作流不得引用 `secrets`；并对并发分组建模。
   - 同一文件还运行 `python3 scripts/host-ci/test_host_ci.py`（主机 CI 驱动的离线单测，见「主机 CI」），因此该单测随 `pnpm test` 成为门禁的一部分，不单列门禁项。
 
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
-- **CI 与内部验收的分工**：三个门禁作业都在 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护**：`main` 只要求主机 CI 提交状态 `host-ci/gates` 通过才能合并；GitHub Actions 照常运行但不阻塞开发期合并，只在晋级 `formal-test` 前作为最终完整 CI 必须全绿。
+- **CI 与内部验收的分工**：三个门禁作业按上表的路由在自托管 runner 或 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
+- **分支保护与分工**：`main` 只要求主机 CI 提交状态 `host-ci/gates` 通过才能合并：开发期的合并以主机 CI 为准。GitHub Actions 的三个作业照常运行但不阻塞开发期合并，只在晋级 `formal-test` 前对精确的 `main` revision 作为最终完整验证必须全绿（`AGENTS.md`「实施流程」第 7 步）；这次验证在自托管 runner 上完成，或在它掉线时按下文手动回退到托管 runner 完成，两者都算。
+- **自托管 runner（#685，推翻原「不做 GitHub self-hosted runner」的决定）**：维护者在自己的常开机器上注册了一台仓库级 runner，不按 GitHub 托管分钟计费，费用不作为路由的考虑因素。标签 `azure-f16` 沿用旧名，只是一个自定义标签，与 Azure 无关（runner 已不是 Azure 按需机器）。三条规则：
+  1. **范围**：只有推送到 `main` 与同仓库分支的 PR（`github.event.pull_request.head.repo.full_name == github.repository`）走自托管；fork PR 与手动运行一律走托管 `ubuntu-latest`。外部贡献者的 PR 不触发自托管：它们最终由维护者审阅合并，fork 的代码不进自建机器。剩下的风险是同仓库分支的 PR 也能改工作流，所以自托管等价于信任所有有写权限的人；合并前须审查工作流改动。
+  2. **掉线时手动回退**：自托管 runner 掉线时，作业会一直排队（GitHub 对没有 runner 接单的作业约 24 小时后取消）。这时先取消排队中的运行，再在目标分支上手动运行本工作流（`workflow_dispatch`，不需要输入参数），由托管 runner 完成完整验证。晋级前的目标是精确的 `main` revision：`main` 没有前进时直接在 `main` 上手动运行；已经前进时，把该精确 SHA 推成临时分支 `ci-verify-<SHA 前 8 位>`，在这个分支上手动运行（推送其他分支不触发本工作流，手动运行走托管），用完删除该分支。不在 PR 上为此改路由。
+  3. **多项目共用、非临时**：这台 runner 由维护者的几个开源项目共用，不是一次性（ephemeral）的，工作区在作业之间复用。工作流因此不得依赖 runner 上的残留状态：每个作业先由 `actions/checkout` 清理工作区（默认 `clean: true`，即 `git clean -ffdx` 与 `git reset --hard`；守门测试拒绝 `clean` 等白名单外的检出输入），工作流只用 `contents: read` 与 `persist-credentials: false`，不引入任何自定义密钥。`setup-node` 的 pnpm 缓存与 `setup-go` 的模块和构建缓存仍按各 Action 的默认位置写在 runner 账号的家目录下，这只是加速：内容按锁文件和 `go.sum` 寻址，race 门禁带 `-count=1` 不读测试缓存，门禁结果只能依赖仓库内容。把这些缓存搬进工作区没有做（Go 模块缓存的只读目录会让下次检出的清理失败，前端工具也可能扫描到工作区里的缓存）。runner 主机的依赖（如 `sqlite3` 命令行）、服务化与最小权限由维护者在主机侧维护，不在仓库内。
 
 ### 主机自检替代 CI（#79）
 
@@ -128,12 +133,12 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
   **OOM 判定**：容器被 OOM 杀死（`docker inspect` 的 `OOMKilled`）或容器内 cgroup `memory.events` 的 `oom_kill` 计数非零，任一即失败；`oom_kill` 能抓到“某个子进程被杀但容器仍以 0 退出”的情形。不得靠加大超时或放宽限制绕过。
 - **离线单测与自动化回归**：`python3 scripts/host-ci/test_host_ci.py`（随 `pnpm test` 通过 `ci-gate-parity.test.ts` 运行）用桩替换 Docker、容器子进程和主机文件，覆盖：容器被 OOM 杀死（`OOMKilled`，退出码 137）、容器内 `oom_kill` 非零而退出码为 0、超时（真实的计时器触发 `docker stop`，判 `timeout`）、正常结束不触发停止、只有暂存身份不一致（退出码 20）才重试、预检的内存和磁盘边界（刚好低于/等于阈值）、阈值可配置、swap 近满只警告、槽位锁（两个槽位互斥、槽位 0 沿用 `.lock`、槽位用尽返回空）、按槽位限定的清理（槽位 1 不动槽位 0 与旧版无槽位标签的容器，槽位 0 清理二者）、维护锁、预检里对其他运行剩余余量的预留、运行中内存下限触发 `host_memory_low` 并只杀本次容器、容器 `memory.peak` 与宿主最低 `MemAvailable` 的记录、限制值校验与优先级。它不证明真实 cgroup 行为和 Docker 守护进程；真实运行的证据仍是对主机的实跑（#97）。
 - **工作流重放模式 `--workflows`（#86）**：`python3 scripts/host-ci/run.py <sha> --workflows` 在同一台 `dev-test` 主机上按 `.github/workflows` 原样执行 workflow，替代 GitHub Actions 不可用时看不到的“工作流本身”的结果。做法：与门禁模式共用同一个 bundle、同一套槽位 `flock`（两种模式占用同一类槽位，默认 1 个槽位时互不并发）、同一资源预检与清理，在主机上检出该精确提交，用固定版本的 [nektos/act](https://github.com/nektos/act)（版本与发布包 sha256 固定在 `run.py`，首次使用时从发布页下载并校验，摘要不符即拒绝）对 `pull_request` 与 `push` 两个事件各重放一遍，运行器镜像 `ubuntu-latest` 映射到以按摘要固定的 `catthehacker/ubuntu:act-24.04` 为基础、再装 `sqlite3` 的派生镜像 `plinth-ci-act:<hash>`（GitHub 的 ubuntu-latest 自带 `sqlite3` 命令行，该基础镜像没有，而 scripts tests 需要；标签由构建配方的 hash 决定，配方变化才重建）。每个作业容器与门禁容器同样限制 4 CPU、10 GiB 且 swap 等于内存，另加 `no-new-privileges`、`--pids-limit`、`plinth.host-ci=1` 标签；`--concurrent-jobs 1` 保证同一时刻只有一个作业容器，不挂 Docker socket（`--container-daemon-socket -`）。与门禁模式不同，作业需要联网（拉取 Action、npm registry、Go proxy），所以只对已审查的提交运行，且依赖 Action 的完整 SHA 固定。`--act-job <作业>` 只跑一个作业，仅用于诊断，状态描述会注明。
-  - **定位**：这是在主机上**本地模拟**执行，不注册为 GitHub self-hosted runner，上文「不做 GitHub self-hosted runner（决定）」不变：fork PR 无法把代码送到这台内网主机，只有维护者手动对已审查的提交触发。它模拟的是 workflow 文本，不是 GitHub 的调度、权限令牌、缓存服务和 runner 隔离，因此不等于 GitHub Actions success；act 对个别 Action 行为（如 `actions/checkout`、缓存）的实现也与官方 runner 有差别。
+  - **定位**：这是在主机上**本地模拟**执行，不注册为 GitHub self-hosted runner：fork PR 无法把代码送到这台内网主机，只有维护者手动对已审查的提交触发。工作流里能路由到的 runner 标签（`ubuntu-latest`、自托管标签 `azure-f16`，以及旧提交里的 `plinth-azure`）都映射到同一个受限运行器镜像；重放的 `pull_request` 事件按同仓库 PR 构造（`head.repo.full_name` 等于仓库名），与上文 CI 的自托管路由一致。它模拟的是 workflow 文本，不是 GitHub 的调度、权限令牌、缓存服务和 runner 隔离，因此不等于 GitHub Actions success；act 对个别 Action 行为（如 `actions/checkout`、缓存）的实现也与官方 runner 有差别。
   - **结果回写**：run 结束后，`run.py` 用本机 `gh` 的登录（不读项目 `.env`，不要求提供 token）对被测 SHA 写 commit status：`host-ci/gates` 对应门禁模式，`host-ci/workflows` 对应本模式；状态为 `success`/`failure`，描述写明通过的门禁数或作业数；预检不足（70）、锁占用（75）、用法错误等没有得出通过/失败结论的运行不写状态。`target_url` 默认留空，可用 `--target-url` 指向 Issue 回执；`--no-status` 关闭回写。写入的是被测 SHA 上的状态，不修改分支保护或仓库设置。
   - **结果 JSON**：`mode: workflows`，`workflows` 下记录 act 版本、运行器镜像 ID、每个事件的退出码、耗时、各作业结果（日志里找不到结果的作业标 `not_run`）和作业容器内存峰值（每 5 秒取一次带标签容器的 `docker stats`，是采样值）；通过条件是两个事件都重放、act 退出 0 且每个作业 `success`。
 - **结果 JSON**：`sha`、`tree`、`verdict`（pass/fail/not_run）与原因、预检读数（可用内存、swap 用量、磁盘）、镜像（标签、ID、是否本次构建、构建秒数）、每次尝试的容器退出码、`OOMKilled`、入口退出状态、各步骤与各门禁的结果和耗时（未运行的门禁标 `not_run`，不会被当作通过）、cgroup 的 `memory.peak` 与 `memory.events`（`oom_kill`）。通过的条件是：容器退出 0、未被 OOM（`OOMKilled` 与 cgroup `oom_kill` 计数都为 0）、没有超时、入口报告 `passed` 且每个门禁都是 `pass`。
 - **抖动**：启动器可能偶发“创建的身份/配置与请求不一致”，检出的提交/tree 与期望不符同属此类。遇到时自动用全新的暂存目录重试一次，首次尝试的证据（`attempt-1/` 下的创建配置、容器日志、结果）保留在结果里；第二次仍不一致就按失败处理，不再重试。门禁本身失败（测试红、类型错误等）不重试。
-- **不做 GitHub self-hosted runner（决定）**：公开仓库的 fork PR 可以改工作流，把任意代码送到内网主机上执行，风险不可接受（#79 的结论）；本工具由维护者手动对已审查的提交触发，不监听任何平台事件，也不注册 runner。
+- **本工具不是 GitHub self-hosted runner**：原先「不做 GitHub self-hosted runner」的决定（#79：公开仓库的 fork PR 可以改工作流，把任意代码送到内网主机上执行）已由 #685 改为只让推送 `main` 与同仓库 PR 使用上文「自托管 runner」，fork PR 仍不进自建机器。主机 CI 本身不变：由维护者手动对已审查的提交触发，不监听任何平台事件，也不注册 runner。
 - **换 runner 时复用**：门禁逻辑只在 `scripts/verify-local.py` 和 `Dockerfile.ci` 构建出的镜像里，`run.py` 与 `host_run.py` 只是把镜像送到测试主机运行的薄封装。别的 runner 做三件事：`docker build -f Dockerfile.ci -t plinth-ci .`；按 `scripts/host-ci/entry.sh` 文件头列的挂载（只读 bundle、`/work` 与 `/tmp` tmpfs、可写的 `/scratch` 与 `/out`）和 `CI_SHA`、`CI_TREE` 两个变量 `docker run`（`host_run.py` 的 `container_command` 是现成的参数清单；`/scratch`、`/out` 要让 UID 10001 可写）；读 `/out/result.json` 与退出码。把镜像直接用作某平台的 container job 没有验证过：镜像以非 root 用户运行，各平台对容器用户的要求不同。
 - **边界**：只证明被测提交在该镜像、该资源上限下通过了本节门禁；不代替 Git hooks、本机 `--race`、独立评审、`dev-test` 发布和发布后 L0/L1/L1 Agent 回归。bundle 带有该提交可达的全部历史，传输前依赖仓库的公开快照检查（`scripts/check-public-tree.sh`）保证历史不含内部标识。镜像构建需要访问公共 npm registry 与 Go proxy，只在依赖或 Dockerfile 变化时发生；运行阶段无网络。纯逻辑与 OOM/超时/预检/锁的离线单测见上文「离线单测与自动化回归」，随 `pnpm test` 运行。
 
@@ -435,7 +440,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
   脚本只引用不另定标准。
 
 ### 11.4 Agent 同意挂起验收（AGT-12）
-发布含挂起/恢复改造的版本后必须执行。会话批准方式（`auto`/`budget`/`manual`，新会话默认 `auto`，#406）决定哪些步骤等人：手工方式下只有文生 3D、图生 3D、换贴图需要人工批准，2D、重拓扑、绑骨、动画由策略批准（格式转换 Offering 已停用，规则保留）（`decided_by` 为 `policy:manual`）；带额外积分的步骤（例如额外导出格式）在手工方式下也要在对话里的批准卡上人工批准。因此挂起验收用 3D 请求，先把会话显式设为手工方式：
+发布含挂起/恢复改造的版本后必须执行。会话批准方式（`auto`/`budget`/`manual`，新会话默认 `auto`，#406）决定哪些步骤等人（#702）：手工（严格）方式下 Agent 发起的每一个付费步骤都需要人工批准，2D 也一样（用户自己点的 2D 按钮不再确认第二次）；审批（`budget`）方式下只有文生 3D、图生 3D、换贴图等需要人工批准，2D、重拓扑、绑骨、动画由策略批准（格式转换 Offering 已停用，规则保留）（`decided_by` 为 `policy:budget`）；带额外积分的步骤（例如额外导出格式）在审批方式下也要在对话里的批准卡上人工批准；自动与审批方式下本会话每批准满 100 步，下一步出一次批准卡。因此挂起验收用 3D 请求，先把会话显式设为手工方式：
 - 会话 A 触发付费 3D 生成 → 同意请求出现后**不批准**（挂起态）；
 - 会话 B 同样触发并保持不批准；
 - 会话 C 发送普通消息，必须立即得到 LLM 响应（不得排队或 AgentBusy）；
@@ -444,7 +449,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 - 会话 A 挂起中执行「停止」→ 轮次落停止终态，之后同会话可正常发起新轮次；
 - 批准卡一出现，本轮立即以等待文案收束（不再等 `consent_wait_timeout_seconds`），批准留在“待批准”里，不产生任何任务；之后批准由待批准服务提交并把结果发进会话；
 - 额外积分的批准卡（Mock 栈可验）：手工方式下发“做一个简单的木凳 3D 模型”，批准卡写明基础积分、附加积分及用途、合计，并有“批准”“不批准”；点“不批准”得到不消耗积分的说明和替代建议（减少附加选项或换模型），不产生任务；点“批准”只产生一个任务。任何一步都不得让用户去勾选“同意额外积分消耗”。`go test ./internal/app -run ExtraCredit` 覆盖手工出卡、自动授予与拒绝路径；
-- 手工方式下的 2D 请求不挂起：无待批准同意，任务 SUCCEEDED，批准来源为 `policy`，显示积分（`smoke-l2-livemodel.sh` 第一部分，一张小额文生图）。
+- 审批方式下的 2D 请求不挂起：无待批准同意，任务 SUCCEEDED，批准来源为 `policy`，显示积分（`smoke-l2-livemodel.sh` 第一部分，一张小额文生图）；严格方式下 2D 也出批准卡（#702）。
 
 ### 11.5 Go 候选验收
 - 候选对外拓扑必须只有 `art-ai-go` 一个容器、一个 Go Entrypoint 和一个

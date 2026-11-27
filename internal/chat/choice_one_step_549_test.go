@@ -260,6 +260,9 @@ type oneStepRig struct {
 	schema     catalog.ChatSchema
 	tools      *stepToolExecutor
 	agent      *scriptedAgent
+	// domain and options default to the 3D remesh card of #549.
+	domain  string
+	options []chat.ChoiceOption
 }
 
 func newOneStepRig(t *testing.T, plan *budget.Summary, responses ...agents.Completion) *oneStepRig {
@@ -290,6 +293,17 @@ func newOneStepRig(t *testing.T, plan *budget.Summary, responses ...agents.Compl
 func (rig *oneStepRig) run(t *testing.T, mode, content, answer string, step *chat.ChoiceStep) string {
 	t.Helper()
 	ctx := context.Background()
+	domain := rig.domain
+	if domain == "" {
+		domain = "model-3d"
+	}
+	options := rig.options
+	if options == nil {
+		options = []chat.ChoiceOption{
+			{ID: "balanced", Label: "保轮廓：约 5,000 三角面", Step: step, Arguments: json.RawMessage(`{}`)},
+			{ID: "bake", Label: "保留现在这套木纹", Arguments: json.RawMessage(`{}`)},
+		}
+	}
 	session, err := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +314,7 @@ func (rig *oneStepRig) run(t *testing.T, mode, content, answer string, step *cha
 		}
 	}
 	assistant, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: content,
-		Options: chat.TurnOptions{CreativeDomain: "model-3d"}})
+		Options: chat.TurnOptions{CreativeDomain: domain}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,11 +332,8 @@ func (rig *oneStepRig) run(t *testing.T, mode, content, answer string, step *cha
 		rig.store.mu.Lock()
 		rig.store.choices = []chat.Choice{{
 			ID: "choice-1", OwnerID: "owner-a", SessionID: session.ID, Kind: "next_step", Capability: "next_step", StepIndex: -1,
-			Options: []chat.ChoiceOption{
-				{ID: "balanced", Label: "保轮廓：约 5,000 三角面", Step: step, Arguments: json.RawMessage(`{}`)},
-				{ID: "bake", Label: "保留现在这套木纹", Arguments: json.RawMessage(`{}`)},
-			},
-			State: chat.ChoiceAnswered, AnswerOptionID: answer, AnswerSource: chat.ChoiceAnsweredOnCard, AnswerMessageID: userID,
+			Options: options,
+			State:   chat.ChoiceAnswered, AnswerOptionID: answer, AnswerSource: chat.ChoiceAnsweredOnCard, AnswerMessageID: userID,
 		}}
 		rig.store.mu.Unlock()
 	}
@@ -333,7 +344,7 @@ func (rig *oneStepRig) run(t *testing.T, mode, content, answer string, step *cha
 		t.Fatal(err)
 	}
 	if err := orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
-		Options: chat.TurnOptions{CreativeDomain: "model-3d"}}); err != nil {
+		Options: chat.TurnOptions{CreativeDomain: domain}}); err != nil {
 		t.Fatal(err)
 	}
 	return session.ID

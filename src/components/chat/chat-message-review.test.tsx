@@ -17,6 +17,9 @@ vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () =>
 vi.mock('@/components/ui/hint-tooltip', () => ({
   HintTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+vi.mock('@/hooks/use-workspace-offerings', () => ({
+  useWorkspaceOfferings: () => ({ offeringsByCapability: {}, modelChoices: [], isLoading: false, error: undefined }),
+}));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({
   useAssetURLRewriter: () => ({
     previewAssetUrl: (url: string) => (url ? `preview:${url}` : ''),

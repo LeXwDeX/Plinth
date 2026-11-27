@@ -103,14 +103,16 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// A refusal here leaves the run without a grant (inert: no card, not
 		// active for the guard); it takes back what an earlier attempt of the
 		// call may have left counted.
-		if found {
-			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
-				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
+		if found != threeViewNoGroup {
+			result := e.threeViewGuardRefusal(active)
+			result.GenerationUnitsTakenBack = true
+			return result, nil
 		}
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
-				GenerationUnitsTakenBack: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.maxGeneration) {
+			result := e.limitResult(command)
+			result.GenerationUnitsTakenBack = true
+			return result, nil
 		}
 		superseded, counted, resumed, release = ended, true, true, releaseSource
 	}
@@ -183,13 +185,12 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		}
 		defer releaseSource()
 		var active skillrun.Run
-		var found bool
+		var found threeViewGuard
 		active, found, superseded, err = e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0])
 		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
-		} else if found {
-			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
-				NoSubmission: true}, nil
+		} else if found != threeViewNoGroup {
+			return e.threeViewGuardRefusal(active), nil
 		}
 		// A grant to replace that a person continued since the guard read it
 		// (claimed or bound) means that group runs again: answer duplicate_run
@@ -207,8 +208,8 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// reach here and is not counted again. A call the duplicate guard
 		// refused starts no run and is not counted (#665).
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.maxGeneration) {
+			return e.limitResult(command), nil
 		}
 		counted = true
 		release = releaseSource
@@ -424,14 +425,14 @@ func (e *Executor) lockThreeViewSession(ctx context.Context, owner, session stri
 // recipe and source picture, that still waits on a card or has a view in
 // flight (#665): a view whose grant is pending or approved while its turn can
 // still use it, or being claimed, or whose Task has not ended; or a group
-// between two views whose continuation turn is still going. A finished,
-// failed or paused group, and one whose card belongs to a stopped turn, is
-// not active: asking again for it starts a new group as before. Without an
-// active group it also returns the approved, unsubmitted grants of those
-// groups whose turn ended (superseded): a new group replaces them.
+// between two views whose continuation turn is still going. A finished or
+// failed group, and one whose card belongs to a stopped turn, is not active:
+// asking again for it starts a new group as before. Without such a group it
+// also returns the approved, unsubmitted grants of those groups whose turn
+// ended (superseded): a new group replaces them.
 func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
 	source generation.AssetID,
-) (skillrun.Run, bool, []supersededThreeViewGrant, error) {
+) (skillrun.Run, threeViewGuard, []supersededThreeViewGrant, error) {
 	owner := generation.OwnerID(command.OwnerID)
 	limit := e.threeView.MaximumListed
 	if limit <= 0 {
@@ -439,7 +440,7 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 	}
 	runs, err := e.skillRuntime.List(ctx, owner, command.SessionID, "", limit)
 	if err != nil {
-		return skillrun.Run{}, false, nil, err
+		return skillrun.Run{}, threeViewNoGroup, nil, err
 	}
 	key := threeViewRunKey(command)
 	var superseded []supersededThreeViewGrant
@@ -450,10 +451,10 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 		for _, step := range run.Steps {
 			active, idle, err := e.threeViewStepActive(ctx, owner, step)
 			if err != nil {
-				return skillrun.Run{}, false, nil, err
+				return skillrun.Run{}, threeViewNoGroup, nil, err
 			}
 			if active {
-				return run, true, nil, nil
+				return run, threeViewGroupActive, nil, nil
 			}
 			if idle.RequestID != "" {
 				superseded = append(superseded, supersededThreeViewGrant{runID: run.ID, grant: idle})
@@ -461,13 +462,29 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 		}
 		active, err := e.threeViewBetweenViews(ctx, owner, run)
 		if err != nil {
-			return skillrun.Run{}, false, nil, err
+			return skillrun.Run{}, threeViewNoGroup, nil, err
 		}
 		if active {
-			return run, true, nil, nil
+			return run, threeViewGroupActive, nil, nil
 		}
 	}
-	return skillrun.Run{}, false, superseded, nil
+	return skillrun.Run{}, threeViewNoGroup, superseded, nil
+}
+
+// threeViewGuard is what the duplicate guard found for a new group's source.
+type threeViewGuard int
+
+const (
+	threeViewNoGroup threeViewGuard = iota
+	// threeViewGroupActive: a group waits on its card or runs (#665).
+	threeViewGroupActive
+)
+
+// threeViewGuardRefusal is the receipt of a call the duplicate guard refused:
+// nothing was created, submitted or charged.
+func (e *Executor) threeViewGuardRefusal(run skillrun.Run) chat.ToolResult {
+	return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", run.ID),
+		NoSubmission: true}
 }
 
 // supersededThreeViewGrant is an approved, unsubmitted view of an earlier
@@ -902,7 +919,9 @@ func (e *Executor) threeViewSubjectType(requested string) (string, string) {
 // that view, submits the next view the basis covers, and ends the tool call
 // only when the group is complete
 // or paused for a person. Accepted views travel to the Agent as same-turn
-// pictures so it can check clothing and colors.
+// pictures so it can check clothing and colors. Every view it submits counts
+// against the turn's generation checkpoint on this call (#693); a view a
+// person already started is waited for, not counted.
 func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
@@ -915,13 +934,23 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 	}
 	_ = json.Unmarshal(command.Call.Arguments, &args)
 	includeRight, _ := threeViewIncludeRight(args.IncludeRight)
-	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID, includeRight)
+	scope, turn := e.scopeKey(command), command.AssistantMessageID
+	remaining := e.generationRemaining(scope, turn, command.Call.ID, command.PriorGenerationCalls,
+		command.OwnGenerationUnits, e.maxGeneration)
+	result, err := e.threeViewService.ContinueWithin(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, turn, includeRight, remaining)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}
 	messages := e.threeView.Messages
+	if result.Awaiting {
+		// A view the person started on the card: wait for it, then go on
+		// (#689, #693). It is not this call's submission.
+		return chat.ToolResult{TaskID: result.TaskID, AwaitTask: true,
+			WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
+	}
 	if result.TaskID != "" {
+		e.addGenerationUnits(scope, turn, command.Call.ID, command.PriorGenerationCalls, command.OwnGenerationUnits, 1)
 		if observe != nil {
 			task := result.Task
 			if err := observe(chat.ToolObservation{Registered: true, TaskID: result.TaskID,
@@ -932,7 +961,14 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			}
 		}
 		content := ""
-		if result.Retried {
+		if result.Retried && result.MaximumAttempts == 0 {
+			// A bounded continuation redraws until the turn's checkpoint (#693).
+			content = strings.NewReplacer(
+				"{view}", e.threeViewSlotLabel(result, result.View),
+				"{attempt}", strconv.Itoa(result.Attempt),
+				"{reasons}", result.FailedReasons,
+			).Replace(messages.ConsistencyRedraw)
+		} else if result.Retried {
 			content = strings.NewReplacer(
 				"{view}", e.threeViewSlotLabel(result, result.View),
 				"{attempt}", strconv.Itoa(result.Attempt),
@@ -954,8 +990,15 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			if reason == "" {
 				reason = result.Reason
 			}
+			template := messages.AgentPaused
+			if (result.Reason == threeview.ReasonViewAlreadyStarted ||
+				result.Reason == threeview.ReasonViewAwaitingApproval) && messages.AgentPausedStarted != "" {
+				// Not a failure: the view was started and waits for its
+				// approval or its turn (#689); who started it is not said.
+				template = messages.AgentPausedStarted
+			}
 			content = strings.NewReplacer("{run}", run.ID, "{view}", e.threeViewSlotLabel(result, result.View),
-				"{reason}", reason).Replace(messages.AgentPaused)
+				"{reason}", reason).Replace(template)
 		}
 		return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
 	}
@@ -1110,15 +1153,12 @@ func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, toke
 	if len(tokens) > 0 && len(command.Options.ReferenceImageIndices) == 0 {
 		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 		if err != nil || len(resolved) == 0 {
-			handle, template := tokens[0], e.context.UnknownHandleTemplate
+			handle, reason := tokens[0], "unknown"
 			var unknown *chat.UnknownHandleError
 			if errors.As(err, &unknown) {
-				handle = unknown.Handle
-				if unknown.Reason == "kind" {
-					template = e.context.WrongHandleKindTemplate
-				}
+				handle, reason = unknown.Handle, unknown.Reason
 			}
-			return nil, strings.ReplaceAll(template, "{handle}", handle)
+			return nil, strings.ReplaceAll(chat.HandleRefusalTemplate(e.context, handle, reason), "{handle}", handle)
 		}
 		urls := make([]string, 0, len(resolved))
 		for _, item := range resolved {

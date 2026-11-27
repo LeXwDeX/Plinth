@@ -32,7 +32,8 @@ CAPABILITY = "text-to-3d"
 THREE_D = ("text-to-3d", "image-to-3d")
 REQUEST = ("做一个低面数的游戏道具 3D 模型：一个带金属包边的木制宝箱，面数控制在 5000 面以内。"
            "这是多步制作：先生成模型，再检查模型，面数或结构不合格就优化。"
-           "请先把制作计划和按积分单位的预算发给我批准，批准后再按计划执行。")
+           "请先提交制作计划，按积分单位列出预算，发给我批准，批准后再按计划执行。")
+# #702: the Agent proposes a plan only when the person asks for one, so the request says so.
 # Nothing starts a turn after a denial; this is how long the deny chain watches for stray work.
 DENY_SETTLE_SECONDS = 30
 

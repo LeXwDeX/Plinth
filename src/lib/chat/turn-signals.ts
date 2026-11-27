@@ -29,3 +29,22 @@ export function stageRequestStep(input: { hasSession: boolean; uploadsPending: b
   if (!input.hasSession) return 'drop';
   return input.uploadsPending ? 'wait' : 'send';
 }
+
+/**
+ * #691: sends a stage request the chat column took (step `drop` or `send`). The request stays pending without a gap
+ * from the moment it was asked for until its send is over: `begin` runs before `clear`, and `end` runs however the
+ * send ends, a turn that ran or a send that returned without one (no Agent, a model no longer offered). A dropped
+ * request is cleared and sends nothing. The turn buttons that asked for it read this state, never a flag of their own.
+ */
+export function sendStageRequest(
+  step: 'drop' | 'send',
+  handlers: { clear(): void; begin(): void; end(): void; send(): Promise<void> },
+): Promise<void> | null {
+  if (step === 'drop') {
+    handlers.clear();
+    return null;
+  }
+  handlers.begin();
+  handlers.clear();
+  return handlers.send().finally(() => handlers.end());
+}

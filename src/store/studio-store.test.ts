@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CHAT_WIDTH_DEFAULT,
-  CHAT_WIDTH_MAX,
   CHAT_WIDTH_MIN,
+  PANEL_RAIL_WIDTH,
   STUDIO_PREFS_KEY,
+  chatWidthMax,
   clampChatWidth,
+  rightPanelFits,
+  rightPanelWidth,
   readStudioPrefs,
+  stageTurnPending,
   useStudioStore,
 } from './studio-store';
 
@@ -27,11 +31,34 @@ beforeEach(() => {
 });
 
 describe('chat column width', () => {
-  it('stays within 440 to 640 pixels', () => {
-    expect(clampChatWidth(100)).toBe(CHAT_WIDTH_MIN);
-    expect(clampChatWidth(900)).toBe(CHAT_WIDTH_MAX);
-    expect(clampChatWidth(501.4)).toBe(501);
-    expect(clampChatWidth(Number.NaN)).toBe(CHAT_WIDTH_DEFAULT);
+  it('stays between 440 and the widest the window allows', () => {
+    expect(clampChatWidth(100, 720)).toBe(CHAT_WIDTH_MIN);
+    expect(clampChatWidth(900, 720)).toBe(720);
+    expect(clampChatWidth(501.4, 720)).toBe(501);
+    expect(clampChatWidth(Number.NaN, 720)).toBe(CHAT_WIDTH_DEFAULT);
+    // The floor comes first, even when the window allows less.
+    expect(clampChatWidth(600, 300)).toBe(CHAT_WIDTH_MIN);
+    // Without a cap (a stored width) only the floor applies: the cap follows the window (#695).
+    expect(clampChatWidth(900)).toBe(900);
+  });
+
+  it('may reach half the window, leaving the stage its 320 pixels (#695)', () => {
+    const open = rightPanelWidth(300, false);
+    const folded = rightPanelWidth(300, true);
+    expect(open).toBe(300 + PANEL_RAIL_WIDTH);
+    expect(folded).toBe(PANEL_RAIL_WIDTH);
+    expect(chatWidthMax(1440, open)).toBe(720);
+    expect(chatWidthMax(1920, open)).toBe(960);
+    expect(chatWidthMax(1366, open)).toBe(683);
+    // The stage's minimum holds the column under half: 1280 - 337 - 320.
+    expect(chatWidthMax(1280, open)).toBe(623);
+    // Around 1100 and narrower the column keeps today's 440.
+    expect(chatWidthMax(1100, open)).toBe(443);
+    expect(chatWidthMax(1090, open)).toBe(CHAT_WIDTH_MIN);
+    expect(chatWidthMax(800, open)).toBe(CHAT_WIDTH_MIN);
+    // A folded panel leaves more room.
+    expect(chatWidthMax(1100, folded)).toBe(550);
+    expect(chatWidthMax(Number.NaN, open)).toBe(CHAT_WIDTH_MIN);
   });
 
   it('is remembered in local storage', () => {
@@ -50,6 +77,25 @@ describe('chat column width', () => {
     expect(readStudioPrefs().chatWidth).toBe(CHAT_WIDTH_DEFAULT);
     expect(() => useStudioStore.getState().setChatWidth(560)).not.toThrow();
     expect(useStudioStore.getState().chatWidth).toBe(560);
+  });
+
+  it('folds the right panel before the stage drops under 320 pixels (#696)', () => {
+    // 440 chat + 337 panel + 320 stage = 1097.
+    expect(rightPanelFits(1440, 300, false)).toBe(true);
+    expect(rightPanelFits(1097, 300, false)).toBe(true);
+    expect(rightPanelFits(1096, 300, false)).toBe(false);
+    expect(rightPanelFits(800, 300, false)).toBe(false);
+    // With the chat folded to its 56px rail the panel fits down to 713.
+    expect(rightPanelFits(800, 300, true)).toBe(true);
+    expect(rightPanelFits(712, 300, true)).toBe(false);
+  });
+
+  it('reads a stored width back without the window cap (#695)', () => {
+    const data = stubStorage();
+    data.set(STUDIO_PREFS_KEY, '{"chatWidth":960}');
+    expect(readStudioPrefs().chatWidth).toBe(960);
+    data.set(STUDIO_PREFS_KEY, '{"chatWidth":200}');
+    expect(readStudioPrefs().chatWidth).toBe(CHAT_WIDTH_MIN);
   });
 
   it('ignores a damaged stored value', () => {
@@ -241,5 +287,35 @@ describe('right panel folding', () => {
     useStudioStore.getState().showProcess(null);
     expect(useStudioStore.getState().panelCollapsed).toBe(false);
     expect(useStudioStore.getState().panelTab3d).toBe('process');
+  });
+});
+
+describe('#691: a stage turn request is pending until its send is over', () => {
+  beforeEach(() => {
+    useStudioStore.setState({ turnRequest: null, stageTurnsSending: 0 });
+  });
+
+  it('is pending from the request, through the send, and not after it', () => {
+    const store = useStudioStore.getState;
+    expect(stageTurnPending(store())).toBe(false);
+    store().requestTurn('转 3D');
+    expect(stageTurnPending(store())).toBe(true);
+    store().beginStageTurn();
+    store().clearTurnRequest();
+    expect(stageTurnPending(store())).toBe(true);
+    store().endStageTurn();
+    expect(stageTurnPending(store())).toBe(false);
+  });
+
+  it('counts overlapping sends, and an extra end never goes below none', () => {
+    const store = useStudioStore.getState;
+    store().beginStageTurn();
+    store().beginStageTurn();
+    store().endStageTurn();
+    expect(stageTurnPending(store())).toBe(true);
+    store().endStageTurn();
+    store().endStageTurn();
+    expect(store().stageTurnsSending).toBe(0);
+    expect(stageTurnPending(store())).toBe(false);
   });
 });

@@ -83,7 +83,8 @@ describe('workspace chat message wiring', () => {
 
   it('sends the models chosen in the other domains and never narrows tools to the tab in view', () => {
     expect(agentDialog).toContain('domainModels: otherDomainModels');
-    expect(agentDialog).toMatch(/entry\[0\] !== domain/);
+    // The split itself (stage domain as `model`, the others as domain models) is turnModels, tested on its own.
+    expect(agentDialog).toMatch(/domainModels: otherDomainModels \} = turnModels\(domain,/);
   });
 
   it('opens chat pictures in the shared result detail instead of a private lightbox', () => {
@@ -343,5 +344,12 @@ describe('session preference wiring (#241)', () => {
     expect(canvasActions).toMatch(/recordPreferenceSignal\(sessionID, 'inpaint'/);
     // The signals are sent next to the action, never instead of it.
     expect(canvasActions.indexOf('recordInpaintSignal()')).toBeLessThan(canvasActions.indexOf('request.onSubmitted?.()'));
+  });
+});
+
+describe('#691: a stage request is counted until its send is over', () => {
+  it('sends it through sendStageRequest with the studio counter, so a dropped or refused request ends the wait', () => {
+    expect(agentDialog).toMatch(/void sendStageRequest\(step, \{\s*clear: clearTurnRequest,\s*begin: studio\.beginStageTurn,\s*end: studio\.endStageTurn,/);
+    expect(agentDialog).not.toMatch(/clearTurnRequest\(\);\s*if \(step === 'drop'\) return;/);
   });
 });

@@ -2068,6 +2068,10 @@ type CanvasMaskSchema struct {
 	// TintColorToken names a CSS custom property such as --info.
 	TintColorToken string  `json:"tint_color_token"`
 	TintOpacity    float64 `json:"tint_opacity"`
+	// ReferencePreviewBackground (#rrggbb) is what the inpaint dialog lays the board picture over in its
+	// "picture that will be sent" preview (#687): a masked edit's reference is flattened over the image-to-image
+	// Offering's alpha_flatten background before it goes upstream, so the preview shows the same picture.
+	ReferencePreviewBackground string `json:"reference_preview_background"`
 }
 
 // CanvasArtboardLabelSchema styles the size label inside the artboard's top-left corner (#282), in screen
@@ -2265,7 +2269,6 @@ type CanvasKeyboardSchema struct {
 	CutShortcut             string `json:"cut_shortcut"`
 	DuplicateShortcut       string `json:"duplicate_shortcut"`
 	DeselectShortcut        string `json:"deselect_shortcut"`
-	InvertSelectionShortcut string `json:"invert_selection_shortcut"`
 	ZoomInShortcut          string `json:"zoom_in_shortcut"`
 	ZoomOutShortcut         string `json:"zoom_out_shortcut"`
 	ZoomActualShortcut      string `json:"zoom_actual_shortcut"`
@@ -4334,7 +4337,8 @@ type ChatThreeViewReviewItem struct {
 type ChatThreeViewContinuationSchema struct {
 	Enabled bool `json:"enabled"`
 	// Reasons keys: budget_not_covered, view_not_finished,
-	// view_already_started, consistency_retries_exhausted.
+	// view_already_started, view_awaiting_approval,
+	// consistency_retries_exhausted, generation_checkpoint.
 	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
@@ -4413,10 +4417,21 @@ type ChatThreeViewMessages struct {
 	// AgentPaused says the budget continuation stopped without finishing the
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
+	// AgentPausedStarted is AgentPaused for a view that was already started
+	// or waits for its approval (view_already_started,
+	// view_awaiting_approval): it is not a failure, and the Agent does not
+	// send the person to click or retry (#689). It does not say who started
+	// the view: the continuation's own grant left for approval stops the same
+	// way. Same fields; a Catalog without it uses AgentPaused.
+	AgentPausedStarted string `json:"agent_paused_started,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
 	// {attempt}, {maximum}, {reasons}. The reasons are worded by
 	// consistency.reasons, one per failed check (#283).
 	ConsistencyRetry string `json:"consistency_retry,omitempty"`
+	// ConsistencyRedraw reports one redraw of a continuation bounded by the
+	// turn's generation checkpoint instead of an attempt limit (#693):
+	// {view}, {attempt}, {reasons}.
+	ConsistencyRedraw string `json:"consistency_redraw,omitempty"`
 	// ConsistencyFailed reports a view that stayed inconsistent; the group
 	// waits for a person. Fields: {view}, {reasons}.
 	ConsistencyFailed string `json:"consistency_failed,omitempty"`
@@ -4527,6 +4542,11 @@ type ChatApprovalPolicySchema struct {
 	// that does not declare the field (every one written before #490) reads as 0.
 	// Server-only: the browser cannot price a step before it is frozen.
 	ManualCreditsThreshold int `json:"manual_credits_threshold"`
+	// GenerationCheckpoint is, per approval mode, the checkpoint window of a
+	// session (#702): after every that many approved steps of the session,
+	// the next step asks a person once on its approval card. Only auto and
+	// budget have one; strict asks for every step. Server-only.
+	GenerationCheckpoint map[string]int `json:"generation_checkpoint,omitempty"`
 	// Budget is the production-plan budget of budget mode. Server-only.
 	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
@@ -5843,9 +5863,15 @@ type ChatContextSchema struct {
 	ReferenceOutputSizeNearestTemplate string `json:"reference_output_size_nearest_template,omitempty"`
 	// UnknownHandleTemplate and WrongHandleKindTemplate are the refusals the
 	// Agent reads when a handle names nothing in this session or an object of
-	// the wrong kind. Field: {handle}.
+	// the wrong kind. Field: {handle}. Read-only tools and submitting tools
+	// share them, so they say the step did not run, not that nothing was
+	// charged.
 	UnknownHandleTemplate   string `json:"unknown_handle_template"`
 	WrongHandleKindTemplate string `json:"wrong_handle_kind_template"`
+	// EmptySelectionTemplate is the refusal when the selection alias names
+	// nothing because the turn has no selected object of the wanted kind
+	// (#684). Field: {handle}. Empty keeps UnknownHandleTemplate.
+	EmptySelectionTemplate string `json:"empty_selection_template,omitempty"`
 	// ResultHandlesField is the key of the tool result that lists the handles
 	// given to the pictures and models the call produced (#25), so a later
 	// step of the same reply names them without guessing. Empty omits it.
@@ -8252,6 +8278,12 @@ type ChatVisionSchema struct {
 	StyleAnchorLabelTemplate   string `json:"style_anchor_label_template,omitempty"`
 	StyleAnchorDroppedTemplate string `json:"style_anchor_dropped_template,omitempty"`
 	UnnamedPictureLabel        string `json:"unnamed_picture_label,omitempty"`
+	// SelectionIntro and SelectionLabelTemplate frame the pictures of the
+	// current selection that have no picture slot (#679): a board raster or
+	// another newly selected picture the message itself does not carry
+	// ({handle} is its handle). Both are required with a selection role.
+	SelectionIntro         string `json:"selection_intro,omitempty"`
+	SelectionLabelTemplate string `json:"selection_label_template,omitempty"`
 	// ContactSheet folds pictures of one tool result over their quota into one
 	// labelled sheet with every handle.
 	ContactSheet ChatVisionContactSheetSchema `json:"contact_sheet"`
@@ -8291,9 +8323,12 @@ type ChatVisionInvalidPictureSchema struct {
 // Vision role sources. A picture belongs to exactly one source: the artboard
 // snapshot, the current user's references, the style lock, a render of the
 // model-review tools, another generated picture, or an older user picture.
+// Selection is a picture of the current selection that no message carries as
+// a picture slot and that is not the artboard snapshot (#679).
 const (
 	ChatVisionSourceCanvas    = "canvas"
 	ChatVisionSourceTurn      = "turn"
+	ChatVisionSourceSelection = "selection"
 	ChatVisionSourceStyle     = "style"
 	ChatVisionSourceRender    = "render"
 	ChatVisionSourceGenerated = "generated"

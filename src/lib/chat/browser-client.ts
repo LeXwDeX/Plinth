@@ -60,7 +60,10 @@ export interface ChatTurnOptions {
   referenceImageIndices?: number[];
   /** 对 imageURLs 中图片的声明（截图来源等），服务端逐项校验。 */
   attachments?: ChatAttachmentClaim[];
-  /** Per-image roles; slots match the 1-based imageURLs positions. */
+  /**
+   * @deprecated #697: the composer no longer asks what an attached picture is for, and this field is no longer
+   * sent. It stays only so older callers still type-check; the server keeps reading the wire field for older clients.
+   */
   attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[];
   /** 本轮发送时工作区正选中的图片或 3D 模型，服务端逐项校验。 */
   selection?: ChatAttachmentClaim[];
@@ -1337,12 +1340,6 @@ export function createChatBrowserClient(
       );
       if (options.attachments && options.attachments.length > 0) {
         body[fields.attachments] = encodeAttachmentClaims(schema, options.attachments);
-      }
-      if (options.attachmentPurposes?.length) {
-        const names = schema.chat.api.attachment;
-        body[fields.attachment_purposes] = options.attachmentPurposes.map(({ imageSlot, purpose }) => ({
-          [names.image_slot]: imageSlot, [names.purpose]: purpose,
-        }));
       }
       if (options.selection && options.selection.length > 0) {
         body[fields.selection] = encodeAttachmentClaims(schema, options.selection);

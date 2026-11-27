@@ -288,6 +288,9 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 	if !strings.HasPrefix(mask.TintColorToken, "--") || !(mask.TintOpacity > 0) || mask.TintOpacity > 1 {
 		return errors.New("frontend.mask 的色调必须是 CSS 令牌，不透明度在 (0,1]")
 	}
+	if !isHexColor(mask.ReferencePreviewBackground) {
+		return errors.New("frontend.mask.reference_preview_background 必须是十六进制颜色")
+	}
 	snap := frontend.Snap
 	if !(snap.ThresholdPixels > 0) || math.IsInf(snap.ThresholdPixels, 0) ||
 		!(snap.GuideStrokeWidth > 0) || math.IsInf(snap.GuideStrokeWidth, 0) ||
@@ -594,7 +597,6 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		"cut_shortcut":              keyboard.CutShortcut,
 		"duplicate_shortcut":        keyboard.DuplicateShortcut,
 		"deselect_shortcut":         keyboard.DeselectShortcut,
-		"invert_selection_shortcut": keyboard.InvertSelectionShortcut,
 		"zoom_in_shortcut":          keyboard.ZoomInShortcut,
 		"zoom_out_shortcut":         keyboard.ZoomOutShortcut,
 		"zoom_actual_shortcut":      keyboard.ZoomActualShortcut,
@@ -713,7 +715,6 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		"node.generated_alt",
 		"node.edit_text_placeholder",
 		"node.frame_default_text",
-		"node.send_reference",
 		"node.reference",
 		"toolbar.background",
 		"toolbar.background.dots",
@@ -773,7 +774,6 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		"layers.hide",
 		"layers.show",
 		"context.copy",
-		"context.send_to_chat",
 		"context.group",
 		"context.ungroup",
 		"context.paste",

@@ -53,46 +53,19 @@ afterEach(() => {
   useSessionContextStore.setState({ context: {}, compacting: {} });
 });
 
-describe('per-attachment purpose controls', () => {
-  it('shows separate purposes, toggles one, sets all, and keeps a pinned choice separate', () => {
-    const onSend = vi.fn();
-    function Controlled() {
-      const [purposes, setPurposes] = React.useState<('style' | 'layout' | 'input' | null)[]>(['style', 'layout']);
-      const [pinned, setPinned] = React.useState<'style' | 'layout' | 'input' | null>('input');
-      return <Composer {...props} onSend={onSend} images={['/a.png', '/b.png']} pinnedImage="/board.png"
-        attachmentPurposes={purposes} pinnedPurpose={pinned}
-        onAttachmentPurposeAt={(index, purpose) => setPurposes((items) => items.map((item, i) => i === index ? purpose : item))}
-        onPinnedPurpose={setPinned} onAttachmentPurpose={(purpose) => setPurposes([purpose, purpose])} />;
-    }
-    const view = render(<Controlled />);
+// #697: an attached picture has no purpose control; the chips say only where the picture came from.
+describe('attached pictures without a purpose control', () => {
+  it('shows no purpose control or purpose text for uploaded or board pictures', () => {
+    const view = render(<Composer {...props} images={['/a.png', '/b.png']} pinnedImage="/board.png" />);
     const chips = view.getAllByTestId('composer-attachment-chip');
-    expect(chips[0].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_style']);
-    expect(chips[1].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_layout']);
-    expect(chips[2].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_input']);
-    const rows = within(view.getByTestId('composer-attachment-purposes')).getAllByTestId('composer-attachment-purpose-row');
-    const label = (purpose: string) => schema.content.messages[`ui.studio.composer.attachment.purpose_${purpose}`];
-    // #405: a row is a label and a three-segment control, laid on the grid the whole group shares.
-    expect(rows.every((row) => row.classList.contains('contents'))).toBe(true);
-    expect(rows.every((row) => within(row).getAllByRole('button').length === 3)).toBe(true);
-    fireEvent.click(within(rows[1]).getByRole('button', { name: label('input') }));
-    expect(chips[0].textContent).toContain(label('style'));
-    expect(chips[1].textContent).toContain(label('input'));
-    fireEvent.click(within(rows[1]).getByRole('button', { name: label('input') }));
-    expect(chips[1].textContent).not.toContain(label('input'));
-    fireEvent.click(within(view.getByTestId('composer-attachment-purpose')).getByRole('radio', { name: label('layout') }));
-    expect(chips[0].textContent).toContain(label('layout'));
-    expect(chips[1].textContent).toContain(label('layout'));
-    expect(chips[2].textContent).toContain(label('input'));
-    fireEvent.click(within(rows[2]).getByRole('button', { name: label('input') }));
-    expect(chips[2].textContent).not.toContain(label('input'));
-    expect(onSend).not.toHaveBeenCalled();
-  });
-
-  it('disables controls that have no corresponding change handler', () => {
-    const view = render(<Composer {...props} images={['/a.png']} pinnedImage="/board.png" />);
-    for (const button of within(view.getByTestId('composer-attachment-purposes')).getAllByRole('button')) {
-      expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(chips).toHaveLength(3);
+    for (const testId of ['composer-attachment-purposes', 'composer-attachment-purpose-row', 'composer-attachment-purpose']) {
+      expect(view.queryByTestId(testId)).toBeNull();
     }
+    expect(view.container.querySelector('[role=radiogroup]')).toBeNull();
+    for (const purpose of ['参考风格', '参考构图', '当作输入图']) expect(view.container.textContent).not.toContain(purpose);
+    expect(chips[0].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.upload']);
+    expect(chips[2].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.from_board']);
   });
 });
 
