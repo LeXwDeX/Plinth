@@ -21,6 +21,7 @@ import {
   type CropRegion,
 } from '@/lib/asset-lists/client';
 import { runIsTerminal, runProgressText, runStatusText } from '@/lib/asset-lists/run';
+import { briefFieldText, productionBriefFields } from '@/lib/chat/production-brief';
 import {
   formatSchemaText, schemaCountMessage, schemaText, type ProductSchema,
 } from '@/lib/product-schema';
@@ -108,11 +109,6 @@ function clamp01(value: number): number {
 
 function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000;
-}
-
-/** A scalar brief value; nested objects and arrays have no place on the card. */
-function scalar(value: unknown): value is string | number | boolean {
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
 /** #331: a region is usable when it has an area and finite coordinates. */
@@ -203,15 +199,15 @@ export function AssetListCard({
   const items = Array.isArray(detail.items) ? detail.items : [];
   const itemCount = typeof detail.item_count === 'number' ? detail.item_count : items.length;
   const itemsCountText = schemaCountMessage(schema, 'ui.asset_list.items_count', itemCount, { count: itemCount });
-  const plannedStepsText = formatSchemaText(text('ui.asset_list.planned_steps'), { steps: detail.planned_step_count });
+  const plannedStepsText = schemaCountMessage(schema, 'ui.asset_list.planned_steps', detail.planned_step_count, { steps: detail.planned_step_count });
   const model3dStepsText = detail.planned_model3d_step_count > 0
-    ? formatSchemaText(text('ui.asset_list.planned_model3d_steps'), { steps: detail.planned_model3d_step_count })
+    ? schemaCountMessage(schema, 'ui.asset_list.planned_model3d_steps', detail.planned_model3d_step_count, { steps: detail.planned_model3d_step_count })
     : '';
-  const briefFields = schema.chat.model3d_usage?.brief?.fields ?? [];
-  const briefEntries = Object.entries(detail.brief ?? {})
-    .filter((entry): entry is [string, string | number | boolean] => scalar(entry[1]))
+  // #670: the first three declared fields that have a value, in the Schema's order and read as the brief panel reads them.
+  const briefEntries = productionBriefFields(schema)
+    .map((field) => ({ field, value: briefFieldText(schema, field, detail.brief?.[field.name]) }))
+    .filter((entry) => entry.value !== '')
     .slice(0, 3);
-  const briefLabel = (key: string) => briefFields.find((field) => field.name === key)?.label || key;
   const itemUnavailable = (item: AssetListItem) =>
     Array.isArray(item.route) && item.route.some((step) => step.available === false);
   const unavailableCount = items.filter(itemUnavailable).length;
@@ -773,10 +769,10 @@ export function AssetListCard({
         <section className="flex flex-col gap-0.5" data-testid="asset-list-brief">
           <span className="text-[11px] text-foreground/70">{text('ui.asset_list.brief_summary')}</span>
           <dl className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
-            {briefEntries.map(([key, value]) => (
-              <div key={key} className="flex min-w-0 gap-1.5">
-                <dt className="shrink-0 text-foreground/70">{briefLabel(key)}</dt>
-                <dd className="min-w-0 [overflow-wrap:anywhere]">{String(value)}</dd>
+            {briefEntries.map(({ field, value }) => (
+              <div key={field.name} className="flex min-w-0 gap-1.5">
+                <dt className="shrink-0 text-foreground/70">{field.label}</dt>
+                <dd className="min-w-0 [overflow-wrap:anywhere]">{value}</dd>
               </div>
             ))}
           </dl>
@@ -1091,11 +1087,11 @@ export function AssetListCard({
                   </span>
                 ) : null}
                 <span className="tabular-nums text-muted-foreground">
-                  {formatSchemaText(text('ui.asset_list.planned_steps'), { steps: item.planned_step_count })}
+                  {schemaCountMessage(schema, 'ui.asset_list.planned_steps', item.planned_step_count, { steps: item.planned_step_count })}
                 </span>
                 {item.planned_model3d_step_count > 0 ? (
                   <span className="tabular-nums text-muted-foreground">
-                    {formatSchemaText(text('ui.asset_list.planned_model3d_steps'), { steps: item.planned_model3d_step_count })}
+                    {schemaCountMessage(schema, 'ui.asset_list.planned_model3d_steps', item.planned_model3d_step_count, { steps: item.planned_model3d_step_count })}
                   </span>
                 ) : null}
                 {itemUnavailable(item) ? (

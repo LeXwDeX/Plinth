@@ -110,15 +110,16 @@ export function ContextMeter() {
     });
   };
 
+  const meterName = formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label, value: text });
   return (
     // The composer's status row (#405: the pickers that shared this area are in the settings dialog now): the whole
     // row, one control high. The figure and the compact action sit together on the left, the tool call counter
     // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
     <div className="flex h-7 w-full min-w-0 items-center gap-1" data-testid="composer-context">
-      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings, visionTokens, visionTokenBudget, visionImages)} className="min-w-0 shrink">
+      <HintTooltip name={meterName} hint={contextHint(schema, tokens, window, settings, visionTokens, visionTokenBudget, visionImages)} className="min-w-0 shrink">
         <span
           tabIndex={0}
-          aria-label={`${label}: ${text}`}
+          aria-label={meterName}
           data-testid="composer-context-meter"
           data-level={level}
           className={cn('block truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[level])}

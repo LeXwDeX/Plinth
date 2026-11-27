@@ -119,7 +119,7 @@ export function Stage3D({ object }: { object: CurrentObject }) {
   const unknown = schemaText(schema, 'ui.studio.stage.stats.unknown');
   const rows: Array<[string, string]> = [
     [schemaText(schema, 'ui.studio.stage.stats.triangles'), stats ? groupedCount(stats.triangles, activeLocale(schema)) : unknown],
-    [schemaText(schema, 'ui.studio.stage.stats.textures'), textureSize ? `${textureSize.width}x${textureSize.height}` : unknown],
+    [schemaText(schema, 'ui.studio.stage.stats.textures'), textureSize ? formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.pixels'), { width: textureSize.width, height: textureSize.height }) : unknown],
   ];
 
   return (

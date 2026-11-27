@@ -12,7 +12,7 @@ import { useBalance } from '@/hooks/use-balance';
 import { useHandleReferences } from '@/hooks/use-handle-references';
 import { HandleTag } from '@/components/chat/handle-tag';
 import { fetchCapabilityOfferings, NO_CREDITS } from '@/lib/agent-offerings';
-import { accountOfCard, approvalInputParameterLabel, approvalOfferingNames, approvalShowsCredits, creditBalanceOf, isRetextureCard, remainingValidity, type ApprovalCardModel } from '@/lib/chat/approval-card';
+import { accountOfCard, approvalInputParameterLabel, approvalOffering, approvalOfferingNames, approvalShowsCredits, creditBalanceOf, isRetextureCard, remainingValidity, type ApprovalCardModel } from '@/lib/chat/approval-card';
 import type { ParameterAdjustment } from '@/lib/chat/pending-approvals';
 import { safeAssetURL, safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
@@ -68,8 +68,16 @@ function profileGroupReason(group: ProfileAdjustmentGroup): string {
   return Array.from(new Set(group.items.map((item) => item.reason).filter((reason) => reason !== ''))).join(' ');
 }
 
-function adjustmentValueText(value: unknown): string {
-  if (typeof value === 'string') return value;
+/**
+ * A frozen parameter value as people read it (#670): a boolean as yes/no and an
+ * option by its label from the step's Offering; anything else as written.
+ */
+function adjustmentValueText(
+  value: unknown,
+  words: { options?: readonly { value: string; label: string }[]; yes: string; no: string },
+): string {
+  if (typeof value === 'boolean') return value ? words.yes : words.no;
+  if (typeof value === 'string') return words.options?.find((option) => option.value === value)?.label ?? value;
   if (value === null || value === undefined) return '';
   try {
     return JSON.stringify(value);
@@ -108,14 +116,6 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
     group.items.length,
     { profile: profileLabel(group.id), count: group.items.length },
   );
-  const agentLine = (item: ParameterAdjustment) => formatSchemaText(
-    schemaText(schema, 'ui.studio.approval.card.parameter_agent_line'),
-    {
-      name: item.label,
-      recommended: adjustmentValueText(item.recommendedValue),
-      actual: adjustmentValueText(item.value),
-    },
-  );
   const capability = schema.capabilities.find((item) => item.id === model.capability);
   const { data: offerings, isLoading: offeringsLoading } = useSWR(
     model.capability ? ['approval-card-offerings', schema.revision, model.capability] : null,
@@ -123,6 +123,20 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
     { revalidateOnFocus: false },
   );
   const names = approvalOfferingNames(offerings, model);
+  const offeringParameters = approvalOffering(offerings, model)?.parameters ?? [];
+  const adjustedText = (item: ParameterAdjustment, value: unknown) => adjustmentValueText(value, {
+    options: offeringParameters.find((parameter) => parameter.name === item.name)?.options,
+    yes: schemaText(schema, 'ui.studio.brief.yes'),
+    no: schemaText(schema, 'ui.studio.brief.no'),
+  });
+  const agentLine = (item: ParameterAdjustment) => formatSchemaText(
+    schemaText(schema, 'ui.studio.approval.card.parameter_agent_line'),
+    {
+      name: item.label,
+      recommended: adjustedText(item, item.recommendedValue),
+      actual: adjustedText(item, item.value),
+    },
+  );
   // Credits follow the Offering's credits_metered: a provider that does not bill in credits shows "/".
   // While the Offering list is still being read, the credit cells hold a neutral placeholder instead
   // of a number that may turn into "/" (or the reverse); a failed read falls back to the server's number.
@@ -161,17 +175,14 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       : 'default';
     return schemaText(schema, `ui.studio.approval.card.model_source_${key}`);
   };
+  // #670: the model is named on the row above; this row says only who chose it and why.
   const modelChoiceText = model.modelChoice
-    ? formatSchemaText(
-      schemaText(schema, model.modelChoice.reason
-        ? 'ui.studio.approval.card.model_choice_line'
-        : 'ui.studio.approval.card.model_choice_line_no_reason'),
-      {
-        model: names.modelName || model.model,
+    ? model.modelChoice.reason
+      ? formatSchemaText(schemaText(schema, 'ui.studio.approval.card.model_choice_basis'), {
         source: modelChoiceSource(model.modelChoice),
-        reason: model.modelChoice.reason ?? '',
-      },
-    )
+        reason: model.modelChoice.reason,
+      })
+      : modelChoiceSource(model.modelChoice)
     : '';
   // #548: the style Skill the step applies, with who chose it.
   const skillChoiceText = model.skillChoice
@@ -240,7 +251,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         <dd className="truncate" data-testid="studio-approval-model">{[names.modelName, names.providerName].filter(Boolean).join(' · ')}</dd>
         {modelChoiceText ? (
           <>
-            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.parameter_source')}</dt>
+            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.model_choice_basis_label')}</dt>
             <dd className="text-muted-foreground" data-testid="studio-approval-model-choice">{modelChoiceText}</dd>
           </>
         ) : null}
@@ -255,7 +266,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             <dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: formatNativePrice(model.nativeQuote.total_amount, model.nativeQuote.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') })}</dt>
             <dd className="font-medium tabular-nums" data-testid="studio-approval-native-price">
               <span>{formatSchemaText(schemaText(schema, 'ui.pricing.base_amount'), { amount: formatNativePrice(model.nativeQuote.base_amount, model.nativeQuote.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') })}</span>
-              {model.nativeQuote.components?.map((component) => <span key={component.id} className="ml-2 text-muted-foreground">{component.label}: {formatNativePrice(component.amount, model.nativeQuote!.unit_label) ?? schemaText(schema, 'ui.pricing.unknown')}</span>)}
+              {model.nativeQuote.components?.map((component) => <span key={component.id} className="ml-2 text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label: component.label, value: formatNativePrice(component.amount, model.nativeQuote!.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') })}</span>)}
             </dd>
           </>
         ) : invalidNativeQuote ? (
@@ -390,7 +401,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
                 {profileGroups.flatMap((group) => {
                   const sourceText = formatSchemaText(schemaText(schema, 'ui.studio.approval.card.parameter_source_profile'), { profile: profileLabel(group.id) });
                   return group.items.map((item) => {
-                    const valueText = `${adjustmentValueText(item.recommendedValue)} → ${adjustmentValueText(item.value)}`;
+                    const valueText = `${adjustedText(item, item.recommendedValue)} → ${adjustedText(item, item.value)}`;
                     return (
                       <tr key={`${group.id}:${item.name}`} className="border-t border-border/60" data-parameter={item.name} data-profile={group.id}>
                         <td className="truncate py-0.5 pr-1">
@@ -414,7 +425,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
                 })}
                 {agentAdjustments.map((item) => {
                   const reasonOpen = openReasons.has(`agent:${item.name}`);
-                  const valueText = `${adjustmentValueText(item.recommendedValue)} → ${adjustmentValueText(item.value)}`;
+                  const valueText = `${adjustedText(item, item.recommendedValue)} → ${adjustedText(item, item.value)}`;
                   const reasonText = item.advice ? `${item.reason} ${item.advice}` : item.reason;
                   return [
                     <tr key={`agent:${item.name}`} className="border-t border-border/60" data-parameter={item.name} data-source="agent">

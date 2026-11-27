@@ -63,9 +63,11 @@ describe('handle tag to composer', () => {
   it('names the selected Skill from the catalog in the chip under the box and in the settings gear (#405)', () => {
     // The Skills picker lost its trigger (and the "SKILL：{name}" label on it) with the pickers under the box; the
     // selected Skill is told by its chip and by the gear's "changed" sentence, both from the catalog's display name.
-    const name = "skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId";
+    // #670: until the catalog is read the name is the Skills loading text, never the Skill id.
+    const name = "skill.catalog.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId";
     expect(source('./composer.tsx')).toContain(name);
     expect(source('./composer-settings.tsx')).toContain(name);
+    for (const file of ['./composer.tsx', './composer-settings.tsx']) expect(source(file)).toContain(": schemaText(schema, 'ui.workspace.skills.loading')");
     expect(source('./skill-picker.tsx')).not.toContain('fullValue');
     expect(source('./skill-picker.tsx')).not.toContain('resolvedSelection');
   });

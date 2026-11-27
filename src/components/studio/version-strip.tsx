@@ -534,7 +534,8 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
   // Results of one source share this connector, with one mark for each of them: a plain edit and a
   // masked repaint are different, and a new branch is a new mark. A processing link names its step.
   const sentence = (link: VersionParent) => {
-    if (!link.known) return schemaText(schema, 'ui.studio.strip.link.unknown');
+    // #670: a parent outside the loaded versions has no name to put in the sentence, so it reads as unknown.
+    if (!link.known || !parentLabel) return schemaText(schema, 'ui.studio.strip.link.unknown');
     const stepKey = link.link === 'process' && link.step ? `ui.studio.strip.link.step.${link.step}` : '';
     const linkKey = stepKey && schemaText(schema, stepKey) ? stepKey : `ui.studio.strip.link.${link.link}`;
     return formatSchemaText(schemaText(schema, linkKey), { parent: parentLabel });
@@ -556,7 +557,7 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
           </HintTooltip>
         );
       })}
-      {parent.known && !adjacent ? <span className="max-w-9 truncate text-[9px] leading-3 text-muted-foreground" data-testid="version-link-source">{parentLabel}</span> : null}
+      {parent.known && !adjacent && parentLabel ? <span className="max-w-9 truncate text-[9px] leading-3 text-muted-foreground" data-testid="version-link-source">{parentLabel}</span> : null}
     </li>
   );
 });

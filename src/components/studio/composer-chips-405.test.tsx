@@ -315,4 +315,12 @@ describe('the strips above the box', () => {
     expect(screen.queryByTestId('composer-chips')).toBeNull();
     expect(screen.queryByTestId('composer-attachments')).toBeNull();
   });
+
+  // #670: before the Skill catalog is read, the Skill chip reads as loading, never as the Skill id.
+  it('names the selected Skill as loading until its catalog is read', () => {
+    render(<Composer {...props} skill={{ ...props.skill, selectedId: 'three-view' }} />);
+    const card = screen.getByTestId('composer-skill-chip');
+    expect(card.textContent).toContain(messages['ui.workspace.skills.loading']);
+    expect(card.textContent).not.toContain('three-view');
+  });
 });

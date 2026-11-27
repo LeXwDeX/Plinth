@@ -167,6 +167,26 @@ describe('three-view card with a multiview model', () => {
       onToThreeD={() => {}} model={model} onMultiview={() => {}} onStartRemaining={() => {}} onReplace={() => {}} />,
   );
 
+  // #670: one credit reads in the singular in English.
+  it('prices one remaining credit in the singular', () => {
+    const en = (defaultCatalog.application as unknown as { localization: { bundles: { en: { messages: Record<string, string> } } } }).localization.bundles.en.messages;
+    const english = {
+      ...schema,
+      content: { ...schema.content, messages: { ...messages, ...en } },
+      localization: { ...schema.localization, active_locale: 'en', default_locale: 'en' },
+    } as ProductSchema;
+    const html = renderToStaticMarkup(
+      <ThreeViewCardView schema={english} group={four([
+        { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+        { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+        { status: 'not_started', startable: true, estimated_credits: 1, credits_metered: true } as SlotWire,
+        { status: 'not_started', startable: true },
+      ])} busy={null} queued={new Set()} thumbnail={() => ''} onAdvance={() => {}} onView={() => {}}
+        onToThreeD={() => {}} model={model} onMultiview={() => {}} onStartRemaining={() => {}} onReplace={() => {}} />,
+    );
+    expect(html).toContain('Generate remaining views (about 1 credit)');
+  });
+
   it('enables 用三视图生成 3D only with the front view and one more view, and names the views it uses', () => {
     const onlyFront = renderFour(four([
       { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },

@@ -69,7 +69,7 @@ export function ObjectDetails({ object }: { object: CurrentObject }) {
       ) : null}
       {capability ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.capability')}>{capability.label_cn || capability.label}</DetailRow> : null}
       {prompt ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.prompt')}><span data-testid="inspector-prompt">{prompt}</span></DetailRow> : null}
-      {size ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.size')}><span className="tabular-nums" data-testid="inspector-size">{`${size.width}x${size.height}${ratio ? ` · ${ratio}` : ''}`}</span></DetailRow> : null}
+      {size ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.size')}><span className="tabular-nums" data-testid="inspector-size">{`${formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.pixels'), { width: size.width, height: size.height })}${ratio ? ` · ${ratio}` : ''}`}</span></DetailRow> : null}
       {candidates > 1 ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.candidates')}>{schemaCountMessage(schema, 'ui.studio.panel.details.candidates_value', candidates, { count: candidates })}</DetailRow> : null}
       {created && Number.isFinite(created.getTime()) ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.created')}>{formatDateTime(created, activeLocale(schema))}</DetailRow> : null}
       {object.captureId ? <DetailRow label={schemaText(schema, 'ui.studio.panel.details.capture')}>{schemaText(schema, 'ui.studio.panel.details.capture_value')}</DetailRow> : null}

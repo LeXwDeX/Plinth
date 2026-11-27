@@ -194,7 +194,9 @@ describe('AssetListCard (#327)', () => {
     expect(screen.getByText('用途')).toBeTruthy();
     expect(screen.getByText('游戏角色')).toBeTruthy();
     expect(screen.getByText('透明背景')).toBeTruthy();
-    expect(screen.getByText('true')).toBeTruthy();
+    // #670: a boolean reads as the brief panel's yes/no, never as the raw value.
+    expect(screen.getByText(messages['ui.studio.brief.yes'])).toBeTruthy();
+    expect(screen.queryByText('true')).toBeNull();
     expect(screen.getByText('三角面预算')).toBeTruthy();
     expect(screen.getByText('30000')).toBeTruthy();
 
@@ -330,6 +332,37 @@ describe('AssetListCard (#327)', () => {
 
     expect(screen.getByTestId('asset-list-item-1').textContent).toContain(messages['ui.asset_list.item_unavailable']);
     expect(screen.getByTestId('asset-list-item-0').textContent).not.toContain(messages['ui.asset_list.item_unavailable']);
+  });
+
+  // #670: the card reads the brief like the brief panel: declared fields in the Schema's order, profile and
+  // option labels, yes/no; an undeclared member is not shown and only the first three fields with a value are.
+  it('summarizes the brief by the first three declared fields with their labels', () => {
+    renderCard({ detail: detail({ brief: {
+      undeclared: 'x', triangle_budget: 30000, target_engine: 'unity', image_transparent: false, purpose: 'game_character',
+    } }) });
+    const rows = Array.from(screen.getByTestId('asset-list-brief').querySelectorAll('dl > div'))
+      .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]);
+    const field = (name: string) => schema.chat.model3d_usage!.brief!.fields!.find((item) => item.name === name)!;
+    expect(rows).toEqual([
+      [field('purpose').label, schema.chat.model3d_usage!.profiles!.find((profile) => profile.id === 'game_character')!.label],
+      [field('image_transparent').label, messages['ui.studio.brief.no']],
+      [field('target_engine').label, field('target_engine').options!.find((option) => option.id === 'unity')!.label],
+    ]);
+  });
+
+  it('words one planned step in the singular in English', () => {
+    const en = defaultCatalog.application.localization.bundles.en.messages as Record<string, string>;
+    const english = {
+      ...defaultCatalog.application,
+      content: { ...defaultCatalog.application.content, messages: { ...messages, ...en } },
+      localization: { ...defaultCatalog.application.localization, active_locale: 'en', default_locale: 'en' },
+    } as unknown as ProductSchema;
+    const one = detail({ planned_step_count: 1, planned_model3d_step_count: 1 });
+    one.items = one.items.slice(0, 1).map((item) => ({ ...item, planned_step_count: 1, planned_model3d_step_count: 1 }));
+    renderCard({ detail: one, schema: english });
+    expect(screen.getAllByText('1 planned step').length).toBe(2);
+    expect(screen.getAllByText(en['ui.asset_list.planned_model3d_steps_one'].replace('{steps}', '1')).length).toBe(2);
+    expect(screen.queryByText('1 planned steps')).toBeNull();
   });
 
   it('renders safely with no items, an empty brief and empty routes', () => {
