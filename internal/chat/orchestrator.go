@@ -2162,6 +2162,11 @@ func (orchestrator *Orchestrator) Process(
 		// Handles given during the round stay with the reply, so the next
 		// round and the final write keep the numbers the Agent was told (#25).
 		assistant.Attachments = results.Attachments
+		// The calls' summaries too: a resumed turn's reply no longer shares
+		// its calls with the checkpoint copy recordToolSummary also writes, so
+		// a call finished after the wait (the auto three-view continuation,
+		// #663) kept no used_skill mark (#611).
+		carryToolSummaries(&assistant, results)
 		if errors.Is(toolErr, ErrTurnAwaitTask) {
 			suspended = true
 			return nil
@@ -4073,6 +4078,18 @@ func (orchestrator *Orchestrator) recordToolSummary(message, checkpoint *Message
 	}
 	if checkpoint != nil {
 		set(checkpoint.ToolCalls)
+	}
+}
+
+// carryToolSummaries copies each summary a tool result recorded on the
+// round's produced copy onto the same call of the reply.
+func carryToolSummaries(assistant *Message, produced Message) {
+	for index := range assistant.ToolCalls {
+		for _, call := range produced.ToolCalls {
+			if call.ID == assistant.ToolCalls[index].ID && len(call.Summary) != 0 {
+				assistant.ToolCalls[index].Summary = call.Summary
+			}
+		}
 	}
 }
 

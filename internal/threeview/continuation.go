@@ -420,12 +420,15 @@ func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID
 	if _, _, err := s.runtime.PrepareStep(ctx, owner, run.ID, stepKey); err != nil {
 		return submission{}, translate(err)
 	}
-	_, grant, err := s.runtime.RequestAgentGrantWithBudget(ctx, owner, run.ID, stepKey, turnID)
+	// The group is a bounded 2D series the person already let run: the approval
+	// window counts its views but does not stop one (#702).
+	_, grant, err := s.runtime.RequestAgentGrantWithBudget(executiongrant.ContinuingSeries(ctx), owner, run.ID, stepKey, turnID)
 	if err != nil {
 		return submission{}, translate(err)
 	}
-	// A grant left pending for a person (the auto or budget approval window,
-	// #702) is not a failure: the view waits on its card.
+	// A grant left pending for a person (the #294 recharge guard, or a step the
+	// mode's own rules leave to a person) is not a failure: the view waits on
+	// its card.
 	if grant.Status == executiongrant.Pending {
 		return submission{Reason: ReasonViewAwaitingApproval}, nil
 	}

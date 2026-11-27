@@ -2189,8 +2189,11 @@ def _three_view_auto_arm(work, api, picture_url, label, include_right):
         args["include_right"] = True
     marker = "[[fake:tool:create_three_view " + json.dumps(args, separators=(",", ":")) + "]]"
     words = "生成四视图 " if include_right else "生成三视图 "
+    # #611: the Skill is picked by hand, so the call is marked with it as the person's.
+    picked = {"id": "system-four-view", "name": "四视图"} if include_right else THREE_VIEW_PICK
     status, _ = _send_chat(api, session, {"content": words + marker, "creative_domain": "image",
-                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url],
+                                           "_skill": picked})
     if status not in (200, 201, 202):
         record(f"{label}: start the views", False, f"send {status}")
         return None
@@ -2233,6 +2236,7 @@ def _three_view_auto_arm(work, api, picture_url, label, include_right):
     record(f"{label}: one create_three_view call in one turn, and the turn ends by itself",
            len(calls) == 1 and bool(calls[0].get("include_right")) == include_right and turns == 1 and done,
            f"calls={json.dumps(calls, ensure_ascii=False)[:200]} turns={turns} done={done}")
+    _record_picked_skill_mark(api, session, label, picked["id"])
     front_asset = (slots.get("front") or {}).get("output_asset_id") or ""
     prepared = _prepared_inputs(work, "main", session)
     fed_front = {}
@@ -2248,6 +2252,20 @@ def _three_view_auto_arm(work, api, picture_url, label, include_right):
            bool(front_asset) and all(fed_front.get(key) for _, key in needles),
            f"front asset {front_asset or 'none'}, fed front {fed_front}")
     return group
+
+
+THREE_VIEW_PICK = {"id": "system-three-view", "name": "三视图"}
+
+
+def _record_picked_skill_mark(api, session, label, skill_id):
+    """#611: the create_three_view call of a hand-picked Skill marks the reply with
+    it as the person's, whatever the approval mode and however the call ended."""
+    _quality_turn_done(api, session, timeout=60)
+    used = [item for message in _quality_messages(api, session) if message.get("role") == "assistant"
+            for item in message.get("used_skills") or []]
+    record(f"{label}: the reply is marked with the hand-picked Skill as the person's (#611)",
+           any(item.get("id") == skill_id and item.get("source") == "user" for item in used),
+           f"used_skills={used}")
 
 
 def _session_turn_count(work, stack, session):
@@ -2352,11 +2370,13 @@ def _three_view_budget_and_strict(work, api, offerings):
 
     views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
     status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
-                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url],
+                                           "_skill": THREE_VIEW_PICK})
     if status not in (200, 201, 202):
         record("three-view: start the views", False, f"send {status}")
         return
     group = _wait_three_view(api, session)
+    _record_picked_skill_mark(api, session, "three-view", THREE_VIEW_PICK["id"])
     slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
     front = slots.get("front") or {}
     record("three-view: the budget finishes front, left and back without a click",
@@ -2438,7 +2458,8 @@ def _three_view_budget_and_strict(work, api, offerings):
         record("three-view strict: manual approval mode", False, f"PUT {status}")
         return
     status, _ = _send_chat(api, strict, {"content": "生成三视图 " + views, "creative_domain": "image",
-                                          "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+                                          "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url],
+                                          "_skill": THREE_VIEW_PICK})
     if status not in (200, 201, 202):
         record("three-view strict: start the front view", False, f"send {status}")
         return
@@ -2473,6 +2494,7 @@ def _three_view_budget_and_strict(work, api, offerings):
     else:
         record("three-view strict: front task exists", False, "no front task")
         return
+    _record_picked_skill_mark(api, strict, "three-view strict", THREE_VIEW_PICK["id"])
     # Strict mode has no server-side continuation: even after the front view
     # finished, left and back stay not started until the person clicks.
     group = _three_view_group(api, strict)

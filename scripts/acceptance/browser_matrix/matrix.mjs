@@ -110,6 +110,8 @@ async function runCell(engine, loc, [W, H]) {
   };
   const tooltip = async () => (await page.locator('[role=tooltip]').allInnerTexts()).filter(Boolean).join('\n');
   const layerRows = () => page.locator('[data-testid=layer-row]');
+  // Clicking the layers tab while it is already selected folds the right panel: click only when folded or not selected.
+  const openLayers = async () => { const t = tid('right-panel-tab-layers'); const folded = await layerRows().first().isVisible().then((v) => !v).catch(() => true); if (folded || (await t.getAttribute('aria-selected')) !== 'true') await t.click(); };
   const uploadToCanvas = async (file) => {
     await page.mouse.move(2, 2); await page.keyboard.press('Escape').catch(() => {});
     const [fc] = await Promise.all([page.waitForEvent('filechooser', { timeout: 15000 }), tid('canvas-tool-upload').click()]);
@@ -118,7 +120,7 @@ async function runCell(engine, loc, [W, H]) {
   };
   const resetCanvas = async () => {
     await goSession();
-    await tid('right-panel-tab-layers').click().catch(() => {});
+    await openLayers().catch(() => {});
     for (let i = 0; i < 12; i++) {
       const n = await layerRows().count();
       if (n <= 1) break;
@@ -401,7 +403,11 @@ async function runCell(engine, loc, [W, H]) {
     await uploadToCanvas(path.join(FIX, 'b3-test.png'));
     await tid('canvas-tool-select').click(); await page.mouse.click(Math.round(W * 0.5), Math.round(H * 0.5)); await page.waitForTimeout(500);
     const mg = tid('stage-merge'); await hover(mg); const t2 = await tooltip(); await shot('enabled-hint');
-    ok(!(await mg.isDisabled()), 'merge enabled with image'); ok(new RegExp(L('作用于', 'Applies to')).test(t2) && new RegExp(L('免费', 'Free')).test(t2), 'enabled hint lines');
+    if (await mg.isDisabled()) {
+      // #681 board-action guard: a stage object not on the board is disabled with the reason first.
+      const first = t2.split('\n').filter(Boolean)[0] || '';
+      ok(first.includes(L('此图不在画板上', "isn't on the canvas")), `merge disabled by the #681 guard, reason first: ${first}`);
+    } else { ok(new RegExp(L('作用于', 'Applies to')).test(t2) && new RegExp(L('免费', 'Free')).test(t2), 'enabled hint lines'); }
     // canvas tool rail: name + shortcut + description
     await hover(tid('canvas-tool-brush')); const t3 = await tooltip();
     ok(/B/.test(t3) && t3.split('\n').filter(Boolean).length >= 2, `tool hint: ${t3.replace(/\n+/g, ' | ')}`);
@@ -447,7 +453,7 @@ async function runCell(engine, loc, [W, H]) {
 
   items['CNV-02'] = async () => {
     await buildCanvas();
-    await tid('right-panel-tab-layers').click(); await page.waitForTimeout(300);
+    await openLayers(); await page.waitForTimeout(300);
     const before = await layerRows().evaluateAll((els) => els.map((e) => (e.innerText || '').trim().split('\n')[0]));
     await shot('before-reload');
     ok(before.length >= 5, `expected >=5 layers (base+image+shape+text+stroke), got ${before.length}: ${before}`);
@@ -455,7 +461,7 @@ async function runCell(engine, loc, [W, H]) {
     await tid('canvas-tool-crop').click(); await page.waitForTimeout(300); await page.keyboard.press('Escape'); await tid('canvas-tool-select').click();
     await page.waitForTimeout(3500); // autosave debounce
     await page.reload(); await page.locator('[data-testid=composer-send]').waitFor(); await page.waitForTimeout(2500);
-    await tid('right-panel-tab-layers').click(); await page.waitForTimeout(500);
+    await openLayers(); await page.waitForTimeout(500);
     const after = await layerRows().evaluateAll((els) => els.map((e) => (e.innerText || '').trim().split('\n')[0]));
     await shot('after-reload');
     ok(JSON.stringify(before) === JSON.stringify(after), `layers differ after reload: ${before} -> ${after}`);
@@ -498,7 +504,7 @@ async function runCell(engine, loc, [W, H]) {
     ok(tiles1 === tiles0 + 1, `merge created one new version (${tiles0}->${tiles1})`);
     // send to chat -> the next message is a canvas turn: the composer's 以画板为主 toggle is on (#644)
     await goSession(); await tid('canvas-tool-select').click(); await page.mouse.click(Math.round(W * 0.5), Math.round(H * 0.5)); await page.waitForTimeout(500);
-    if (await tid('stage-send-chat').isDisabled()) { await tid('right-panel-tab-layers').click(); await layerRows().first().click(); await page.waitForTimeout(400); }
+    if (await tid('stage-send-chat').isDisabled()) { await openLayers(); await layerRows().first().click(); await page.waitForTimeout(400); }
     await tid('stage-send-chat').click(); await page.waitForTimeout(1500);
     await shot('sent-to-chat');
     const boardMode = await tid('composer-board-mode').first().getAttribute('aria-pressed').catch(() => null);

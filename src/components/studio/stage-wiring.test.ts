@@ -112,7 +112,11 @@ describe('stage, right panel, lightbox and compare wiring', () => {
   it('opens the shared details on a card click, selects only through the checkbox, and keeps the canvas out of the click', () => {
     const strip = read('./version-strip.tsx');
     expect(allOutputs).toContain('onClick={onDetail}');
-    expect(allOutputs).toContain('openResultDetail(targetOfTile(tile, sessionId, labelOf(tile), picked, \'\', schema))');
+    // #690: the details title is the strip's own: label and caption ("2D v2 · 三视图 · 正面").
+    expect(allOutputs).toContain('openResultDetail(targetOfTile(tile, sessionId, versionTitle(schema, tile, tiles), picked, \'\', schema))');
+    expect(allOutputs).toContain("const title = schemaCaption ? [label, schemaCaption].join(' · ') : label;");
+    expect(allOutputs).toContain('targetOfTile(tile, sessionId, title, {}, \'\', schema)');
+    expect(strip).toContain("const label = caption ? [versionLabel(schema, tile, tile.domain), caption].join(' · ') : versionLabel(schema, tile, tile.domain);");
     expect(allOutputs).not.toContain('onDoubleClick');
     expect(allOutputs).not.toContain('openOnStage');
     expect(allOutputs).toContain('onCheckedChange={() => { const shift = shiftHeld.current; shiftHeld.current = false; onCheck(shift); }}');
