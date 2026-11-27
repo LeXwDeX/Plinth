@@ -78,6 +78,10 @@ type LocaleBundle struct {
 // rather than an application path; Load checks it against OfferingTexts.
 const OfferingsCoverage = "offerings"
 
+// projectMessagesCoverage covers the project HTTP boundary's copy (#670); a
+// Catalog without application.project skips it.
+const projectMessagesCoverage = "project.messages"
+
 // PublicLocalizationSchema is what the browser learns about locales: the
 // choices and which one this projection is in, never the other bundles.
 type PublicLocalizationSchema struct {
@@ -287,6 +291,10 @@ func validateLocalization(schema ApplicationSchema) error {
 		// 制作清单是可选段：旧 Catalog 不声明它，共享的 coverage 也不该因此
 		// 要求一份不存在的段。
 		if path == assetListCoverage && schema.AssetList == nil {
+			continue
+		}
+		// 项目段同样可选（#240 之前的 Catalog 没有它）。
+		if path == projectMessagesCoverage && schema.Project == nil {
 			continue
 		}
 		node, err := resolveLocalizationNode(document, path)
@@ -599,7 +607,8 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 	skipAssetList := schema.AssetList == nil
 	skipExecution := skipAssetList || schema.AssetList.Execution == nil
 	skipDecompose := skipAssetList || schema.AssetList.Decompose == nil
-	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList && !skipExecution && !skipDecompose {
+	skipProject := schema.Project == nil
+	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList && !skipExecution && !skipDecompose && !skipProject {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -626,6 +635,9 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 		}
 		// 单图拆解段同样可选：未声明时共享 bundle 里的拆解文案被跳过。
 		if skipDecompose && strings.HasPrefix(path, "asset_list.decompose.") {
+			continue
+		}
+		if skipProject && strings.HasPrefix(path, "project.") {
 			continue
 		}
 		applied[path] = text
