@@ -140,7 +140,7 @@ function Thumb({ tile, size, handle }: { tile: VersionTile; size: 'regular' | 'c
         <span className="grid size-full grid-cols-2 grid-rows-2 gap-px bg-background">
           {[0, 1, 2, 3].map((index) => (
             grid[index]
-              ? <img key={index} src={grid[index]} alt={''} loading="lazy" decoding="async" className="size-full object-cover" />
+              ? <img key={index} src={grid[index]} alt={''} loading="lazy" decoding="async" className="bg-checkerboard size-full object-cover" />
               : <span key={index} className="bg-muted" />
           ))}
         </span>
@@ -295,7 +295,7 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
                 aria-label={[schemaText(schema, 'ui.studio.strip.view'), candidate.label].join(' ')}
                 className={cn('relative h-20 w-20 overflow-hidden rounded-md border bg-muted focus-visible:outline-2 focus-visible:outline-ring', shown ? 'border-primary' : 'border-border')}
               >
-                <img src={previewAssetUrl(candidate.url)} alt={''} decoding="async" className="size-full object-cover" />
+                <img src={previewAssetUrl(candidate.url)} alt={''} decoding="async" className="bg-checkerboard size-full object-cover" />
               </button>
               <span className="truncate text-center text-[11px] text-muted-foreground">{candidate.label}</span>
               <HintTooltip name={schemaText(schema, 'ui.studio.strip.enlarge')}

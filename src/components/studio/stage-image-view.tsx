@@ -87,7 +87,7 @@ function StageImageModal() {
             alt={image.label}
             draggable={false}
             onError={() => setBroken(true)}
-            className="max-h-full max-w-full select-none rounded-md object-contain shadow-lg"
+            className="bg-checkerboard max-h-full max-w-full select-none rounded-md object-contain shadow-lg"
             data-testid="stage-image-picture"
           />
         )}

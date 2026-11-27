@@ -158,6 +158,13 @@
   }
 }
 
+/* #699：透明底图片下面垫棋盘格，深色底上透明区域不会显示成黑色；不透明的像素会把它盖住。 */
+@utility bg-checkerboard {
+  background-color: var(--panel);
+  background-image: repeating-conic-gradient(var(--muted) 0% 25%, var(--panel) 0% 50%);
+  background-size: 16px 16px;
+}
+
 /* ── 光栅 shimmer 动画（结果区骨架屏占位符） ── */
 @keyframes shimmer {
   0% {

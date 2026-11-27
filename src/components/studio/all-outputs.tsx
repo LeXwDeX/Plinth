@@ -329,7 +329,7 @@ function OutputCard({ tile, sessionId, label, selected, current, schemaCaption, 
         )}
       >
         <span className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-muted">
-          {src ? <img src={src} alt={''} loading="lazy" decoding="async" draggable={false} className="size-full object-cover" /> : tile.domain === 'model' ? <Box aria-hidden className="size-8 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-8 text-muted-foreground" />}
+          {src ? <img src={src} alt={''} loading="lazy" decoding="async" draggable={false} className="bg-checkerboard size-full object-cover" /> : tile.domain === 'model' ? <Box aria-hidden className="size-8 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-8 text-muted-foreground" />}
           {tile.status !== 'ready' ? (
             <span className="absolute inset-x-0 bottom-0 bg-panel/85 px-2 py-1 text-xs">{versionStatusLabel(schema, tile)}</span>
           ) : null}
