@@ -21,6 +21,7 @@ import {
 } from '@/lib/workspace/three-view';
 import { cn } from '@/lib/utils';
 import { formatNativePrice } from '@/lib/pricing';
+import { defaultApprovalMode } from '@/lib/chat/approval-modes';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -95,6 +96,11 @@ export interface ThreeViewCardViewProps {
   onMultiview?: () => boolean | void;
   /** The session's turn is running: the two buttons that ask for a turn wait for it (#691: no double turns). */
   turnRunning?: boolean;
+  /**
+   * #693: the server is carrying the group on by itself (an automatic-approval session whose turn or views are in
+   * flight): the required views not started yet say they come later, and no manual start is offered for them.
+   */
+  autoContinuing?: boolean;
   /** 生成剩余视图: starts each required view not started yet, one approval each. */
   onStartRemaining?: () => void;
   /** A picture the person chose or dropped replaces one view. */
@@ -108,7 +114,7 @@ export interface ThreeViewCardViewProps {
  */
 export function ThreeViewCardView({
   schema, group, busy, queued, thumbnail, onAdvance, onView, onToThreeD, model, multiviewState = 'picked', onMultiview, onStartRemaining, onReplace,
-  turnRunning = false,
+  turnRunning = false, autoContinuing = false,
 }: ThreeViewCardViewProps) {
   // #633: the same count as the version strip; a started right view (a four-view request) is part of it.
   const { done, total } = groupProgress(group.slots);
@@ -172,7 +178,9 @@ export function ThreeViewCardView({
       ) : null}
       <ul className={cn('grid gap-2', group.slots.length > 3 ? 'grid-cols-4' : 'grid-cols-3')} aria-label={text(schema, 'slots')}>
         {group.slots.map((slot) => {
-          const action = slotAction(slot);
+          // #693: a required view the automatic continuation will start has nothing to press.
+          const autoLater = autoContinuing && !slot.optional && slot.status === 'not_started';
+          const action = autoLater ? null : slotAction(slot);
           // #691: starting the optional right view has its own words and a quieter button: a three-view does not need it.
           const optionalStart = action === 'start' && slot.optional;
           const actionKey = optionalStart ? 'start_optional' : action;
@@ -227,7 +235,9 @@ export function ThreeViewCardView({
               {isQueued ? (
                 <span className="text-[11px] leading-4 text-muted-foreground" data-testid="three-view-queued">{text(schema, 'queued')}</span>
               ) : null}
-              {action ? (
+              {autoLater ? (
+                <span className="text-[11px] leading-4 text-muted-foreground" data-testid="three-view-auto-later">{text(schema, 'auto_later')}</span>
+              ) : action ? (
                 <HintTooltip
                   name={optionalStart ? formatSchemaText(text(schema, 'start_optional'), { view: slot.label }) : text(schema, action)}
                   reason={native && nativeAmount === null ? schemaText(schema, 'ui.unavailable.reason.three_view.price_unknown') : undefined}
@@ -285,7 +295,7 @@ export function ThreeViewCardView({
         })}
       </ul>
       <footer className="flex flex-col gap-1.5 border-t border-border pt-2">
-        {onStartRemaining && remaining.length > 0 ? (
+        {onStartRemaining && remaining.length > 0 && !autoContinuing ? (
           <Action
             type="button"
             size="xs"
@@ -362,6 +372,10 @@ export function ThreeViewCardView({
 export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   const { schema } = useProductSchema();
   const { busy, queued, advance, startRemaining, replace, turnRunning } = useThreeViews();
+  const approvalMode = useChatStore((state) => state.sessions.find((item) => item.id === state.activeSessionId)?.approvalMode) ?? defaultApprovalMode(schema);
+  // #693: in an automatic-approval session the server starts the remaining views itself while the turn or a view runs.
+  const autoContinuing = approvalMode === 'auto'
+    && (turnRunning || group.slots.some((slot) => slot.status === 'starting' || slot.status === 'running'));
   const { viewOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD } = useObjectActions();
   const { proxyAssetUrl } = useAssetURLRewriter();
   const sessionId = useChatStore((state) => state.activeSessionId);
@@ -390,6 +404,7 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
       model={model}
       multiviewState={multiviewState}
       turnRunning={turnRunning}
+      autoContinuing={autoContinuing}
       onAdvance={(slot) => { void advance(group, slot).then(report); }}
       onStartRemaining={() => { void startRemaining(group).then(report); }}
       onReplace={(slot, picture) => { void replace(group, slot, picture).then(report); }}

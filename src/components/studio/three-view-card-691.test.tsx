@@ -90,3 +90,28 @@ describe('#691: the three-view card', () => {
     expect(onToThreeD).toHaveBeenCalledOnce();
   });
 });
+
+describe('#693: while the automatic continuation carries the group on', () => {
+  const running = four([
+    { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+    { status: 'running', task_id: 't2' },
+    { status: 'not_started', startable: true, estimated_credits: 9, credits_metered: true },
+    { status: 'not_started', startable: true, estimated_credits: 9, credits_metered: true },
+  ]);
+  const props = { group: running, onStartRemaining: () => {} };
+
+  it('says the required views come later and offers no manual start for them; the optional right view keeps its own', () => {
+    card({ ...props, autoContinuing: true });
+    expect(slotOf('back').querySelector('[data-testid="three-view-start"]')).toBeNull();
+    expect(slotOf('back').querySelector('[data-testid="three-view-auto-later"]')?.textContent).toBe(messages['ui.studio.three_view.auto_later']);
+    expect(screen.queryByTestId('three-view-start-remaining')).toBeNull();
+    expect(slotOf('right').querySelector('[data-testid="three-view-start"]')).not.toBeNull();
+  });
+
+  it('keeps every manual start where the session asks for each one', () => {
+    card({ ...props, autoContinuing: false });
+    expect(slotOf('back').querySelector('[data-testid="three-view-start"]')).not.toBeNull();
+    expect(screen.queryByTestId('three-view-auto-later')).toBeNull();
+    expect(screen.getByTestId('three-view-start-remaining')).toBeTruthy();
+  });
+});
