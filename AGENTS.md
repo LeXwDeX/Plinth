@@ -98,7 +98,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 4. **发布到 `dev-test`**：用 `scripts/release-env.py release dev-test` 发布已推送的 `origin/main`，发布后核对镜像 revision 与目标完整 SHA 一致。CI 只执行自动化门禁，不承担发布。
 5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及上游的验收使用 fake 场景。L2、L5 等真实模型或付费验收不再每次发布必跑，只在用户当次同意后执行（见「上游接口与 Fake」），结果回灌 fake。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent 并写机器报告，判定口径见「发布后冒烟判定与晋级校验」；真实形态仍按 `docs/deployment.md` §6 手动执行。
 6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
-7. **最终 GitHub Runner 验证**：本轮所有问题在自建 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub Runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。
+7. **最终 GitHub Runner 验证**：本轮所有问题在自建 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub Runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。GitHub Runner 指 `.github/workflows/ci.yml` 的三个作业：推送 `main` 时由自托管 runner 运行；自托管 runner 掉线时，按 `dev_test.md` §2「自托管 runner」手动触发该工作流，由 GitHub 托管 runner 完成，两者都算。
 8. **晋级到 `formal-test` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到正式测试环境，交由人工 Review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；前三项由 `release-env.py` 读 `dev-test` 发布根下的机器报告核对，验收报告以本仓库原生 Issue comment 记录，脚本同时核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
 9. **Tag 与 GitHub Release**：人工 Review 确认 `formal-test` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；Review 未通过时修复后从第 1 步重走。
 
