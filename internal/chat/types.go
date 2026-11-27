@@ -391,6 +391,19 @@ func (checkpoint TurnCheckpoint) priorGenerationUnits(callID string, bound ...ma
 	return total
 }
 
+// ownGenerationUnits is what the turn's generation count holds for callID
+// itself; a task-bound call without a record counts one, as in
+// priorGenerationUnits.
+func (checkpoint TurnCheckpoint) ownGenerationUnits(callID string, bound bool) int {
+	if units := checkpoint.GenerationUnits[callID]; units > 0 {
+		return units
+	}
+	if bound {
+		return 1
+	}
+	return 0
+}
+
 // WaitingCall is one call of a tool round that still lacks its receipt.
 // With a TaskID it is a paid step in flight: the turn wakes once the Task is
 // terminal or Deadline passed. Without one the generation kernel refused the

@@ -1193,6 +1193,59 @@ func (e *Executor) countedGenerationUnits(scope, turn, callID string) int {
 	return current.calls[callID]
 }
 
+// generationRemaining is how many more units the turn's generation count
+// takes before limit (generationLimit) once callID holds own units (#693); -1
+// when the turn has no limit. prior is the count before the call
+// (PriorGenerationCalls), own what the turn checkpoint holds for the call
+// (OwnGenerationUnits), used when this process lost the call's count.
+func (e *Executor) generationRemaining(scope, turn, callID string, prior, own, limit int) int {
+	if e.maxGeneration <= 0 || limit <= 0 {
+		return -1
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	used := prior + own
+	if current, known := e.usage[scope]; known && current.turn == turn {
+		if counted, seen := current.calls[callID]; seen {
+			used = max(current.count, prior+counted)
+		} else {
+			used = max(current.count, prior) + own
+		}
+	}
+	return max(limit-used, 0)
+}
+
+// addGenerationUnits adds units to callID's share of the turn's generation
+// count (#693): a three-view continuation counts every view it submits on the
+// call that started the group. A call this process lost is first restored
+// with own units on top of prior, as generationRemaining reads it.
+func (e *Executor) addGenerationUnits(scope, turn, callID string, prior, own, units int) {
+	if e.maxGeneration <= 0 || units <= 0 {
+		return
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known && len(e.usage) >= maxUsageScopes {
+		e.evictOldestUsageLocked()
+	}
+	e.usageClock++
+	if current.turn != turn {
+		current = generationUsage{turn: turn, calls: map[string]int{}}
+	}
+	current.used = e.usageClock
+	if current.calls == nil {
+		current.calls = map[string]int{}
+	}
+	if _, seen := current.calls[callID]; !seen {
+		current.count = max(current.count, prior) + own
+		current.calls[callID] = own
+	}
+	current.count += units
+	current.calls[callID] += units
+	e.usage[scope] = current
+}
+
 // evictOldestUsageLocked drops the scope whose last generation call is the
 // oldest (#665); the caller holds usageMu.
 func (e *Executor) evictOldestUsageLocked() {

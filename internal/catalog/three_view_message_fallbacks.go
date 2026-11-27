@@ -54,6 +54,10 @@ func fillThreeViewMessageFallbacks(application *ApplicationSchema) {
 	fallback(&messages.ModelUnavailable, builtIn.ModelUnavailable)
 	fallback(&messages.Denied, builtIn.Denied)
 	fallback(&messages.DuplicateRun, builtIn.DuplicateRun)
+	// A view the person already started, and a redraw bounded by the turn's
+	// generation checkpoint (#689, #693).
+	fallback(&messages.AgentPausedStarted, builtIn.AgentPausedStarted, messages.AgentPaused)
+	fallback(&messages.ConsistencyRedraw, builtIn.ConsistencyRedraw)
 }
 
 // builtInThreeViewMessages reads the three-view texts of the built-in Catalog

@@ -4334,7 +4334,8 @@ type ChatThreeViewReviewItem struct {
 type ChatThreeViewContinuationSchema struct {
 	Enabled bool `json:"enabled"`
 	// Reasons keys: budget_not_covered, view_not_finished,
-	// view_already_started, consistency_retries_exhausted.
+	// view_already_started, consistency_retries_exhausted,
+	// generation_checkpoint.
 	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
@@ -4413,10 +4414,19 @@ type ChatThreeViewMessages struct {
 	// AgentPaused says the budget continuation stopped without finishing the
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
+	// AgentPausedStarted is AgentPaused for a view that was already started
+	// (view_already_started): the person started it, it is not a failure, and
+	// the Agent does not send the person to click or retry (#689). Same
+	// fields; a Catalog without it uses AgentPaused.
+	AgentPausedStarted string `json:"agent_paused_started,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
 	// {attempt}, {maximum}, {reasons}. The reasons are worded by
 	// consistency.reasons, one per failed check (#283).
 	ConsistencyRetry string `json:"consistency_retry,omitempty"`
+	// ConsistencyRedraw reports one redraw of a continuation bounded by the
+	// turn's generation checkpoint instead of an attempt limit (#693):
+	// {view}, {attempt}, {reasons}.
+	ConsistencyRedraw string `json:"consistency_redraw,omitempty"`
 	// ConsistencyFailed reports a view that stayed inconsistent; the group
 	// waits for a person. Fields: {view}, {reasons}.
 	ConsistencyFailed string `json:"consistency_failed,omitempty"`

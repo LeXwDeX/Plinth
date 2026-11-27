@@ -903,7 +903,9 @@ func (e *Executor) threeViewSubjectType(requested string) (string, string) {
 // that view, submits the next view the basis covers, and ends the tool call
 // only when the group is complete
 // or paused for a person. Accepted views travel to the Agent as same-turn
-// pictures so it can check clothing and colors.
+// pictures so it can check clothing and colors. Every view it submits counts
+// against the turn's generation checkpoint on this call (#693); a view a
+// person already started is waited for, not counted.
 func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
@@ -916,13 +918,23 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 	}
 	_ = json.Unmarshal(command.Call.Arguments, &args)
 	includeRight, _ := threeViewIncludeRight(args.IncludeRight)
-	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID, includeRight)
+	scope, turn := e.scopeKey(command), command.AssistantMessageID
+	remaining := e.generationRemaining(scope, turn, command.Call.ID, command.PriorGenerationCalls,
+		command.OwnGenerationUnits, e.generationLimit(command))
+	result, err := e.threeViewService.ContinueWithin(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, turn, includeRight, remaining)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}
 	messages := e.threeView.Messages
+	if result.Awaiting {
+		// A view the person started on the card: wait for it, then go on
+		// (#689, #693). It is not this call's submission.
+		return chat.ToolResult{TaskID: result.TaskID, AwaitTask: true,
+			WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
+	}
 	if result.TaskID != "" {
+		e.addGenerationUnits(scope, turn, command.Call.ID, command.PriorGenerationCalls, command.OwnGenerationUnits, 1)
 		if observe != nil {
 			task := result.Task
 			if err := observe(chat.ToolObservation{Registered: true, TaskID: result.TaskID,
@@ -933,7 +945,14 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			}
 		}
 		content := ""
-		if result.Retried {
+		if result.Retried && result.MaximumAttempts == 0 {
+			// A bounded continuation redraws until the turn's checkpoint (#693).
+			content = strings.NewReplacer(
+				"{view}", e.threeViewSlotLabel(result, result.View),
+				"{attempt}", strconv.Itoa(result.Attempt),
+				"{reasons}", result.FailedReasons,
+			).Replace(messages.ConsistencyRedraw)
+		} else if result.Retried {
 			content = strings.NewReplacer(
 				"{view}", e.threeViewSlotLabel(result, result.View),
 				"{attempt}", strconv.Itoa(result.Attempt),
@@ -945,6 +964,13 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			AwaitTask: true, WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
 	}
 	pictures := e.threeViewPictures(result)
+	if result.Paused && result.Reason == threeview.ReasonGenerationCheckpoint {
+		// The turn ends at its generation checkpoint (#694); the views left
+		// continue when the person answers.
+		limited := e.limitResult(command)
+		limited.Pictures = pictures
+		return limited, nil
+	}
 	if result.Paused {
 		content := ""
 		if result.Reason == threeview.ReasonConsistencyExhausted {
@@ -955,8 +981,13 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			if reason == "" {
 				reason = result.Reason
 			}
+			template := messages.AgentPaused
+			if result.Reason == threeview.ReasonViewAlreadyStarted && messages.AgentPausedStarted != "" {
+				// Not a failure: the person started it (#689).
+				template = messages.AgentPausedStarted
+			}
 			content = strings.NewReplacer("{run}", run.ID, "{view}", e.threeViewSlotLabel(result, result.View),
-				"{reason}", reason).Replace(messages.AgentPaused)
+				"{reason}", reason).Replace(template)
 		}
 		return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
 	}

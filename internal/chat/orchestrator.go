@@ -55,6 +55,11 @@ type ToolCommand struct {
 	// before this call, rebuilt from the units the turn checkpoint keeps
 	// (TurnCheckpoint.GenerationUnits, #665).
 	PriorGenerationCalls int
+	// OwnGenerationUnits is what the turn checkpoint holds for this call
+	// itself: a three-view continuation adds a unit for every view it submits
+	// on the call that started the group (#693), so a replay after a restart
+	// rebuilds the call's own count too.
+	OwnGenerationUnits int
 	// ApprovalMode is the session's approval mode read when the round's tools
 	// start (#694): the turn's generation checkpoint depends on it. Empty when
 	// it cannot be read, which keeps max_generation_calls_per_turn.
@@ -3412,6 +3417,7 @@ func (orchestrator *Orchestrator) executeTools(
 			waitDeadline = entry.Deadline
 		}
 		priorGenerationCalls := turn.Checkpoint.priorGenerationUnits(call.ID, boundTasks, taskBindings)
+		ownGenerationUnits := turn.Checkpoint.ownGenerationUnits(call.ID, boundTaskID != "")
 		tool, found := registry.resolve(call.Name, boundTaskID != "")
 		if !found && boundTaskID == "" {
 			// Current catalog availability cannot hide an already accepted Task.
@@ -3531,6 +3537,7 @@ func (orchestrator *Orchestrator) executeTools(
 				FrozenIdempotencyKey: frozenKey,
 				TaskWaitDeadline:     waitDeadline,
 				PriorGenerationCalls: priorGenerationCalls,
+				OwnGenerationUnits:   ownGenerationUnits,
 				ApprovalMode:         approvalMode,
 				ConsentWaitDeadline:  command.ConsentWaitDeadline,
 				Call:                 call,
