@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 /**
+ * OUTDATED, NOT PART OF ACCEPTANCE (#705). Written against the old Studio UI: the starter card
+ * (`stage-starter-card`) and other entry points it drives no longer exist, so it has scored 0/43 since
+ * before #405. Do not cite its results as evidence. Current browser acceptance lives in
+ * `release-1-9-*.mjs` and `browser_matrix/` (see README.md). Kept only as a record.
+ *
  * Studio acceptance run: the four scenarios of ux-validation-prototype.md section 5,
  * driven through the real UI with Playwright (clicks, typing, keyboard).
  *

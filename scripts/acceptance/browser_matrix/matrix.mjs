@@ -297,13 +297,22 @@ async function runCell(engine, loc, [W, H]) {
     throw Object.assign(new Error(`picker shows only the system three-view Skill (${names[0]}) plus the admin's ${mine.length} personal Skill(s); "fresh user sees an empty personal list" needs a second account (not available on dev-test)`), { status: 'PARTIAL' });
   };
 
+  // #548 creator dialog: step one asks for the name and a requirement, then 「生成」 drafts the fields or 「我自己写」 opens
+  // them empty. These items take 「我自己写」 (no draft call, deterministic): name, description and prompt are required,
+  // and 「保存并使用」 saves with the Schema's `creation.recommended_size` and selects the new Skill.
   const createSkill = async (name) => {
     await openSkills();
-    await page.getByText(L('创建 Skill', 'Create Skill'), { exact: true }).click();
-    await page.locator('#personal-skill-name, input[type=text]').first().fill(name);
+    await page.getByRole('button', { name: L('创建 Skill', 'Create Skill'), exact: true }).click();
+    const creator = tid('workspace-skill-creator');
+    await creator.waitFor({ timeout: 10000 });
+    await page.locator('#personal-skill-name').fill(name);
+    await tid('skill-write-myself').click();
+    await page.locator('#personal-skill-description').waitFor({ timeout: 10000 });
+    await page.locator('#personal-skill-description').fill('b3 acceptance description');
     await page.locator('#personal-skill-prompt').fill('b3 acceptance prompt');
-    await page.getByText(L('保存并使用', 'Save and use'), { exact: false }).first().click();
-    await page.waitForTimeout(1500);
+    await creator.getByRole('button', { name: L('保存并使用', 'Save and use') }).click();
+    await creator.waitFor({ state: 'detached', timeout: 15000 });
+    await page.waitForTimeout(800);
     await closeSettings();
   };
   const pickModel2D = async () => {
