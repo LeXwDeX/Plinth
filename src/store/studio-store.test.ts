@@ -10,6 +10,7 @@ import {
   rightPanelFits,
   rightPanelWidth,
   readStudioPrefs,
+  stageTurnPending,
   useStudioStore,
 } from './studio-store';
 
@@ -286,5 +287,35 @@ describe('right panel folding', () => {
     useStudioStore.getState().showProcess(null);
     expect(useStudioStore.getState().panelCollapsed).toBe(false);
     expect(useStudioStore.getState().panelTab3d).toBe('process');
+  });
+});
+
+describe('#691: a stage turn request is pending until its send is over', () => {
+  beforeEach(() => {
+    useStudioStore.setState({ turnRequest: null, stageTurnsSending: 0 });
+  });
+
+  it('is pending from the request, through the send, and not after it', () => {
+    const store = useStudioStore.getState;
+    expect(stageTurnPending(store())).toBe(false);
+    store().requestTurn('转 3D');
+    expect(stageTurnPending(store())).toBe(true);
+    store().beginStageTurn();
+    store().clearTurnRequest();
+    expect(stageTurnPending(store())).toBe(true);
+    store().endStageTurn();
+    expect(stageTurnPending(store())).toBe(false);
+  });
+
+  it('counts overlapping sends, and an extra end never goes below none', () => {
+    const store = useStudioStore.getState;
+    store().beginStageTurn();
+    store().beginStageTurn();
+    store().endStageTurn();
+    expect(stageTurnPending(store())).toBe(true);
+    store().endStageTurn();
+    store().endStageTurn();
+    expect(store().stageTurnsSending).toBe(0);
+    expect(stageTurnPending(store())).toBe(false);
   });
 });

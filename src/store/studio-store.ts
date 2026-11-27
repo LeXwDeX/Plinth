@@ -167,6 +167,8 @@ interface StudioState extends StudioPrefs {
   /** 舞台上的动作（如"转 3D"）请 Agent 直接做一件事；由对话栏作为一轮发出。 */
   /** `models`: a 3D model the person confirmed for this one turn (#678), by workspace domain; no lock is written. */
   turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[]; multiview?: MultiviewTurnRequest; models?: Record<string, string> } | null;
+  /** #691: stage requests the chat column took and is still sending (until the turn ends or the send returns without one). */
+  stageTurnsSending: number;
   /** 请 3D 舞台把某个模型当前的视角截图到 2D（对话里的结果卡也能发起）。 */
   captureRequest: { taskId: string; seq: number } | null;
   /** Whether the model on the 3D stage can be captured or have a part exported (#126); `taskId` names the model it describes. */
@@ -221,6 +223,8 @@ interface StudioState extends StudioPrefs {
   /** `selection` names the picture the turn is about (the rasterised board), instead of what the stage shows. */
   requestTurn: (text: string, selection?: ChatAttachmentClaim[], multiview?: MultiviewTurnRequest, models?: Record<string, string>) => void;
   clearTurnRequest: () => void;
+  beginStageTurn: () => void;
+  endStageTurn: () => void;
   requestCapture: (taskId: string) => void;
   clearCaptureRequest: () => void;
   setStageModelState: (stageModelState: { taskId: string; state: StageModelState } | null) => void;
@@ -271,6 +275,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     viewResetRequest: null,
     composerPrefill: null,
     turnRequest: null,
+    stageTurnsSending: 0,
     captureRequest: null,
     stageModelState: null,
     imageCommand: null,
@@ -327,6 +332,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
       },
     })),
     clearTurnRequest: () => set({ turnRequest: null }),
+    beginStageTurn: () => set((state) => ({ stageTurnsSending: state.stageTurnsSending + 1 })),
+    endStageTurn: () => set((state) => ({ stageTurnsSending: Math.max(0, state.stageTurnsSending - 1) })),
     requestCapture: (taskId) => set((state) => ({ captureRequest: { taskId, seq: (state.captureRequest?.seq ?? 0) + 1 } })),
     clearCaptureRequest: () => set({ captureRequest: null }),
     setStageModelState: (stageModelState) => set({ stageModelState }),
@@ -364,3 +371,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
   };
 });
 
+
+/** #691: a stage action asked for a turn that has not been sent yet, or is still being sent (and run). */
+export function stageTurnPending(state: Pick<StudioState, 'turnRequest' | 'stageTurnsSending'>): boolean {
+  return state.turnRequest !== null || state.stageTurnsSending > 0;
+}

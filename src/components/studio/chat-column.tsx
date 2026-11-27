@@ -103,7 +103,7 @@ import {
   cancelQueuedTurn, enqueueTurn, holdDrainForRead, holdsToRelease, nextDrainStep, pruneQueuedSessions, queueMayDrain, queuedFor,
   readCompleted, takeQueuedTurn, type DrainGate, type QueueBySession,
 } from '@/lib/chat/send-queue';
-import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
+import { chatErrorToastId, requestTurnStop, sendStageRequest, stageRequestStep } from '@/lib/chat/turn-signals';
 import { createCoalescer } from '@/lib/chat/coalesce';
 import { restoreRemovedMessage } from '@/lib/chat/message-pages';
 import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
@@ -1639,12 +1639,18 @@ export function ChatColumn() {
       toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
       return;
     }
-    clearTurnRequest();
-    if (step === 'drop') return;
-    void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
-      turnRequest.multiview || turnRequest.models
-        ? { ...(turnRequest.multiview ? { multiview: turnRequest.multiview } : {}), ...(turnRequest.models ? { domainModels: turnRequest.models } : {}) }
-        : undefined);
+    // #691: the request stays pending (the three-view card's turn buttons stay off) until this send is over, a turn
+    // that ran or a send that returned without one; a dropped request is no longer pending.
+    const studio = useStudioStore.getState();
+    void sendStageRequest(step, {
+      clear: clearTurnRequest,
+      begin: studio.beginStageTurn,
+      end: studio.endStageTurn,
+      send: () => sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
+        turnRequest.multiview || turnRequest.models
+          ? { ...(turnRequest.multiview ? { multiview: turnRequest.multiview } : {}), ...(turnRequest.models ? { domainModels: turnRequest.models } : {}) }
+          : undefined),
+    });
   }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回

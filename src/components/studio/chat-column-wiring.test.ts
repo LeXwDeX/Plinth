@@ -346,3 +346,10 @@ describe('session preference wiring (#241)', () => {
     expect(canvasActions.indexOf('recordInpaintSignal()')).toBeLessThan(canvasActions.indexOf('request.onSubmitted?.()'));
   });
 });
+
+describe('#691: a stage request is counted until its send is over', () => {
+  it('sends it through sendStageRequest with the studio counter, so a dropped or refused request ends the wait', () => {
+    expect(agentDialog).toMatch(/void sendStageRequest\(step, \{\s*clear: clearTurnRequest,\s*begin: studio\.beginStageTurn,\s*end: studio\.endStageTurn,/);
+    expect(agentDialog).not.toMatch(/clearTurnRequest\(\);\s*if \(step === 'drop'\) return;/);
+  });
+});

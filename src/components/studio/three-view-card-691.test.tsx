@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
-import { ThreeViewCardView, type ThreeViewCardViewProps } from '@/components/studio/three-view-card';
+import { ThreeViewCardView, useTurnButtonsPending, type ThreeViewCardViewProps } from '@/components/studio/three-view-card';
+import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
+import { useStudioStore } from '@/store/studio-store';
 import type { ProductSchema } from '@/lib/product-schema';
 import { parseThreeViews, type MultiviewModel, type ThreeViewGroup } from '@/lib/workspace/three-view';
 
@@ -72,14 +74,13 @@ describe('#691: the three-view card', () => {
     expect((screen.getByTestId('three-view-multiview') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('asks for one turn per press: the two turn buttons stay off until the turn starts and ends', () => {
+  it('keeps the two turn buttons off while a turn is asked for or runs, and usable again once neither holds', () => {
     const onMultiview = vi.fn(() => true);
     const onToThreeD = vi.fn(() => true);
-    const view = card({ onMultiview, onToThreeD });
-    fireEvent.click(screen.getByTestId('three-view-multiview'));
+    const view = card({ onMultiview, onToThreeD, turnPending: true });
     fireEvent.click(screen.getByTestId('three-view-multiview'));
     fireEvent.click(screen.getByTestId('three-view-to-3d'));
-    expect(onMultiview).toHaveBeenCalledOnce();
+    expect(onMultiview).not.toHaveBeenCalled();
     expect(onToThreeD).not.toHaveBeenCalled();
     view.rerender(<ThreeViewCardView schema={schema} group={ready} busy={null} queued={new Set()} thumbnail={() => ''} onAdvance={() => {}} onView={() => {}}
       onToThreeD={onToThreeD} model={model} onMultiview={onMultiview} turnRunning />);
@@ -88,6 +89,46 @@ describe('#691: the three-view card', () => {
       onToThreeD={onToThreeD} model={model} onMultiview={onMultiview} turnRunning={false} />);
     fireEvent.click(screen.getByTestId('three-view-to-3d'));
     expect(onToThreeD).toHaveBeenCalledOnce();
+  });
+
+  it('never stays off on its own: a press whose turn never starts leaves the buttons usable', () => {
+    // The request was dropped or refused before a turn started (no session, no Agent, a model no longer offered):
+    // nothing is pending and no turn runs, so the card does not keep the buttons off by itself.
+    const onToThreeD = vi.fn(() => true);
+    card({ onToThreeD });
+    fireEvent.click(screen.getByTestId('three-view-to-3d'));
+    fireEvent.click(screen.getByTestId('three-view-to-3d'));
+    expect(onToThreeD).toHaveBeenCalledTimes(2);
+    expect((screen.getByTestId('three-view-to-3d') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('#691: what keeps the turn buttons off', () => {
+  afterEach(() => {
+    act(() => {
+      useStudioStore.setState({ turnRequest: null, stageTurnsSending: 0 });
+      useModel3DConfirmStore.getState().close();
+    });
+  });
+
+  it('a stage request not yet sent, a send in progress, and an open 3D model confirmation', () => {
+    const { result } = renderHook(() => useTurnButtonsPending());
+    expect(result.current).toBe(false);
+    act(() => { useStudioStore.getState().requestTurn('转 3D'); });
+    expect(result.current).toBe(true);
+    // The request is dropped (no session): usable again.
+    act(() => { useStudioStore.getState().clearTurnRequest(); });
+    expect(result.current).toBe(false);
+    // The send runs, then returns without a turn (no Agent, model no longer offered): usable again.
+    act(() => { useStudioStore.getState().beginStageTurn(); });
+    expect(result.current).toBe(true);
+    act(() => { useStudioStore.getState().endStageTurn(); });
+    expect(result.current).toBe(false);
+    // Confirming the model: a second press would ask again, so the buttons wait for the answer.
+    act(() => { useModel3DConfirmStore.getState().ask({ modelId: 'm', modelName: 'M', cost: '', run: () => {} }); });
+    expect(result.current).toBe(true);
+    act(() => { useModel3DConfirmStore.getState().close(); });
+    expect(result.current).toBe(false);
   });
 });
 

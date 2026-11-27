@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { Box, Check, Image as ImageIcon, Layers, RotateCcw, TriangleAlert, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -23,6 +23,8 @@ import { cn } from '@/lib/utils';
 import { formatNativePrice } from '@/lib/pricing';
 import { defaultApprovalMode } from '@/lib/chat/approval-modes';
 import { useChatStore } from '@/store/chat-store';
+import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
+import { stageTurnPending, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import type { CurrentObject } from '@/store/workspace-store';
@@ -97,6 +99,11 @@ export interface ThreeViewCardViewProps {
   /** The session's turn is running: the two buttons that ask for a turn wait for it (#691: no double turns). */
   turnRunning?: boolean;
   /**
+   * #691: a turn a stage action asked for is not sent yet or is still being sent, or the 3D model confirmation is open
+   * (`useTurnButtonsPending`). The two turn buttons wait for it too; nothing else keeps them off.
+   */
+  turnPending?: boolean;
+  /**
    * #693: the server is carrying the group on by itself (an automatic-approval session whose turn or views are in
    * flight): the required views not started yet say they come later, and no manual start is offered for them.
    */
@@ -114,7 +121,7 @@ export interface ThreeViewCardViewProps {
  */
 export function ThreeViewCardView({
   schema, group, busy, queued, thumbnail, onAdvance, onView, onToThreeD, model, multiviewState = 'picked', onMultiview, onStartRemaining, onReplace,
-  turnRunning = false, autoContinuing = false,
+  turnRunning = false, turnPending = false, autoContinuing = false,
 }: ThreeViewCardViewProps) {
   // #633: the same count as the version strip; a started right view (a four-view request) is part of it.
   const { done, total } = groupProgress(group.slots);
@@ -127,14 +134,13 @@ export function ThreeViewCardView({
   const separator = text(schema, 'view_separator');
   const usedViews = multiview?.slots.map((slot) => slot.label).join(separator) ?? '';
   const picker = useRef<HTMLInputElement>(null);
-  // #691: a press of 用三视图生成 3D or 只用正面转 3D asks for a turn; until that turn starts (or ends) neither may be
-  // pressed again, so a double click never queues two paid turns.
-  const [turnAsked, setTurnAsked] = useState(false);
-  useEffect(() => { setTurnAsked(false); }, [turnRunning]);
-  const turnButtonsOff = turnAsked || turnRunning;
+  // #691: a press of 用三视图生成 3D or 只用正面转 3D asks for a turn; while that request waits, is sent or runs (or its
+  // model confirmation is open) neither may be pressed again, so a double click never queues two paid turns. The
+  // state is read from the request itself: a request dropped or refused before a turn started leaves them usable.
+  const turnButtonsOff = turnPending || turnRunning;
   const askTurn = (run: () => boolean | void) => {
     if (turnButtonsOff) return;
-    if (run() !== false) setTurnAsked(true);
+    run();
   };
   const [replacing, setReplacing] = useState<ThreeViewSlot | null>(null);
   const accept = model?.mediaTypes.length ? model.mediaTypes.join(',') : 'image/png,image/jpeg';
@@ -369,6 +375,16 @@ export function ThreeViewCardView({
   );
 }
 
+/**
+ * #691: what keeps the card's two turn buttons off besides a running turn: a stage request not sent yet or still
+ * being sent (the chat column counts it until the send is over), or the 3D model confirmation waiting for an answer.
+ */
+export function useTurnButtonsPending(): boolean {
+  const requested = useStudioStore(stageTurnPending);
+  const confirming = useModel3DConfirmStore((state) => state.request !== null);
+  return requested || confirming;
+}
+
 export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   const { schema } = useProductSchema();
   const { busy, queued, advance, startRemaining, replace, turnRunning } = useThreeViews();
@@ -376,6 +392,7 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   // #693: in an automatic-approval session the server starts the remaining views itself while the turn or a view runs.
   const autoContinuing = approvalMode === 'auto'
     && (turnRunning || group.slots.some((slot) => slot.status === 'starting' || slot.status === 'running'));
+  const turnPending = useTurnButtonsPending();
   const { viewOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD } = useObjectActions();
   const { proxyAssetUrl } = useAssetURLRewriter();
   const sessionId = useChatStore((state) => state.activeSessionId);
@@ -404,6 +421,7 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
       model={model}
       multiviewState={multiviewState}
       turnRunning={turnRunning}
+      turnPending={turnPending}
       autoContinuing={autoContinuing}
       onAdvance={(slot) => { void advance(group, slot).then(report); }}
       onStartRemaining={() => { void startRemaining(group).then(report); }}
