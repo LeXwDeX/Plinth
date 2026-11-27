@@ -555,18 +555,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
 		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
 	}
-	// #694: every mode's generation checkpoint must fit inside the round
-	// bound too, and a reply stopped there says why.
-	if checkpoints := schema.ApprovalPolicy.GenerationCheckpoint; len(checkpoints) > 0 {
-		for mode, count := range checkpoints {
-			if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds > 0 && rounds < count {
-				return fmt.Errorf("agent 的 max_tool_rounds_per_turn 不得小于 approval_policy.generation_checkpoint[%s]", mode)
-			}
-		}
-		if !strings.Contains(schema.Presentation.Messages.GenerationCheckpointReached, "{count}") {
-			return errors.New("声明了 approval_policy.generation_checkpoint 时 presentation.messages.generation_checkpoint_reached 必须包含 {count}")
-		}
-	}
 	// #665: a bounded tool result needs the note that tells the Agent what
 	// was cut and how to narrow the request.
 	if limit := schema.Agent.MaxToolResultCharacters; limit < 0 {

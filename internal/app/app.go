@@ -1326,7 +1326,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Preflight:                 toolExecutor.SelectionError,
 		SubmissionGate:            newAssetListSubmissionGate(assetListService, applicationSchema.AssetList),
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
-		GenerationCheckpoint:      applicationSchema.Chat.ApprovalPolicy.GenerationCheckpoint,
 		ConsentReconcileContent:   applicationSchema.Chat.Agent.ConsentReconcileContent,
 		ConsentLimitContent:       applicationSchema.Chat.Agent.ConsentLimitContent,
 		Texts:                     texts,

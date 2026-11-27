@@ -8,12 +8,12 @@ import (
 )
 
 // #665: only a group the auto mode started drops its right view when the mode
-// changes. In the strict mode the session policy approves the cheap views as
-// policy:manual; a four-view request there finishes its required views as a
+// changes. In the budget ("approve") mode without a plan the session policy
+// approves the cheap views as policy:budget (#702: strict asks for every view); a four-view request there finishes its required views as a
 // plain three-view group instead of pausing on a right-view card that was
 // never raised.
 func TestManualPolicyApprovedGroupDoesNotWaitOnTheRightView665(t *testing.T) {
-	f := newContinuationFixtureWithMode(t, false, "manual")
+	f := newContinuationFixtureWithMode(t, false, "budget")
 	ctx := context.Background()
 	var last string
 	for i, key := range []string{"front", "left", "back"} {
@@ -21,7 +21,7 @@ func TestManualPolicyApprovedGroupDoesNotWaitOnTheRightView665(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, grant, err := f.runtime.RequestAgentGrant(ctx, "owner-a", f.run.ID, key, "turn-a")
-		if err != nil || grant.Status != executiongrant.Approved || grant.DecidedBy != executiongrant.PolicyActorPrefix+"manual" {
+		if err != nil || grant.Status != executiongrant.Approved || grant.DecidedBy != executiongrant.PolicyActorPrefix+"budget" {
 			t.Fatalf("%s grant = %+v err=%v", key, grant, err)
 		}
 		_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, key)

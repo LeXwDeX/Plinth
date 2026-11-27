@@ -10,8 +10,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// #150: the approval policy the shipped Product Schema declares. In manual
-// and budget modes only the listed capabilities need a person; Remesh,
+// #150: the approval policy the shipped Product Schema declares. In budget
+// ("approve") mode only the listed capabilities need a person (#702: strict
+// asks for every step); Remesh,
 // Rigging and Animation are approved by policy, so the Agent must never tell
 // a person to switch a mode to "get a confirmation" for them.
 func TestDefaultSchemaApprovalPolicyAutoApprovesRemeshRiggingAnimation(t *testing.T) {
@@ -27,7 +28,7 @@ func TestDefaultSchemaApprovalPolicyAutoApprovesRemeshRiggingAnimation(t *testin
 		if !slices.Contains(policy.KnownCapabilities, capability) {
 			t.Fatalf("capability %q is not declared by the Schema", capability)
 		}
-		for _, mode := range []string{approvalpolicy.ModeAuto, approvalpolicy.ModeManual} {
+		for _, mode := range []string{approvalpolicy.ModeAuto, approvalpolicy.ModeBudget} {
 			if approvalpolicy.RequiresHuman(policy, mode, capability) {
 				t.Errorf("%s needs a person in %s mode", capability, mode)
 			}
@@ -44,9 +45,10 @@ func TestDefaultSchemaApprovalPolicyAutoApprovesRemeshRiggingAnimation(t *testin
 }
 
 // Tripo Rigging and decimation declare fixed additional export formats with extra
-// credits, so manual mode still asks a person for those steps even though the
-// capability itself is approved by policy. The Agent text states that exception.
-func TestDefaultSchemaTripoRiggingExtraCreditsNeedAPersonInManualMode(t *testing.T) {
+// credits, so the budget ("approve") mode still asks a person for those steps
+// even though the capability itself is approved by policy. The Agent text states
+// that exception. Strict asks for every step anyway (#702).
+func TestDefaultSchemaTripoRiggingExtraCreditsNeedAPersonInBudgetMode(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -59,11 +61,14 @@ func TestDefaultSchemaTripoRiggingExtraCreditsNeedAPersonInManualMode(t *testing
 		t.Fatalf("tripo/processing/rigging does not declare fixed extra credits: %v", err)
 	}
 	const extra = 1
-	if approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeManual, "rigging") {
+	if approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeBudget, "rigging") {
 		t.Fatal("rigging itself needs a person")
 	}
-	if !approvalpolicy.RequiresHumanForExtraCredits(policy, approvalpolicy.ModeManual, extra) {
-		t.Fatal("manual mode approves Tripo rigging extra credits without a person")
+	if !approvalpolicy.RequiresHumanForExtraCredits(policy, approvalpolicy.ModeBudget, extra) {
+		t.Fatal("budget mode approves Tripo rigging extra credits without a person")
+	}
+	if !approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeManual, "rigging") {
+		t.Fatal("strict mode approves rigging without a person")
 	}
 	if approvalpolicy.RequiresHumanForExtraCredits(policy, approvalpolicy.ModeAuto, extra) {
 		t.Fatal("auto mode asks a person for extra credits")

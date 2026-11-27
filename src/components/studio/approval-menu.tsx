@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { useChatStore, type ApprovalMode } from '@/store/chat-store';
 
 /**
- * 批准方式下拉（#103）：严格（逐步批准）、自动与预算制，顺序、名称和说明都来自
+ * 批准方式下拉（#103、#702）：严格（每一步都问）、自动与审批，顺序、名称和说明都来自
  * Schema。切到自动要先确认（之后的付费步骤不再询问）；切换只影响之后的步骤，
  * 已经在等待的批准不会因此被通过。
  */

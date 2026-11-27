@@ -92,10 +92,13 @@ func (s *recoveryPlanStore) SaveProcessingPlan(ctx context.Context, plan process
 	return nil
 }
 
+// recoveryManualMode is the budget ("approve") mode since #702: it still asks
+// only for the listed 3D capabilities, so the processing steps these tests
+// recover run by policy (strict now asks for every step).
 type recoveryManualMode struct{}
 
 func (recoveryManualMode) SessionApprovalMode(context.Context, string, string) (string, error) {
-	return "manual", nil
+	return "budget", nil
 }
 
 type recoveryCatalog struct{ *catalog.Catalog }
@@ -298,7 +301,7 @@ func TestProcessingPlanMiddleSubmissionRecoveryPersists(t *testing.T) {
 				t.Fatal(err)
 			}
 			grant, err := repo.GetExecutionGrant(ctx, "owner-a", middle.AuthorizationRef)
-			if err != nil || grant.DecidedBy != "policy:manual" {
+			if err != nil || grant.DecidedBy != "policy:budget" {
 				t.Fatalf("grant=%+v err=%v", grant, err)
 			}
 			var recoveredID generation.TaskID
@@ -387,7 +390,7 @@ func TestProcessingPlanMiddleSubmissionRecoveryPersists(t *testing.T) {
 			}
 			for _, step := range getPlan().Steps {
 				grant, err := repo.GetExecutionGrant(ctx, "owner-a", step.AuthorizationRef)
-				if err != nil || grant.DecidedBy != "policy:manual" {
+				if err != nil || grant.DecidedBy != "policy:budget" {
 					t.Fatalf("step %s grant=%+v err=%v", step.Capability, grant, err)
 				}
 			}

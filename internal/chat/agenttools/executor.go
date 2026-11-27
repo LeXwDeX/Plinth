@@ -232,10 +232,6 @@ type Config struct {
 	// MaxGenerationCallsPerTurn 限定单轮付费生成次数（Schema 声明；
 	// <=0 表示不设限，仅测试允许）。
 	MaxGenerationCallsPerTurn int
-	// GenerationCheckpoint is approval_policy.generation_checkpoint (#694):
-	// per approval mode, the generations one reply runs before it stops. A
-	// mode it does not name keeps MaxGenerationCallsPerTurn.
-	GenerationCheckpoint map[string]int
 	// ConsentLimitContent is what the Agent reads when the turn's generation
 	// call limit is reached; ConsentReconcileContent is the failure text of a
 	// three-view view whose submission outcome stayed unknown past its wait
@@ -305,8 +301,6 @@ type Executor struct {
 	usage         map[string]generationUsage
 	usageClock    uint64
 	maxGeneration int
-	// generationCheckpoint is the per-approval-mode count (#694).
-	generationCheckpoint map[string]int
 
 	// limitContent and reconcileContent are the Schema's texts for a reached
 	// generation call limit and an unknown three-view submission outcome.
@@ -473,7 +467,6 @@ func New(config Config) (*Executor, error) {
 		taskObservationTimeout: config.TaskObservationTimeout,
 		usage:                  map[string]generationUsage{},
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
-		generationCheckpoint:   config.GenerationCheckpoint,
 		limitContent:           config.ConsentLimitContent,
 		reconcileContent:       config.ConsentReconcileContent,
 		texts:                  config.Texts,
@@ -526,7 +519,7 @@ func (e *Executor) execute(
 		adds := revisionAddsPaidStep(command)
 		scope := e.scopeKey(command)
 		if adds && e.generationLimitWouldBeReached(scope, command.AssistantMessageID, command.Call.ID,
-			command.PriorGenerationCalls, 1, e.generationLimit(command)) {
+			command.PriorGenerationCalls, 1, e.maxGeneration) {
 			return e.limitResult(command), nil
 		}
 		result, err := e.reviseProcessingPlan(ctx, command)
@@ -1050,7 +1043,7 @@ func (e *Executor) generateWithParams(
 		// processing plan its paid steps, without refusing it (#665).
 		e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, weight)
 	} else if e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
-		command.Call.ID, command.PriorGenerationCalls, weight, e.generationLimit(command)) {
+		command.Call.ID, command.PriorGenerationCalls, weight, e.maxGeneration) {
 		return e.limitResult(command), nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
@@ -1080,22 +1073,10 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 	return e.generationLimitReachedForCallWeighted(scope, turn, callID, prior, 1, limit)
 }
 
-// generationLimit is the turn's generation checkpoint (#694): the count the
-// session's approval mode declares in approval_policy.generation_checkpoint,
-// else max_generation_calls_per_turn.
-func (e *Executor) generationLimit(command chat.ToolCommand) int {
-	if count, declared := e.generationCheckpoint[command.ApprovalMode]; declared && count > 0 {
-		return count
-	}
-	return e.maxGeneration
-}
-
-// limitResult answers a call refused at the turn's generation checkpoint: the
-// Agent's text, nothing submitted, and the checkpoint the orchestrator ends
-// the reply with (#694).
+// limitResult answers a call refused at the turn's
+// max_generation_calls_per_turn: the Agent's text, nothing submitted.
 func (e *Executor) limitResult(command chat.ToolCommand) chat.ToolResult {
-	return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
-		GenerationCheckpoint: e.generationLimit(command)}
+	return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}
 }
 
 // generationLimitReachedForCallWeighted counts one call as weight paid

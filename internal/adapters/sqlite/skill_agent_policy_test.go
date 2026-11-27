@@ -74,10 +74,11 @@ func (m sessionModes) SessionApprovalMode(ctx context.Context, owner, session st
 	return sessionApprovalModeOrManual(s.ApprovalMode), nil
 }
 
-func TestSkillRunManualModeImageStepIsApprovedByPolicy(t *testing.T) {
-	result, gateway, observed := runThreeViewUnderPolicy(t, "manual", generation.ImageToImage)
+// #702: the budget ("approve") mode approves a 2D step by policy; strict asks.
+func TestSkillRunBudgetModeImageStepIsApprovedByPolicy(t *testing.T) {
+	result, gateway, observed := runThreeViewUnderPolicy(t, "budget", generation.ImageToImage)
 	if result.Suspend || gateway.submits != 1 {
-		t.Fatalf("manual image step waited: %+v submits=%d", result, gateway.submits)
+		t.Fatalf("budget image step waited: %+v submits=%d", result, gateway.submits)
 	}
 	if len(observed) == 0 || observed[0].ApprovalSource != "policy" {
 		t.Fatalf("approval source missing from observation: %+v", observed)
@@ -132,9 +133,18 @@ func TestSkillRunRequestGrantManualModeThreeDWaitsForHuman(t *testing.T) {
 	}
 }
 
-func TestSkillRunRequestGrantManualModeImageStepIsApprovedByPolicy(t *testing.T) {
+// #702: strict asks for every step, a view the person starts on the card too;
+// the budget ("approve") mode approves the 2D step by policy.
+func TestSkillRunRequestGrantManualModeImageStepWaitsForHuman(t *testing.T) {
 	grant := requestSkillGrant(t, "manual", generation.ImageToImage)
-	if grant.Status != executiongrant.Approved || grant.DecidedBy != "policy:manual" {
+	if grant.Status != executiongrant.Pending || grant.DecidedBy != "" {
+		t.Fatalf("strict image step must wait for a person: %+v", grant)
+	}
+}
+
+func TestSkillRunRequestGrantBudgetModeImageStepIsApprovedByPolicy(t *testing.T) {
+	grant := requestSkillGrant(t, "budget", generation.ImageToImage)
+	if grant.Status != executiongrant.Approved || grant.DecidedBy != "policy:budget" {
 		t.Fatalf("image step not approved by policy: %+v", grant)
 	}
 }

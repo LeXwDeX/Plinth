@@ -19,7 +19,7 @@ func (m fixedModes) SessionApprovalMode(context.Context, string, string) (string
 
 func testApprovalPolicy() approvalpolicy.Policy {
 	return approvalpolicy.New("manual",
-		[]string{"auto", "manual"},
+		[]string{"auto", "budget", "manual"},
 		[]string{"text-to-3d", "image-to-3d", "retexture"},
 		[]string{"text-to-image", "image-to-image", "image-to-3d", "text-to-3d", "retexture"})
 }
@@ -60,14 +60,17 @@ func TestApproveByPolicyMatrix(t *testing.T) {
 		name, mode, capability string
 		approved               bool
 	}{
-		{"manual image", "manual", "text-to-image", true},
+		// #702: strict asks for every step; budget ("approve") for the 3D list.
+		{"manual image", "manual", "text-to-image", false},
 		{"manual image-to-3d", "manual", "image-to-3d", false},
-		{"manual text-to-3d", "manual", "text-to-3d", false},
-		{"manual retexture", "manual", "retexture", false},
+		{"budget image", "budget", "text-to-image", true},
+		{"budget image-to-3d", "budget", "image-to-3d", false},
+		{"budget text-to-3d", "budget", "text-to-3d", false},
+		{"budget retexture", "budget", "retexture", false},
 		{"auto image-to-3d", "auto", "image-to-3d", true},
 		{"auto retexture", "auto", "retexture", true},
 		{"unknown mode is manual", "bogus", "image-to-3d", false},
-		{"unknown mode still approves image", "bogus", "text-to-image", true},
+		{"unknown mode asks for an image too", "bogus", "text-to-image", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,7 +102,7 @@ func TestApproveByPolicyOwnerMismatchAndStateRules(t *testing.T) {
 	ctx := context.Background()
 	r := openGrantTestRepo(t)
 	i, g := policyGrant(t, r, "text-to-image")
-	service := policyService(r, "manual")
+	service := policyService(r, "budget")
 
 	if _, err := service.ApproveByPolicy(ctx, "owner-b", g.RequestID, "auto"); err == nil {
 		t.Fatal("another owner approved by policy")
@@ -112,18 +115,18 @@ func TestApproveByPolicyOwnerMismatchAndStateRules(t *testing.T) {
 		t.Fatalf("empty request id: %v", err)
 	}
 
-	first, err := service.ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "manual")
+	first, err := service.ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "budget")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Replaying the same policy decision is idempotent and writes no second audit row.
-	again, err := service.ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "manual")
+	again, err := service.ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "budget")
 	if err != nil || again.RequestVersion != first.RequestVersion || again.DecidedBy != first.DecidedBy {
 		t.Fatalf("replay: %+v %v", again, err)
 	}
 	var audits int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM execution_grant_audit WHERE request_id=? AND actor_id=?`,
-		g.RequestID, "policy:manual").Scan(&audits); err != nil || audits != 1 {
+		g.RequestID, "policy:budget").Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("policy audit rows = %d err=%v", audits, err)
 	}
 	// A different policy actor cannot rewrite the decision.
@@ -177,14 +180,14 @@ func TestApplyPolicyUsesSessionModeAndLeavesHumanStepsPending(t *testing.T) {
 	_, image := policyGrant(t, r, "text-to-image")
 	_, model := policyGrant(t, r, "image-to-3d")
 
-	manual := policyService(r, "manual")
+	manual := policyService(r, "budget")
 	got, err := manual.ApplyPolicy(ctx, image)
 	if err != nil || got.Status != executiongrant.Approved || !got.ApprovedByPolicy() {
-		t.Fatalf("manual image: %+v %v", got, err)
+		t.Fatalf("budget image: %+v %v", got, err)
 	}
 	got, err = manual.ApplyPolicy(ctx, model)
 	if err != nil || got.Status != executiongrant.Pending {
-		t.Fatalf("manual image-to-3d must wait: %+v %v", got, err)
+		t.Fatalf("budget image-to-3d must wait: %+v %v", got, err)
 	}
 	got, err = policyService(r, "auto").ApplyPolicy(ctx, model)
 	if err != nil || got.Status != executiongrant.Approved || got.DecidedBy != "policy:auto" {
@@ -203,7 +206,7 @@ func TestPolicyApprovedGrantCanBeClaimedAndBound(t *testing.T) {
 	ctx := context.Background()
 	r := openGrantTestRepo(t)
 	i, g := policyGrant(t, r, "text-to-image")
-	approved, err := policyService(r, "manual").ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "manual")
+	approved, err := policyService(r, "budget").ApproveByPolicy(ctx, i.OwnerID, g.RequestID, "budget")
 	if err != nil {
 		t.Fatal(err)
 	}

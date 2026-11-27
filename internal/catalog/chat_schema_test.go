@@ -428,7 +428,8 @@ func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
 	}
 	agent := taskCatalog.Application().Chat.Agent
 	admission := taskCatalog.Application().Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks
-	if agent.MaxGenerationCallsPerTurn != 20 || !agent.ParallelToolCalls ||
+	// #702: the per-reply bound is only a runaway guard now.
+	if agent.MaxGenerationCallsPerTurn != 200 || !agent.ParallelToolCalls ||
 		agent.MaxParallelGenerationSubmissions != admission || admission != 8 {
 		t.Fatalf("agent = %d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
 			agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)

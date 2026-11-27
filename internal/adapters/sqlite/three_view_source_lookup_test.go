@@ -397,6 +397,10 @@ func TestSQLiteSourceOfGrantBoundBeforeStepBinding(t *testing.T) {
 	ctx := context.Background()
 	repo, _, _ := skillFixture(t)
 	insertGrantTurn(t, repo, "turn-a", "owner-a", "session-a")
+	// #702: strict asks for every step; budget approves the front view by policy.
+	if _, err := repo.db.Exec(`UPDATE go_chat_sessions SET approval_mode='budget' WHERE id='session-a'`); err != nil {
+		t.Fatal(err)
+	}
 	store := &failingSkillBindStore{Repository: repo, fail: true}
 	recipe := skillrun.Recipe{ID: "three-view", Revision: "r1", Steps: []skillrun.StepSpec{{
 		Key: "front", Label: "Front", Capability: generation.ImageToImage, OfferingID: "offering-i2i", OfferingRevision: "r7",

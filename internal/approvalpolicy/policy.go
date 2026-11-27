@@ -28,8 +28,8 @@ const (
 // KnownCapabilities is the set of capabilities declared by the same Schema;
 // a capability outside it is never auto-approved in manual mode.
 type Policy struct {
-	DefaultMode                string
-	Modes                      []string
+	DefaultMode string
+	Modes       []string
 	// ManualApprovalCapabilities are the capabilities the budget ("approve")
 	// mode always asks a person for. The strict mode asks for every step.
 	ManualApprovalCapabilities []string
