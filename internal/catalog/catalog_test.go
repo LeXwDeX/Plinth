@@ -956,7 +956,7 @@ const minimalApplication = `"application":{
 				"brush_size_down_key":"[","brush_size_up_key":"]","brush_size_step_ratio":0.1,
 				"swap_colors_key":"x","default_colors_key":"d","help_key":"?","mask_confirm_key":"Enter","mask_exit_key":"Escape","delete_keys":["delete","backspace"],
 				"generate_shortcut":"mod+enter","lock_shortcut":"mod+/","merge_visible_shortcut":"mod+alt+shift+e",
-				"cut_shortcut":"mod+x","duplicate_shortcut":"mod+j","deselect_shortcut":"mod+d","invert_selection_shortcut":"mod+shift+i",
+				"cut_shortcut":"mod+x","duplicate_shortcut":"mod+j","deselect_shortcut":"mod+d",
 				"zoom_in_shortcut":"mod+=","zoom_out_shortcut":"mod+-","zoom_actual_shortcut":"mod+1","zoom_selection_shortcut":"mod+alt+0",
 				"layers_panel_shortcut":"f7","history_panel_shortcut":"alt+f9",
 				"nudge_pixels":1,"nudge_large_pixels":10,"reserved_shortcuts":["mod+a","f7"]

@@ -175,10 +175,12 @@ describe('shortcut display from the Schema', () => {
     }
   });
 
-  it('calls the mask tool 蒙版 in the shortcut panel, like the rail', () => {
+  it('calls the mask tool by its rail name in the shortcut panel (#692: 擦除重绘区)', () => {
     const canvas = shortcutSections(schema, windows).find((section) => section.area === 'canvas')!;
-    expect(canvas.items.find((item) => item.id === 'tool_mask')?.label).toBe('蒙版');
-    expect(text('ui.canvas.toolbar.mask')).toBe('蒙版');
+    expect(canvas.items.find((item) => item.id === 'tool_mask')?.label).toBe('擦除重绘区');
+    expect(text('ui.canvas.toolbar.mask')).toBe('擦除重绘区');
+    // #692: inversion is no longer offered, so the panel lists no shortcut for it.
+    expect(canvas.items.find((item) => item.id === 'invert_selection')).toBeUndefined();
     expect(canvas.items.find((item) => item.id === 'tool_brush')?.label).not.toContain('像素');
   });
 

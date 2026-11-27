@@ -597,7 +597,6 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		"cut_shortcut":              keyboard.CutShortcut,
 		"duplicate_shortcut":        keyboard.DuplicateShortcut,
 		"deselect_shortcut":         keyboard.DeselectShortcut,
-		"invert_selection_shortcut": keyboard.InvertSelectionShortcut,
 		"zoom_in_shortcut":          keyboard.ZoomInShortcut,
 		"zoom_out_shortcut":         keyboard.ZoomOutShortcut,
 		"zoom_actual_shortcut":      keyboard.ZoomActualShortcut,

@@ -2269,7 +2269,6 @@ type CanvasKeyboardSchema struct {
 	CutShortcut             string `json:"cut_shortcut"`
 	DuplicateShortcut       string `json:"duplicate_shortcut"`
 	DeselectShortcut        string `json:"deselect_shortcut"`
-	InvertSelectionShortcut string `json:"invert_selection_shortcut"`
 	ZoomInShortcut          string `json:"zoom_in_shortcut"`
 	ZoomOutShortcut         string `json:"zoom_out_shortcut"`
 	ZoomActualShortcut      string `json:"zoom_actual_shortcut"`

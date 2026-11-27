@@ -62,7 +62,7 @@ describe('the collapsed rail', () => {
   it('draws one icon-only 30x28 button per tool in the Schema order, named for screen readers', () => {
     const order = [...html.matchAll(/data-tool="([a-z]+)"/g)].map((match) => match[1]);
     expect(order).toEqual([...CANVAS_TOOL_IDS]);
-    for (const [id, label] of [['select', '选择'], ['mask', '蒙版'], ['brush', '画笔'], ['snap', '吸附'], ['undo', '撤销'], ['zoom', '缩放工具']]) {
+    for (const [id, label] of [['select', '选择'], ['mask', '擦除重绘区'], ['brush', '画笔'], ['snap', '吸附'], ['undo', '撤销'], ['zoom', '缩放工具']]) {
       expect(buttonOf(html, id), id).toContain(`aria-label="${label}"`);
     }
     expect(hasClass(buttonOf(html, 'brush'), 'w-[30px]')).toBe(true);
@@ -112,7 +112,7 @@ describe('the expanded rail', () => {
     expect(hasClass(buttonOf(html, 'brush'), 'w-[30px]')).toBe(false);
     expect(hasClass(buttonOf(html, 'brush'), 'w-full')).toBe(true);
     const labels = [...html.matchAll(/data-testid="tool-rail-label">([^<]*)</g)].map((match) => match[1]);
-    expect(labels).toEqual(['选择', '平移工具', '矩形选框', '套索选区', '蒙版', '吸管', '缩放工具', '上传图片', '形状工具', '文字工具', '矢量铅笔', '画笔', '橡皮', '裁剪', '吸附', '撤销', '重做', '收起']);
+    expect(labels).toEqual(['选择', '平移工具', '矩形选框', '套索选区', '擦除重绘区', '吸管', '缩放工具', '上传图片', '形状工具', '文字工具', '矢量铅笔', '画笔', '橡皮', '裁剪', '吸附', '撤销', '重做', '收起']);
   });
 
   it('ends with a « 收起 toggle that offers to collapse', () => {

@@ -588,7 +588,7 @@ export function InpaintDialog({
                   />
                 ) : null}
                 <p className="text-xs text-muted-foreground" data-testid="inpaint-mask-scope">
-                  {schemaMessage(schema, 'ui.canvas.inpaint.mask_scope', { canvas: canvasLabel })}
+                  {text('ui.canvas.mask.hint')}
                 </p>
               </div>
             </div>

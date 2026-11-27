@@ -199,7 +199,6 @@ const canvasSchema: CanvasProductSchema = {
       cut_shortcut: 'mod+x',
       duplicate_shortcut: 'mod+j',
       deselect_shortcut: 'mod+d',
-      invert_selection_shortcut: 'mod+shift+i',
       zoom_in_shortcut: 'mod+=',
       zoom_out_shortcut: 'mod+-',
       zoom_actual_shortcut: 'mod+1',

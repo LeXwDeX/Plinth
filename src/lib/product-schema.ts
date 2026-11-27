@@ -1615,7 +1615,6 @@ export interface CanvasProductSchema {
       cut_shortcut: string;
       duplicate_shortcut: string;
       deselect_shortcut: string;
-      invert_selection_shortcut: string;
       zoom_in_shortcut: string;
       zoom_out_shortcut: string;
       zoom_actual_shortcut: string;

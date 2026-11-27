@@ -214,9 +214,9 @@ describe('the mask on the board (#310)', () => {
     // The mask has its own Schema tint (the pre-#310 single-stroke look), not the lighter selection tint.
     expect(board).toMatch(/readCanvasToken\(maskSchema\.tint_color_token, palette\.handle\)/);
     expect(board).toContain('tintOpacity: maskSchema.tint_opacity');
-    // A pure marquee / lasso selection keeps the selection tint.
-    expect(board).toMatch(/overlayTintKind\(maskOverlay\) === 'mask'/);
-    expect(board).toContain('tintOpacity: selectionSchema.tint_opacity');
+    // #692: every erased area, marquee / lasso included, is darkened with the mask tint (no selection tint).
+    expect(board).not.toContain('overlayTintKind(maskOverlay)');
+    expect(board).not.toContain('tintOpacity: selectionSchema.tint_opacity');
     // No translucent line per stroke: those stack and darken where strokes overlap.
     expect(board).not.toMatch(/maskState\.(strokes\.map|current \?)[\s\S]{0,200}<Line/);
   });
@@ -224,5 +224,30 @@ describe('the mask on the board (#310)', () => {
   it('shows the mask brush footprint before and while painting, sized by the brush and the zoom', () => {
     expect(board).toMatch(/if \(activeTool === 'mask'\) setMaskHover\(\{ x: world\.x, y: world\.y \}\)/);
     expect(board).toMatch(/name="mask-brush-cursor"[\s\S]*?radiusX=\{brushCursorRadius\(brushSize, viewport\.zoom\)\}/);
+  });
+});
+
+// #692: the mask has one concept. What is erased is repainted and what is not erased is never changed; there is
+// no paint / erase switch, no Alt subtraction and no inversion, and only the binarized mask is submitted.
+describe('the mask only erases (#692)', () => {
+  const board = withoutComments(read('./canvas-board.tsx'));
+  const options = withoutComments(read('./canvas-tool-options.tsx'));
+  const chat = withoutComments(read('../studio/chat-column.tsx'));
+  it('offers no paint / erase switch, by button or by X', () => {
+    expect(options).not.toContain('mask-erase-toggle');
+    expect(options).not.toContain('toggleErasing');
+    expect(board).not.toContain('toggleErasing');
+    expect(board).not.toContain('useMaskStore.getState().erasing');
+  });
+  it('has no Alt subtraction and no inversion shortcut', () => {
+    expect(board).not.toMatch(/altKey\) return 'subtract'/);
+    expect(board).not.toContain('invert_selection_shortcut');
+    expect(board).not.toContain('invertSelection(');
+  });
+  it('submits the binarized mask from the board and from the chat', () => {
+    expect(board).toContain('paintSubmittedMask(context, geometry, maskState.strokes');
+    expect(board).not.toMatch(/\bpaintMask\(context, geometry, maskState\.strokes/);
+    expect(chat).toContain('paintSubmittedMask(maskContext, geometry');
+    expect(chat).not.toMatch(/\bpaintMask\(/);
   });
 });

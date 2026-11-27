@@ -39,7 +39,7 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Surface } from '@/components/ui/surface';
 import { sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { canvasBackgroundStyle } from '@/lib/canvas/background-style';
-import { artboardToWorld, inpaintGeometry, paintMask, rectangleRegion, worldToArtboard } from '@/lib/canvas/inpaint-export';
+import { artboardToWorld, inpaintGeometry, paintSubmittedMask, rectangleRegion, worldToArtboard } from '@/lib/canvas/inpaint-export';
 import { CanvasExportError, exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { CanvasImageCache, pictureKeys, pictureSize, splitPictureKey } from '@/lib/canvas/image-cache';
 import { canvasText } from '@/lib/canvas/presentation';
@@ -68,7 +68,7 @@ import { clickTargets, selectionAfterClick } from '@/lib/canvas/auto-select';
 import { drawOutsideDim, outsideDimRects, revealSteps, visibleWorld, type OutsideDimTarget } from '@/lib/canvas/outside-dim';
 import { konvaRevealPainter, paintedNodes, type RevealScratch } from '@/lib/canvas/outside-dim-painter';
 import { antsOutlines } from '@/lib/canvas/selection-preview';
-import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps, overlayTintKind, type MaskOverlayTarget } from '@/lib/canvas/mask-overlay';
+import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps, type MaskOverlayTarget } from '@/lib/canvas/mask-overlay';
 import { sampleColor } from '@/lib/canvas/eyedropper';
 import { brushTargetAt, type BrushTargetState } from '@/lib/canvas/brush-target';
 import { blankLayerFill, brushCreatesCanvasLayer, canvasLayerNode, isBlankLayer } from '@/lib/canvas/initial-layer';
@@ -163,11 +163,12 @@ interface SelectionDraft {
   points: number[];
 }
 
-/** Shift adds to the selection, Alt takes away from it, no key replaces it (Photoshop). */
-function selectionModeOf(event: { shiftKey?: boolean; altKey?: boolean }): SelectionMode {
-  if (event.altKey) return 'subtract';
-  if (event.shiftKey) return 'add';
-  return 'replace';
+/**
+ * Shift adds to the selection, no key replaces it. #692: the mask has one concept (what is erased is repainted),
+ * so there is no Alt subtraction; a wrong area is taken back with undo.
+ */
+function selectionModeOf(event: { shiftKey?: boolean }): SelectionMode {
+  return event.shiftKey ? 'add' : 'replace';
 }
 
 const EMPTY_NODES: CanvasNode[] = [];
@@ -255,7 +256,6 @@ export function CanvasBoard({
   const activeShapeType = useCanvasStore((state) => state.activeShapeType);
   const lastStyle = useCanvasStore((state) => state.lastStyle);
   const autoSelect = useCanvasStore((state) => state.autoSelect);
-  const maskErasing = useMaskStore((state) => state.erasing);
   const containerRef = useRef<HTMLDivElement>(null);
   const setDrawingAreaRef = useCallback((element: HTMLDivElement | null) => {
     containerRef.current = element;
@@ -332,9 +332,9 @@ export function CanvasBoard({
   const maskStrokes = maskState?.strokes;
   const maskCurrent = maskState?.current;
   const maskOverlay = useMemo(() => maskOverlaySteps(maskStrokes, maskCurrent), [maskStrokes, maskCurrent]);
-  const maskOverlayStyle = overlayTintKind(maskOverlay) === 'mask'
-    ? { tintColor: maskTintColor, tintOpacity: maskSchema.tint_opacity }
-    : { tintColor: selectionSchema.tint_color, tintOpacity: selectionSchema.tint_opacity };
+  // #692: every erased area (brush, marquee or lasso) is what gets repainted, so it is darkened with the mask's
+  // Schema tint; what is kept stays bright ("bright areas stay, dark areas are repainted").
+  const maskOverlayStyle = { tintColor: maskTintColor, tintOpacity: maskSchema.tint_opacity };
   const maskOverlayScratch = useRef<HTMLCanvasElement | null>(null);
   // #91: the layer the pictures are drawn in, the veil layer above it, and the veil's reusable cut-out canvases.
   const contentLayerRef = useRef<Konva.Layer>(null);
@@ -771,7 +771,7 @@ export function CanvasBoard({
         return;
       }
       if (activeTool === 'mask') {
-        useMaskStore.getState().beginStroke(sessionId, worldToArtboard(artboard, world), store.getState().brushSize, artboard ?? undefined, useMaskStore.getState().erasing);
+        useMaskStore.getState().beginStroke(sessionId, worldToArtboard(artboard, world), store.getState().brushSize, artboard ?? undefined);
         return;
       }
       if (activeTool === 'crop') {
@@ -1013,11 +1013,6 @@ export function CanvasBoard({
           if (!useMaskStore.getState().clearSelection(sessionId)) store.getState().clearSelection();
           return;
         }
-        if (matchesShortcut(event, keyboard.invert_selection_shortcut)) {
-          event.preventDefault();
-          if (artboard) useMaskStore.getState().invertSelection(sessionId, artboard);
-          return;
-        }
       }
       // While painting a mask: Enter finishes it, Esc leaves the tool.
       if (activeTool === 'mask' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing) {
@@ -1156,14 +1151,12 @@ export function CanvasBoard({
         return;
       }
       if (key === keyboard.swap_colors_key) {
-        // In the mask tool X flips between painting and erasing the selection (Photoshop's quick mask).
-        if (maskTool) useMaskStore.getState().toggleErasing();
-        else store.getState().swapColors();
+        // #692: the mask only erases (what is erased is repainted), so X has nothing to switch there.
+        if (!maskTool) store.getState().swapColors();
         return;
       }
       if (key === keyboard.default_colors_key) {
-        if (maskTool) useMaskStore.getState().setErasing(false);
-        else store.getState().resetColors();
+        if (!maskTool) store.getState().resetColors();
         return;
       }
       const resolved = resolveToolKey(event, keyboard, { tool: activeTool, shapeType: store.getState().activeShapeType });
@@ -1226,7 +1219,7 @@ export function CanvasBoard({
     canvas.height = geometry.size.height;
     const context = canvas.getContext('2d');
     if (!context) return;
-    paintMask(context, geometry, maskState.strokes, palette.eraserComposite);
+    paintSubmittedMask(context, geometry, maskState.strokes, palette.eraserComposite);
     const strokes = maskState.strokes;
     const submittedDraft = maskState;
     void (async () => {
@@ -2021,7 +2014,7 @@ export function CanvasBoard({
               y={maskHover.y}
               radiusX={brushCursorRadius(brushSize, viewport.zoom)}
               radiusY={brushCursorRadius(brushSize, viewport.zoom)}
-              stroke={maskErasing ? palette.erase : palette.handle}
+              stroke={palette.erase}
               strokeWidth={1.5 / viewport.zoom}
               listening={false}
             />
