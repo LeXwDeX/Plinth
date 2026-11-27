@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   configureClientErrorReporting,
+  installGlobalErrorReporting,
   installRequestIdTracking,
   lastRequestIdSeen,
   reportClientError,
@@ -42,6 +43,24 @@ describe('client error reporting (#233)', () => {
     configureClientErrorReporting('/api/v1/client-errors', 'x');
     for (let index = 0; index < 30; index += 1) reportClientError('window-error', new Error(`e${index}`));
     expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+
+  it('does not report the benign ResizeObserver loop notices as window errors (#705)', () => {
+    const listeners = new Map<string, (event: unknown) => void>();
+    vi.stubGlobal('window', {
+      location: { pathname: '/workspace' },
+      addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, listener),
+      removeEventListener: () => undefined,
+    });
+    configureClientErrorReporting('/api/v1/client-errors', 'x');
+    const remove = installGlobalErrorReporting();
+    const onError = listeners.get('error')!;
+    onError({ error: null, message: 'ResizeObserver loop completed with undelivered notifications.' });
+    onError({ error: null, message: 'ResizeObserver loop limit exceeded' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    onError({ error: new Error('real failure'), message: 'real failure' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    remove();
   });
 });
 

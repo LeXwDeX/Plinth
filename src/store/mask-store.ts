@@ -152,7 +152,8 @@ export const useMaskStore = create<MaskStore>()((set, get) => {
       const stroke: MaskStroke = mode === 'subtract' ? { ...region, erase: true } : { ...region, erase: undefined };
       if (mode === 'subtract' && base.strokes.length === 0) return state;
       if (mode === 'replace') {
-        const after = [stroke];
+        // #705: a new marquee / lasso replaces the earlier selection regions only; brush strokes stay.
+        const after = [...base.strokes.filter((kept) => kept.region !== true && kept.invert !== true), stroke];
         return {
           parked,
           draft: { ...base, frame: frame ?? base.frame, strokes: after, steps: [...stepsOf(base), { kind: 'frame', before: base.strokes, after }], redo: [], redoSteps: [], current: null },

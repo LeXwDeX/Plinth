@@ -235,7 +235,7 @@ export function ImageResultCard({
                   >
                     {url
                       // #290: the card shows the downscaled preview; copying and dragging still carry the original.
-                      ? <img src={previewAssetUrl(entry.image.url)} alt={label} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture={url} />
+                      ? <img src={previewAssetUrl(entry.image.url)} alt={label} loading="lazy" decoding="async" className="bg-checkerboard size-full object-cover" data-chat-picture={url} />
                       : <span className="flex size-full items-center justify-center p-2 text-center text-[11px]"><UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'error.unavailable'))} /></span>}
                   </button>
                 </HintTooltip>
@@ -426,9 +426,9 @@ export function SentImages({ images, attachments, labelPrefix, onPreview }: { im
               className="block size-16 overflow-hidden rounded-md border border-border bg-muted focus-visible:outline-2 focus-visible:outline-ring"
             >
               {url
-                ? <img src={previewAssetUrl(image.url)} alt={`${labelPrefix} ${index + base}`} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture={url} />
+                ? <img src={previewAssetUrl(image.url)} alt={`${labelPrefix} ${index + base}`} loading="lazy" decoding="async" className="bg-checkerboard size-full object-cover" data-chat-picture={url} />
                 : inline
-                  ? <img src={inline} alt={`${labelPrefix} ${index + base}`} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture-inline="" />
+                  ? <img src={inline} alt={`${labelPrefix} ${index + base}`} loading="lazy" decoding="async" className="bg-checkerboard size-full object-cover" data-chat-picture-inline="" />
                   : <ImageIcon aria-hidden className="m-auto size-4 text-muted-foreground" />}
             </button>
             {(() => {

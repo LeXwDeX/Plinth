@@ -43,6 +43,13 @@ const card = (props: Partial<ThreeViewCardViewProps> = {}) => render(
 const slotOf = (key: string) => document.querySelector(`[data-slot="${key}"]`) as HTMLElement;
 
 describe('#691: the three-view card', () => {
+  it('shows each view whole in its square thumbnail instead of cropping it', () => {
+    card({ thumbnail: (slot) => `/thumb/${slot.key}` });
+    const picture = slotOf('front').querySelector('[data-testid="three-view-thumb"] img') as HTMLImageElement;
+    expect(picture.className).toContain('object-contain');
+    expect(picture.className).not.toContain('object-cover');
+  });
+
   it('words the optional right view as an add-on a three-view does not need, with a quieter button', () => {
     card();
     const button = slotOf('right').querySelector('[data-testid="three-view-start"]') as HTMLButtonElement;

@@ -262,6 +262,19 @@ describe('canvas-level selection (marquee, lasso, invert, quick-mask erase)', ()
     expect([editable(20, 20), editable(30, 20), editable(70, 70)]).toEqual([false, true, true]);
   });
 
+  it('#705: a marquee without Shift replaces the earlier marquee but keeps the brush strokes painted before it', () => {
+    useMaskStore.getState().beginStroke('s1', { x: 70, y: 70 }, 10, frame);
+    useMaskStore.getState().extendStroke('s1', { x: 80, y: 70 });
+    useMaskStore.getState().endStroke('s1');
+    useMaskStore.getState().commitRegion('s1', rect(10, 10, 40, 30), 'replace', frame);
+    useMaskStore.getState().commitRegion('s1', rect(50, 10, 60, 20), 'replace', frame);
+    expect([editable(75, 70), editable(20, 20), editable(55, 15)]).toEqual([true, false, true]);
+    expect(useMaskStore.getState().draft?.strokes).toHaveLength(2);
+    // The replacement is one undo step that brings the earlier marquee back.
+    expect(useMaskStore.getState().undoStroke('s1')).toBe(true);
+    expect([editable(75, 70), editable(20, 20), editable(55, 15)]).toEqual([true, true, false]);
+  });
+
   it('brush strokes after a marquee merge into the one mask', () => {
     useMaskStore.getState().commitRegion('s1', rect(10, 10, 40, 30), 'replace', frame);
     useMaskStore.getState().beginStroke('s1', { x: 70, y: 70 }, 10, frame);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { currentObjectLayer, inpaintEntry } from './inpaint-entry';
+import { currentObjectLayer, inpaintEntry, stagePictureOffBoard } from './inpaint-entry';
 
 const proxy = (url: string, taskId: string) => `/proxy/${taskId}?u=${encodeURIComponent(url)}`;
 const picture = (id: string, taskId: string, url: string) => ({ id, type: 'image' as const, imageUrl: proxy(url, taskId) });
@@ -44,5 +44,24 @@ describe('currentObjectLayer (#278)', () => {
     expect(currentObjectLayer(nodes, null, 's', proxy)).toBeUndefined();
     expect(currentObjectLayer(undefined, v1, 's', proxy)).toBeUndefined();
     expect(currentObjectLayer(nodes, v1, 's', () => null)).toBeUndefined();
+  });
+});
+
+describe('stagePictureOffBoard (#681, #705)', () => {
+  const layer = { id: 'n1' };
+  it('keeps the board actions off while the picture on the stage has no layer and nothing on the board is selected', () => {
+    expect(stagePictureOffBoard({ kind: 'image' }, [layer], undefined, null)).toBe(true);
+  });
+
+  it('lets a picture the person selected on the board count as explicit board content', () => {
+    // The reported case: an older picture is on the stage, the new one is on the board and selected there.
+    expect(stagePictureOffBoard({ kind: 'image' }, [layer], undefined, layer)).toBe(false);
+  });
+
+  it('is never off the board for a picture with its own layer, a model, no object or an unknown board', () => {
+    expect(stagePictureOffBoard({ kind: 'image' }, [layer], layer, null)).toBe(false);
+    expect(stagePictureOffBoard({ kind: 'model' }, [layer], undefined, null)).toBe(false);
+    expect(stagePictureOffBoard(null, [layer], undefined, null)).toBe(false);
+    expect(stagePictureOffBoard({ kind: 'image' }, undefined, undefined, null)).toBe(false);
   });
 });

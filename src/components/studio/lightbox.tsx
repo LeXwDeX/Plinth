@@ -221,7 +221,7 @@ function LightboxView() {
             onLoad={() => setView((current) => ({ ...current }))}
             onError={() => setBroken(true)}
             style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
-            className="max-h-full max-w-full select-none object-contain"
+            className="bg-checkerboard max-h-full max-w-full select-none object-contain"
             data-testid="lightbox-image"
           />
         )}

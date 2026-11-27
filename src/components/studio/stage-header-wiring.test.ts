@@ -267,7 +267,8 @@ describe('stage toolbar structure', () => {
 
   it('#681: keeps the board actions off, with how to put the picture there, while the picture on the stage is not on the board', () => {
     const messages = (defaultCatalog.application as unknown as { content: { messages: Record<string, string> } }).content.messages;
-    expect(header).toContain("const offBoard = object?.kind === 'image' && boardNodes !== undefined && objectLayer === undefined;");
+    // #705: a picture the person selected on the board is explicit board content, so it lifts the guard.
+    expect(header).toContain('const offBoard = stagePictureOffBoard(object, boardNodes, objectLayer, boardPicture);');
     expect(header).toContain("const offBoardReason = schemaText(schema, 'ui.studio.stage.action.not_on_board');");
     expect(header).toMatch(/merge: offBoard \? \{ run: \(\) => undefined, variant: 'outline', disabled: true, reason: offBoardReason \}/);
     expect(messages['ui.studio.stage.action.not_on_board']).toContain('放入画板');
