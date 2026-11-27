@@ -62,8 +62,8 @@ type choiceWire struct {
 	AssistantMessageID string `json:"assistant_message_id"`
 	Tool               string `json:"tool"`
 	Kind               string `json:"kind,omitempty"`
-	// Question is the Schema question of a generic card (#103); a
-	// provider-choice card has none.
+	// Question is the Agent's own question of a generic card (#699) or else
+	// its kind's Schema question (#103); a provider-choice card has none.
 	Question        string             `json:"question,omitempty"`
 	Capability      string             `json:"capability"`
 	Options         []choiceOptionWire `json:"options"`
@@ -102,8 +102,8 @@ func choiceToWire(choice chat.Choice, question string) choiceWire {
 }
 
 // choiceKindQuestion is the Schema-declared default question of a generic
-// card's kind. The Agent's per-card question is not persisted with the card,
-// so the card shows this declared one.
+// card's kind, shown when the card keeps no question of the Agent's own
+// (#699; cards opened before it keep none).
 func (s *Server) choiceKindQuestion(kind string) string {
 	for _, declared := range s.application.Chat.Choice.Kinds {
 		if declared.ID == kind {
@@ -128,8 +128,8 @@ func (s *Server) listChatSessionChoices(writer http.ResponseWriter, request *htt
 	}
 	wires := make([]choiceWire, 0, len(choices))
 	for _, choice := range choices {
-		question := ""
-		if choice.Kind != "" {
+		question := choice.Question
+		if question == "" && choice.Kind != "" {
 			question = s.choiceKindQuestion(choice.Kind)
 		}
 		wires = append(wires, choiceToWire(choice, question))

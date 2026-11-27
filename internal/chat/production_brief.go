@@ -301,6 +301,10 @@ type ChoiceOptionInput struct {
 	Steps []ChoiceStep
 }
 
+// choiceQuestionMaxRunes is ask_choice's declared question maxLength, the
+// same way the tool's option label and description bounds are applied.
+const choiceQuestionMaxRunes = 300
+
 // AskChoice opens a generic card of a kind the Schema declares. The usage
 // profile kind builds its options from model3d_usage.profiles; each option's
 // arguments are the target tool's declared argument filled with the profile
@@ -564,7 +568,13 @@ func (service *Service) AskChoice(
 	if len(options) == 0 {
 		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
-	question := strings.TrimSpace(arguments.Question)
+	// The card keeps the Agent's own question (#699) within ask_choice's
+	// declared maxLength; a longer one is dropped for the kind's default.
+	asked := strings.TrimSpace(arguments.Question)
+	if len([]rune(asked)) > choiceQuestionMaxRunes {
+		asked = ""
+	}
+	question := asked
 	if question == "" {
 		question = kind.Question
 	}
@@ -582,6 +592,7 @@ func (service *Service) AskChoice(
 		CallID:             command.Call.ID,
 		ToolName:           kind.ToolName,
 		Kind:               kind.ID,
+		Question:           asked,
 		Capability:         kind.ID,
 		StepIndex:          -1,
 		Options:            options,
