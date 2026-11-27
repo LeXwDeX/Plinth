@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.64",
+    "revision": "2026-11-27.10.65",
     "terminology": {
       "user_facing": [
         {
@@ -3313,6 +3313,7 @@
         "error.after_nonnegative": "after 必须是非负整数",
         "ui.providers.load_failed": "加载模型列表失败",
         "ui.header.menu_toggle": "切换菜单",
+        "ui.notifications.region": "通知",
         "ui.header.failures_show_title": "点击显示失败任务",
         "ui.header.failures_hide_title": "点击隐藏失败任务",
         "ui.header.failures_hidden": "已隐藏失败",
@@ -18162,6 +18163,7 @@
             "error.after_nonnegative": "after must be a non-negative integer",
             "ui.providers.load_failed": "Failed to load the model list",
             "ui.header.menu_toggle": "Toggle menu",
+            "ui.notifications.region": "Notifications",
             "ui.header.failures_show_title": "Click to show failed tasks",
             "ui.header.failures_hide_title": "Click to hide failed tasks",
             "ui.header.failures_hidden": "Failures hidden",

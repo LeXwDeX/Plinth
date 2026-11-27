@@ -9,7 +9,7 @@ import { ProductSchemaProvider } from '@/components/product-schema-provider';
 import { installRequestIdTracking } from '@/lib/client-error-report';
 import { activeLocale } from '@/lib/i18n/locale';
 import { swrPollingConfig } from '@/lib/polling';
-import type { ProductSchema } from '@/lib/product-schema';
+import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { AuthenticationGate } from './authentication-gate';
 import { ProductRouter } from './router';
 
@@ -51,6 +51,7 @@ if (!window.__PLINTH_UNSUPPORTED_BROWSER__) {
             position={schema.runtime.frontend.toaster.position}
             richColors={schema.runtime.frontend.toaster.rich_colors}
             duration={schema.runtime.frontend.toaster.duration_milliseconds}
+            containerAriaLabel={schemaText(schema, 'ui.notifications.region')}
           />
         </ProductSchemaProvider>
       </SWRConfig>
