@@ -16,6 +16,7 @@ type checkpointToolExecutor struct {
 	mu    sync.Mutex
 	calls int
 	modes []string
+	note  string
 }
 
 func (executor *checkpointToolExecutor) Execute(_ context.Context, command chat.ToolCommand,
@@ -25,7 +26,8 @@ func (executor *checkpointToolExecutor) Execute(_ context.Context, command chat.
 	executor.calls++
 	executor.modes = append(executor.modes, command.ApprovalMode)
 	if executor.calls > 1 {
-		return chat.ToolResult{AgentContent: "limit reached", NoSubmission: true, GenerationCheckpoint: 1}, nil
+		return chat.ToolResult{AgentContent: "limit reached", NoSubmission: true, GenerationCheckpoint: 1,
+			GenerationCheckpointNote: executor.note}, nil
 	}
 	return chat.ToolResult{AgentContent: "done"}, nil
 }
@@ -64,5 +66,27 @@ func TestReplyEndsAtTheGenerationCheckpointWithTheSchemaNote(t *testing.T) {
 		if seen != mode || seen == "" {
 			t.Fatalf("tool saw approval mode %q, session has %q", seen, mode)
 		}
+	}
+}
+
+// #689: a call whose work left at the checkpoint does not go on by replying
+// (the three-view views left continue on the card) ends the reply with its own
+// note instead of generation_checkpoint_reached.
+func TestReplyEndsWithTheCheckpointCallsOwnNote(t *testing.T) {
+	service := newChatService(t, newMemoryChatRepository())
+	schema := configuredChatSchema(t)
+	schema.Presentation.Messages.GenerationCheckpointReached = "configured-checkpoint {count}"
+	tool := schema.Tools[0].Name
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{Content: "first", ToolCalls: []agents.ToolCall{budgetCall("r0", tool, "r0")}},
+		{Content: "second", ToolCalls: []agents.ToolCall{budgetCall("r1", tool, "r1")}},
+	}}
+	command, err := processOnce(t, service, schema, agent, &checkpointToolExecutor{note: "on the card {count}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := storedReply(t, service, command)
+	if !strings.HasSuffix(reply.Content, "on the card 1") || strings.Contains(reply.Content, "configured-checkpoint") {
+		t.Fatalf("reply = %q", reply.Content)
 	}
 }

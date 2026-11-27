@@ -164,6 +164,11 @@ type ToolResult struct {
 	// ends the reply after this round with
 	// presentation.messages.generation_checkpoint_reached.
 	GenerationCheckpoint int `json:"-"`
+	// GenerationCheckpointNote, when set with GenerationCheckpoint, ends the
+	// reply in place of generation_checkpoint_reached ({count} is filled): a
+	// tool whose work left at the checkpoint does not go on by replying says
+	// where it does (#689, the three-view card).
+	GenerationCheckpointNote string `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -2361,7 +2366,8 @@ func (orchestrator *Orchestrator) Process(
 	}
 	emptyText := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.AgentEmptyResponse)
 	inlineText, _ := orchestrator.agentInlineImageMessage(ctx, agents.ErrInlineImageOutput)
-	if note := orchestrator.endingNote(ctx, cutReply, roundsCapped, turn.generationCheckpoint); note != "" {
+	if note := orchestrator.endingNote(ctx, cutReply, roundsCapped, turn.generationCheckpoint,
+		turn.generationCheckpointNote); note != "" {
 		// #665: a reply the upstream cut, or one stopped at the tool round
 		// bound, keeps what it wrote and says why it ends there.
 		emptyReply = false
@@ -2453,9 +2459,13 @@ func (orchestrator *Orchestrator) turnApprovalMode(ctx context.Context, command 
 // the upstream cut at its output limit or by its content filter, the tool
 // round bound, or the approval mode's generation checkpoint (#694). Empty
 // when none applies or the Schema declares no text.
-func (orchestrator *Orchestrator) endingNote(ctx context.Context, cutReply string, roundsCapped bool, checkpoint int) string {
+func (orchestrator *Orchestrator) endingNote(ctx context.Context, cutReply string, roundsCapped bool, checkpoint int,
+	checkpointNote string,
+) string {
 	messages := orchestrator.schema.Presentation.Messages
 	switch {
+	case checkpoint > 0 && checkpointNote != "":
+		return strings.ReplaceAll(orchestrator.text(ctx, checkpointNote), "{count}", strconv.Itoa(checkpoint))
 	case checkpoint > 0 && messages.GenerationCheckpointReached != "":
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.GenerationCheckpointReached),
 			"{count}", strconv.Itoa(checkpoint))
@@ -3583,6 +3593,9 @@ func (orchestrator *Orchestrator) executeTools(
 		if result.GenerationCheckpoint > 0 {
 			// #694: the reply stops after this round at the checkpoint.
 			turn.generationCheckpoint = result.GenerationCheckpoint
+			if result.GenerationCheckpointNote != "" {
+				turn.generationCheckpointNote = result.GenerationCheckpointNote
+			}
 		}
 		if err != nil && !result.NoSubmission && result.TaskID == "" && paidTool(tool.Execution) {
 			// Task acceptance may have committed while the response or chat

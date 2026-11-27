@@ -4337,8 +4337,8 @@ type ChatThreeViewReviewItem struct {
 type ChatThreeViewContinuationSchema struct {
 	Enabled bool `json:"enabled"`
 	// Reasons keys: budget_not_covered, view_not_finished,
-	// view_already_started, consistency_retries_exhausted,
-	// generation_checkpoint.
+	// view_already_started, view_awaiting_approval,
+	// consistency_retries_exhausted, generation_checkpoint.
 	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
@@ -4405,7 +4405,23 @@ type ChatThreeViewMessages struct {
 	// an earlier group of the session still waits on its card or runs
 	// (#665): nothing new is created, submitted or charged. Fields: {run}.
 	// Optional: a Catalog without it takes the built-in Catalog's.
-	DuplicateRun      string `json:"duplicate_run,omitempty"`
+	DuplicateRun string `json:"duplicate_run,omitempty"`
+	// PausedRun refuses a new group of the same source picture right after
+	// the previous turn stopped that picture's group with required views
+	// left (at its generation checkpoint, #689): a new group would draw and
+	// charge the front view again. Nothing is created, submitted or charged;
+	// the views left continue on the card. Fields: {run}. Optional: a Catalog
+	// without it takes the built-in Catalog's.
+	PausedRun string `json:"paused_run,omitempty"`
+	// CheckpointPaused is the Agent's receipt when the continuation stops at
+	// the turn's generation checkpoint (#689, #693): the views left are not
+	// submitted and continue on the card. Fields: {run}, {view}. Optional.
+	CheckpointPaused string `json:"checkpoint_paused,omitempty"`
+	// CheckpointNote ends a reply whose three-view continuation stopped at the
+	// generation checkpoint, in place of
+	// presentation.messages.generation_checkpoint_reached: the views left
+	// continue on the card, not by replying (#689). Field: {count}. Optional.
+	CheckpointNote    string `json:"checkpoint_note,omitempty"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
@@ -4418,9 +4434,11 @@ type ChatThreeViewMessages struct {
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
 	// AgentPausedStarted is AgentPaused for a view that was already started
-	// (view_already_started): the person started it, it is not a failure, and
-	// the Agent does not send the person to click or retry (#689). Same
-	// fields; a Catalog without it uses AgentPaused.
+	// or waits for its approval (view_already_started,
+	// view_awaiting_approval): it is not a failure, and the Agent does not
+	// send the person to click or retry (#689). It does not say who started
+	// the view: the continuation's own grant left for approval stops the same
+	// way. Same fields; a Catalog without it uses AgentPaused.
 	AgentPausedStarted string `json:"agent_paused_started,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
 	// {attempt}, {maximum}, {reasons}. The reasons are worded by

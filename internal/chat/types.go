@@ -229,6 +229,10 @@ type Turn struct {
 	// turn's generation checkpoint (#694); the reply ends after that round.
 	// It is never stored.
 	generationCheckpoint int
+	// generationCheckpointNote is the checkpoint call's own ending note
+	// (ToolResult.GenerationCheckpointNote, #689); empty uses the Schema's
+	// generation_checkpoint_reached. It is never stored.
+	generationCheckpointNote string
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.

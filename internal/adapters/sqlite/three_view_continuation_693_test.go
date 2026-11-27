@@ -189,3 +189,39 @@ func TestAgentToolSaysAStartedViewIsNotAFailure(t *testing.T) {
 		t.Fatalf("prepared back view: %+v err=%v", result, err)
 	}
 }
+
+// #689: a view whose grant waits (a person started it on the card, or the
+// continuation's own grant was left for approval) pauses with
+// view_awaiting_approval, not with the started reason that named the card;
+// a view only prepared keeps view_already_started.
+func TestContinuationSaysAViewWaitsForItsApproval(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	ctx := context.Background()
+	frontTask := f.startFrontByPolicy(t)
+	f.finish(t, frontTask, "asset-front")
+	result, err := f.views.ContinueWith(ctx, "owner-a", "session-a", f.run.ID, frontTask, "turn-a", false)
+	if err != nil || result.View != "left" || result.TaskID == "" {
+		t.Fatalf("left submit: %+v err=%v", result, err)
+	}
+	leftTask := result.TaskID
+	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "back"); err != nil {
+		t.Fatal(err)
+	}
+	f.finish(t, leftTask, "asset-left")
+	result, err = f.views.ContinueWith(ctx, "owner-a", "session-a", f.run.ID, leftTask, "turn-a", false)
+	if err != nil || !result.Paused || result.Reason != threeview.ReasonViewAlreadyStarted || result.View != "back" {
+		t.Fatalf("prepared back view: %+v err=%v", result, err)
+	}
+	if _, _, err := f.runtime.RequestAgentGrantWithBudget(ctx, "owner-a", f.run.ID, "back", "turn-a"); err != nil {
+		t.Fatal(err)
+	}
+	if back := f.step(t, "back"); back.Phase != skillrun.GrantPending {
+		t.Fatalf("back = %+v, want a grant", back)
+	}
+	submits := f.gateway.submits
+	result, err = f.views.ContinueWith(ctx, "owner-a", "session-a", f.run.ID, leftTask, "turn-a", false)
+	if err != nil || !result.Paused || result.Reason != threeview.ReasonViewAwaitingApproval || result.View != "back" ||
+		f.gateway.submits != submits {
+		t.Fatalf("back waiting for its grant: %+v err=%v", result, err)
+	}
+}

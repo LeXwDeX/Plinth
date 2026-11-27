@@ -19,9 +19,14 @@ var errViewNotFinished = errors.New("threeview: view task did not succeed")
 
 // Reason codes a continuation can stop with. The Schema words each one.
 const (
-	ReasonBudgetNotCovered     = "budget_not_covered"
-	ReasonViewNotFinished      = "view_not_finished"
-	ReasonViewAlreadyStarted   = "view_already_started"
+	ReasonBudgetNotCovered   = "budget_not_covered"
+	ReasonViewNotFinished    = "view_not_finished"
+	ReasonViewAlreadyStarted = "view_already_started"
+	// ReasonViewAwaitingApproval stops at a view whose grant waits for a
+	// decision or for its submit: a person may have started it on the card,
+	// or the continuation itself asked and the plan did not cover it. Neither
+	// is a failure; the Schema words it without naming who started it (#689).
+	ReasonViewAwaitingApproval = "view_awaiting_approval"
 	ReasonConsistencyExhausted = "consistency_retries_exhausted"
 	// ReasonGenerationCheckpoint stops a bounded continuation before it
 	// submits past the turn's generation checkpoint (#693, #694).
@@ -298,6 +303,8 @@ func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID 
 				return result, nil
 			}
 			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewNotFinished)
+		case skillrun.GrantPending:
+			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewAwaitingApproval)
 		default:
 			return pausedAt(ctx, s, run, step.Spec.Key, ReasonViewAlreadyStarted)
 		}
