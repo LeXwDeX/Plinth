@@ -406,8 +406,13 @@ func TestDefaultCatalogApprovalPolicyMatchesProductRule(t *testing.T) {
 		if !slices.Contains(policy.KnownCapabilities, capability) {
 			t.Fatalf("default Schema does not declare capability %s", capability)
 		}
-		if got := approvalpolicy.RequiresHuman(policy, "manual", capability); got != humanCapabilities[capability] {
-			t.Errorf("manual %s requires human = %v, want %v", capability, got, humanCapabilities[capability])
+		// #702: strict asks for every step; the budget ("approve") mode for
+		// the 3D list.
+		if !approvalpolicy.RequiresHuman(policy, "manual", capability) {
+			t.Errorf("manual %s does not require a human", capability)
+		}
+		if got := approvalpolicy.RequiresHuman(policy, "budget", capability); got != humanCapabilities[capability] {
+			t.Errorf("budget %s requires human = %v, want %v", capability, got, humanCapabilities[capability])
 		}
 		if approvalpolicy.RequiresHuman(policy, "auto", capability) {
 			t.Errorf("auto mode waits for a human on %s", capability)

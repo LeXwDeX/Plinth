@@ -37,11 +37,11 @@ func (repository *sessionLookupRepository) Session(
 // tell the three modes apart.
 const (
 	manualModeLabel   = "批准方式是「严格（逐步批准）」"
-	manualModeText    = "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡"
+	manualModeText    = "严格（逐步批准）方式下，每一个付费步骤（包括 2D 生图、加工和格式转换）都先出批准卡"
 	autoModeLabel     = "批准方式是「自动」"
-	autoModeText      = "自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡"
-	budgetModeLabel   = "批准方式是「预算（制作计划）」"
-	budgetModeText    = "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算"
+	autoModeText      = "自动方式下，付费步骤由系统按会话批准方式自动批准，不出批准卡"
+	budgetModeLabel   = "批准方式是「审批」"
+	budgetModeText    = "审批方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类 3D 步骤每一步都先出批准卡"
 	budgetBlockHead   = "【制作预算】"
 	noPlanStateText   = "尚未提交计划"
 	approvalBlockHead = "【批准方式】"
