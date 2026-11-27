@@ -152,7 +152,7 @@
 每次发布都给构建一个版本串，顶栏品牌名旁与登录页显示它，`/api/version` 以 `release` 字段返回；原有的 `version` 字段仍是完整提交 SHA，冒烟、错误上报与排障继续用它。
 
 - 版本串来源：`release-env.py release <环境> --release-version <名称>` 显式给出；不传时取待发布 revision 的 `git describe --tags --always`（形如 `v1.9.4-12-gfbf5000`，即 v1.9.4 之后第 12 个提交）。只允许字母、数字、点、下划线和连字符，最长 64 个字符。
-- 通道与提交哈希相同：`release-env.py` 把它作为 `RELEASE_VERSION` 放进服务器段参数 → `release-server-steps.sh` 以 `--build-arg GO_RELEASE_VERSION` 构建 → `Dockerfile.go-runtime` 用 `-ldflags -X …/internal/app.releaseVersion` 链接进二进制。本地构建不传时为空，界面不显示版本。
+- 通道与提交哈希相同：`release-env.py` 把它作为 `RELEASE_VERSION` 放进服务器段参数 → `release-server-steps.sh` 以 `--build-arg GO_RELEASE_VERSION` 构建 → `Dockerfile.go-runtime` 用 `-ldflags -X …/internal/app.releaseVersion` 链接进二进制。本地构建不传时为空，界面不显示版本。Compose 构建同样可选：自部署 `docker-compose.yml` 读 `ART_AI_RELEASE_VERSION`，内部 `docker-compose.go-production.yml` 读 `GO_RELEASE_VERSION`，缺省为空。
 
 约定：发布 `formal-test` 时传入的版本串，就是人工 Review 通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
 

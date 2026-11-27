@@ -103,9 +103,10 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// A refusal here leaves the run without a grant (inert: no card, not
 		// active for the guard); it takes back what an earlier attempt of the
 		// call may have left counted.
-		if found {
-			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
-				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
+		if found != threeViewNoGroup {
+			result := e.threeViewGuardRefusal(found, active)
+			result.GenerationUnitsTakenBack = true
+			return result, nil
 		}
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
 			command.Call.ID, command.PriorGenerationCalls, e.generationLimit(command)) {
@@ -184,13 +185,12 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		}
 		defer releaseSource()
 		var active skillrun.Run
-		var found bool
+		var found threeViewGuard
 		active, found, superseded, err = e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0])
 		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
-		} else if found {
-			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
-				NoSubmission: true}, nil
+		} else if found != threeViewNoGroup {
+			return e.threeViewGuardRefusal(found, active), nil
 		}
 		// A grant to replace that a person continued since the guard read it
 		// (claimed or bound) means that group runs again: answer duplicate_run
@@ -425,14 +425,18 @@ func (e *Executor) lockThreeViewSession(ctx context.Context, owner, session stri
 // recipe and source picture, that still waits on a card or has a view in
 // flight (#665): a view whose grant is pending or approved while its turn can
 // still use it, or being claimed, or whose Task has not ended; or a group
-// between two views whose continuation turn is still going. A finished,
-// failed or paused group, and one whose card belongs to a stopped turn, is
-// not active: asking again for it starts a new group as before. Without an
-// active group it also returns the approved, unsubmitted grants of those
-// groups whose turn ended (superseded): a new group replaces them.
+// between two views whose continuation turn is still going. It also finds a
+// group the previous turn's continuation stopped with required views left
+// (threeViewGroupPaused, #689): the person's next message ("continue") must
+// not start a new group that draws and charges the front view again; the
+// views left continue on the card. A finished or failed group, one paused
+// longer ago, and one whose card belongs to a stopped turn, is not active:
+// asking again for it starts a new group as before. Without such a group it
+// also returns the approved, unsubmitted grants of those groups whose turn
+// ended (superseded): a new group replaces them.
 func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
 	source generation.AssetID,
-) (skillrun.Run, bool, []supersededThreeViewGrant, error) {
+) (skillrun.Run, threeViewGuard, []supersededThreeViewGrant, error) {
 	owner := generation.OwnerID(command.OwnerID)
 	limit := e.threeView.MaximumListed
 	if limit <= 0 {
@@ -440,9 +444,10 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 	}
 	runs, err := e.skillRuntime.List(ctx, owner, command.SessionID, "", limit)
 	if err != nil {
-		return skillrun.Run{}, false, nil, err
+		return skillrun.Run{}, threeViewNoGroup, nil, err
 	}
 	key := threeViewRunKey(command)
+	previous := previousThreeViewTurn(command)
 	var superseded []supersededThreeViewGrant
 	for _, run := range runs {
 		if run.RecipeID != recipeID || run.SourceAssetID != source || run.IdempotencyKey == key {
@@ -451,10 +456,10 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 		for _, step := range run.Steps {
 			active, idle, err := e.threeViewStepActive(ctx, owner, step)
 			if err != nil {
-				return skillrun.Run{}, false, nil, err
+				return skillrun.Run{}, threeViewNoGroup, nil, err
 			}
 			if active {
-				return run, true, nil, nil
+				return run, threeViewGroupActive, nil, nil
 			}
 			if idle.RequestID != "" {
 				superseded = append(superseded, supersededThreeViewGrant{runID: run.ID, grant: idle})
@@ -462,13 +467,112 @@ func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.To
 		}
 		active, err := e.threeViewBetweenViews(ctx, owner, run)
 		if err != nil {
-			return skillrun.Run{}, false, nil, err
+			return skillrun.Run{}, threeViewNoGroup, nil, err
 		}
 		if active {
-			return run, true, nil, nil
+			return run, threeViewGroupActive, nil, nil
+		}
+		paused, err := e.threeViewPausedByTurn(ctx, owner, run, previous)
+		if err != nil {
+			return skillrun.Run{}, threeViewNoGroup, nil, err
+		}
+		if paused {
+			return run, threeViewGroupPaused, nil, nil
 		}
 	}
-	return skillrun.Run{}, false, superseded, nil
+	return skillrun.Run{}, threeViewNoGroup, superseded, nil
+}
+
+// threeViewGuard is what the duplicate guard found for a new group's source.
+type threeViewGuard int
+
+const (
+	threeViewNoGroup threeViewGuard = iota
+	// threeViewGroupActive: a group waits on its card or runs (#665).
+	threeViewGroupActive
+	// threeViewGroupPaused: the previous turn stopped a group with required
+	// views left (#689).
+	threeViewGroupPaused
+)
+
+// threeViewGuardRefusal is the receipt of a call the duplicate guard refused:
+// nothing was created, submitted or charged.
+func (e *Executor) threeViewGuardRefusal(found threeViewGuard, run skillrun.Run) chat.ToolResult {
+	template := e.threeView.Messages.DuplicateRun
+	if found == threeViewGroupPaused && e.threeView.Messages.PausedRun != "" {
+		template = e.threeView.Messages.PausedRun
+	}
+	return chat.ToolResult{AgentContent: strings.ReplaceAll(template, "{run}", run.ID), NoSubmission: true}
+}
+
+// previousThreeViewTurn is the assistant message of the turn before this one,
+// from the call's history; empty when there is none.
+func previousThreeViewTurn(command chat.ToolCommand) string {
+	for i := len(command.History) - 1; i >= 0; i-- {
+		message := command.History[i]
+		if message.Role == "assistant" && message.ID != "" && message.ID != command.AssistantMessageID {
+			return message.ID
+		}
+	}
+	return ""
+}
+
+// threeViewPausedByTurn reports a group that the continuation of the given
+// turn (the previous one) stopped with required views left, nothing in flight
+// and nothing failed (#689): its latest finished view was approved on the
+// continuation basis by that turn, which has ended and was not stopped, and
+// every required view left is planned without a grant or a rejected view
+// waiting for its redraw. That is how a group stops at the turn's generation
+// checkpoint (or when the basis no longer covers the next view). The person's
+// "continue" must not draw and charge the front view again in a new group;
+// the views left go on from the card. A group paused before the previous
+// turn is not refused: a later ask starts a new group as before.
+func (e *Executor) threeViewPausedByTurn(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
+	previous string,
+) (bool, error) {
+	if previous == "" || e.threeViewTurnEnded == nil {
+		return false, nil
+	}
+	latest, left := "", false
+	for _, step := range run.Steps {
+		if step.Spec.Optional || step.ReplacementAssetID != "" {
+			continue
+		}
+		switch {
+		case step.Phase == skillrun.OutputReady:
+			if step.GrantRequestID != "" {
+				latest = step.GrantRequestID
+			}
+			if step.Review == skillrun.Rejected {
+				left = true
+			}
+		case (step.Phase == skillrun.Planned || step.Phase == skillrun.Prepared) && step.GrantRequestID == "":
+			left = true
+		default:
+			// A view waiting on a grant, in flight or failed: not this pause.
+			return false, nil
+		}
+	}
+	if latest == "" || !left {
+		return false, nil
+	}
+	grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), latest)
+	if err != nil {
+		return false, err
+	}
+	continued := grant.BudgetEligible && (grant.ApprovedByBudget() ||
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto)
+	if !continued || grant.TriggerTurnID != previous {
+		return false, nil
+	}
+	if stopped, err := e.threeViewTurnStopped(ctx, grant); err != nil || stopped {
+		return false, err
+	}
+	ended, err := e.threeViewTurnEnded(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return false, nil
+	}
+	return ended, err
 }
 
 // supersededThreeViewGrant is an approved, unsubmitted view of an earlier
@@ -965,10 +1069,17 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 	}
 	pictures := e.threeViewPictures(result)
 	if result.Paused && result.Reason == threeview.ReasonGenerationCheckpoint {
-		// The turn ends at its generation checkpoint (#694); the views left
-		// continue when the person answers.
+		// The turn ends at its generation checkpoint (#694). The views left
+		// continue on the card: the person's next message starts a new turn,
+		// whose create_three_view the duplicate guard refuses for this group
+		// rather than drawing the front view again (#689).
 		limited := e.limitResult(command)
 		limited.Pictures = pictures
+		if messages.CheckpointPaused != "" {
+			limited.AgentContent = strings.NewReplacer("{run}", run.ID,
+				"{view}", e.threeViewSlotLabel(result, result.View)).Replace(messages.CheckpointPaused)
+		}
+		limited.GenerationCheckpointNote = messages.CheckpointNote
 		return limited, nil
 	}
 	if result.Paused {
@@ -982,8 +1093,10 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 				reason = result.Reason
 			}
 			template := messages.AgentPaused
-			if result.Reason == threeview.ReasonViewAlreadyStarted && messages.AgentPausedStarted != "" {
-				// Not a failure: the person started it (#689).
+			if (result.Reason == threeview.ReasonViewAlreadyStarted ||
+				result.Reason == threeview.ReasonViewAwaitingApproval) && messages.AgentPausedStarted != "" {
+				// Not a failure: the view was started and waits for its
+				// approval or its turn (#689); who started it is not said.
 				template = messages.AgentPausedStarted
 			}
 			content = strings.NewReplacer("{run}", run.ID, "{view}", e.threeViewSlotLabel(result, result.View),

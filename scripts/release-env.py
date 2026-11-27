@@ -345,10 +345,20 @@ def release_version(requested, revision):
             raise EnvironmentError_(f"--release-version {requested!r} may only hold letters, digits, dot, underscore "
                                     "and hyphen (at most 64), e.g. v1.9.5")
         return requested
-    if revision is None:
-        # The same origin/main release-go-testenv.sh resolves right after its own fetch.
+    # Without a revision the release is the same origin/main release-go-testenv.sh resolves right
+    # after its own fetch. A promoted revision may be missing from this clone too: fetch before
+    # describing it, and say what to do instead of a bare git exit code.
+    target = revision or "origin/main"
+    try:
         run("git", "fetch", "-q", "origin")
-    described = run("git", "describe", "--tags", "--always", f"{revision or 'origin/main'}^{{commit}}").strip()
+    except EnvironmentError_:
+        raise EnvironmentError_(f"git fetch origin failed, so the release string of {target} cannot be described; "
+                                "check the network or pass --release-version") from None
+    try:
+        described = run("git", "describe", "--tags", "--always", f"{target}^{{commit}}").strip()
+    except EnvironmentError_:
+        raise EnvironmentError_(f"git describe cannot read {target} even after fetching origin (is it a commit of "
+                                "this repository?); pass --release-version") from None
     if not RELEASE_VERSION_NAME.fullmatch(described):
         raise EnvironmentError_(f"git describe gave {described!r}, which is not a plain release name; pass --release-version")
     return described

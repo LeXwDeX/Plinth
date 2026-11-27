@@ -69,7 +69,9 @@ func TestSelfDeployComposeContract(t *testing.T) {
 		"ART_AI_PORT":          true,
 		"ART_AI_IMAGE_TAG":     true,
 		"ART_AI_SOURCE_COMMIT": true,
-		"GOPROXY":              true,
+		// #676: the optional release string of a build.
+		"ART_AI_RELEASE_VERSION": true,
+		"GOPROXY":                true,
 	}
 	assignment := regexp.MustCompile(`(?m)^#? ?([A-Z][A-Z0-9_]*)=`)
 	for _, match := range assignment.FindAllStringSubmatch(example, -1) {

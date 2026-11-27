@@ -97,6 +97,8 @@ curl http://127.0.0.1:13333/api/version   # {"version":"<上面的完整 SHA>"}
 
 没有 `.git` 的源码包（例如下载的压缩包）里 `git rev-parse HEAD` 会失败：把它换成完整的
 40 位提交 SHA，或者去掉 `ART_AI_SOURCE_COMMIT=...` 前缀（此时 `/api/version` 为 `unknown`）。
+想在顶栏与 `/api/version` 的 `release` 字段显示版本号时，再加可选的
+`ART_AI_RELEASE_VERSION=$(git describe --tags --always)`（只允许字母、数字、点、下划线和连字符）；不传时为空，界面不显示版本。
 构建使用 Docker 默认的 BuildKit。BuildKit 不支持 `docker build --network <NETWORK>`
 （报 `network mode ... not supported by buildkit`）；需要在构建期隔离或观测网络时，改用经典
 构建器单独构建镜像，再用 Compose 启动（镜像名与标签要和 Compose 一致，默认 `art-ai:local`）：
