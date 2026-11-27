@@ -7326,7 +7326,7 @@
               "edit_multiview_images",
               "create_three_view"
             ],
-            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；两者都没有时，图生图先按源图比例用 set_params 设 aspect_ratio。与用途建议的画幅不一致时用一句话说明，不要要求用户改画板。\n提示词：用模型提示词指引要求的语言（没写就用英文）写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图、四视图用 create_three_view，不逐张 refine_image。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风。改写已有步骤时只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图按 3D 制作要领里的输入图要求画。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。\n张数按用户的话定：几张不同内容的图分次提交，每条 prompt 只写一个场景，写进几个场景或「几张图」会被拼成多格总览；n 等张数参数只出同一 prompt 的变体。提交多次前先一句话说明几次、每次一个场景。已得到多格总览时，经用户明确同意才用 crop_image_regions 裁块，并说明每块只有原图一部分分辨率。"
+            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；两者都没有时，图生图先按源图比例用 set_params 设 aspect_ratio。与用途建议的画幅不一致时用一句话说明，不要要求用户改画板。\n提示词：用模型提示词指引要求的语言（没写就用英文）写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图、四视图用 create_three_view，不逐张 refine_image。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；换画风是重绘，不套此条。改写已有步骤时只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图按 3D 制作要领里的输入图要求画。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。\n张数按用户的话定：几张不同内容的图分次提交，每条 prompt 只写一个场景，写进几个场景或「几张图」会被拼成多格总览；n 等张数参数只出同一 prompt 的变体。提交多次前先一句话说明几次、每次一个场景。已得到多格总览时，经用户明确同意才用 crop_image_regions 裁块，并说明每块只有原图一部分分辨率。"
           },
           {
             "id": "model3d_assets",
@@ -8980,7 +8980,7 @@
           "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. How many images to make follows what the person says: the model's count parameter (such as n) only gives variants of one prompt; several different images (different scenes, characters or compositions) are separate calls with one scene per prompt, as the 2D craft brief says. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says.",
+          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. How many images to make follows what the person says: the model's count parameter (such as n) only gives variants of one prompt; several different images (different scenes, characters or compositions) are separate calls with one scene per prompt, as the 2D craft brief says. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says. Restyling a character in another picture's style is a redraw, not an edit: start from the original pictures, never from a failed result. From a style picture take only its visible rendering (body proportions, line work, shading, palette), never its character, pose, background or text; from the character picture take identity, outfit, hair, expression and gestures. When the proportions can be read from a style picture they are part of the style; when no style picture shows a standing full body, first open ask_choice kind next_step with 2 to 4 proportion options, each naming this tool with image-to-image as its step, say the person can also type their own, and submit no generation in that reply. In prompt, call each picture by its role (the style picture, the character picture), never by number: the server numbers them in send order. Describe the target positively; use negation only for what not to copy from a reference, never name a look to avoid (such as chibi), and never describe the character picture with style words. To adjust proportions, resend the same original references, change only the proportion sentence and submit one call at a time; do not correct geometry on a result (such as legs shorter by a percent).",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings"},
@@ -8997,7 +8997,7 @@
               },
               "model": {
                 "type": "string",
-                "description": "Optional image model to run, by model id or Offering id. The session's explicit 2D pick wins over it; omit it when the person has not asked for a particular model and let the 2D purpose recommend one."
+                "description": "Optional image model to run, by model id or Offering id. The session's explicit 2D pick wins over it; omit it when the person has not asked for a particular model and let the 2D purpose recommend one. When redoing or correcting a result of this session, pass the model that made it unless the person asks otherwise, and say so before switching models."
               },
               "reference_image_indices": {
                 "type": "array",
@@ -9015,7 +9015,7 @@
               "reference_purposes": {
                 "type": "object",
                 "additionalProperties": { "type": "string" },
-                "description": "Optional purpose of each reference picture, keyed by its handle, in English (for example {\"@img3\": \"keep this character and its pose\", \"@img7\": \"take the outfit from this image\"}). Give it whenever several references play different roles; the server writes the purposes into the final prompt in the order the pictures are really sent. Every key must be a picture this call sends."
+                "description": "Optional purpose of each reference picture, keyed by its handle, in English (for example {\"@img3\": \"keep this character and its pose\", \"@img7\": \"take the outfit from this image\"}). Give it whenever several references play different roles; the server writes the purposes into the final prompt in the order the pictures are really sent. For a restyle: {\"@img1\": \"take only the art style: body proportions, line work, shading and palette\", \"@img3\": \"keep this character: identity, outfit, hair, expression and gestures\"}; a style purpose never includes the background. Every key must be a picture this call sends."
               },
               "mask": {
                 "type": "string",
@@ -9054,8 +9054,8 @@
           "result_asset_roles": [
             "image"
           ],
-          "prompt_with_reference_template": "Edit the reference image: {prompt}. Keep the original composition, style, and unchanged elements intact.",
-          "prompt_with_previous_template": "Original image: {previous_prompt}. Edit: {prompt}",
+          "prompt_with_reference_template": "Use the attached reference image(s) for this request: {prompt}. Keep whatever the request does not ask to change.",
+          "prompt_with_previous_template": "The first reference image was made from this earlier request: {previous_prompt}. Use the attached reference image(s) for this new request: {prompt}. Keep whatever the new request does not ask to change.",
           "reference_purposes_argument": "reference_purposes",
           "prompt_with_reference_purposes_template": "Use the reference images, numbered in the order given, only for what each one is for: {purposes}Task: {prompt}",
           "reference_purpose_item_template": "image {position}: {purpose}. ",
@@ -11230,7 +11230,7 @@
             "id": "next_step",
             "option_source": "agent",
             "question": "接下来想怎么做？",
-            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项只做一件事并写明做什么；选好后我只做这一件，做完向你汇报，再问下一步；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。",
+            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项只做一件事并写明做什么；选好后我只做这一件，做完向你汇报，再问下一步；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。选项都不合适时，也可以直接在对话里写。",
             "min_options": 2,
             "max_options": 4,
             "actions": ["switch_operation", "clear_operation"],
@@ -21962,7 +21962,7 @@
             "chat.choice.kinds[id=concept_direction].question": "Which direction should we develop?",
             "chat.choice.kinds[id=concept_direction].message": "Choose a concept direction for this work. Each direction has a low-cost sketch and one sentence; after you choose, I will continue with that direction's parameters.",
             "chat.choice.kinds[id=next_step].question": "What would you like to do next?",
-            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation; each one does one thing and says what it is. After you choose, I do only that one thing, report back and then ask about the next step. An option that switches or clears the function selection saves the new selection for you first and changes nothing else.",
+            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation; each one does one thing and says what it is. After you choose, I do only that one thing, report back and then ask about the next step. An option that switches or clears the function selection saves the new selection for you first and changes nothing else. If no option fits, you can also type your own answer in the chat.",
             "chat.choice.kinds[id=next_step].step.one_step_refusal": "The choice card was not opened: option {option} does more than one thing. One option can do only one thing (one generation, one processing step or one unpaid explanation), and step names only that one step. Split a multi-step route into one card per step, or use propose_production_plan so the person approves it as a whole, then call ask_choice again.",
             "chat.choice.kinds[id=next_step].step.unchosen_refusal": "{tool} was not submitted and nothing was charged: on the direction card the person chose only \"{option}\", and this step is not part of that one choice. Report the current result first, then ask the person about the next step on a new ask_choice card (kind=next_step).",
             "chat.choice.kinds[id=concept_quantity].question": "How many concept images should we look at first?",

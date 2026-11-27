@@ -501,7 +501,7 @@ func TestExecutorAppliesDeclaredTurnParametersWithoutAdapterBranches(
 		t.Fatalf("mask data URI not resolved: %#v", submitted)
 	}
 	if submitted["configured-prompt"] !=
-		"Edit the reference image: paint. Keep the original composition, style, and unchanged elements intact." ||
+		"Use the attached reference image(s) for this request: paint. Keep whatever the request does not ask to change." ||
 		strings.Contains(submitted["configured-prompt"].(string), "hijacked") {
 		t.Fatalf("reserved prompt overridden: %#v", submitted)
 	}
