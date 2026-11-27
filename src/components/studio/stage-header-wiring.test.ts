@@ -278,7 +278,8 @@ describe('stage toolbar structure', () => {
     expect(header).toContain('<KindBadge kind="image" />');
     expect(header).toContain("text('ui.studio.stage.board')");
     expect(header).toMatch(/const mergeable = object === null\s*\?\s*boardHasContent/);
-    expect(header).toContain("send_chat: object || boardHasContent ? { run: () => requestImageCommand('send-board') } : null");
+    // #677: offered whenever a picture is on the stage, greyed with its reason while the frame holds nothing.
+    expect(header).toMatch(/send_chat: object \|\| boardHasContent\s*\? \{\s*run: \(\) => requestImageCommand\('send-board'\),\s*disabled: !boardHasContent,\s*reason: text\('ui\.studio\.stage\.action\.send_chat_empty'\),\s*\}\s*: null,/);
     // Export stays in the toolbar while the frame is empty, greyed with its reason in the hover hint.
     expect(header).toMatch(/export_board: \{\s*run: \(\) => requestImageCommand\('export-board'\),\s*disabled: offBoard \|\| !boardHasContent,\s*reason: offBoard \? offBoardReason : text\('ui.studio.stage.action.export_board_empty'\),\s*\}/);
     for (const id of ['merge', 'send_chat', 'export_board']) {

@@ -2391,13 +2391,22 @@ export function ChatColumn() {
       }
     };
   }, [activeSessionId, boardTurnOn, hasReference, objectDeselected]);
-  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644).
+  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644). #677: the press always shows what it
+  // did: the toggle lights up, the composer takes focus and a note says so, or says it was already on.
   const boardModeRequest = useWorkspaceStore((state) => state.boardModeRequest);
+  const boardTurnOnRef = useRef(boardTurnOn);
+  boardTurnOnRef.current = boardTurnOn;
   useEffect(() => {
     if (!boardModeRequest || boardModeRequest !== activeSessionId) return;
     useWorkspaceStore.getState().clearBoardModeRequest();
-    setBoardModeChosen(true);
-  }, [activeSessionId, boardModeRequest, setBoardModeChosen]);
+    if (boardTurnOnRef.current) toast.info(schemaText(schema, 'ui.studio.stage.action.send_chat_already_on'));
+    else {
+      setBoardModeChosen(true);
+      toast.success(schemaText(schema, 'ui.studio.stage.action.send_chat_done'));
+    }
+    if (useStudioStore.getState().chatCollapsed) setCollapsed(false);
+    window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
+  }, [activeSessionId, boardModeRequest, schema, setBoardModeChosen, setCollapsed]);
   const mentions = useMemo((): ComposerMention[] => mentionList.map((candidate) => {
     let thumbnail = '';
     if (candidate.kind === 'image') {

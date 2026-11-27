@@ -194,8 +194,15 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
     capture_2d: object
       ? { run: () => captureToTwoD(object), disabled: !object.assetId || captureBlock !== null, reason: text(captureBlock ?? CAPTURE_BLOCK_TEXT.notReady) }
       : null,
-    // A picture can always be sent; with only the board, there must be something in the frame to send.
-    send_chat: object || boardHasContent ? { run: () => requestImageCommand('send-board') } : null,
+    // 发送到对话 makes the next message a canvas turn (#644): with a picture on the stage it is always offered, but
+    // #677: greyed with its reason while there is no dashed frame or nothing in it, so a press never does nothing.
+    send_chat: object || boardHasContent
+      ? {
+        run: () => requestImageCommand('send-board'),
+        disabled: !boardHasContent,
+        reason: text('ui.studio.stage.action.send_chat_empty'),
+      }
+      : null,
     export_board: {
       run: () => requestImageCommand('export-board'),
       disabled: offBoard || !boardHasContent,
