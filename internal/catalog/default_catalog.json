@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.63",
+    "revision": "2026-11-27.10.64",
     "terminology": {
       "user_facing": [
         {
@@ -3297,7 +3297,7 @@
         "error.limit_positive": "limit 必须是正整数",
         "error.after_nonnegative": "after 必须是非负整数",
         "ui.providers.load_failed": "加载模型列表失败",
-        "ui.header.menu_toggle": "Toggle menu",
+        "ui.header.menu_toggle": "切换菜单",
         "ui.header.failures_show_title": "点击显示失败任务",
         "ui.header.failures_hide_title": "点击隐藏失败任务",
         "ui.header.failures_hidden": "已隐藏失败",
@@ -3334,7 +3334,7 @@
         "ui.workbench.enhance_failed": "提示词增强失败",
         "ui.workbench.enhance_no_change": "增强未产生变化，请稍后重试",
         "ui.workbench.enhance_success": "提示词已增强",
-        "ui.model_3d.native_mode_notice": "✦ Native 模式：直接输出最高精度网格，不限制面数",
+        "ui.model_3d.native_mode_notice": "✦ 原生模式：直接输出最高精度网格，不限制面数",
         "ui.model_3d.parameter_value": "{label}：{value}",
         "ui.model_3d.export_formats": "导出格式",
         "ui.model_3d.preview_required": "(预览必需)",
@@ -3411,7 +3411,7 @@
         "ui.image_to_image.result": "转换结果",
         "ui.image_to_image.empty": "上传图片和提示词后开始转换",
         "ui.loading": "加载中...",
-        "ui.retexture.title": "Retexture",
+        "ui.retexture.title": "换贴图",
         "ui.retexture.description": "AI 重新为 3D 模型生成贴图纹理",
         "ui.retexture.input_section": "输入模型",
         "ui.retexture.input_task_tab": "任务 ID",
@@ -3438,19 +3438,19 @@
         "ui.retexture.upload_failed_status": "上传失败 ({status})",
         "ui.retexture.response_parse_failed": "解析服务端响应失败",
         "ui.retexture.network_upload_failed": "网络错误，上传失败",
-        "ui.retexture.upload_task_created": "模型已上传，Retexture 任务已创建",
+        "ui.retexture.upload_task_created": "模型已上传，换贴图任务已创建",
         "ui.retexture.upload_failed": "上传失败",
-        "ui.retexture.task_created": "Retexture 任务已创建",
+        "ui.retexture.task_created": "换贴图任务已创建",
         "ui.retexture.create_failed": "创建任务失败",
         "ui.retexture.enhance": "AI 增强",
-        "ui.retexture.start": "开始 Retexture",
+        "ui.retexture.start": "开始换贴图",
         "ui.retexture.progress": "任务进度",
         "ui.retexture.task_id_prefix": "ID:",
         "ui.retexture.preview": "3D 预览",
         "ui.retexture.download": "下载模型",
         "ui.retexture.download_filename_fallback": "model",
         "ui.retexture.empty": "输入模型和风格描述后开始换贴图",
-        "ui.background_removal.title": "Background Removal",
+        "ui.background_removal.title": "去背景",
         "ui.background_removal.description": "上传图片批量去除背景，支持透明物体和精细抠图",
         "ui.background_removal.upload_section": "上传图片",
         "ui.background_removal.parameters_section": "高级参数（可选）",
@@ -3791,7 +3791,7 @@
         "ui.chat.input.paste.image_unreadable_one": "有 {count} 张图片无法读取，文字已保留；可先保存图片再上传",
         "ui.chat.input.attachment_upload_failed": "附件图片上传失败，消息没有发出，请重试",
         "ui.chat.input.attachment_too_large": "附件 {index} 为 {size}，超过 {limit} 的上传上限，消息没有发出",
-        "ui.chat.input.skill_locked": "已锁定参数面板（quality 自动 high）",
+        "ui.chat.input.skill_locked": "已锁定参数面板（质量自动设为高）",
         "ui.chat.input.attachment_alt": "附件 {index}",
         "ui.chat.input.remove_attachment": "移除附件 {index}",
         "ui.chat.input.multi_image_hint": "提示词里用「第1张图」「第2张图」指定角色，AI 会自动识别。",
@@ -3931,7 +3931,7 @@
         "ui.workspace.processing.plan_step_queued": "排队等待提交",
         "ui.workspace.processing.plan_auto_rigging": "动作需要先绑骨，已加入绑骨步骤。",
         "ui.workspace.processing.plan_incompatible": "所选步骤没有可用的输入路径，请调整步骤或模型。",
-        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」（Remesh），把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
+        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」，把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
         "ui.workspace.processing.source_refused_face_limit": "{service} 最多接受 {limit} 个三角面，当前模型约 {faces} 个",
         "ui.unavailable.label": "无法使用，{reason}",
         "ui.unavailable.reason.canvas.reference_ratio_unsupported": "模型不支持参考图比例",
@@ -4568,7 +4568,7 @@
         "ui.canvas.crop.apply": "应用裁剪",
         "ui.canvas.crop.cancel": "取消裁剪",
         "ui.canvas.models.title": "模型选择",
-        "ui.canvas.models.auto": "Auto",
+        "ui.canvas.models.auto": "自动",
         "ui.canvas.models.empty": "暂无可用模型",
         "ui.canvas.style.line_width": "线宽",
         "ui.canvas.style.line_color": "线色",
@@ -4713,10 +4713,10 @@
         "ui.workspace.skills.draft_invalid": "请填写名称和要求。",
         "ui.workspace.skills.write_myself": "我自己写",
         "ui.workspace.skills.back": "返回",
-        "ui.workspace.skills.slug": "标识（slug）",
+        "ui.workspace.skills.slug": "标识",
         "ui.workspace.skills.slug_hint": "小写字母、数字和单个连字符；留空则自动生成。",
         "ui.workspace.skills.slug_invalid": "标识只能用小写字母、数字和单个连字符（1–64 个字符），且不能与已有 Skill 重复。",
-        "ui.workspace.skills.description": "说明（description）",
+        "ui.workspace.skills.description": "说明",
         "ui.workspace.skills.description_hint": "一行，说清做什么、什么时候用；Agent 只凭它决定是否使用。",
         "ui.workspace.skills.description_invalid": "说明必须是一行，不能为空，不超过 1024 个字符，不能含 < 或 >。",
         "ui.workspace.skills.description_derived": "自动生成，建议补写",
@@ -5073,7 +5073,7 @@
         "ui.studio.agent_scope.mode_2d": "2D 模式",
         "ui.studio.agent_scope.mode_3d": "3D 模式",
         "ui.studio.agent_scope.mode_auto": "自动模式",
-        "ui.studio.agent_scope.short_auto": "Auto",
+        "ui.studio.agent_scope.short_auto": "自动",
         "ui.studio.agent_scope.short_2d": "2D",
         "ui.studio.agent_scope.short_3d": "3D",
         "ui.studio.agent_scope.col.mode": "模式",
@@ -17675,6 +17675,7 @@
         "chat.choice.kinds",
         "model_delivery",
         "asset_list",
+        "project.messages",
         "offerings"
       ],
       "locale_fields": [
@@ -17797,7 +17798,7 @@
             "ui.project.style_save_failed": "Could not save the style guide; try again.",
             "ui.project.conventions_saved": "Production conventions saved.",
             "ui.project.conventions_save_failed": "Could not save the production conventions; check the values and try again.",
-            "ui.project.reference_limit": "At most {maximum}",
+            "ui.project.reference_limit": "At most {maximum} images",
             "ui.project.inherit_hint": "This session inherits the style guide of \"{project}\"; choose \"This session\" to override it.",
             "ui.project.no_project_hint": "Assign the session to a project to reuse its style guide and assets.",
             "ui.project.promote_title": "Promote to project asset",
@@ -20580,6 +20581,28 @@
             "ui.viewer.splat.load_failed": "This Gaussian Splat can't be previewed right now. The original file can still be downloaded."
           },
           "fields": {
+            "project.messages.name_required": "Project name cannot be empty.",
+            "project.messages.name_too_long": "Project name cannot exceed {maximum} characters.",
+            "project.messages.project_limit": "Each user can create at most {maximum} projects.",
+            "project.messages.asset_name_required": "Asset name cannot be empty.",
+            "project.messages.asset_name_too_long": "Asset name cannot exceed {maximum} characters.",
+            "project.messages.asset_limit": "Each project can hold at most {maximum} assets.",
+            "project.messages.style_text_too_long": "Style notes cannot exceed {maximum} characters.",
+            "project.messages.palette_color_invalid": "Palette colors must be in #RRGGBB form.",
+            "project.messages.reference_limit": "At most {maximum} style reference images.",
+            "project.messages.reference_invalid": "The reference image is unavailable or does not belong to the current user.",
+            "project.messages.unknown_project": "The project does not exist or does not belong to the current user.",
+            "project.messages.asset_not_found": "The project asset does not exist.",
+            "project.messages.promotion_source_invalid": "Only your own completed task outputs or uploaded images can be promoted.",
+            "project.messages.style_guide_inherited": "Sessions in this project inherit the style guide of project “{project}” by default.",
+            "project.messages.style_guide_overridden": "This session overrides the project style guide.",
+            "project.messages.style_guide_off": "This session injects no style reference.",
+            "project.messages.style_guide_empty": "Not enabled",
+            "project.messages.style_guide_references_only": "(reference images only)",
+            "project.messages.style_guide_palette": "Palette: {palette} (the main colors of a 2D generation must stay within the palette)",
+            "project.messages.conventions_empty": "None",
+            "project.messages.assets_empty": "None",
+            "runtime.provider_connections[id=jimeng-images].display_name": "Jimeng",
             "content.brand.metadata_title": "Plinth - Multi-model creation platform",
             "content.brand.metadata_description": "Plinth multi-model creation and asset platform",
             "content.home.title": "Plinth pure Go runtime",
@@ -22416,6 +22439,27 @@
             "model_delivery.archive.readme.missing_line": "- {label}: {reason}"
           },
           "offering_texts": {
+            "中心": "Center",
+            "FDM（熔融沉积）": "FDM (fused deposition)",
+            "SLA（光固化）": "SLA (resin)",
+            "全彩": "Full color",
+            "写实": "Realistic",
+            "拓竹（Bambu Lab）": "Bambu Lab",
+            "最高质量（Prime）": "Highest quality (Prime)",
+            "圆形": "Circle",
+            "圆角矩形": "Rounded rectangle",
+            "六边形": "Hexagon",
+            "盾形": "Shield",
+            "星形": "Star",
+            "线性": "Linear",
+            "伽马": "Gamma",
+            "S 形曲线": "S-curve",
+            "角色": "Character",
+            "风景": "Landscape",
+            "拓竹 MH001（60 mm）": "Bambu Lab MH001 (60 mm)",
+            "Cherry MX 1×1 键帽（R1 排）": "Cherry MX 1×1 keycap (row R1)",
+            "人物": "Person",
+            "方形": "Square",
             "16:9 宽屏": "16:9 widescreen",
             "1990 霹雳舞 (Breakdance_1990)": "1990 breakdance",
             "2K Ultra 几何": "2K Ultra geometry",
@@ -41983,11 +42027,11 @@
           "options": [
             {
               "value": "bottom",
-              "label": "bottom"
+              "label": "底部"
             },
             {
               "value": "center",
-              "label": "center"
+              "label": "中心"
             }
           ],
           "presentation": {
@@ -42147,15 +42191,15 @@
           "options": [
             {
               "value": "fdm",
-              "label": "fdm"
+              "label": "FDM（熔融沉积）"
             },
             {
               "value": "sla",
-              "label": "sla"
+              "label": "SLA（光固化）"
             },
             {
               "value": "full_color",
-              "label": "full_color"
+              "label": "全彩"
             }
           ],
           "presentation": {
@@ -42335,15 +42379,15 @@
           "options": [
             {
               "value": "fdm",
-              "label": "fdm"
+              "label": "FDM（熔融沉积）"
             },
             {
               "value": "sla",
-              "label": "sla"
+              "label": "SLA（光固化）"
             },
             {
               "value": "full_color",
-              "label": "full_color"
+              "label": "全彩"
             }
           ],
           "presentation": {
@@ -42543,7 +42587,7 @@
           "options": [
             {
               "value": "realistic",
-              "label": "realistic"
+              "label": "写实"
             }
           ],
           "presentation": {
@@ -42590,7 +42634,7 @@
           "options": [
             {
               "value": "bambu",
-              "label": "bambu"
+              "label": "拓竹（Bambu Lab）"
             }
           ],
           "presentation": {
@@ -42706,7 +42750,7 @@
           "options": [
             {
               "value": "prime",
-              "label": "prime"
+              "label": "最高质量（Prime）"
             }
           ],
           "presentation": {
@@ -45055,23 +45099,23 @@
           "options": [
             {
               "value": "circle",
-              "label": "circle"
+              "label": "圆形"
             },
             {
               "value": "rounded-rect",
-              "label": "rounded-rect"
+              "label": "圆角矩形"
             },
             {
               "value": "hexagon",
-              "label": "hexagon"
+              "label": "六边形"
             },
             {
               "value": "shield",
-              "label": "shield"
+              "label": "盾形"
             },
             {
               "value": "star",
-              "label": "star"
+              "label": "星形"
             }
           ]
         },
@@ -45146,15 +45190,15 @@
           "options": [
             {
               "value": "linear",
-              "label": "linear"
+              "label": "线性"
             },
             {
               "value": "gamma",
-              "label": "gamma"
+              "label": "伽马"
             },
             {
               "value": "s-curve",
-              "label": "s-curve"
+              "label": "S 形曲线"
             }
           ]
         },
@@ -45556,23 +45600,23 @@
           "options": [
             {
               "value": "circle",
-              "label": "circle"
+              "label": "圆形"
             },
             {
               "value": "rounded-rect",
-              "label": "rounded-rect"
+              "label": "圆角矩形"
             },
             {
               "value": "hexagon",
-              "label": "hexagon"
+              "label": "六边形"
             },
             {
               "value": "shield",
-              "label": "shield"
+              "label": "盾形"
             },
             {
               "value": "star",
-              "label": "star"
+              "label": "星形"
             }
           ]
         },
@@ -45647,15 +45691,15 @@
           "options": [
             {
               "value": "linear",
-              "label": "linear"
+              "label": "线性"
             },
             {
               "value": "gamma",
-              "label": "gamma"
+              "label": "伽马"
             },
             {
               "value": "s-curve",
-              "label": "s-curve"
+              "label": "S 形曲线"
             }
           ]
         },
@@ -45971,11 +46015,11 @@
           "options": [
             {
               "value": "character",
-              "label": "character"
+              "label": "角色"
             },
             {
               "value": "landscape",
-              "label": "landscape"
+              "label": "风景"
             }
           ]
         }
@@ -46142,11 +46186,11 @@
           "options": [
             {
               "value": "bambu_mh001_60mm",
-              "label": "bambu_mh001_60mm"
+              "label": "拓竹 MH001（60 mm）"
             },
             {
               "value": "none",
-              "label": "none"
+              "label": "无"
             }
           ]
         },
@@ -46222,7 +46266,7 @@
           "options": [
             {
               "value": "stl",
-              "label": "stl"
+              "label": "STL"
             }
           ],
           "fixed": true
@@ -47276,7 +47320,7 @@
           "options": [
             {
               "value": "cherry-mx-1x1-r1",
-              "label": "cherry-mx-1x1-r1"
+              "label": "Cherry MX 1×1 键帽（R1 排）"
             }
           ],
           "fixed": true
@@ -47446,11 +47490,11 @@
           "options": [
             {
               "value": "person",
-              "label": "person"
+              "label": "人物"
             },
             {
               "value": "other",
-              "label": "other"
+              "label": "其他"
             }
           ],
           "required": true
@@ -47549,11 +47593,11 @@
           "options": [
             {
               "value": "square",
-              "label": "square"
+              "label": "方形"
             },
             {
               "value": "hex",
-              "label": "hex"
+              "label": "六边形"
             }
           ]
         },
@@ -47648,7 +47692,7 @@
           "options": [
             {
               "value": "3mf",
-              "label": "3mf"
+              "label": "3MF"
             }
           ],
           "fixed": true
