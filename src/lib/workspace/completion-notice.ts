@@ -3,6 +3,9 @@
  * 浏览器通知。以下是不依赖界面的判断；文案全部来自 Schema。
  */
 
+import { findTaskState } from '@/lib/workspace/task-projection';
+import type { TaskStateSchema } from '@/lib/product-schema';
+
 export type NoticeOutcome = 'done' | 'failed';
 
 export interface NoticeTask {
@@ -31,7 +34,11 @@ export interface NoticeScan {
  * 一个没有状态的占位，紧接着写入终态，不算亲眼见过）、用户自己取消的任务（没有失败
  * 也没有产物）都不提醒（#651）。
  */
-export function scanTasks(previousActive: ReadonlySet<string>, tasks: readonly NoticeTask[]): NoticeScan {
+export function scanTasks(
+  previousActive: ReadonlySet<string>,
+  tasks: readonly NoticeTask[],
+  states: readonly TaskStateSchema[] = [],
+): NoticeScan {
   const active = new Set<string>();
   const finished: NoticeScan['finished'] = [];
   for (const task of tasks) {
@@ -44,6 +51,9 @@ export function scanTasks(previousActive: ReadonlySet<string>, tasks: readonly N
       continue;
     }
     if (!previousActive.has(task.taskId) || task.notFound) continue;
+    // #705: a cancelled task also carries a failure (its cancellation note), but the user stopped it: the Schema
+    // task_states outcome says canceled, and it is not announced as a failure.
+    if (task.state && findTaskState(states, task.state)?.outcome === 'canceled') continue;
     if (task.failure) finished.push({ task, outcome: 'failed' });
     else if (task.downloadables.length > 0) finished.push({ task, outcome: 'done' });
   }

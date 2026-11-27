@@ -160,6 +160,9 @@ type Choice struct {
 	// Kind is the generic choice kind (#103), e.g. usage_profile. Empty is a
 	// #321 provider-choice card.
 	Kind string
+	// Question is the Agent's own question of a generic card (#699), bounded
+	// by ask_choice's declared length; empty shows the kind's default.
+	Question string
 	// Capability is the step being chosen for; StepIndex its position in a
 	// plan (-1 for a single-step tool). A generic card stores its kind here
 	// too, for the continuation, and -1 as its index.

@@ -365,14 +365,16 @@ func TestAdvisedRequiredParameterStillNeedsADefault(t *testing.T) {
 		parameters, _ := o["parameters"].([]any)
 		for _, item := range parameters {
 			parameter, _ := item.(map[string]any)
-			if parameter["name"] != "texture" {
+			// texture is an ordinary setting since #704; texture_version
+			// is still advised.
+			if parameter["name"] != "texture_version" {
 				continue
 			}
 			parameter["required"] = true
 			delete(parameter, "default")
 			return
 		}
-		t.Fatal("texture parameter missing")
+		t.Fatal("texture_version parameter missing")
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid advised policy") {
 		t.Fatalf("required advised parameter without a default accepted: %v", err)

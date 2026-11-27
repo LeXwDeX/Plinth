@@ -23,7 +23,7 @@ export function ObjectThumbImage({ kind, src, className }: { kind: 'image' | 'mo
       className={cn('flex size-full items-center justify-center', !shown && 'bg-muted text-muted-foreground', className)}
     >
       {shown
-        ? <img src={src} alt={''} loading="lazy" decoding="async" onError={() => setFailed(src)} className="size-full object-cover" />
+        ? <img src={src} alt={''} loading="lazy" decoding="async" onError={() => setFailed(src)} className={cn('size-full object-cover', kind === 'image' && 'bg-checkerboard')} />
         : <Icon aria-hidden className="size-1/2 max-h-5 max-w-5" />}
     </span>
   );

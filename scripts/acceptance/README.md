@@ -21,7 +21,7 @@ passwords. Output goes to the system temp dir (or `--out`/`OUT`), never into the
 | `chrome_viewer.py` / `chrome_viewer.mjs` | 已部署环境里已有的大 GLB | M3D-01/03（查看器旋转缩放、视图模式）、DLV-01/02（大文件字节与 ZIP）、查看器加载失败与重试 | 约 5–15 分钟（取决于模型大小） | 系统 Chrome 或 Playwright Chromium、`release-env.py smoke` |
 | `release-1-9-0-browser.mjs` | 已部署环境（默认 dev-test，必须是 fake 上游形态） | v1.9.0 的 #586、#559、#587、#560（批次 1）、#548（批次 2，未部署时 SKIP「待批次 2」）、第三批 N1–N6、批次 4 M1–M2、#599 项目组 P1–P4 、批次 F（PR #627：#610 至 #624，F610–F624；模型自主行为记 INFO「需真实模型复测」）与批次 H 的 fake 复现 F629–F632（#629 大图三视图 409 与请求中途断开、#630 三视图运行 ID、#631 版本条单层画板参考图、#632 检查类工具结果语言；修复前的版本上应 FAIL，目标 fake 早于 `[[fake:echo-tool-results]]` 时依赖它的检查记 INFO），见文件头注释 | 全套约 40–50 分钟（P1–P4 约 1 分钟，批次 F 约 15 分钟，批次 H 约 10 分钟） | Playwright（chromium）、`release-env.py smoke`（Agent 专用账号；P1–P4 另需注入的管理员账号，缺少时 SKIP） |
 | `release-1-9-2-canvas-ratio.mjs` | 已部署环境（默认 dev-test，必须是 fake 上游形态） | #653 画布以比例为准：C1 新画布默认 1:1；C2 GPT Image 下 16:9 画布经 `@画布` 发送，提示最高画质并冻结 3840x2160；C3 切到 Gemini 不改画布、仍可 `@画布` 发送并冻结 16:9、4K；C4 Nano Banana 下 21:9 画布的缺比例提示、最接近比例出图与「画布改为 16:9」（没有 Nano Banana 时 SKIP），见文件头注释 | 约 5 分钟 | Playwright（chromium）、`release-env.py smoke`（Agent 专用账号） |
-| `studio-scenarios.mjs` | 已有脚本，Mock 栈上的 Studio 四个场景 | 见文件头注释 | — | — |
+| `studio-scenarios.mjs` | **已过期，不属于验收**（#705）：按旧 Studio 界面写的四个场景，起步卡 `stage-starter-card` 等入口早已不存在，历史上就是 0/43；结果不作为任何验收证据。现行浏览器验收用 `release-1-9-*` 系列与 `browser_matrix/` | — | — | — |
 
 `acceptance_lib.py` 是 `mock_stack.py` 与 `cross_user.py` 共用的标准库小工具（带 Cookie 的 HTTP 客户端、PNG 编解码、multipart、空闲端口），`browser_matrix/lib.mjs` 与 `fixtures.mjs` 是浏览器脚本共用的 Playwright 解析、登录和 PNG/GLB 夹具生成。
 

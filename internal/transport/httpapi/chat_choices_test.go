@@ -164,6 +164,26 @@ func TestGenericChoiceCardsCarryTheSchemaQuestion(t *testing.T) {
 	if card.Kind != "usage_profile" || card.Capability != "usage_profile" || card.Question != wantQuestion {
 		t.Fatalf("generic card = %+v, want question %q", card, wantQuestion)
 	}
+
+	// #699: a card that keeps the Agent's own question shows it instead of
+	// the kind's default.
+	const asked = "风格图里看不到全身，想按哪种身体比例来画？"
+	seedChoiceReply(t, repository, sessionID, "turn-3")
+	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
+		OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-3", CallID: "call-3",
+		Kind: "next_step", Capability: "next_step", StepIndex: -1, Question: asked,
+		Options:   []chat.ChoiceOption{{ID: "four_heads", Label: "约 4 头身"}, {ID: "style_heads", Label: "按风格图"}},
+		CreatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read = grantTestRequest(t, handler, cookie, http.MethodGet, choicesPath(sessionID), "", "")
+	if err := json.Unmarshal(read.Body.Bytes(), &listed); err != nil || len(listed.Choices) != 2 {
+		t.Fatalf("listed = %s err=%v", read.Body.String(), err)
+	}
+	if card := listed.Choices[0]; card.Kind != "next_step" || card.Question != asked {
+		t.Fatalf("agent-worded card = %+v, want question %q", card, asked)
+	}
 }
 
 // #374: a direction card names no target tool; its options carry the action

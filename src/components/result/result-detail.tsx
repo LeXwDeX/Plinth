@@ -231,7 +231,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
           <img
             src={file}
             alt={displayTarget.title}
-            className="max-h-full max-w-full object-contain"
+            className="bg-checkerboard max-h-full max-w-full object-contain"
             onLoad={(event) => setMeasured({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
           />
         ) : kind === 'video' ? (

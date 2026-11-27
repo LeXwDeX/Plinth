@@ -39,6 +39,13 @@ beforeEach(() => {
 });
 
 describe('project switcher', () => {
+  it('lets the project name shrink and truncate in a narrow top bar instead of being painted over (#705)', () => {
+    render(<ProjectSwitcher />);
+    const wrapper = screen.getByTestId('project-switcher-trigger').parentElement!;
+    expect(wrapper.className).toContain('min-w-0');
+    expect(wrapper.className).not.toContain('shrink-0');
+  });
+
   it('shows the open session project and chooses another one', async () => {
     render(<ProjectSwitcher />);
     expect(screen.getByTestId('project-switcher-trigger').textContent).toContain('Star Harbor');

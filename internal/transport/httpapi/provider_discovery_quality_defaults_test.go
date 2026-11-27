@@ -88,10 +88,10 @@ func TestHiddenParametersStayOutOfProviderDiscovery(t *testing.T) {
 		capability, providerID string
 		names                  []string
 	}{
-		{"text-to-3d", "tripo-v3.1-full", []string{"face_limit", "texture", "pbr", "texture_quality", "geometry_quality", "quad", "smart_low_poly", "export_uv"}},
+		{"text-to-3d", "tripo-v3.1-full", []string{"face_limit", "pbr", "texture_quality", "geometry_quality", "quad", "smart_low_poly", "export_uv"}},
 		{"image-to-3d", "tripo-v3.1-full", []string{"face_limit", "enable_image_autofix", "texture_quality", "geometry_quality"}},
 		{"text-to-3d", "meshy-7.1", []string{"geometry_resolution", "texture_resolution", "should_remesh", "topology", "enable_pbr"}},
-		{"image-to-3d", "meshy-7.1", []string{"geometry_resolution", "texture_resolution", "should_remesh", "topology", "target_polycount", "should_texture", "enable_pbr", "image_enhancement"}},
+		{"image-to-3d", "meshy-7.1", []string{"geometry_resolution", "texture_resolution", "should_remesh", "topology", "target_polycount", "enable_pbr", "image_enhancement"}},
 		// The retexture texture resolution is a public choice since #129: a
 		// session purpose may need a texture below the 8K default.
 		{"retexture", "meshy-processing", []string{"enable_pbr"}},
