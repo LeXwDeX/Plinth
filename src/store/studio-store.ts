@@ -18,9 +18,14 @@ import { stepIndex, type LightboxItem, type LightboxState } from '@/lib/workspac
 
 export const CHAT_WIDTH_DEFAULT = 440;
 export const CHAT_WIDTH_MIN = 440;
-export const CHAT_WIDTH_MAX = 640;
+/** #695: the chat column may be widened to half the window, never past the stage's minimum room. */
+export const CHAT_WIDTH_MAX_FRACTION = 0.5;
+/** #696: the stage keeps at least this many pixels; the chat's 440 floor still comes first. */
+export const STAGE_MIN_WIDTH = 320;
 /** 收起后的窄条宽度。 */
 export const CHAT_RAIL_WIDTH = 56;
+/** The right panel's tab rail with its border: all the panel takes while folded. */
+export const PANEL_RAIL_WIDTH = 37;
 
 /** While the studio watches for versions the tracker does not know of, the chain is read this often. */
 export const VERSIONS_WATCH_INTERVAL_MS = 3000;
@@ -66,9 +71,39 @@ interface StudioPrefs {
 
 export const STUDIO_PREFS_KEY = 'art-ai-studio-prefs';
 
-export function clampChatWidth(width: number): number {
+/**
+ * The widest the chat column may be in a window `viewportWidth` wide whose right panel takes `rightWidth`
+ * (#695, #696): half the window, less if the stage would get under its minimum, never under the 440 floor.
+ * Order: the floor first, then the stage's minimum, then the half-window cap.
+ */
+export function chatWidthMax(viewportWidth: number, rightWidth: number): number {
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(rightWidth)) return CHAT_WIDTH_MIN;
+  const half = Math.floor(viewportWidth * CHAT_WIDTH_MAX_FRACTION);
+  const room = Math.floor(viewportWidth - rightWidth - STAGE_MIN_WIDTH);
+  return Math.max(CHAT_WIDTH_MIN, Math.min(half, room));
+}
+
+/** What the right panel takes: its content column (Schema width) and the tab rail, or the rail alone while folded. */
+export function rightPanelWidth(panelContentWidth: number, panelCollapsed: boolean): number {
+  return panelCollapsed ? PANEL_RAIL_WIDTH : panelContentWidth + PANEL_RAIL_WIDTH;
+}
+
+/**
+ * #696: whether the open right panel leaves the stage its minimum beside the chat at its narrowest (the 440 floor,
+ * or the rail while the chat is folded). When it does not, the panel is folded before the chat is narrowed.
+ */
+export function rightPanelFits(viewportWidth: number, panelContentWidth: number, chatCollapsed: boolean): boolean {
+  const chat = chatCollapsed ? CHAT_RAIL_WIDTH : CHAT_WIDTH_MIN;
+  return viewportWidth - chat - rightPanelWidth(panelContentWidth, false) >= STAGE_MIN_WIDTH;
+}
+
+/**
+ * The 440 floor, and `max` when given. The stored width only takes the floor: the cap follows the window, so a
+ * width stored in a wide window comes back when the window is wide again (#695).
+ */
+export function clampChatWidth(width: number, max: number = Number.POSITIVE_INFINITY): number {
   if (!Number.isFinite(width)) return CHAT_WIDTH_DEFAULT;
-  return Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, Math.round(width)));
+  return Math.min(Math.max(CHAT_WIDTH_MIN, max), Math.max(CHAT_WIDTH_MIN, Math.round(width)));
 }
 
 export function readStudioPrefs(): StudioPrefs {
