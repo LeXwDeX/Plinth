@@ -15,15 +15,26 @@
 // position 是确定性断言，旧实现（absolute）每次都会 FAIL。
 // 只保存「功能」草稿状态，不点保存、不发消息、不调用模型。
 //
+// 「功能」页只在会话里有 3D 模型时才有「绑骨」等选项，空会话里看不到（#705）。
+// 所以开始前先用同目录的 seed-fake-3d-task.py 造一个有 SUCCEEDED 3D 任务的会话
+// （零费用；它只在 fake 上游形态运行，否则拒绝）；也可用 OVERLAY_SESSION=<会话 ID>
+// 直接指定一个已有模型的会话。造不出（目标不是 fake 形态、缺环境变量）时整轮记
+// SKIP 并说明原因；进了会话仍看不到「绑骨」时该视口记 SKIP，不当作通过。
+//
 // 用法（本地或服务器）：
 //   BASE=<环境 base_url> ADMIN_USERNAME=... ADMIN_PASSWORD=... \
-//   [SMOKE_EVIDENCE_DIR=/abs/path] [ROUNDS=5] node scripts/smoke/overlay-scroll-lock-geometry.mjs
+//   [OVERLAY_SESSION=<会话 ID>] [SMOKE_EVIDENCE_DIR=/abs/path] [ROUNDS=5] \
+//   node scripts/smoke/overlay-scroll-lock-geometry.mjs
+//   或：python3 scripts/release-env.py smoke dev-test -- node scripts/smoke/overlay-scroll-lock-geometry.mjs
+// 退出码：0 = 无 FAIL（可含 SKIP，SKIP 不算通过）；1 = 有 FAIL。
 //
 // 凭据只用于本进程内的登录请求，不写日志、不写报告。
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -53,6 +64,11 @@ function resolvePlaywright() {
 
 let pass = 0;
 let fail = 0;
+let skip = 0;
+const skipped = (name, detail) => {
+  console.log(`SKIP: ${name}${detail ? ` — ${detail}` : ''}`);
+  skip += 1;
+};
 const ok = (name, detail) => {
   console.log(`PASS: ${name}${detail ? ` — ${detail}` : ''}`);
   pass += 1;
@@ -122,9 +138,34 @@ const check = (tag, samples) => {
   return { drift, overflow: overflow.length, gutter: gutter.length };
 };
 
+// #705: a session that holds a 3D model, so the 「功能」 tab shows its options. The seed script refuses (exit 2)
+// unless the target runs the fake upstream; its stdout carries no credentials.
+const modelSession = () => {
+  if (process.env.OVERLAY_SESSION) return { id: process.env.OVERLAY_SESSION };
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'seed-fake-3d-task.py');
+  const run = spawnSync('python3', [script], { env: process.env, encoding: 'utf8', timeout: 8 * 60 * 1000 });
+  const id = (run.stdout || '').match(/ in session (\S+)/)?.[1];
+  if (run.status === 0 && id) return { id };
+  const reason = ((run.stderr || '').trim() || (run.stdout || '').trim() || run.error?.message || '').split('\n')[0];
+  return { status: run.status, reason };
+};
+
+const finish = () => {
+  console.log(`\nRESULT: ${fail ? `FAIL (${fail})` : skip ? 'SKIP' : 'PASS'} — PASS=${pass} FAIL=${fail} SKIP=${skip}`);
+  process.exit(fail ? 1 : 0);
+};
+
 const playwright = resolvePlaywright();
 if (!username || !password) throw new Error('需要 ADMIN_USERNAME / ADMIN_PASSWORD 登录测试账号');
 if (evidenceDir) await fs.mkdir(evidenceDir, { recursive: true, mode: 0o700 });
+
+const seeded = modelSession();
+if (!seeded.id) {
+  if (seeded.status === 2) skipped('造有 3D 模型的会话', `seed-fake-3d-task.py 拒绝运行：${seeded.reason}；可设 OVERLAY_SESSION 指定已有模型的会话`);
+  else bad('造有 3D 模型的会话', `seed-fake-3d-task.py 退出码 ${seeded.status}：${seeded.reason}`);
+  finish();
+}
+console.log(`INFO: 使用有 3D 模型的会话 ${seeded.id}`);
 
 let browser;
 try {
@@ -140,9 +181,8 @@ try {
       const page = await context.newPage();
       const summaries = [];
       // The race only shows on a select's first open after load, so each
-      // round reloads. Opening `/` starts a new conversation and then
-      // remounts the workbench on `?session=`; later rounds reuse that one.
-      let sessionUrl = base + '/';
+      // round reloads the session that holds the 3D model.
+      let sessionUrl = `${base}/?session=${encodeURIComponent(seeded.id)}`;
       for (let round = 1; round <= rounds; round += 1) {
         await page.goto(sessionUrl, { waitUntil: 'domcontentloaded' });
         await page.waitForURL(/[?&]session=/, { timeout: 30000 });
@@ -154,7 +194,12 @@ try {
         await tab.waitFor({ timeout: 20000 });
         if (await tab.getAttribute('aria-selected') !== 'true') await tab.click();
         const panel = page.locator('[data-testid="harness-panel"]');
-        await panel.locator('input[type="radio"][value="rigging"]').click({ timeout: 20000 });
+        const rigging = panel.locator('input[type="radio"][value="rigging"]');
+        if (!await rigging.waitFor({ timeout: 20000 }).then(() => true, () => false)) {
+          skipped(`${tag} 验收`, '「功能」页没有「绑骨」选项（会话里没有可加工的 3D 模型），无法打开「执行服务」下拉');
+          break;
+        }
+        await rigging.click({ timeout: 20000 });
         // The trigger stays disabled while the harness draft is saving.
         const trigger = panel.locator('[role="combobox"]:not([data-disabled])').first();
         await trigger.waitFor({ state: 'visible', timeout: 20000 });
@@ -195,5 +240,4 @@ try {
   await browser?.close();
 }
 
-console.log(`\nRESULT: ${fail ? `FAIL (${fail})` : 'PASS'} — PASS=${pass} FAIL=${fail}`);
-process.exit(fail ? 1 : 0);
+finish();
