@@ -24,7 +24,7 @@ import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/com
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { groupProgress } from '@/lib/workspace/three-view';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
-import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
+import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { objectOfTile, type TilePick } from '@/lib/workspace/version-object';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
@@ -98,7 +98,10 @@ function useTileHandle(tile: VersionTile): string {
   return single ? handleOfPicture(messages, { url: tile.assets[0].url }) : '';
 }
 
-/** The handle badge: over the thumbnail of a regular tile, beside the version label of a compact one. */
+/**
+ * The handle badge: over the thumbnail of a regular tile, beside the version label of a compact one. #680: it reads
+ * as it is typed in the chat (`@img5`); the tile's hover hint says what it is for.
+ */
 function HandleBadge({ handle, className }: { handle: string; className?: string }) {
   const { schema } = useProductSchema();
   return (
@@ -106,7 +109,7 @@ function HandleBadge({ handle, className }: { handle: string; className?: string
       aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
       className={cn('pointer-events-none rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white', className)}
       data-testid="version-handle-badge"
-    >{handleLabel(handle)}</span>
+    >{handle}</span>
   );
 }
 
@@ -398,7 +401,9 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
       {/* The card shows a short caption; the hover hint carries the whole label and, for a failed one, why it failed.
           The wrapper is block-level and full width, so every tile of a column stays as wide as the column (its
           ring and hover background included), as the bare button was. */}
-      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined}
+      <HintTooltip name={label}
+        hint={tile.status === 'failed' && tile.failure ? tile.failure
+          : handle ? formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.hint'), { handle }) : undefined}
         reason={tile.status === 'ready' && !canDisplay ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined} className="flex w-full">
         <button
           type="button"

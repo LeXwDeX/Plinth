@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import React, { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -256,12 +258,17 @@ describe('output strip navigation and details', () => {
 
 describe('chat handle badge on a version tile (#87)', () => {
   const routed = (assetId: string) => `/api/v1/tasks/old/assets/${assetId}`;
-  it('shows the handle the session messages gave this one picture, without its marker', () => {
+  it('shows the handle the session messages gave this one picture as it is typed in the chat (#680)', () => {
     state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
     state.messages = [{ attachments: [{ handle: '@img25', kind: 'image', taskId: 'old', assetId: 'a' }] }];
     const html = renderToStaticMarkup(<VersionStrip />);
-    expect(html).toMatch(/data-testid="version-handle-badge"[^>]*>img25</);
-    expect(html).toContain('aria-label="对话里的句柄 @img25"');
+    expect(html).toMatch(/data-testid="version-handle-badge"[^>]*>@img25</);
+    expect(html).toContain('aria-label="引用 @img25"');
+  });
+  it('says in the tile\'s hover hint how the handle is used (#680)', () => {
+    const source = readFileSync(fileURLToPath(new URL('./version-strip.tsx', import.meta.url)), 'utf8');
+    expect(source).toContain("handle ? formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.hint'), { handle })");
+    expect((catalog.application.content.messages as Record<string, string>)['ui.studio.handle_badge.hint']).toBe('在对话里用 {handle} 引用这张图');
   });
   it('shows the handle on the result a 「更多」 group keeps outside, a compact tile (#617)', () => {
     state.tiles = [0, 1, 2].map((index) => tile({ key: `n:${index}`, taskId: `t${index}`, taskIds: [`t${index}`],
@@ -271,8 +278,8 @@ describe('chat handle badge on a version tile (#87)', () => {
     const html = renderToStaticMarkup(<VersionStrip />);
     const strip = html.slice(0, html.indexOf('data-testid="version-fold-list"'));
     expect(strip).toContain('h-[34px]');
-    expect(strip).toMatch(/data-testid="version-handle-badge"[^>]*>img7</);
-    expect(strip).toContain('aria-label="对话里的句柄 @img7"');
+    expect(strip).toMatch(/data-testid="version-handle-badge"[^>]*>@img7</);
+    expect(strip).toContain('aria-label="引用 @img7"');
   });
   it('shows no badge when no message names the picture', () => {
     state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];

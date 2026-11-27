@@ -52,7 +52,7 @@ describe('a view-confirmation thumbnail opens the picture in the stage area (#87
     expect(modal.className).toContain('absolute inset-0');
     expect(view.getByTestId('stage-image-picture').getAttribute('src')).toBe(images[1]);
     expect(view.getByTestId('stage-image-label').textContent).toBe('第 2 张图');
-    expect(view.getByTestId('stage-image-handle').textContent).toBe('img26');
+    expect(view.getByTestId('stage-image-handle').textContent).toBe('@img26');
     // The first picture has no handle in the messages: none is shown.
     fireEvent.click(thumbs[0]);
     expect(view.queryByTestId('stage-image-handle')).toBeNull();
