@@ -124,7 +124,9 @@ describe('stage, right panel, lightbox and compare wiring', () => {
     expect(allOutputs).toContain("'ui.studio.outputs.selected_count'");
     expect(allOutputs).toContain("'ui.studio.outputs.clear_selection'");
     expect(allOutputs).toContain("addEventListener('keydown', onKeyDown, true)");
-    expect(allOutputs).toContain('escapeClearsSelection(chosenCount, blockers)');
+    // #705: Esc clears the selection first, then closes the panel.
+    expect(allOutputs).toContain('const outcome = escapeOutcome(chosenCount, blockers);');
+    expect(allOutputs).toMatch(/if \(outcome === 'close'\) \{\s*setAllOutputsOpen\(false\);/);
     // The strip retains comparison toggles; ordinary activation selects the stage and details stays a separate action.
     expect(strip).toContain('if (tile.status === \'ready\' && !toggleTileInCompare(tile))');
     expect(strip).toContain('else viewOnStage(selected)');
