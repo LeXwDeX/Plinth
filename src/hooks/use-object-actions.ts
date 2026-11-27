@@ -34,25 +34,34 @@ export function useObjectActions() {
    * Only objects of the session in view may take the stage. An unsent mask does not stop it: the
    * mask belongs to the canvas and stays (mask-store).
    */
-  const openOnStage = useCallback((object: CurrentObject): boolean => {
+  const putOnStage = useCallback((object: CurrentObject): boolean => {
     if (!object.sessionId || useChatStore.getState().activeSessionId !== object.sessionId) return false;
     useWorkspaceStore.getState().setCurrentObject(object);
     return sameObject(useWorkspaceStore.getState().currentObject, object);
   }, []);
 
   /**
+   * #681: every caller is a person's click (a result card picture, 选用, a plan candidate, the lightbox), and a
+   * click never changes the board: a picture without an explicit placement only takes the stage (`view`), the way
+   * a strip tile does. Only a double click, a 「放入画板」/「插入到画布」 button or a drag puts it on the board
+   * (insertOnCanvas). The automatic join of a new Agent result does not come through here (#239/#262).
+   */
+  const openOnStage = useCallback((object: CurrentObject): boolean =>
+    putOnStage(object.kind === 'image' && !object.placement ? { ...object, placement: 'view' } : object), [putOnStage]);
+
+  /**
    * #559: looking at a version (a strip tile, a source jump, stepping through versions) only puts it on the
    * stage. A picture already on the board is selected there; one the person removed stays removed.
    */
   const viewOnStage = useCallback((object: CurrentObject): boolean =>
-    openOnStage(object.kind === 'image' ? { ...object, placement: 'view' } : object), [openOnStage]);
+    putOnStage(object.kind === 'image' ? { ...object, placement: 'view' } : object), [putOnStage]);
 
   /**
    * #559: 「插入到画布」 puts exactly this picture on the board and records it as placed. A model has no
    * 2D board: it opens on the 3D stage as before.
    */
   const insertOnCanvas = useCallback((object: CurrentObject): boolean =>
-    openOnStage(object.kind === 'image' ? { ...object, placement: 'insert' } : object), [openOnStage]);
+    putOnStage(object.kind === 'image' ? { ...object, placement: 'insert' } : object), [putOnStage]);
 
   /** The turn that converts the object's own picture, addressed by its @img handle (no upload). */
   const requestObjectTurn = useCallback((object: CurrentObject) => {

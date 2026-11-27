@@ -52,7 +52,7 @@ function LightboxView() {
   const versions = useSessionVersions();
   const { openOnStage } = useObjectActions();
   const picked = Boolean(item?.pick && pick?.kind === 'image' && pick.taskId === item.pick.taskId && pick.assetId === item.pick.assetId);
-  // Choosing a candidate also puts it on the stage, so the next request starts from the one picked.
+  // Choosing a candidate also puts it on the stage, so the next request starts from the one picked; never on the board (#681).
   const pickCurrent = () => {
     const target = item?.pick;
     if (!target || !sessionId) return;

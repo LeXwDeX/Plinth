@@ -1,6 +1,5 @@
 'use client';
 
-import { useCanvasStore } from '@/store/canvas-store';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { AlertTriangle, Box, Brush, Camera, Check, ChevronUp, Columns2, Crop, Eraser, Grid2x2, Link2Off, Maximize2, Merge, Paintbrush, Paperclip, Wand2, type LucideIcon } from 'lucide-react';
@@ -234,7 +233,6 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
   const { openOnStage, viewOnStage } = useObjectActions();
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick, busy, choose } = useSessionPick(chat, sessionId);
-  const boardNodes = useCanvasStore((state) => state.nodesBySession[sessionId]);
   const shownAssetId = useWorkspaceStore((state) => state.currentObject?.assetId);
   const { slotOf } = useStageViewer();
   const candidates = candidatesOf(tile, (index) => formatSchemaText(schemaText(schema, 'ui.studio.strip.candidate_n'), { index }), imageResultSlots(schema, tile.capability));
@@ -281,15 +279,13 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
       <ul className="flex gap-2">
         {candidates.map((candidate) => {
           const picked = pick?.kind === 'image' && pick.taskId === candidate.taskId && pick.assetId === candidate.assetId;
-          // Picked on the server but its picture was removed from the board: say so, the pick itself is untouched.
-          const offCanvas = picked && boardNodes !== undefined && !boardNodes.some((node) => node.type === 'image' && node.taskId === candidate.taskId);
           const shown = current && shownAssetId === candidate.assetId;
           return (
             <li key={candidate.key} className="flex w-20 flex-col gap-1">
               <button
                 type="button"
                 onClick={() => {
-                  // Looking at a candidate only shows it (#559); 选用 below still puts it on the board.
+                  // Looking at a candidate only shows it (#559); 选用 below does not put it on the board either (#681).
                   const object = objectOfTile(tile, sessionId, { taskId: candidate.taskId, assetId: candidate.assetId });
                   if (object) viewOnStage(object);
                 }}
@@ -320,14 +316,15 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
                 aria-pressed={picked}
                 data-testid="version-repick"
                 onClick={() => {
-                  // Choosing a candidate also puts it on the stage, so the next request starts from the one picked.
+                  // Choosing a candidate tells the Agent which one (the session's pick) and puts it on the stage, so the
+                  // next request starts from it; it never puts it on the board (#681: openOnStage only views).
                   void choose({ kind: 'image', taskId: candidate.taskId, assetId: candidate.assetId }).then((ok) => {
                     const object = ok ? objectOfTile(tile, sessionId, { taskId: candidate.taskId, assetId: candidate.assetId }) : null;
                     if (object) openOnStage(object);
                   });
                 }}
               >
-                {picked ? <Check /> : null}{picked ? schemaText(schema, offCanvas ? 'ui.chat.image.picked_off_canvas' : 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
+                {picked ? <Check /> : null}{picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
               </Action>
             </li>
           );

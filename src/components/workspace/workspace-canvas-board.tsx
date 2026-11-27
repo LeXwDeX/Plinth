@@ -511,13 +511,12 @@ export function WorkspaceCanvasBoard() {
       localBitmapNodeIds(sessionID).size === 0 &&
       first.nodesHash === computeNodesHash(useCanvasStore.getState().getNodes(sessionID)) ? firstImage : null;
     // FEA-02：产物归属其他会话时不落画布（切会话后旧轮次完成场景）。
-    const boardEmpty = useCanvasStore.getState().getNodes(sessionID).length === 0;
     const urls = firstRestore ? [firstRestore.url]
-      : imagesToPlace(selection, sessionID, placedSelections.current, suppressedTaskIds, placedResults, boardEmpty);
+      : imagesToPlace(selection, sessionID, placedSelections.current, suppressedTaskIds, placedResults);
     if (!selection || urls.length === 0) return;
     placedSelections.current.add(selection);
-    // #559: an explicit insert (and the one picture a view puts on an empty board) is written to the placement
-    // receipt, so the automatic join neither adds it a second time nor brings it back after a delete.
+    // #559: an explicit insert is written to the placement receipt, so the automatic join neither adds it a
+    // second time nor brings it back after a delete.
     const receiptKey = !firstRestore && selection.placement ? placementReceiptKey(sessionVersions.tiles, selection) : null;
     const registerReceipt = () => {
       if (!receiptKey || placementSession.current !== sessionID) return;
