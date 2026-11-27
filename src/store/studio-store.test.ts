@@ -7,6 +7,7 @@ import {
   STUDIO_PREFS_KEY,
   chatWidthMax,
   clampChatWidth,
+  rightPanelFits,
   rightPanelWidth,
   readStudioPrefs,
   useStudioStore,
@@ -75,6 +76,17 @@ describe('chat column width', () => {
     expect(readStudioPrefs().chatWidth).toBe(CHAT_WIDTH_DEFAULT);
     expect(() => useStudioStore.getState().setChatWidth(560)).not.toThrow();
     expect(useStudioStore.getState().chatWidth).toBe(560);
+  });
+
+  it('folds the right panel before the stage drops under 320 pixels (#696)', () => {
+    // 440 chat + 337 panel + 320 stage = 1097.
+    expect(rightPanelFits(1440, 300, false)).toBe(true);
+    expect(rightPanelFits(1097, 300, false)).toBe(true);
+    expect(rightPanelFits(1096, 300, false)).toBe(false);
+    expect(rightPanelFits(800, 300, false)).toBe(false);
+    // With the chat folded to its 56px rail the panel fits down to 713.
+    expect(rightPanelFits(800, 300, true)).toBe(true);
+    expect(rightPanelFits(712, 300, true)).toBe(false);
   });
 
   it('reads a stored width back without the window cap (#695)', () => {

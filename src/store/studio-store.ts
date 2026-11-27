@@ -89,6 +89,15 @@ export function rightPanelWidth(panelContentWidth: number, panelCollapsed: boole
 }
 
 /**
+ * #696: whether the open right panel leaves the stage its minimum beside the chat at its narrowest (the 440 floor,
+ * or the rail while the chat is folded). When it does not, the panel is folded before the chat is narrowed.
+ */
+export function rightPanelFits(viewportWidth: number, panelContentWidth: number, chatCollapsed: boolean): boolean {
+  const chat = chatCollapsed ? CHAT_RAIL_WIDTH : CHAT_WIDTH_MIN;
+  return viewportWidth - chat - rightPanelWidth(panelContentWidth, false) >= STAGE_MIN_WIDTH;
+}
+
+/**
  * The 440 floor, and `max` when given. The stored width only takes the floor: the cap follows the window, so a
  * width stored in a wide window comes back when the window is wide again (#695).
  */
