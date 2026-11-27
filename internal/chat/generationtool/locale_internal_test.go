@@ -380,6 +380,10 @@ func (*capturingChoiceStore) ReopenChoice(context.Context, string, string, strin
 	return nil
 }
 
+func (*capturingChoiceStore) SupersedeChoicesBefore(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+
 // #358: askChoice names each candidate's provider and model in the turn
 // locale. The stored card keeps the raw Schema names; IDs, prices and the
 // user's arguments are unchanged.

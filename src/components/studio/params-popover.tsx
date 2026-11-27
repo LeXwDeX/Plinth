@@ -11,8 +11,7 @@ import type { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
 import type { GenerationParams } from '@/hooks/use-generation-params';
 import { CanvasSizeNotice, ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
-import { canvasResizeForChoice } from '@/lib/workspace/canvas-size';
-import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
+import { CanvasRatioPicker } from '@/components/canvas/canvas-ratio-picker';
 import { CanvasResizeAnchor } from '@/components/canvas/canvas-resize-anchor';
 import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote } from '@/lib/pricing';
@@ -33,7 +32,7 @@ export interface ParamsPanelProps {
   /** The selected Skill, whose recommended size becomes the size default. */
   skill: { name: string; recommendedSize: string } | null;
   effective: ReturnType<typeof useAgentEffectiveConfiguration>;
-  /** #246: the session's canvas. A 2D size chosen here resizes it; a mismatch with the model is shown. */
+  /** #653: the session's canvas: its ratio is picked here, and a model without that ratio is said. */
   canvas?: { sessionId: string; delivery: CanvasDelivery } | null;
 }
 
@@ -126,9 +125,9 @@ export function ParamsPanel({ params, domains, hasSession, disabled = false, ski
         <div className="mt-1.5 flex flex-col gap-1">
           {effective.loading ? <p>{text('ui.workspace.harness.loading')}</p> : effective.failed ? <p role="alert">{schema.agent_configuration.ui.load_failed}</p> : effective.data ? (
             <>
-              <p>{schema.agent_configuration.ui.dialogue_model}: {effective.data.model.label}</p>
-              <p>{schema.agent_configuration.ui.revision}: {effective.data.revision}</p>
-              <p>{schema.agent_configuration.ui.source}: {effective.data.parameter_source}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.dialogue_model, value: effective.data.model.label })}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.revision, value: effective.data.revision })}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.source, value: effective.data.parameter_source })}</p>
             </>
           ) : <p>{schema.agent_configuration.ui.effective_empty}</p>}
         </div>
@@ -141,17 +140,6 @@ export function ParamsPanel({ params, domains, hasSession, disabled = false, ski
 /** One capability owns one form and one parameter scope. Read-only exposure is explicitly opt-in. */
 export function ParamsDomainSection({ params, hasSession, disabled, skill, canvas = null }: Pick<ParamsPanelProps, 'params' | 'hasSession' | 'disabled' | 'skill' | 'canvas'>) {
   const { schema } = useProductSchema();
-  /**
-   * #246: a size the person picks (or resets to the default) is the canvas size too: the boundary changes as
-   * one undo step, content keeping its pixel size and its place relative to the chosen anchor. Only a canvas
-   * whose size is already known is resized; a canvas still loading starts from the chosen size anyway.
-   */
-  const resizeCanvasTo = (name: string, value: unknown) => {
-    if (!canvas) return;
-    const pixels = canvasResizeForChoice(canvas.delivery.known, params.offering, params.model.sizeParams, params.values,
-      name, value, schema.canvas.frontend.artboard, schema.canvas.limits);
-    if (pixels) applyCanvasResize(schema, canvas.sessionId, pixels);
-  };
   const text = (key: string) => schemaText(schema, key);
   const [showMore, setShowMore] = useState(false);
   const { model, values, setValue, estimate } = params;
@@ -177,7 +165,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
       const dependency = model.paramSchemas.find((entry) => entry.name === condition.parameter);
       const value = values[condition.parameter];
       const label = dependency?.options?.find((option) => option.value === String(value))?.label ?? String(value ?? '');
-      return `${dependency?.label ?? condition.parameter}: ${label}`;
+      return formatSchemaText(text('ui.common.label_value'), { label: dependency?.label ?? condition.parameter, value: label });
     });
     return formatSchemaText(text('ui.studio.params.condition_disabled'), { conditions: labels.join(text('ui.studio.list_separator')) });
   };
@@ -204,7 +192,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
     ? nativeQuote ? [
         formatSchemaText(text('ui.pricing.default_estimate'), { amount: formatNativePrice(nativeQuote.total_amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') }),
         formatSchemaText(text('ui.pricing.base_amount'), { amount: formatNativePrice(nativeQuote.base_amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') }),
-        ...(nativeQuote.components ?? []).map((component) => `${component.label}: ${formatNativePrice(component.amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown')}`),
+        ...(nativeQuote.components ?? []).map((component) => formatSchemaText(text('ui.common.label_value'), { label: component.label, value: formatNativePrice(component.amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') })),
         ...(nativeUpperQuote && (nativeUpperQuote.unit !== nativeQuote.unit || nativeUpperQuote.total_amount !== nativeQuote.total_amount)
           ? [formatSchemaText(text('ui.pricing.upper_estimate'), { amount: formatNativePrice(nativeUpperQuote.total_amount, nativeUpperQuote.unit_label) ?? text('ui.pricing.unknown') })]
           : []),
@@ -258,17 +246,18 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
             label={param.label}
             note={fromSkill ? formatSchemaText(text('ui.studio.params.from_skill'), { skill: skill?.name ?? '' }) : undefined}
           >
-            <ParameterOrigin params={params} name={param.name} size disabled={!hasSession || disabled || parameterDisabled(param, values)} onReset={() => resizeCanvasTo(param.name, null)} />
-            <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => { setValue(param.name, value); resizeCanvasTo(param.name, value); }} optionText={sizeText} />
+            <ParameterOrigin params={params} name={param.name} size disabled={!hasSession || disabled || parameterDisabled(param, values)} />
+            <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => setValue(param.name, value)} optionText={sizeText} />
             {conditionNotice(param)}
           </Row>
         );
       })}
 
-      {canvas && model.sizeParams.length > 0 ? (
+      {canvas ? (
         <>
           <ReferenceSizeNotice delivery={canvas.delivery} />
           <CanvasSizeNotice sessionId={canvas.sessionId} delivery={canvas.delivery} />
+          <CanvasRatioPicker sessionId={canvas.sessionId} delivery={canvas.delivery} disabled={!hasSession || disabled} />
           <p className="text-[11px] leading-4 text-muted-foreground" data-testid="canvas-resize-hint">{text('ui.canvas.size.resize_hint')}</p>
           <CanvasResizeAnchor disabled={!hasSession || disabled} />
         </>

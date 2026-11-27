@@ -87,6 +87,11 @@ func TestDefaultCatalogDeclaresNoToolCallLimit(t *testing.T) {
 	if bytes.Contains(public, []byte("agent_limits")) || bytes.Contains(public, []byte("max_tool_calls")) {
 		t.Fatal("the public Schema still carries a tool call limit")
 	}
+	// #553 over #665: the per-turn tool round bound is an operator opt-in,
+	// the default Catalog leaves it unset so the count is only displayed.
+	if rounds := taskCatalog.Application().Chat.Agent.MaxToolRoundsPerTurn; rounds != 0 {
+		t.Fatalf("default max_tool_rounds_per_turn = %d, want 0 (no bound)", rounds)
+	}
 	messages := taskCatalog.Application().Content.Messages
 	english := taskCatalog.Application().Localization.Bundles["en"].Messages
 	for _, text := range []string{messages["ui.studio.tool_calls.turn"], english["ui.studio.tool_calls.turn"]} {

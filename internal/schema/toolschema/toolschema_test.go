@@ -148,3 +148,64 @@ func TestFreeFormObjectsAreDeliberateAndNarrow(t *testing.T) {
 		t.Fatal("a free-form object was accepted without FreeFormObjects")
 	}
 }
+
+// #665: the chat Agent tools declare strict bounds and typed maps; both are
+// parsed and enforced, never silently ignored.
+func TestExclusiveBoundsAndTypedMapsAreEnforced(t *testing.T) {
+	schema, err := Parse(json.RawMessage(`{"type":"object","properties":{
+		"width":{"type":"number","exclusiveMinimum":0,"maximum":1},
+		"labels":{"type":"object","additionalProperties":{"type":"string","maxLength":3}}
+	},"additionalProperties":false}`), Options{RootObject: true, ClosedObjects: true, FreeFormObjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]string{
+		`{"width":0.5,"labels":{"a":"xy"}}`: "",
+		`{"width":0}`:                       "$.width: must be above 0",
+		`{"labels":{"a":"long"}}`:           "$.labels.a: must have at most 3 characters",
+		`{"labels":{"a":1}}`:                "$.labels.a: must be of type string",
+	} {
+		got := ""
+		if err := schema.Validate(json.RawMessage(raw)); err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Fatalf("%s: got %q, want %q", raw, got, want)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"number","exclusiveMinimum":1,"exclusiveMaximum":1}`,
+		`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":{"type":"string"}}`,
+		`{"type":"string","exclusiveMinimum":1}`,
+	} {
+		if _, err := Parse(json.RawMessage(raw), Options{}); err == nil {
+			t.Fatalf("%s: parsed, want a refusal", raw)
+		}
+	}
+}
+
+// #665: with OptionalNullAbsent a null under a property the object does not
+// require is the property left out; a required null is still checked, and
+// plain Validate keeps refusing both.
+func TestValidateWithOptionalNullAbsent(t *testing.T) {
+	schema, err := Parse(json.RawMessage(`{"type":"object","properties":{
+		"id":{"type":"string"},"params":{"type":"object","properties":{"n":{"type":"integer"}}}},
+		"required":["id"],"additionalProperties":false}`), Options{RootObject: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lenient := ValidateOptions{OptionalNullAbsent: true}
+	if err := schema.ValidateWith(json.RawMessage(`{"id":"a","params":null}`), lenient); err != nil {
+		t.Fatalf("optional null = %v", err)
+	}
+	if err := schema.ValidateWith(json.RawMessage(`{"id":"a","params":{"n":null}}`), lenient); err != nil {
+		t.Fatalf("nested optional null = %v", err)
+	}
+	var violation *ValidationError
+	if err := schema.ValidateWith(json.RawMessage(`{"id":null}`), lenient); !errors.As(err, &violation) || violation.Path != "$.id" {
+		t.Fatalf("required null = %v", err)
+	}
+	if err := schema.Validate(json.RawMessage(`{"id":"a","params":null}`)); !errors.As(err, &violation) || violation.Path != "$.params" {
+		t.Fatalf("strict optional null = %v", err)
+	}
+}

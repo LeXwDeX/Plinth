@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 
 import {
-  groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
+  fourViewRequested, groupIsActive, groupMultiview, groupProgress, groupTileStatus, interleaveGroups, requestedView, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
   remainingSlots, slotAction, succeededCount, viewLabelOfTask, type ThreeViewGroup,
 } from './three-view';
 
@@ -100,6 +100,17 @@ describe('group state', () => {
     expect(groupProgress([slot('succeeded'), slot('not_started'), slot('succeeded'), slot('succeeded', true)])).toEqual({ done: 3, total: 4 });
     expect(requestedView(slot('not_started', true))).toBe(false);
     expect(requestedView(slot('denied', true))).toBe(true);
+  });
+
+  // #633: a four-view request names itself; a three-view group whose right view nobody started stays a three-view.
+  it('says whether the right view was asked for', () => {
+    const slot = (status: string, optional = false) => ({ status, optional }) as { status: ThreeViewGroup['slots'][number]['status']; optional: boolean };
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('not_started', true)])).toBe(false);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded')])).toBe(false);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('running', true)])).toBe(true);
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('failed', true)])).toBe(true);
+    // A right view the person denied was never started: the card stays a three-view.
+    expect(fourViewRequested([slot('succeeded'), slot('succeeded'), slot('succeeded'), slot('denied', true)])).toBe(false);
   });
 });
 

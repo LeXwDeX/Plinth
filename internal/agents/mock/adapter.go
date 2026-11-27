@@ -56,23 +56,24 @@ type Config struct {
 }
 
 type Adapter struct {
-	toolName       string
-	promptArgument string
-	summary        string
-	failureSummary string
-	waitingSummary string
-	waitingContent string
-	rechargePrefix string
-	deniedContent  string
-	deniedSummary  string
-	scopeRefusal   string
-	choiceSummary  string
-	summaryTmpl    string
-	citationTmpl   string
-	userRole       string
-	toolRole       string
-	localize       func(context.Context, string) string
-	nextCall       atomic.Uint64
+	toolName        string
+	promptArgument  string
+	summary         string
+	failureSummary  string
+	waitingSummary  string
+	waitingContent  string
+	rechargePrefix  string
+	rechargeContent string
+	deniedContent   string
+	deniedSummary   string
+	scopeRefusal    string
+	choiceSummary   string
+	summaryTmpl     string
+	citationTmpl    string
+	userRole        string
+	toolRole        string
+	localize        func(context.Context, string) string
+	nextCall        atomic.Uint64
 }
 
 func New(config Config) (*Adapter, error) {
@@ -83,22 +84,23 @@ func New(config Config) (*Adapter, error) {
 		return nil, errors.New("mock agent: incomplete schema config")
 	}
 	return &Adapter{
-		toolName:       config.ToolName,
-		promptArgument: config.PromptArgument,
-		summary:        config.Summary,
-		failureSummary: config.FailureSummary,
-		waitingSummary: config.WaitingSummary,
-		waitingContent: config.WaitingContent,
-		rechargePrefix: strings.Split(config.RechargeContent, "{task_id}")[0],
-		deniedContent:  config.DeniedContent,
-		deniedSummary:  config.DeniedSummary,
-		scopeRefusal:   config.ScopeRefusal,
-		choiceSummary:  config.ChoiceSummary,
-		summaryTmpl:    config.SummaryTemplate,
-		citationTmpl:   config.CitationTemplate,
-		userRole:       config.UserRole,
-		toolRole:       config.ToolRole,
-		localize:       config.Localize,
+		toolName:        config.ToolName,
+		promptArgument:  config.PromptArgument,
+		summary:         config.Summary,
+		failureSummary:  config.FailureSummary,
+		waitingSummary:  config.WaitingSummary,
+		waitingContent:  config.WaitingContent,
+		rechargePrefix:  strings.Split(config.RechargeContent, "{task_id}")[0],
+		rechargeContent: config.RechargeContent,
+		deniedContent:   config.DeniedContent,
+		deniedSummary:   config.DeniedSummary,
+		scopeRefusal:    config.ScopeRefusal,
+		choiceSummary:   config.ChoiceSummary,
+		summaryTmpl:     config.SummaryTemplate,
+		citationTmpl:    config.CitationTemplate,
+		userRole:        config.UserRole,
+		toolRole:        config.ToolRole,
+		localize:        config.Localize,
 	}, nil
 }
 
@@ -290,8 +292,10 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 		if message.Role != adapter.toolRole {
 			continue
 		}
-		if adapter.waitingContent != "" && message.Content == adapter.waitingContent ||
-			adapter.rechargePrefix != "" && strings.HasPrefix(message.Content, adapter.rechargePrefix) {
+		// The tool answers these texts in the turn's locale (#632).
+		if adapter.waitingContent != "" && adapter.isText(ctx, message.Content, adapter.waitingContent) ||
+			adapter.rechargePrefix != "" && (strings.HasPrefix(message.Content, adapter.rechargePrefix) ||
+				strings.HasPrefix(message.Content, strings.Split(adapter.text(ctx, adapter.rechargeContent), "{task_id}")[0])) {
 			waiting = true
 			continue
 		}
@@ -303,7 +307,7 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 			}
 			continue
 		}
-		if adapter.deniedContent != "" && message.Content == adapter.deniedContent {
+		if adapter.deniedContent != "" && adapter.isText(ctx, message.Content, adapter.deniedContent) {
 			denied = true
 			continue
 		}
@@ -423,6 +427,12 @@ func (adapter *Adapter) text(ctx context.Context, text string) string {
 		return text
 	}
 	return adapter.localize(ctx, text)
+}
+
+// isText reports whether content is the Schema text in the default locale or
+// in the turn's locale.
+func (adapter *Adapter) isText(ctx context.Context, content, text string) bool {
+	return content == text || content == adapter.text(ctx, text)
 }
 
 func (adapter *Adapter) Complete(

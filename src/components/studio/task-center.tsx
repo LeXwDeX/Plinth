@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { formatSchemaText, taskStatePresentation } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, taskStatePresentation } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
@@ -90,7 +90,7 @@ export function useTaskSummary() {
 
 export function TaskCenterButton() {
   const { schema, text } = useProductSchema();
-  const { activeTasks, liveCount, listedCount, overallProgress } = useTaskSummary();
+  const { activeTasks, liveCount, overallProgress } = useTaskSummary();
   const open = useStudioStore((state) => state.taskDrawerOpen);
   const setOpen = useStudioStore((state) => state.setTaskDrawerOpen);
   const title = text('ui.workspace.tasks.title');
@@ -99,11 +99,10 @@ export function TaskCenterButton() {
     <HintTooltip name={openLabel} className="shrink-0">
       <button
         type="button"
-        aria-label={listedCount > 0 ? formatSchemaText(text('ui.common.parenthetical'), {
+        // #670: the label counts what the badge shows (the running tasks), with its unit.
+        aria-label={liveCount > 0 ? formatSchemaText(text('ui.common.parenthetical'), {
           text: openLabel,
-          detail: activeTasks.length > 0
-            ? `${listedCount}${text('ui.common.clause_separator')}${text('ui.workspace.tasks.progress')} ${overallProgress}${schema.runtime.frontend.percentage_suffix}`
-            : String(listedCount),
+          detail: `${schemaCountMessage(schema, 'ui.workspace.tasks.running_count', liveCount, { count: liveCount })}${text('ui.common.clause_separator')}${text('ui.workspace.tasks.progress')} ${overallProgress}${schema.runtime.frontend.percentage_suffix}`,
         }) : openLabel}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -389,7 +388,7 @@ export function TaskDrawer() {
   };
 
   const taskList = (
-    <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-3">
+    <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-3 [scrollbar-gutter:stable]">
       {noticeControl}
       <div role="group" aria-label={text('ui.workspace.tasks.filter.label')} className="flex gap-1" data-testid="workspace-task-filter">
         {TASK_FILTERS.map((value: TaskFilter) => (
@@ -415,7 +414,7 @@ export function TaskDrawer() {
         </Action>
       </p> : null}
       {skillRunsLoading && !skillRunsError && showLiveRows ? <p role="status" className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />{ui.title}
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />{text('ui.loading')}
       </p> : null}
       {visibleSkillSteps.map((step) => <Surface
         as="article"
@@ -502,6 +501,9 @@ export function TaskDrawer() {
                       {chip.label}
                     </span>
                   ) : null}
+                  {/* #651: one fixed slot for the cancel or dismiss button, so the buttons of every row sit on one vertical
+                      line whatever the state (running, finished, no button) and whatever sits to their left. */}
+                  <span className="flex size-6 shrink-0 items-center justify-center" data-testid="workspace-task-action-slot">
                   {running ? (
                     <HintTooltip name={ui.cancel} className="pointer-events-auto">
                       <Action
@@ -531,6 +533,7 @@ export function TaskDrawer() {
                       </Action>
                     </HintTooltip>
                   ) : null}
+                  </span>
                 </div>
               </header>
 

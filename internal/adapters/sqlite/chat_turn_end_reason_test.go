@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,6 +18,8 @@ var endReasonStrings = catalog.ChatTurnEndReasonsSchema{
 	Stopped:          "configured-end-stopped",
 	Background:       "configured-end-background",
 	Error:            "configured-end-error",
+	EmptyResponse:    "configured-end-empty-response",
+	InlineImage:      "configured-end-inline-image",
 }
 
 func endReasonService(t *testing.T, repository chat.Repository, reasons catalog.ChatTurnEndReasonsSchema) *chat.Service {
@@ -73,7 +76,18 @@ func TestSQLiteTurnEndReasonRoundTripsThroughEveryRead(t *testing.T) {
 		{chat.TurnEndBackground, "turn-done", endReasonStrings.Background},
 		{chat.TurnEndError, "turn-error", endReasonStrings.Error},
 	} {
-		if err := service.MarkTurnRunning(ctx, assistant.ID); err != nil {
+		// #665: MarkTurnRunning only moves a queued, running or waiting turn;
+		// a finished one is refused and keeps its end. A turn that runs again
+		// is set running by a plain state write, which clears the reason.
+		if err := service.MarkTurnRunning(ctx, assistant.ID); errors.Is(err, chat.ErrTurnStateChanged) {
+			kept, readErr := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)
+			if readErr != nil || kept.State == "running" || kept.EndReason == "" {
+				t.Fatalf("a refused MarkTurnRunning changed the finished turn: %#v, %v", kept, readErr)
+			}
+			if err := repository.UpdateTurnState(ctx, assistant.ID, "running", "", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+		} else if err != nil {
 			t.Fatal(err)
 		}
 		running, err := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)

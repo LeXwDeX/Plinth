@@ -22,8 +22,9 @@ import (
 // the real probe of 2026-11-20): the same stack the application's fake
 // deployment runs, with the answers it gives for gpt-astra. A test that needs a
 // wire event a faithful fake never sends (an unknown event type, a stream cut
-// short, an oversized line) serves it from a scripted handler instead
-// (scripted).
+// short, an oversized line other than the two the fake plays since
+// formal-test's #638 rounds, fake_observed_1126_test.go) serves it from a
+// scripted handler instead (scripted).
 
 // recorder keeps the bytes of every request the Adapter sends.
 type recorder struct {

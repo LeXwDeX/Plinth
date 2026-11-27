@@ -43,7 +43,6 @@ import {
 import { resolveCanvasFrame } from '@/lib/canvas/canvas-frame';
 import { canvasArtboard } from '@/lib/canvas/artboard';
 import { initialCanvasNodes } from '@/lib/canvas/initial-layer';
-import { settingsAfterModelSwitch } from '@/lib/workspace/canvas-size';
 import { artboardContent, exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { chooseClipboardPaste, pasteAnchor } from '@/lib/canvas/clipboard';
 import { flushPendingEdits, localBitmapNodeIds } from '@/lib/canvas/pending-edits';
@@ -211,9 +210,9 @@ export function WorkspaceCanvasBoard() {
     },
   }), [schema]);
   const ui = useMemo(() => ({
-    loading: schemaText(schema, 'ui.workspace.harness.loading'),
-    loadFailed: schemaText(schema, 'ui.workspace.history.load_failed'),
-    saveFailed: schemaText(schema, 'ui.workspace.harness.save_failed'),
+    loading: schemaText(schema, 'ui.workspace.canvas.loading'),
+    loadFailed: schemaText(schema, 'ui.workspace.canvas.load_failed'),
+    saveFailed: schemaText(schema, 'ui.workspace.canvas.save_failed'),
     conflict: schemaText(schema, 'ui.workspace.canvas.conflict'),
     exportFailed: schemaText(schema, 'ui.workspace.canvas.export_failed'),
     inpaintBoardEmpty: schemaText(schema, 'ui.studio.stage.action.inpaint_board_empty'),
@@ -282,7 +281,7 @@ export function WorkspaceCanvasBoard() {
 
   /**
    * #246: a canvas without a saved pixel size gets one before the board shows. A new canvas starts at the
-   * size the chosen 2D model produces (the Schema default without one). A legacy canvas (saved before
+   * Schema default, 1:1 (#653: the canvas is a ratio, whatever the model). A legacy canvas (saved before
    * coordinate version 2) is migrated once: its old 512-unit frame becomes the pixel frame around the same
    * centre and every node scales with it, then the save below records the size and version.
    */
@@ -321,21 +320,8 @@ export function WorkspaceCanvasBoard() {
     setLoadedSessionID(sessionID);
   }, [fetchedSessionID, initialHeight, initialWidth, loadedSessionID, schema, sessionID, settled]);
 
-  /**
-   * #246: switching the 2D model keeps the canvas size. When the new model offers that size, its setting
-   * follows the canvas; otherwise the notice over the board says what the model will produce instead.
-   */
-  const fitOffering = canvasDelivery.generation.offering?.id ?? '';
-  const seenOffering = useRef<{ sessionId: string | null; offering: string }>({ sessionId: null, offering: '' });
-  const setGenerationValue = canvasDelivery.generation.setValue;
-  const fit = canvasDelivery.fit;
-  useEffect(() => {
-    if (!sessionID || loadedSessionID !== sessionID || !settled) return;
-    const seen = seenOffering.current;
-    seenOffering.current = { sessionId: sessionID, offering: fitOffering };
-    const settings = settingsAfterModelSwitch(seen, { sessionId: sessionID, offering: fitOffering }, fit);
-    for (const [name, value] of Object.entries(settings ?? {})) setGenerationValue(name, value);
-  }, [fit, fitOffering, loadedSessionID, sessionID, setGenerationValue, settled]);
+  // #653: switching the 2D model changes neither the canvas nor the model's settings: a canvas turn takes the new
+  // model's highest quality at the canvas ratio, and the notice over the board says when it has no such ratio.
 
   // Besides the nodes, the save also runs for each new size or registration, even while an earlier one is
   // still unsaved and its dirty flag therefore does not change (#246, see boardAutosaveTrigger).
@@ -753,25 +739,13 @@ export function WorkspaceCanvasBoard() {
       }
       return;
     }
-    let url: string;
-    try {
-      // #286: saved edits, export and upload each say when they fail, and are reported with their step.
-      ({ url } = await exportAndUploadSnapshot({
-        flush: () => flushPendingEdits(sessionID),
-        exportPicture: () => rasteriseBoard(sessionID),
-        upload: (picture) => uploadBlob(picture, filename),
-        maximumBytes: schema.runtime.input_assets.upload_max_bytes,
-      }));
-    } catch (error) {
-      const text = reportSnapshotFailure(schema, 'board-to-chat', error);
-      if (isCurrentSessionScope(scope)) toast.error(text);
-      return;
-    }
-    if (!isCurrentSessionScope(scope)) return;
-    // Sending to the chat only attaches the picture to the next message; the stage object stays.
-    useWorkspaceStore.getState().queueChatAttachments([url]);
+    // #644: sending the board to the chat makes the next message a canvas turn (以画板为主). The board is
+    // rasterised when that message is sent, like every canvas turn, so it goes out as the board is then and
+    // with the canvas turn's layout, mask and size rules; it is no longer attached as a plain upload. The stage
+    // object stays.
+    useWorkspaceStore.getState().requestBoardMode(sessionID);
     useStudioStore.getState().setChatCollapsed(false);
-  }, [exportFilename, loadedSessionID, rasteriseBoard, schema, sessionID, ui.exportFailed, uploadBlob]);
+  }, [exportFilename, loadedSessionID, rasteriseBoard, sessionID, ui.exportFailed]);
 
   /**
    * Stamp the visible layers (Photoshop's "stamp visible"): the artboard is rasterised like any other

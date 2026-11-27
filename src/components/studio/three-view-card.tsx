@@ -11,11 +11,11 @@ import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useThreeViews } from '@/hooks/use-three-views';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import {
-  groupMultiview, groupProgress, pickMultiviewModel, remainingCredits, remainingSlots, requestedView, slotAction, slotReplaceable,
+  fourViewRequested, groupMultiview, groupProgress, pickMultiviewModel, remainingCredits, remainingSlots, requestedView, slotAction, slotReplaceable,
   type MultiviewModel, type ThreeViewGroup, type ThreeViewSlot,
 } from '@/lib/workspace/three-view';
 import { cn } from '@/lib/utils';
@@ -103,6 +103,8 @@ export function ThreeViewCardView({
 }: ThreeViewCardViewProps) {
   // #633: the same count as the version strip; a started right view (a four-view request) is part of it.
   const { done, total } = groupProgress(group.slots);
+  // #633: a four-view request names itself; the group's label is the one fixed three-view name.
+  const cardTitle = fourViewRequested(group.slots) ? text(schema, 'title_four') : group.label || text(schema, 'title');
   const front = group.slots.find((slot) => slot.key === group.modelSource.slot);
   const remaining = remainingSlots(group);
   const restCredits = remainingCredits(remaining);
@@ -125,12 +127,12 @@ export function ThreeViewCardView({
       data-testid="three-view-card"
       data-run={group.runId}
       data-complete={group.complete}
-      aria-label={group.label || text(schema, 'title')}
+      aria-label={cardTitle}
       className="flex flex-col gap-2 rounded-lg border border-border bg-panel-raised p-3 text-xs"
     >
       <header className="flex items-center gap-2">
         <Layers aria-hidden className="size-4 shrink-0 text-primary" />
-        <span className="text-[13px] font-semibold">{group.label || text(schema, 'title')}</span>
+        <span className="text-[13px] font-semibold">{cardTitle}</span>
         <span className="ml-auto text-muted-foreground" data-testid="three-view-progress">
           {group.complete && done === total ? text(schema, 'complete') : formatSchemaText(text(schema, 'progress'), { done, total })}
         </span>
@@ -257,7 +259,7 @@ export function ThreeViewCardView({
             data-testid="three-view-start-remaining"
             onClick={onStartRemaining}
           >
-            {restCredits > 0 ? formatSchemaText(text(schema, 'generate_rest_with_cost'), { credits: restCredits }) : text(schema, 'generate_rest')}
+            {restCredits > 0 ? schemaCountMessage(schema, 'ui.studio.three_view.generate_rest_with_cost', restCredits, { credits: restCredits }) : text(schema, 'generate_rest')}
           </Action>
         ) : null}
         {model && multiview && onMultiview ? (

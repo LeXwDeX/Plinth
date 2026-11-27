@@ -8,10 +8,28 @@ package catalog
 type ChatImageCropSchema struct {
 	// Tool names the control tool that implements it.
 	Tool string `json:"tool"`
+	// Limits bound one crop of this tool, apart from the asset-list decompose
+	// crop (application.asset_list.decompose.crop), which keeps its own
+	// smaller limits (#642).
+	Limits ChatImageCropLimits `json:"limits"`
 	// Texts are the Agent-facing refusal copy, keyed by the error code the
 	// tool result carries. A refusal names one region, a limit or the source,
 	// never another owner's asset.
 	Texts ChatImageCropTexts `json:"texts"`
+}
+
+// ChatImageCropLimits bounds one crop of the Agent tool (#642). A crop is a
+// deterministic pixel copy with no model input budget, so the region cap
+// lets a 4096x4096 board be cut whole. Memory is bounded by the source
+// decode limits (chat.image_mask.limits), which the region cap may not
+// exceed; the PNG cap may not exceed runtime.input_assets.upload_max_bytes,
+// the storage cap of an ordinary input asset. Leaving both zero (an older
+// Catalog) keeps the decompose crop limits for the tool.
+type ChatImageCropLimits struct {
+	// MaximumRegionPixels is the largest area one crop may cover.
+	MaximumRegionPixels int64 `json:"maximum_region_pixels"`
+	// MaximumPNGBytes bounds the encoded PNG of one crop.
+	MaximumPNGBytes int64 `json:"maximum_png_bytes"`
 }
 
 // ChatImageCropTexts words the tool's refusals. {detail} carries the measured

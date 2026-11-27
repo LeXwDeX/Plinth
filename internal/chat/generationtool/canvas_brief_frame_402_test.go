@@ -3,7 +3,6 @@ package generationtool
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -55,7 +54,7 @@ func TestCanvasTurnIgnoresTheBriefFrameAndDoesNotAskForAnotherCanvas_402(t *test
 
 	// The note says the size followed the canvas, and never asks for another one.
 	note := executor.canvasSizeNote(command, offering, submitted)
-	want := strings.NewReplacer("{canvas}", fmt.Sprintf("%d×%d", 1536, 2048), "{size}", "3:4").Replace(schema.Context.CanvasOutputSizeTemplate)
+	want := strings.NewReplacer("{ratio}", "3:4", "{size}", "3:4").Replace(schema.Context.CanvasOutputSizeTemplate)
 	if note != want {
 		t.Fatalf("note = %q; want %q", note, want)
 	}

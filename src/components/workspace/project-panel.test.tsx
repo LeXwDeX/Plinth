@@ -148,6 +148,60 @@ describe('project panel', () => {
     expect(screen.getByTestId('project-panel-empty').textContent).toBe(messages['ui.project.no_project_hint']);
   });
 
+  // #668: the free-form convention texts show their declared label, not the field name.
+  it('labels the convention texts with the Schema copy instead of the field names', async () => {
+    render(<ProjectPanel sessionId="s1" />);
+    const input = await screen.findByTestId('project-conventions-text-naming');
+    const label = input.closest('label')?.textContent ?? '';
+    expect(label).toContain(messages['ui.project.convention.naming']);
+    expect(label).not.toMatch(/naming/);
+    for (const name of ['pipeline', 'coordinates']) {
+      const text = screen.getByTestId(`project-conventions-text-${name}`).closest('label')?.textContent ?? '';
+      expect(text).toContain(messages[`ui.project.convention.${name}`]);
+      expect(text).not.toContain(name);
+    }
+  });
+
+  // #670: the button after a failed read reads the project again, so it says retry, not save.
+  it('offers a retry, not a save, after the project failed to load', async () => {
+    mock.getStyleGuide.mockRejectedValueOnce(new Error('offline'));
+    render(<ProjectPanel sessionId="s1" />);
+    const alert = await screen.findByRole('alert');
+    const button = alert.querySelector('button');
+    expect(button?.textContent).toBe(messages['ui.project.retry']);
+    expect(button?.textContent).not.toBe(messages['ui.project.save']);
+    fireEvent.click(button!);
+    await waitFor(() => expect(mock.getStyleGuide).toHaveBeenCalledTimes(2));
+  });
+
+  // #670: one project asset reads in the singular ("1 asset", not "1 assets").
+  it('counts a single project asset with the singular copy', async () => {
+    const localization = schema.localization as { active_locale?: string };
+    const previousLocale = localization.active_locale;
+    const previousOne = messages['ui.project.asset_count_one'];
+    localization.active_locale = 'en';
+    (messages as Record<string, string>)['ui.project.asset_count_one'] = '{count} asset';
+    try {
+      render(<ProjectPanel sessionId="s1" />);
+      await screen.findByTestId('project-asset-a1');
+      const section = screen.getByTestId('project-assets-section');
+      expect(section.textContent).toContain('1 asset');
+      expect(section.textContent).not.toContain(messages['ui.project.asset_count'].replace('{count}', '1'));
+    } finally {
+      localization.active_locale = previousLocale;
+      (messages as Record<string, string>)['ui.project.asset_count_one'] = previousOne;
+    }
+  });
+
+  // The palette counter belongs to the palette; the reference line counts references.
+  it('counts palette colours on the palette row and references on the reference row', async () => {
+    render(<ProjectPanel sessionId="s1" />);
+    await screen.findByTestId('project-style-text');
+    const maxPalette = (schema as unknown as { project: { style_guide: { maximum_palette_colors: number; maximum_references: number } } }).project.style_guide;
+    expect(screen.getByTestId('project-style-palette-count').textContent).toBe(`1/${maxPalette.maximum_palette_colors}`);
+    expect(screen.getByTestId('project-style-reference-count').textContent).toBe(`1/${maxPalette.maximum_references}`);
+  });
+
   it('loads the style guide, conventions and assets and saves only a changed guide', async () => {
     render(<ProjectPanel sessionId="s1" />);
     const textarea = await screen.findByTestId('project-style-text') as HTMLTextAreaElement;

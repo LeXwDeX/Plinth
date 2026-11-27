@@ -61,6 +61,16 @@ export interface ComposerMask {
   picture?: { url: string; width: number; height: number; strokes: readonly (readonly number[])[]; brush: number };
 }
 
+/**
+ * #644 「以画板为主」 for the message in the box: off, the turn works on the conversation and the board takes no
+ * part; on, the board is the turn's input. `forced`: a selection or mask on the board, or `@画布`, turned it on.
+ */
+export interface ComposerBoardMode {
+  on: boolean;
+  forced: boolean;
+  onToggle: () => void;
+}
+
 /** "Continue from this older version": the next result is branched from it. */
 export interface ComposerBranch {
   /** Version label such as "2D v1". */
@@ -146,6 +156,8 @@ export interface ComposerProps {
   onMentionPicked?: (candidate: MentionCandidate) => void;
   /** #154: the style-lock label and one-turn exemption; null when the session has no lock. */
   styleLock?: ComposerStyleLock | null;
+  /** #644: the 以画板为主 toggle; null when the session has no board to send. */
+  boardMode?: ComposerBoardMode | null;
 }
 
 /** Flat [x0, y0, x1, y1, ...] as the points of an SVG polyline. */
@@ -192,7 +204,7 @@ export function Composer({
   attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
-  styleLock = null,
+  styleLock = null, boardMode = null,
 }: ComposerProps) {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
@@ -221,7 +233,12 @@ export function Composer({
   ];
   const overriding = chip ? overridingHandle(value, chip.handle) : '';
   const currentName = chip ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label }) : '';
-  const skillName = skill.selectedId ? skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId : '';
+  // #670: the Skill is named once its catalog is read; until then the name reads as loading, never as its id.
+  const skillName = skill.selectedId
+    ? skill.catalog
+      ? skill.catalog.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId
+      : schemaText(schema, 'ui.workspace.skills.loading')
+    : '';
   const purposeLabelId = useId();
   const stopLabel = schemaText(schema, 'ui.workspace.agent.stop');
   const sendLabel = schemaText(schema, 'ui.workspace.agent.send');
@@ -805,6 +822,28 @@ export function Composer({
               <ImagePlus className="size-4" />
             </Action>
           </HintTooltip>
+          {boardMode ? (
+            <HintTooltip
+              name={schemaText(schema, 'ui.studio.composer.board_mode.label')}
+              hint={schemaText(schema, boardMode.forced
+                ? 'ui.studio.composer.board_mode.hint_forced'
+                : boardMode.on ? 'ui.studio.composer.board_mode.hint_on' : 'ui.studio.composer.board_mode.hint_off')}
+            >
+              <Action
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-pressed={boardMode.on}
+                disabled={disabled || boardMode.forced}
+                onClick={boardMode.onToggle}
+                data-testid="composer-board-mode"
+                className={cn('gap-1 px-1.5 text-xs', boardMode.on ? 'bg-primary/15 text-primary' : 'text-muted-foreground')}
+              >
+                <Frame aria-hidden className="size-3.5" />
+                {schemaText(schema, 'ui.studio.composer.board_mode.label')}
+              </Action>
+            </HintTooltip>
+          ) : null}
           <span className="flex-1" />
           <HintTooltip name={schemaText(schema, 'ui.studio.composer.expand_editor')}>
             <Action type="button" variant="ghost" size="icon-sm" aria-label={schemaText(schema, 'ui.studio.composer.expand_editor')} disabled={disabled} onClick={() => setExpanded(true)}>

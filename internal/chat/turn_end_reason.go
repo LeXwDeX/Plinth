@@ -24,6 +24,12 @@ const (
 	TurnEndBackground
 	// TurnEndError is a turn that finished as failed.
 	TurnEndError
+	// TurnEndEmptyResponse is a turn whose model round answered with no text
+	// and no tool call, also after its retry (#638).
+	TurnEndEmptyResponse
+	// TurnEndInlineImage is a turn a model round of which drew a picture
+	// itself instead of calling a generation tool (#638).
+	TurnEndInlineImage
 )
 
 // turnEndReasonText is the Schema string stored for the kind. It is empty when
@@ -42,6 +48,10 @@ func (service *Service) turnEndReasonText(reason TurnEndReason) (text string, ok
 		return reasons.Background, true
 	case TurnEndError:
 		return reasons.Error, true
+	case TurnEndEmptyResponse:
+		return reasons.EmptyResponse, true
+	case TurnEndInlineImage:
+		return reasons.InlineImage, true
 	}
 	return "", false
 }

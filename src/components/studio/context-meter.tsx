@@ -3,6 +3,7 @@
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { useSessionReasoning } from '@/hooks/use-session-reasoning';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useSessionContext } from '@/hooks/use-session-context';
@@ -80,6 +81,8 @@ export function ContextMeter() {
     return state.toolCallCounts?.[id] ?? latestToolCallCount(state.messagesBySession?.[id] ?? []) ?? 0;
   });
   const { supported, canCompact, context, compacting, turnRunning, compact } = useSessionContext(activeSessionId);
+  // The thinking level the next turn sends (the user's pick, else the model's own default), as the picker holds it.
+  const { reasoning } = useSessionReasoning(activeSessionId);
   const settings = schema.chat.context_compaction;
   if (!supported || !settings) return null;
   const tokens = context?.tokens ?? null;
@@ -90,7 +93,10 @@ export function ContextMeter() {
   const visionTokens = context?.visionTokens ?? null;
   const visionTokenBudget = context?.visionTokenBudget ?? null;
   const visionImages = context?.visionBudget ?? null;
-  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn', toolCalls, { count: toolCalls });
+  // The counter row: "thinking level, tool calls". The level is always named: a model that offers none (or whose
+  // levels are not read yet) says so in the Schema's words instead of leaving it out.
+  const effort = reasoning?.effort || reasoning?.defaultLevel || schemaText(schema, 'ui.studio.reasoning.none_value');
+  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn_with_effort', toolCalls, { effort, count: toolCalls });
   const compactLabel = schemaText(schema, compacting ? 'ui.studio.context.compacting' : 'ui.studio.context.compact');
 
   const run = () => {
@@ -104,15 +110,16 @@ export function ContextMeter() {
     });
   };
 
+  const meterName = formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label, value: text });
   return (
     // The composer's status row (#405: the pickers that shared this area are in the settings dialog now): the whole
     // row, one control high. The figure and the compact action sit together on the left, the tool call counter
     // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
     <div className="flex h-7 w-full min-w-0 items-center gap-1" data-testid="composer-context">
-      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings, visionTokens, visionTokenBudget, visionImages)} className="min-w-0 shrink">
+      <HintTooltip name={meterName} hint={contextHint(schema, tokens, window, settings, visionTokens, visionTokenBudget, visionImages)} className="min-w-0 shrink">
         <span
           tabIndex={0}
-          aria-label={`${label}: ${text}`}
+          aria-label={meterName}
           data-testid="composer-context-meter"
           data-level={level}
           className={cn('block truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[level])}

@@ -251,15 +251,25 @@ func (service *Service) SetSessionChatModel(ctx context.Context, ownerID, sessio
 // TurnModel is the model, connection and thinking level a turn of the
 // owner's session would use if it started now.
 func (service *Service) TurnModel(ctx context.Context, ownerID, sessionID string) (ChatModelOption, string, error) {
+	option, effort, _, err := service.turnModelChoice(ctx, ownerID, sessionID)
+	return option, effort, err
+}
+
+// turnModelChoice is TurnModel with whether the level is the person's own
+// choice: one stored for the session that the model offers (#638). A session
+// that never chose, or chose a level this model does not offer, follows the
+// model's default.
+func (service *Service) turnModelChoice(ctx context.Context, ownerID, sessionID string) (ChatModelOption, string, bool, error) {
 	state, err := service.ContextState(ctx, ownerID, sessionID)
 	if err != nil {
-		return ChatModelOption{}, "", err
+		return ChatModelOption{}, "", false, err
 	}
 	option, _, err := service.sessionModel(ctx, state.ChatModel)
 	if err != nil {
-		return ChatModelOption{}, "", err
+		return ChatModelOption{}, "", false, err
 	}
-	return option, option.EffortFor(state.ReasoningEffort), nil
+	effort := option.EffortFor(state.ReasoningEffort)
+	return option, effort, state.ReasoningEffort != "" && effort == state.ReasoningEffort, nil
 }
 
 // ReasoningView is a session's thinking level as the composer shows it:

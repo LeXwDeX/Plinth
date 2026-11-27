@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -52,7 +54,19 @@ type Configuration struct {
 	Format int `json:"format,omitempty"`
 	// DisabledToolNames lists the declared tools the administrator turned off.
 	DisabledToolNames []string `json:"disabled_tool_names,omitempty"`
+	// SkillOrigins is stored only (#665): for every Skill of a packaged ID (a
+	// current default or a retired built-in) whether the version carries the
+	// product's own copy (SkillOriginPackaged) or one an administrator edited
+	// (SkillOriginEdited). It is written on every publish and never read from
+	// a submission or shown; a version stored before it has no entry.
+	SkillOrigins map[string]string `json:"skill_origins,omitempty"`
 }
+
+// The values of Configuration.SkillOrigins.
+const (
+	SkillOriginPackaged = "packaged"
+	SkillOriginEdited   = "edited"
+)
 
 type Snapshot struct {
 	Revision      string        `json:"revision"`
@@ -84,6 +98,11 @@ type Management struct {
 	Tools           []Tool        `json:"tools"`
 	MCPPresets      []MCPPreset   `json:"mcp_presets"`
 	History         []History     `json:"history"`
+	// SkippedSkills names the packaged Skills of the published version that
+	// fail the current Schema and are left out of every turn (#665). The log
+	// warns once per Skill per process; this keeps the skip in front of the
+	// administrator for as long as it lasts. Empty when nothing is skipped.
+	SkippedSkills []string `json:"skipped_skills,omitempty"`
 }
 type MCPPreset struct {
 	Available       bool     `json:"available"`
@@ -113,7 +132,13 @@ type Service struct {
 	offerings           []schemacontract.Offering
 	retiredBuiltIns     map[string]string
 	packagedSkillImages map[string]bool
-	personalSkills      PersonalSkillStore
+	// packagedFingerprints identifies a stored Skill as the product's own
+	// copy: the exact content a release saved (retired built-ins). A Skill
+	// with the same ID but other content was edited by an administrator.
+	packagedFingerprints map[string]string
+	// skippedWarned keeps the skip warning to one line per Skill per process.
+	skippedWarned  sync.Map
+	personalSkills PersonalSkillStore
 	// legacy and toolBaseline are what a version without a format marker is
 	// read against (see resolve).
 	legacy       legacyDefaults
@@ -142,12 +167,14 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	}
 	s.legacy, s.toolBaseline = legacy, legacy.toolBaseline()
 	s.packagedSkillImages = map[string]bool{}
+	s.packagedFingerprints = map[string]string{}
 	retired, err := catalog.RetiredBuiltInSkills()
 	if err != nil {
 		return nil, err
 	}
 	for _, skill := range retired {
 		s.packagedSkillImages[skill.ThumbnailPath] = true
+		s.packagedFingerprints[skill.ID] = skill.Fingerprint
 		if s.retiredBuiltIns != nil {
 			s.retiredBuiltIns[skill.ID] = skill.Fingerprint
 		}
@@ -223,6 +250,7 @@ func (s *Service) project(c Configuration) Configuration {
 		}
 	}
 	result.EnabledToolNames = kept
+	result.SkillOrigins = nil
 	return result
 }
 
@@ -253,21 +281,176 @@ func clone(c Configuration) Configuration {
 
 // Snapshot reads the latest version as the effective configuration.
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
+	snapshot, _, err := s.snapshot(ctx)
+	return snapshot, err
+}
+
+// snapshot is Snapshot with the packaged Skills the read left out.
+func (s *Service) snapshot(ctx context.Context) (Snapshot, []catalog.SkillSchema, error) {
 	v, err := s.store.LatestAgentConfiguration(ctx)
 	if errors.Is(err, ErrNotFound) {
-		return Snapshot{"0", clone(s.defaults)}, nil
+		return Snapshot{"0", clone(s.defaults)}, nil, nil
 	}
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, nil, err
 	}
-	stored := s.resolve(v)
-	if err = s.Validate(stored); err != nil {
-		return Snapshot{}, err
+	stored, skipped, err := s.tolerant(v.Revision, s.resolve(v))
+	if err != nil {
+		return Snapshot{}, nil, err
 	}
-	return Snapshot{v.Revision, s.project(stored)}, nil
+	return Snapshot{v.Revision, s.project(stored)}, skipped, nil
 }
+
+// tolerant validates a stored configuration. A Schema upgrade may tighten
+// what a packaged Skill must satisfy; that must not stop every new turn or the
+// service from starting (#665). A packaged Skill that no longer passes is
+// left out of what is read, with one warning per Skill per process; the stored
+// version is not rewritten, so it comes back once the Schema accepts it again.
+// A Skill an administrator or a person wrote (including one that reuses a
+// packaged ID with edited content, see isPackagedSkill) is never dropped: it
+// fails, naming it. A failing part other than the Skills (tool selection, MCP
+// presets) is reported as it is, before any Skill is judged.
+func (s *Service) tolerant(revision string, stored Configuration) (Configuration, []catalog.SkillSchema, error) {
+	err := s.Validate(stored)
+	if err == nil {
+		return stored, nil, nil
+	}
+	withoutSkills := stored
+	withoutSkills.Skills = nil
+	if restErr := s.Validate(withoutSkills); restErr != nil {
+		return Configuration{}, nil, fmt.Errorf("agent configuration %s: %w", revision, restErr)
+	}
+	cleaned, skipped, invalidOwn := s.splitInvalidSkills(stored)
+	if len(invalidOwn) > 0 {
+		return Configuration{}, nil, fmt.Errorf("agent configuration %s: skills %v fail the current Schema: %w", revision, invalidOwn, err)
+	}
+	if len(skipped) == 0 {
+		return Configuration{}, nil, err
+	}
+	if cleanedErr := s.Validate(cleaned); cleanedErr != nil {
+		return Configuration{}, nil, cleanedErr
+	}
+	for _, skill := range skipped {
+		if _, warned := s.skippedWarned.LoadOrStore(skill.ID, true); !warned {
+			slog.Warn("Agent 配置中的内置 Skill 未通过当前 Schema 校验，已跳过",
+				"revision", revision, "skill", skill.ID, "error", err)
+		}
+	}
+	return cleaned, skipped, nil
+}
+
+// isPackagedSkill reports whether a stored Skill is the product's own copy
+// (#665). The origin the publish recorded decides: an administrator who edited
+// a Skill of a packaged ID is known by it, not by comparing content, so a copy
+// of an older release's text stays the product's after a release edits it. A
+// version stored before origins were recorded cannot tell an older packaged
+// text from an edit: a Skill of a packaged ID (a current default or a retired
+// built-in) is taken as packaged, as the read did before (skip by ID), so it
+// cannot stop every turn; the next publish records its origin.
+func (s *Service) isPackagedSkill(skill catalog.SkillSchema, origins map[string]string) bool {
+	if origins[skill.ID] == SkillOriginEdited {
+		return false
+	}
+	return s.packagedID(skill.ID)
+}
+
+// defaultSkillID reports whether id is a Skill of the current default catalog.
+func (s *Service) defaultSkillID(id string) bool {
+	for _, preset := range s.defaults.Skills {
+		if preset.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// packagedID reports whether id is a current default or a retired built-in.
+func (s *Service) packagedID(id string) bool {
+	_, retired := s.packagedFingerprints[id]
+	return retired || s.defaultSkillID(id)
+}
+
+// sameAsPackaged reports whether a Skill carries exactly the product's content:
+// the current default of its ID, or the retired built-in saved unchanged. The
+// comparison is catalog.RetiredSkillFingerprint, which a new SkillSchema field
+// left at its zero value does not change.
+func (s *Service) sameAsPackaged(skill catalog.SkillSchema) bool {
+	got, err := catalog.RetiredSkillFingerprint(skill)
+	if err != nil {
+		return false
+	}
+	for _, preset := range s.defaults.Skills {
+		if preset.ID == skill.ID {
+			if want, err := catalog.RetiredSkillFingerprint(preset); err == nil && want == got {
+				return true
+			}
+		}
+	}
+	want, known := s.packagedFingerprints[skill.ID]
+	return known && got == want
+}
+
+// skillOrigins records, for every Skill of a packaged ID that a version will
+// store, whether it is the product's copy (#665): equal to the packaged
+// content, or carried unchanged from the version it replaces (previous) where
+// it was the product's copy. Any other content was written by an
+// administrator.
+func (s *Service) skillOrigins(skills []catalog.SkillSchema, previous Configuration) map[string]string {
+	prior := map[string]catalog.SkillSchema{}
+	for _, skill := range previous.Skills {
+		prior[skill.ID] = skill
+	}
+	origins := map[string]string{}
+	for _, skill := range skills {
+		if !s.packagedID(skill.ID) {
+			continue
+		}
+		origin := SkillOriginEdited
+		if s.sameAsPackaged(skill) {
+			origin = SkillOriginPackaged
+		} else if before, found := prior[skill.ID]; found && sameSkillContent(before, skill) &&
+			s.isPackagedSkill(before, previous.SkillOrigins) {
+			origin = SkillOriginPackaged
+		}
+		origins[skill.ID] = origin
+	}
+	if len(origins) == 0 {
+		return nil
+	}
+	return origins
+}
+
+func sameSkillContent(a, b catalog.SkillSchema) bool {
+	x, errA := catalog.RetiredSkillFingerprint(a)
+	y, errB := catalog.RetiredSkillFingerprint(b)
+	return errA == nil && errB == nil && x == y
+}
+
+// splitInvalidSkills validates each Skill on its own, apart from the rest of
+// the configuration: an invalid packaged Skill is removed from the result and
+// returned in skipped; the IDs of other invalid Skills are returned in
+// invalidOwn and kept in the result.
+func (s *Service) splitInvalidSkills(c Configuration) (Configuration, []catalog.SkillSchema, []string) {
+	kept := make([]catalog.SkillSchema, 0, len(c.Skills))
+	var skipped []catalog.SkillSchema
+	var invalidOwn []string
+	for _, skill := range c.Skills {
+		alone := Configuration{Skills: []catalog.SkillSchema{skill}}
+		if s.Validate(alone) != nil {
+			if s.isPackagedSkill(skill, c.SkillOrigins) {
+				skipped = append(skipped, skill)
+				continue
+			}
+			invalidOwn = append(invalidOwn, skill.ID)
+		}
+		kept = append(kept, skill)
+	}
+	c.Skills = kept
+	return c, skipped, invalidOwn
+}
+
 func (s *Service) Management(ctx context.Context) (Management, error) {
-	v, err := s.Snapshot(ctx)
+	v, skipped, err := s.snapshot(ctx)
 	if err != nil {
 		return Management{}, err
 	}
@@ -289,6 +472,9 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 	}
 	for _, h := range history {
 		result.History = append(result.History, History{h.Revision, h.CreatedAt, h.ActorID, h.Source})
+	}
+	for _, skill := range skipped {
+		result.SkippedSkills = append(result.SkippedSkills, skill.ID)
 	}
 	return result, nil
 }
@@ -439,7 +625,25 @@ func validateIDs(ids []string, allowed map[string]bool) error {
 	}
 	return nil
 }
+
+// Publish stores what an administrator submitted. A packaged Skill that the
+// read view left out as invalid (see tolerant) was never shown, so the
+// administrator could not have chosen to delete it: it is carried over from
+// the version being replaced unless the submission names the same ID (#665).
 func (s *Service) Publish(ctx context.Context, expected, actor, source string, c Configuration) (Snapshot, error) {
+	carried, previous, err := s.skippedPackagedSkills(ctx, expected)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return s.publish(ctx, expected, actor, source, c, carried, previous)
+}
+
+// publish stores c, plus the carried Skills, which are written as stored
+// without validation (they are left out again on every read). The origin of
+// each packaged-ID Skill is recorded against previous, the version whose
+// Skills c carries over (skillOrigins); what a submission says about origins
+// is ignored.
+func (s *Service) publish(ctx context.Context, expected, actor, source string, c Configuration, carried []catalog.SkillSchema, previous Configuration) (Snapshot, error) {
 	c = s.withSchemaPrompts(c)
 	if err := s.Validate(c); err != nil {
 		return Snapshot{}, err
@@ -447,14 +651,47 @@ func (s *Service) Publish(ctx context.Context, expected, actor, source string, c
 	if _, err := strconv.ParseUint(expected, 10, 64); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.toStored(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	stored := s.toStored(c)
+	named := map[string]bool{}
+	for _, skill := range c.Skills {
+		named[skill.ID] = true
+	}
+	for _, skill := range carried {
+		if !named[skill.ID] {
+			stored.Skills = append(stored.Skills, skill)
+		}
+	}
+	stored.SkillOrigins = s.skillOrigins(stored.Skills, previous)
+	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: stored}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
 	// The caller gets the effective configuration, not the stored form.
 	v.Snapshot.Configuration = s.project(c)
 	return v.Snapshot, err
 }
+
+// skippedPackagedSkills returns the invalid packaged Skills of the version
+// with the given revision, the ones its read view leaves out, and that
+// version's read view.
+func (s *Service) skippedPackagedSkills(ctx context.Context, revision string) ([]catalog.SkillSchema, Configuration, error) {
+	if revision == "0" {
+		return nil, Configuration{}, nil
+	}
+	latest, err := s.store.LatestAgentConfiguration(ctx)
+	if errors.Is(err, ErrNotFound) {
+		return nil, Configuration{}, nil
+	}
+	if err != nil {
+		return nil, Configuration{}, err
+	}
+	if latest.Revision != revision {
+		return nil, Configuration{}, nil // the append below fails with ErrConflict
+	}
+	resolved := s.resolve(latest)
+	_, skipped, _ := s.splitInvalidSkills(resolved)
+	return skipped, resolved, nil
+}
 func (s *Service) Restore(ctx context.Context, expected, target, actor string) (Snapshot, error) {
 	if target == "0" {
-		return s.Publish(ctx, expected, actor, "reset", s.defaults)
+		return s.publish(ctx, expected, actor, "reset", s.defaults, nil, Configuration{})
 	}
 	v, err := s.store.AgentConfigurationVersion(ctx, target)
 	if err != nil {
@@ -468,7 +705,7 @@ func (s *Service) Restore(ctx context.Context, expected, target, actor string) (
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return s.Publish(ctx, expected, actor, "restore:"+target, cleaned)
+	return s.publish(ctx, expected, actor, "restore:"+target, cleaned, nil, cleaned)
 }
 
 func (s *Service) withoutRetiredBuiltIns(c Configuration) (Configuration, bool, error) {
@@ -520,13 +757,21 @@ func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 		}
 		_, undeclared := s.withoutUndeclaredSelections(latest.Configuration)
 		if !retiredSkills && !undeclared {
-			return s.Validate(cleaned)
+			// The same tolerance as every read: an invalid packaged Skill is
+			// skipped without rewriting the version; an administrator's
+			// invalid Skill fails startup, naming it.
+			_, _, err := s.tolerant(latest.Revision, cleaned)
+			return err
 		}
 		source := "retire_builtin_skills"
 		if !retiredSkills {
 			source = "retire_undeclared_selections"
 		}
-		_, err = s.Publish(ctx, latest.Revision, "system", source, cleaned)
+		cleaned, skipped, err := s.tolerant(latest.Revision, cleaned)
+		if err != nil {
+			return err
+		}
+		_, err = s.publish(ctx, latest.Revision, "system", source, cleaned, skipped, resolved)
 		if errors.Is(err, ErrConflict) {
 			continue
 		}

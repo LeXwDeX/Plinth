@@ -44,6 +44,15 @@ export function saveLastObject(
   }
 }
 
+/** #665: a deleted session leaves no remembered object behind. */
+export function forgetLastObject(sessionId: string, store: Pick<Storage, 'removeItem'> | null = defaultStore() as Storage | null): void {
+  try {
+    store?.removeItem(KEY_PREFIX + sessionId);
+  } catch {
+    // See saveLastObject.
+  }
+}
+
 export function readLastObject(sessionId: string, store: Store | null = defaultStore()): SavedObject | null {
   if (!store) return null;
   try {

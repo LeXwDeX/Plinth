@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 // #330 final-review P1: a Plan step refused because another active Task already
-// runs the same conversion must pause without a Task and be resumable. It must
-// not be recorded as a definitive submission rejection, which would give the
-// formats up for good.
+// runs the same conversion must stay queued without a Task (no timeout) and be
+// submitted again by the background once that run has ended. It must not be
+// recorded as a definitive submission rejection, which would give the formats
+// up for good.
 
 func TestPlanStepPausesOnAnOverlappingActiveConversion330(t *testing.T) {
 	ctx := context.Background()
@@ -46,26 +48,32 @@ func TestPlanStepPausesOnAnOverlappingActiveConversion330(t *testing.T) {
 	if err := service.advanceAll(ctx); err != nil {
 		t.Fatal(err)
 	}
-	paused, err := service.Get(ctx, "owner", plan.ID)
+	queued, err := service.Get(ctx, "owner", plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paused.State != Paused || paused.Failure != ReasonPrepareUnavailable ||
-		paused.Steps[0].State != Paused || paused.Steps[0].Failure != ReasonPrepareUnavailable ||
-		!paused.Steps[0].Resumable || paused.Steps[0].TaskID != "" {
-		t.Fatalf("overlapping conversion plan = %#v", paused)
+	// The overlap is not a pause that waits for a person: the step stays queued
+	// (no timeout) with a retry time, nothing is submitted or charged.
+	if queued.State == Paused || queued.State == Failed || queued.Failure != "" ||
+		queued.Steps[0].State == Paused || queued.Steps[0].State == Failed ||
+		queued.Steps[0].QueuedUntil == nil || queued.Steps[0].TaskID != "" {
+		t.Fatalf("overlapping conversion plan = %#v", queued)
 	}
 	if len(gateway.commands) != 0 {
 		t.Fatalf("an overlapping conversion submitted a Task: %#v", gateway.commands)
 	}
-
-	// Once the other conversion is gone, an explicit Resume continues the same
-	// frozen step and pays once.
-	gateway.submitError = nil
-	if _, err := service.Resume(ctx, ResumeCommand{OwnerID: "owner", PlanID: plan.ID,
-		ExpectedPlanVersion: paused.Version, ExpectedOfferingRevision: "v1"}); err != nil {
+	// Before its retry time the step is not submitted again.
+	if err := service.advanceAll(ctx); err != nil {
 		t.Fatal(err)
 	}
+
+	// Once the other conversion is gone and the retry time has come, the
+	// background submits the same frozen step on its own and pays once.
+	gateway.submitError = nil
+	stored = store.plans[plan.ID]
+	past := time.Now().UTC().Add(-time.Second)
+	stored.Steps[0].QueuedUntil = &past
+	store.plans[plan.ID] = stored
 	if err := service.advanceAll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +82,9 @@ func TestPlanStepPausesOnAnOverlappingActiveConversion330(t *testing.T) {
 		t.Fatal(err)
 	}
 	if continued.State != Running || continued.Steps[0].TaskID == "" {
-		t.Fatalf("resumed plan = %#v", continued)
+		t.Fatalf("retried plan = %#v", continued)
 	}
 	if len(gateway.commands) != 1 {
-		t.Fatalf("resume submitted %d tasks, want 1", len(gateway.commands))
+		t.Fatalf("retry submitted %d tasks, want 1", len(gateway.commands))
 	}
 }

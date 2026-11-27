@@ -1,17 +1,18 @@
 /**
- * How the 2D model's output size and the canvas pixel size relate (#246). The canvas size is saved with
- * the canvas and is its own truth; the output-size settings are the model's. A size the person picks in the
- * 参数 panel resizes the canvas; switching models never does: the new model's settings are aligned to the
- * canvas when one of its options produces exactly that size, and otherwise the mismatch is shown.
- * A ratio-only setting ("16:9") is read through the Schema's ratio_pixels table, or through ratio_pixel_tiers
- * when the Offering also has a resolution tier parameter (Gemini image_size 1K/2K/4K).
+ * #653: the canvas is a ratio. Its saved pixels are only editing precision (and the resolution of the artboard
+ * snapshot); a canvas is never migrated, its ratio is read from its pixels (canvasShapeOf). The 2D model decides the
+ * output size of a canvas turn: of the sizes it may produce, the one with the most pixels at the canvas ratio
+ * (canvasRatioTurnOutput); a model without that ratio takes the nearest ratio it has, and the notice says so.
+ * Switching models never changes the canvas. A ratio-only setting ("16:9") is read through the Schema's
+ * ratio_pixels table, or through ratio_pixel_tiers when the Offering also has a resolution tier parameter
+ * (Gemini image_size 1K/2K/4K).
  */
 
 import type { ImageSizeConstraintWire, OfferingParameterWire, OfferingWire } from '@/lib/agent-offerings';
 import { parameterConditionMatches, type CanvasProductSchema } from '@/lib/product-schema';
 import type { ParamSchema } from '@/lib/providers/types';
-import { clampCanvasPixels, samePixels, type CanvasPixels } from '@/lib/canvas/artboard';
-import { deliverySize, effectiveOfferingValues } from '@/lib/workspace/generation-params';
+import type { CanvasPixels } from '@/lib/canvas/artboard';
+import { deliverySize } from '@/lib/workspace/generation-params';
 
 type ArtboardSchema = CanvasProductSchema['frontend']['artboard'];
 /** The Schema tables that turn a ratio into pixels. */
@@ -38,71 +39,19 @@ export function outputPixels(
   return mapped ? { width: mapped.width, height: mapped.height } : null;
 }
 
-/** The size a canvas starts with: what the chosen 2D model would produce, else the Schema's default. */
-export function initialCanvasPixels(
-  artboard: ArtboardSchema,
-  sizeParams: readonly ParamSchema[],
-  values: Record<string, unknown>,
-): CanvasPixels {
-  return outputPixels(sizeParams, values, artboard) ?? { width: artboard.default_width, height: artboard.default_height };
-}
-
-/**
- * The pixels the model produces once `name` is set to `value`, with the Offering's fixed and forced
- * values applied (Seedream turns a 2K choice into its 4K size, for example).
- */
-export function pixelsForChoice(
-  offering: OfferingWire | undefined,
-  sizeParams: readonly ParamSchema[],
-  entered: Record<string, unknown>,
-  name: string,
-  value: unknown,
-  tables: RatioTables,
-): CanvasPixels | null {
-  const values = offering ? effectiveOfferingValues(offering, { ...entered, [name]: value }) : { ...entered, [name]: value };
-  return outputPixels(sizeParams, values, tables);
-}
-
-export type CanvasSizeFit =
-  /** No 2D model, or one without output-size settings: nothing to compare. */
-  | { kind: 'none' }
-  /** The settings produce exactly the canvas size. */
-  | { kind: 'match' }
-  /** Different now, but these settings of the same model produce the canvas size. */
-  | { kind: 'align'; settings: Record<string, string>; output: CanvasPixels | null }
-  /** No option of this model produces the canvas size; `output` is what it would produce. */
-  | { kind: 'conflict'; output: CanvasPixels | null };
-
-/** How the current model's output size relates to the canvas size. */
-export function canvasSizeFit(
-  offering: OfferingWire | undefined,
-  sizeParams: readonly ParamSchema[],
-  values: Record<string, unknown>,
-  canvas: CanvasPixels,
-  tables: RatioTables,
-): CanvasSizeFit {
-  if (!offering || sizeParams.length === 0) return { kind: 'none' };
-  const output = outputPixels(sizeParams, values, tables);
-  if (samePixels(output, canvas)) return { kind: 'match' };
-  // An option named after the canvas size wins over one the Offering forces to it.
-  const named = `${canvas.width}x${canvas.height}`;
-  for (const param of sizeParams) {
-    const options = [...(param.options ?? [])].sort((left, right) => Number(right.value === named) - Number(left.value === named));
-    for (const option of options) {
-      if (samePixels(pixelsForChoice(offering, sizeParams, values, param.name, option.value, tables), canvas)) {
-        return { kind: 'align', settings: { [param.name]: option.value }, output };
-      }
-    }
-  }
-  return { kind: 'conflict', output };
+/** The size a new canvas starts with (#653): the Schema default, a 1:1 canvas whatever the model. */
+export function initialCanvasPixels(artboard: Pick<ArtboardSchema, 'default_width' | 'default_height'>): CanvasPixels {
+  return { width: artboard.default_width, height: artboard.default_height };
 }
 
 /*
- * #272/#284: on a turn whose source is the artboard, the server sets the output size from the canvas, not from
+ * #272/#284/#653: on a turn whose source is the artboard, the server sets the output size from the canvas, not from
  * the size remembered for the session (internal/chat/generationtool/canvas_size.go). The functions below are the
- * same rule over the same Schema declarations (options, image_size, forced_when), so the notice says the size
- * that is really sent. The shared cases in internal/chat/generationtool/testdata/canvas_turn_sizes.json run
- * against both implementations.
+ * same rules over the same Schema declarations (options, image_size, forced_when, the ratio tables), so the notice
+ * says the size that is really sent. The shared cases in internal/chat/generationtool/testdata/canvas_turn_sizes.json
+ * run against both implementations. canvasRatioTurnOutput is the canvas turn's rule; canvasSizeChoice and
+ * canvasTurnOutput (the legal size closest to a picture) remain for one reference picture (#296) and inpainting,
+ * whose result must be put back on the canvas pixel for pixel (#308).
  */
 
 /** How close two aspect ratios must be (as a log ratio) to count as the same shape (server: sameRatioTolerance). */
@@ -223,12 +172,7 @@ export function canvasSizeChoice(parameter: Pick<OfferingParameterWire, 'options
  * Offering's own.
  */
 export function canvasSizeParameters(offering: OfferingWire): OfferingParameterWire[] {
-  return (offering.parameters ?? []).filter((wire) => {
-    if (wire.semantic !== 'output-size' || wire.fixed === true || wire.adjustment_policy) return false;
-    if (wire.name === offering.extra_credit_consent_parameter) return false;
-    const surface = wire.presentation?.surface;
-    return surface !== 'hidden' && surface !== 'readonly' && wire.type !== 'task' && wire.type !== 'asset' && wire.type !== 'asset-array';
-  });
+  return (offering.parameters ?? []).filter((wire) => wire.semantic === 'output-size' && personMayChoose(offering, wire));
 }
 
 /** How a person's or the Agent's choice of a parameter is recorded for the session (#213, #246). */
@@ -246,13 +190,12 @@ export interface CanvasTurnOutput {
 }
 
 /**
- * The output size a turn whose source is the artboard really sends (#272/#284): each output-size parameter the
- * person may choose is set to its canvasSizeChoice, then the Offering's forced_when applies (Seedream turns
- * 2048x2048 into 4096x4096). Like the server's size note, a larger size of the same shape still follows the
- * canvas; a smaller one or another shape is the nearest legal size. Null when the Offering has no such parameter,
- * or (#614) when the Agent chose one of them with set_params: the server then carries out the Agent's size instead
- * of the canvas's (applyCanvasOutputSize), so the canvas sets nothing. The person's own choice resizes the canvas
- * (#246) and stays under it.
+ * The legal output size closest to a picture of `canvas` pixels (#284/#308): each output-size parameter the person
+ * may choose is set to its canvasSizeChoice, then the Offering's forced_when applies (Seedream turns 2048x2048 into
+ * 4096x4096). A larger size of the same shape still follows the picture; a smaller one or another shape is the
+ * nearest legal size. Inpainting reads it (its result must match the canvas pixels), and so does one reference
+ * picture (referenceTurnOutput). A canvas turn uses canvasRatioTurnOutput since #653. Null when the Offering has no
+ * such parameter, or (#614) when the Agent chose one of them with set_params.
  */
 export function canvasTurnOutput(
   offering: OfferingWire | undefined,
@@ -282,9 +225,232 @@ export function canvasTurnOutput(
       ? { width: size.width, height: size.height }
       : outputPixels([{ name: parameter.name, label: parameter.label, type: 'select' }], input, tables);
     // A ratio is also read as the pixels the Schema maps it to: Gemini's 9:16 at 4K is 3072x5504, not exactly 9:16,
-    // and on a canvas of that size it still follows the canvas (server: Executor.followsCanvas).
+    // and on a picture of that size it still follows it (server: Executor.ratioSameShape).
     const follows = followsCanvas(size, canvas) || (size.width === 0 && pixels !== null && followsCanvas(pixelSizeValue(pixels), canvas));
     return { value: text, pixels, ratioOnly: size.width === 0, nearest: !follows };
+  }
+  return null;
+}
+
+/** The aspect ratio a canvas stands for (#653): `label` names it ("16:9"), `ratio` is its width over height. */
+export interface CanvasShape {
+  label: string;
+  ratio: number;
+}
+
+function sameRatio(left: number, right: number): boolean {
+  return Math.abs(Math.log(left / right)) < SAME_RATIO_TOLERANCE;
+}
+
+/** The denominator bound of the simple ratio an uncommon canvas is named by (server: ratioLabelMaxTerm). */
+const RATIO_LABEL_MAX_TERM = 32;
+
+/** The ratios the Schema names (ratio_pixels keys), sorted like the server sorts them. */
+function namedRatios(tables: RatioTables): string[] {
+  return Object.keys(tables.ratio_pixels ?? {}).filter((name) => parseSizeValue(name)?.width === 0).sort();
+}
+
+/** The Schema maps the ratio to exactly these pixels, in ratio_pixels or in any resolution tier. */
+function ratioMapsTo(tables: RatioTables, ratio: string, canvas: CanvasPixels): boolean {
+  const same = (pixels: { width: number; height: number } | undefined) => pixels !== undefined && pixels.width === canvas.width && pixels.height === canvas.height;
+  if (same(tables.ratio_pixels[ratio])) return true;
+  return Object.values(tables.ratio_pixel_tiers ?? {}).some((tiers) => Object.values(tiers).some((table) => same(table[ratio])));
+}
+
+/**
+ * The ratio of a canvas, read from its pixels (server: canvasShapeOf): a ratio the Schema names when the canvas has
+ * its shape or exactly the pixels the Schema maps it to (a canvas made for a ratio-only model before #653, such as
+ * Gemini's 3072x5504 for 9:16); otherwise its own width over height, named by the simplest ratio of that shape.
+ */
+export function canvasShapeOf(canvas: CanvasPixels, tables: RatioTables): CanvasShape {
+  const ratio = canvas.width / canvas.height;
+  const names = namedRatios(tables);
+  for (const name of names) {
+    const named = parseSizeValue(name);
+    if (named && sameRatio(named.ratio, ratio)) return { label: name, ratio: named.ratio };
+  }
+  for (const name of names) {
+    if (ratioMapsTo(tables, name, canvas)) return { label: name, ratio: parseSizeValue(name)?.ratio ?? ratio };
+  }
+  for (let denominator = 1; denominator <= RATIO_LABEL_MAX_TERM; denominator += 1) {
+    const numerator = Math.round(ratio * denominator);
+    if (numerator >= 1 && sameRatio(numerator / denominator, ratio)) return { label: `${numerator}:${denominator}`, ratio };
+  }
+  let divisor = canvas.width;
+  for (let rest = canvas.height; rest !== 0;) [divisor, rest] = [rest, divisor % rest];
+  return { label: `${canvas.width / divisor}:${canvas.height / divisor}`, ratio };
+}
+
+/** The common ratios a canvas offers (#653): the Schema's ratio_pixels, from the tallest to the widest. */
+export function canvasRatioOptions(tables: RatioTables): string[] {
+  return namedRatios(tables).sort((left, right) => (parseSizeValue(left)?.ratio ?? 0) - (parseSizeValue(right)?.ratio ?? 0));
+}
+
+/**
+ * The canvas pixels for a ratio the person picks (#653): the long edge is the Schema default's, so picking a ratio
+ * also brings a canvas that was saved much larger (or smaller) back to the default size; the short edge follows the
+ * ratio, within the Schema's canvas range. The resize is one undo step.
+ */
+export function canvasPixelsForRatio(
+  ratio: string,
+  artboard: Pick<ArtboardSchema, 'default_width' | 'default_height'>,
+  limits: Pick<CanvasProductSchema['limits'], 'minimum_dimension' | 'maximum_dimension'>,
+): CanvasPixels | null {
+  const parts = ratio.split(':').map(Number);
+  if (parts.length !== 2 || !(parts[0] > 0) || !(parts[1] > 0)) return null;
+  const [width, height] = parts;
+  const clamp = (value: number) => Math.min(limits.maximum_dimension, Math.max(limits.minimum_dimension, Math.round(value)));
+  const long = clamp(Math.max(artboard.default_width, artboard.default_height));
+  return width >= height ? { width: long, height: clamp(long * height / width) } : { width: clamp(long * width / height), height: long };
+}
+
+/** Whether a person may choose the parameter (server: Offering.UserParameterAllowed). */
+function personMayChoose(offering: OfferingWire, wire: OfferingParameterWire): boolean {
+  if (wire.fixed === true || wire.adjustment_policy || wire.name === offering.extra_credit_consent_parameter) return false;
+  const surface = wire.presentation?.surface;
+  return surface !== 'hidden' && surface !== 'readonly' && wire.type !== 'task' && wire.type !== 'asset' && wire.type !== 'asset-array';
+}
+
+/**
+ * The resolution tiers a person may choose (server: canvasTierParameters): the parameters the Schema's
+ * ratio_pixel_tiers covers. Gemini declares its image_size read-only at 4K, so it is the Offering's own.
+ */
+export function canvasTierParameters(offering: OfferingWire, tables: RatioTables): OfferingParameterWire[] {
+  const tiers = tables.ratio_pixel_tiers ?? {};
+  return (offering.parameters ?? []).filter((wire) => wire.name in tiers && personMayChoose(offering, wire));
+}
+
+/** The custom size with the most pixels of the ratio within the bounds; same search order as the server. */
+function largestOfRatio(constraint: ImageSizeConstraintWire, ratio: number): SizeValue | null {
+  if (!(ratio > 0) || !Number.isFinite(ratio) || !(constraint.max_pixels > 0)) return null;
+  const step = Math.max(constraint.multiple ?? 0, 1);
+  const maxEdge = constraint.max_edge ?? 0;
+  const limit = maxEdge > 0 ? maxEdge : Math.ceil(Math.sqrt(constraint.max_pixels * Math.max(ratio, 1 / ratio)));
+  const snap = (value: number) => Math.round(value / step) * step;
+  let best: SizeValue | null = null;
+  for (let multiple = Math.floor(limit / step); multiple >= 1; multiple -= 1) {
+    const edge = multiple * step;
+    for (const [width, height] of [[edge, snap(edge / ratio)], [snap(edge * ratio), edge]]) {
+      if (width <= 0 || height <= 0 || width * height <= (best ? best.width * best.height : 0)) continue;
+      if (!imageSizeAllows(constraint, width, height) || !sameRatio(width / height, ratio)) continue;
+      best = pixelSizeValue({ width, height });
+    }
+  }
+  return best;
+}
+
+function boundedRatio(constraint: ImageSizeConstraintWire, ratio: number): number {
+  if (!(constraint.max_ratio > 0)) return ratio;
+  return Math.min(Math.max(ratio, 1 / constraint.max_ratio), constraint.max_ratio);
+}
+
+/**
+ * The value of one output-size parameter for a canvas of this shape (#653, server: canvasRatioChoice): of its options
+ * and, when it takes custom sizes, the largest custom size of the canvas ratio (or of its most extreme legal ratio),
+ * the candidates of the canvas ratio, else those of the nearest ratio; among them the one with the most pixels (a
+ * ratio-only value counts none), the first in declared order on a tie.
+ */
+export function canvasRatioChoice(parameter: Pick<OfferingParameterWire, 'options' | 'image_size'>, shape: CanvasShape): string | null {
+  const candidates: SizeValue[] = [];
+  for (const option of parameter.options ?? []) {
+    const candidate = parseSizeValue(String(option.value));
+    if (candidate) candidates.push(candidate);
+  }
+  const constraint = parameter.image_size;
+  if (constraint) {
+    const custom = largestOfRatio(constraint, shape.ratio);
+    if (custom) candidates.push(custom);
+    else {
+      const bounded = boundedRatio(constraint, shape.ratio);
+      const extreme = bounded !== shape.ratio ? largestOfRatio(constraint, bounded) : null;
+      if (extreme) candidates.push(extreme);
+    }
+  }
+  let nearest = Infinity;
+  for (const candidate of candidates) nearest = Math.min(nearest, Math.abs(Math.log(candidate.ratio / shape.ratio)));
+  let best = '';
+  let bestArea = -1;
+  for (const candidate of candidates) {
+    const distance = Math.abs(Math.log(candidate.ratio / shape.ratio));
+    // The canvas ratio when there is one; else the nearest ratio.
+    const eligible = distance < SAME_RATIO_TOLERANCE || (nearest >= SAME_RATIO_TOLERANCE && distance <= nearest + SAME_RATIO_TOLERANCE);
+    if (!eligible) continue;
+    const area = candidate.width * candidate.height;
+    if (area > bestArea) { best = candidate.value; bestArea = area; }
+  }
+  return best === '' ? null : best;
+}
+
+/**
+ * The values the canvas sets on a canvas turn (#653, server: canvasRatioValues): each output-size parameter a person
+ * may choose gets canvasRatioChoice; each resolution tier a person may choose, the option whose pixels for the chosen
+ * ratio are the most.
+ */
+export function canvasRatioValues(offering: OfferingWire, canvas: CanvasPixels, tables: RatioTables): Record<string, string> {
+  const shape = canvasShapeOf(canvas, tables);
+  const tiers = tables.ratio_pixel_tiers ?? {};
+  const values: Record<string, string> = {};
+  let ratio = '';
+  for (const parameter of canvasSizeParameters(offering)) {
+    if (parameter.name in tiers) continue;
+    const choice = canvasRatioChoice(parameter, shape);
+    if (choice === null) continue;
+    values[parameter.name] = choice;
+    if (parseSizeValue(choice)?.width === 0 && ratio === '') ratio = choice;
+  }
+  for (const parameter of canvasTierParameters(offering, tables)) {
+    let best = '';
+    let bestArea = 0;
+    for (const option of parameter.options ?? []) {
+      const pixels = tiers[parameter.name]?.[String(option.value)]?.[ratio];
+      const area = pixels ? pixels.width * pixels.height : 0;
+      if (area > bestArea) { best = String(option.value); bestArea = area; }
+    }
+    if (best !== '') values[parameter.name] = best;
+  }
+  return values;
+}
+
+export interface CanvasRatioTurnOutput extends CanvasTurnOutput {
+  /** The canvas ratio ("16:9"). */
+  ratio: string;
+  /** The ratio of the size sent: the canvas ratio, or the nearest one the model has (`nearest`). */
+  outputRatio: string;
+}
+
+/**
+ * The output size a turn whose source is the artboard really sends (#653): canvasRatioValues, then the Offering's
+ * forced_when. `nearest` means the model has no size of the canvas ratio. Null when the Offering has no output size a
+ * person may choose, or (#614) when the Agent chose one of them with set_params: the server then carries out the
+ * Agent's size instead of the canvas's (applyCanvasOutputSize), so the canvas sets nothing.
+ */
+export function canvasRatioTurnOutput(
+  offering: OfferingWire | undefined,
+  values: Record<string, unknown>,
+  canvas: CanvasPixels,
+  tables: RatioTables,
+  states?: ParameterStates,
+): CanvasRatioTurnOutput | null {
+  if (!offering || canvas.width <= 0 || canvas.height <= 0) return null;
+  const parameters = canvasSizeParameters(offering);
+  if ([...parameters, ...canvasTierParameters(offering, tables)].some((parameter) => states?.[parameter.name]?.source === 'agent')) return null;
+  const input: Record<string, unknown> = { ...values, ...canvasRatioValues(offering, canvas, tables) };
+  for (const wire of offering.parameters ?? []) {
+    for (const rule of wire.forced_when ?? []) {
+      if (parameterConditionMatches(rule.when, input)) { input[wire.name] = rule.value; break; }
+    }
+  }
+  const shape = canvasShapeOf(canvas, tables);
+  for (const parameter of parameters) {
+    const text = typeof input[parameter.name] === 'string' ? String(input[parameter.name]) : '';
+    const size = parseSizeValue(text);
+    if (!size) continue;
+    const pixels = size.width > 0
+      ? { width: size.width, height: size.height }
+      : outputPixels([{ name: parameter.name, label: parameter.label, type: 'select' }], input, tables);
+    const nearest = !sameRatio(size.ratio, shape.ratio);
+    const outputRatio = !nearest ? shape.label : size.width === 0 ? text : canvasShapeOf({ width: size.width, height: size.height }, tables).label;
+    return { value: text, pixels, ratioOnly: size.width === 0, nearest, ratio: shape.label, outputRatio };
   }
   return null;
 }
@@ -321,36 +487,4 @@ export function referenceTurnOutput(
   const changed = !parameters.some((parameter) => String(values[parameter.name] ?? '') === turn.value);
   const shapeKept = size !== null && (sameShape(size.ratio, reference) || (turn.pixels !== null && sameShape(turn.pixels.width / turn.pixels.height, reference)));
   return { ...turn, nearest: !shapeKept, changed };
-}
-
-/**
- * The canvas size a 2D size choice in the 参数 panel asks for (#246): the choice's effective pixels, in the
- * Schema's canvas range. Null when the canvas has no size yet (it starts from the choice anyway) or the
- * choice names no pixels.
- */
-export function canvasResizeForChoice(
-  canvasKnown: boolean,
-  offering: OfferingWire | undefined,
-  sizeParams: readonly ParamSchema[],
-  entered: Record<string, unknown>,
-  name: string,
-  value: unknown,
-  artboard: RatioTables,
-  limits: Pick<CanvasProductSchema['limits'], 'minimum_dimension' | 'maximum_dimension'>,
-): CanvasPixels | null {
-  if (!canvasKnown) return null;
-  return clampCanvasPixels(pixelsForChoice(offering, sizeParams, entered, name, value, artboard), limits);
-}
-
-/**
- * The model's size settings to write after the person switched the 2D model while the board was open
- * (#246): only on a real switch within the same session, and only when the new model offers the canvas size.
- */
-export function settingsAfterModelSwitch(
-  seen: { sessionId: string | null; offering: string },
-  current: { sessionId: string; offering: string },
-  fit: CanvasSizeFit,
-): Record<string, string> | null {
-  const switched = seen.sessionId === current.sessionId && seen.offering !== '' && current.offering !== '' && seen.offering !== current.offering;
-  return switched && fit.kind === 'align' ? fit.settings : null;
 }

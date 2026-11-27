@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
-import { recoverChatSession } from './session-recovery';
+import { drainAwaitsRead, holdDrainForRead, readCompleted, type DrainGate } from './send-queue';
+import { lastReadStarted, recoverChatSession } from './session-recovery';
 
 const pending: ChatMessage[] = [{ id: 'm', role: 'assistant', content: '', isPending: true, createdAt: 1 }];
 const complete: ChatMessage[] = [{ id: 'm', role: 'assistant', content: 'finished image', createdAt: 1 }];
@@ -21,6 +22,8 @@ function fixture(sessionId = 'session-a') {
   });
   const onLoading = vi.fn();
   const onLoadError = vi.fn();
+  const onGaveUp = vi.fn();
+  const onRead = vi.fn();
   // The recoverer reads only the newest page; each fixture response is a whole conversation.
   const pageQueries: Array<{ before?: string; limit: number }> = [];
   const listMessagePage = (id: string, query: { before?: string; limit: number }, signal?: AbortSignal) => {
@@ -29,9 +32,9 @@ function fixture(sessionId = 'session-a') {
   };
   const start = () => recoverChatSession({
     sessionId, client: { listMessagePage }, pageSize: 50, connect, pollMilliseconds: 500,
-    onLoading, onLoadError,
+    onLoading, onLoadError, onGaveUp, onRead,
   });
-  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError };
+  return { start, callbacks, closed, listMessages, pageQueries, connect, onLoading, onLoadError, onGaveUp, onRead };
 }
 
 describe('history session recovery', () => {
@@ -58,6 +61,40 @@ describe('history session recovery', () => {
     expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
     expect(f.listMessages).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  // #665: the send queue of the page waits for a read applied after another tab's send.
+  it('reports every applied read of the newest page, not a failed one', async () => {
+    const f = fixture();
+    f.listMessages.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(complete);
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).not.toHaveBeenCalled();
+    stop();
+    const again = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).toHaveBeenCalledTimes(1);
+    again();
+  });
+
+  it('numbers each read by when it started, so a read in flight before a change does not count as one made after', async () => {
+    const f = fixture();
+    const inFlight = deferred<ChatMessage[]>();
+    f.listMessages.mockReturnValueOnce(inFlight.promise).mockResolvedValue(complete);
+    const stop = f.start();
+    // Another tab claims a turn while this read is still on its way: the drain asks for a read started from now on.
+    let gate: DrainGate = holdDrainForRead({}, 'session-a', lastReadStarted() + 1);
+    f.onRead.mockImplementation((started: number) => { gate = readCompleted(gate, 'session-a', started); });
+    inFlight.resolve(complete);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.onRead).toHaveBeenCalledTimes(1);
+    expect(drainAwaitsRead(gate, 'session-a')).toBe(true);
+    stop();
+    // The read made after the change does.
+    const again = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drainAwaitsRead(gate, 'session-a')).toBe(false);
+    again();
   });
 
   it('reads only the newest page and keeps earlier pages the person already loaded', async () => {
@@ -152,5 +189,52 @@ describe('history session recovery', () => {
     expect(useChatStore.getState().messagesBySession['session-a']).toEqual(complete);
     stop();
     expect(useChatStore.getState().streamingBuffers['session-b']).toBeDefined();
+  });
+  it('#665: a stream that throws when opened leaves no running buffer and is read again', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValueOnce(pending).mockResolvedValue(complete);
+    f.connect.mockImplementationOnce(() => { throw new Error('EventSource refused'); });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.listMessages).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().messagesBySession['session-a']).toEqual(complete);
+    stop();
+  });
+
+  it('#665: a reply left pending is read a bounded number of times and the stream is tried again', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValue(pending);
+    // Every stream ends at once without the turn ending (the turn no longer runs on the server).
+    f.connect.mockImplementation((_id: string, options: { onDone(): void; onError(): void }) => {
+      queueMicrotask(() => options.onError());
+      return f.closed;
+    });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    const reads = f.listMessages.mock.calls.length;
+    expect(f.connect.mock.calls.length).toBeGreaterThan(1);
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(f.listMessages.mock.calls.length).toBe(reads);
+    expect(reads).toBeLessThan(60);
+    expect(useChatStore.getState().streamingBuffers['session-a']).toBeUndefined();
+    // #665: the page is told once that the reads stopped, so it can say so and offer to read again.
+    expect(f.onGaveUp).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('#665: a reply that ends before the bound does not report giving up', async () => {
+    const f = fixture();
+    f.listMessages.mockResolvedValueOnce(pending).mockResolvedValueOnce(pending).mockResolvedValue(complete);
+    f.connect.mockImplementation((_id: string, options: { onDone(): void; onError(): void }) => {
+      queueMicrotask(() => options.onError());
+      return f.closed;
+    });
+    const stop = f.start();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(useChatStore.getState().messagesBySession['session-a']).toEqual(complete);
+    expect(f.onGaveUp).not.toHaveBeenCalled();
+    stop();
   });
 });

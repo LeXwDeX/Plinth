@@ -22,6 +22,11 @@ type RetryPolicy struct {
 	// MaxRetryAfter bounds the upstream's Retry-After: a failure that asks for
 	// a longer wait is returned at once instead of waited for.
 	MaxRetryAfter time.Duration
+	// EmptyRetries is how many times a streamed call that answered with an
+	// empty completion (no text, no tool call) is sent again (#638); 0 returns
+	// it as it is. It is counted apart from MaxAttempts. A picture the model
+	// drew itself (ErrInlineImageOutput) is not empty and never sent again.
+	EmptyRetries int
 	// RoundTimeout bounds one call with all its attempts and waits; 0: only
 	// each attempt's own request timeout bounds it.
 	RoundTimeout time.Duration
@@ -38,7 +43,10 @@ type RetryPolicy struct {
 // returns, except what it streamed to the caller: a stream is replayed only
 // while it has emitted no delta, so a person never sees the same output twice;
 // one that broke after its first delta returns its failure, for the caller to
-// end the turn on (#509).
+// end the turn on (#509). A stream that ended with an empty answer is sent
+// again up to EmptyRetries times while it has passed on no visible text: its
+// content-free thinking and tool-calling signals show nothing to repeat
+// (#638).
 type Retrying struct {
 	next   Adapter
 	policy RetryPolicy
@@ -47,7 +55,7 @@ type Retrying struct {
 // NewRetrying wraps next; a policy without retries and without a round bound
 // leaves next as it is.
 func NewRetrying(next Adapter, policy RetryPolicy) Adapter {
-	if policy.MaxAttempts <= 1 && policy.RoundTimeout <= 0 {
+	if policy.MaxAttempts <= 1 && policy.RoundTimeout <= 0 && policy.EmptyRetries <= 0 {
 		return next
 	}
 	return &Retrying{next: next, policy: policy}
@@ -56,18 +64,79 @@ func NewRetrying(next Adapter, policy RetryPolicy) Adapter {
 // errRoundTimeout is the cause of a call its round timeout ended.
 var errRoundTimeout = errors.New("agent model round timed out")
 
-func (retrying *Retrying) Stream(ctx context.Context, request Request, emit func(Delta) error) (Completion, error) {
-	emitted := false
+func (retrying *Retrying) Stream(parent context.Context, request Request, emit func(Delta) error) (Completion, error) {
+	// The round bounds every attempt and wait of the call, empty retries
+	// included.
+	ctx := parent
+	if retrying.policy.RoundTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeoutCause(parent, retrying.policy.RoundTimeout, errRoundTimeout)
+		defer cancel()
+	}
+	emitted, shown := false, false
+	// thinking is true while the last delta passed on was a content-free
+	// thinking signal (#665): an empty answer sent again reasons again, and
+	// its first signal would repeat the status the caller already shows.
+	thinking := false
 	guarded := emit
 	if emit != nil {
 		guarded = func(delta Delta) error {
 			emitted = true
+			if delta.Thinking && delta.Content == "" && !delta.ToolCalling {
+				if thinking {
+					return nil
+				}
+				thinking = true
+			} else {
+				thinking = false
+			}
+			if delta.Content != "" {
+				shown = true
+			}
 			return emit(delta)
 		}
 	}
-	return retrying.run(ctx, request, func(ctx context.Context) (Completion, error) {
+	call := func(ctx context.Context) (Completion, error) {
 		return retrying.next.Stream(ctx, request, guarded)
-	}, func() bool { return emitted })
+	}
+	// reported is the last usage an attempt reported (#665). The usage is
+	// the context reading of the request, the same for every empty retry of
+	// it, so it is carried over, not summed, when the answer kept reports
+	// none.
+	var reported *Usage
+	for empties := 0; ; empties++ {
+		completion, err := retrying.run(parent, ctx, request, call, func() bool { return emitted })
+		if completion.Usage != nil {
+			reported = completion.Usage
+		} else if err == nil {
+			completion.Usage = reported
+		}
+		if !retrying.retriesEmpty(ctx, request, completion, err, shown, empties) {
+			return completion, err
+		}
+		emitted = false
+	}
+}
+
+// retriesEmpty reports whether an answer is sent again for being empty (#638):
+// a completion without text or a tool call, while the policy has empty
+// retries left, nothing visible was passed on and the caller still waits. It
+// waits the first backoff before saying yes. A picture the model drew itself
+// (ErrInlineImageOutput) is never sent again: it is the model's own choice,
+// billed as a generated image, and a repeat would only be billed again.
+func (retrying *Retrying) retriesEmpty(
+	ctx context.Context, request Request, completion Completion, err error, shown bool, empties int,
+) bool {
+	if err != nil || !completion.Empty() || shown || empties >= retrying.policy.EmptyRetries || ctx.Err() != nil {
+		return false
+	}
+	if logger := retrying.policy.Logger; logger != nil {
+		logger.Warn("对话模型返回空回复（无文字、无工具调用），稍后重试",
+			"model", request.Model, "connection", request.Connection, "purpose", request.Purpose,
+			"empty_retry", empties+1, "empty_retries", retrying.policy.EmptyRetries,
+			"usage_reported", completion.Usage != nil, "error", err)
+	}
+	return retrying.wait(ctx, retrying.backoff(1)) == nil
 }
 
 // Complete is sent once, as it is: its callers (the session title, the
@@ -78,16 +147,12 @@ func (retrying *Retrying) Complete(ctx context.Context, request Request) (Comple
 	return retrying.next.Complete(ctx, request)
 }
 
+// run sends the call within the round ctx (parent bounded by the round
+// timeout) and retries its transient failures.
 func (retrying *Retrying) run(
-	parent context.Context, request Request,
+	parent, ctx context.Context, request Request,
 	call func(context.Context) (Completion, error), emitted func() bool,
 ) (Completion, error) {
-	ctx := parent
-	if retrying.policy.RoundTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeoutCause(parent, retrying.policy.RoundTimeout, errRoundTimeout)
-		defer cancel()
-	}
 	for attempt := 1; ; attempt++ {
 		completion, err := call(ctx)
 		if err == nil {

@@ -28,7 +28,7 @@ import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
 import { SessionStepsBar } from '@/components/studio/session-steps-bar';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
-import { Composer, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
+import { Composer, type ComposerBoardMode, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
 import { SessionNotesPanel, sessionNotesText } from '@/components/workspace/session-notes-panel';
 import { applyChoiceAction } from '@/components/workspace/harness-choice-action';
 import { Action } from '@/components/ui/button';
@@ -70,7 +70,8 @@ import { isAutoTitlePending, pollAutoTitle } from '@/lib/chat/session-pages';
 import { nextStreamStatus } from '@/lib/chat/stream-status';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
 import { useReferenceSize } from '@/hooks/use-reference-size';
-import { canvasSnapshotClaim, currentObjectSource } from '@/lib/canvas/current-object';
+import { canvasSnapshotClaim } from '@/lib/canvas/current-object';
+import { boardInputSource, boardMode } from '@/lib/chat/board-mode';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
 import { inpaintGeometry, paintMask } from '@/lib/canvas/inpaint-export';
@@ -88,7 +89,7 @@ import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, latestReplies, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
 import { runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
@@ -99,9 +100,21 @@ import { budgetFollowsTasks, followSettledBudget, reloadSessionBudget } from '@/
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
-import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
+import {
+  cancelQueuedTurn, enqueueTurn, holdDrainForRead, holdsToRelease, nextDrainStep, pruneQueuedSessions, queueMayDrain, queuedFor,
+  readCompleted, takeQueuedTurn, type DrainGate, type QueueBySession,
+} from '@/lib/chat/send-queue';
+import { chatErrorToastId, requestTurnStop, stageRequestStep } from '@/lib/chat/turn-signals';
+import { createCoalescer } from '@/lib/chat/coalesce';
+import { restoreRemovedMessage } from '@/lib/chat/message-pages';
+import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
+import { createUncertainSendStore, newSendKey, sendSignature, sendUnderKey } from '@/lib/chat/send-key';
+import { idempotencyRefused } from '@/lib/chat/send-error-codes';
+import { activeLocale } from '@/lib/i18n/locale';
+import { groupedCount } from '@/lib/workspace/model-stats';
+import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
-import { recoverChatSession } from '@/lib/chat/session-recovery';
+import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
 import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
@@ -133,7 +146,7 @@ import {
   type ChatImage,
   type ChatMessage as ChatMessageType,
 } from '@/store/chat-store';
-import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
+import { useCanvasStore } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -143,7 +156,6 @@ import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
-import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
@@ -210,7 +222,6 @@ function ResizeHandle({ width, label, onResize }: { width: number; label: string
 }
 
 /** 对话列：会话设定、消息与批准卡片、输入区。折叠成窄条时事件流照常接收。 */
-const NO_NODES: CanvasNode[] = [];
 
 /** The attachments being read or prepared for one visit. A count, so one paste finishing cannot unlock another. */
 interface PendingAttachmentReads {
@@ -432,6 +443,11 @@ export function ChatColumn() {
   const [pinnedPurpose, setPinnedPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // 「从这里继续」之后、发出之前：下一个版本接在这个版本后面（芯片可取消）。
   const [branchFrom, setBranchFrom] = useSessionState<{ key: string; label: string } | null>(null);
+  // #644 「以画板为主」: this message only, off by default and off again once it has left the box. A selection or
+  // mask on the board, `@画布` or 「发送到对话」 from the board turns it on (boardMode below).
+  const [boardModeChosen, setBoardModeChosen] = useSessionState(false);
+  const boardModeChosenRef = useRef(false);
+  boardModeChosenRef.current = boardModeChosen;
   const chipHandleRef = useRef('');
   const mentionsRef = useRef<MentionCandidate[]>([]);
   // What the `@` list entries were when picked: numbered names shift when a layer or attachment is removed.
@@ -464,15 +480,26 @@ export function ChatColumn() {
   const draftEpoch = useRef(0);
   // Messages sent while a turn runs wait here ("排队中") and go out when it ends. Kept per
   // session, so switching away and back does not lose them.
-  const [queue, setQueue] = useState<QueueBySession>({});
+  // #665: the queue is kept in this browser (a reload does not lose a queued message) and leaves with its session.
+  const queue: QueueBySession = useSendQueueStore((state) => state.queue);
+  const setQueue = useSendQueueStore((state) => state.update);
   const queuedTurns = queuedFor(queue, activeSessionId);
   const [drainTick, setDrainTick] = useState(0);
+  // #665: the sessions whose drain waits for a read started after another tab's claim or send (see DrainGate, numbered
+  // by lastReadStarted), and the read a waiting drain last asked for. The holds this tab took are kept per session in
+  // the send queue store.
+  const [drainGate, setDrainGate] = useState<DrainGate>({});
+  const forcedRead = useRef<number | null>(null);
   // #154: the session's saved style lock and this turn's exemption. The exemption never outlives its turn.
   const styleLock = useStyleLock(chatClient, activeSessionId);
   const [styleLockSkipped, setStyleLockSkipped] = useState(false);
   useEffect(() => { setStyleLockSkipped(false); }, [activeSessionId]);
-  const drainingRef = useRef(false);
+  // #665: the session whose queued turn this page is claiming or sending, or null.
+  const drainingRef = useRef<string | null>(null);
   const startedTurnsRef = useRef(0);
+  // #665: per session, the last send whose answer never came, until a send of another request or an answered one
+  // replaces it; kept in the tab's sessionStorage so a reload keeps it.
+  const [uncertainSends] = useState(() => createUncertainSendStore(() => (typeof window === 'undefined' ? undefined : window.sessionStorage)));
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
@@ -486,16 +513,6 @@ export function ChatColumn() {
   // that takes references, so that is the one priced.
   const objectDeselected = sessionSelection != null && deselectedObject === objectKey(sessionSelection);
   const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectDeselected);
-  useEffect(() => {
-    if (!activeSessionId) return;
-    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected };
-    useStudioStore.getState().setGenerationReferenceContext(context);
-    return () => {
-      if (useStudioStore.getState().generationReferenceContext === context) {
-        useStudioStore.getState().setGenerationReferenceContext(null);
-      }
-    };
-  }, [activeSessionId, hasReference, objectDeselected]);
   const imageGeneration = useGenerationParams('image', activeSessionId, hasReference);
   const modelGeneration = useGenerationParams('model-3d', activeSessionId, hasReference);
   const generation = stageDomain === 'image' ? imageGeneration : modelGeneration;
@@ -602,7 +619,7 @@ export function ChatColumn() {
           toast.error(schemaMessage(schema, `ui.form.image_upload.${code}`, {
             filename: file.name,
             size: formatSizeLimit(maximumImageBytes),
-            pixels: schema.runtime.frontend.image_upload.maximum_pixels,
+            pixels: groupedCount(schema.runtime.frontend.image_upload.maximum_pixels, activeLocale(schema)),
           }));
         }
       }
@@ -757,6 +774,11 @@ export function ChatColumn() {
     return result;
   }, [messages, optimisticUser, schema, streamBuf]);
 
+  const coalesceReads = useRef(createCoalescer());
+  const replyStalled = useMemo(() => ({
+    text: schemaText(schema, 'ui.chat.toast.reply_stalled'),
+    retry: schemaText(schema, 'ui.chat.toast.reply_stalled.retry'),
+  }), [schema]);
   const processEvent = useCallback(
     (sessionId: string, event: ChatSemanticEvent) => {
       // #285: thinking, tool status and progress share one status slot.
@@ -770,14 +792,14 @@ export function ChatColumn() {
       }
       // #275: a status event follows each round's tool calls being saved on the assistant message, so
       // the count in the saved message is read again then; it only ever rises during a reply.
+      // #665: a replayed stream repeats every status; the reads are coalesced per session.
       if (event.type === 'status') {
-        chatClient
+        coalesceReads.current(`tool-calls:${sessionId}`, () => chatClient
           .listMessagePage(sessionId, { limit: 4 })
           .then((page) => {
             const count = latestToolCallCount(page.messages);
             if (count !== undefined) useChatStore.getState().observeToolCallCount(sessionId, count);
-          })
-          .catch(() => {});
+          }));
       }
       switch (event.type) {
         case 'text':
@@ -798,7 +820,8 @@ export function ChatColumn() {
           updateSessionTitle(sessionId, event.content);
           break;
         case 'error':
-          toast.error(event.content);
+          // #665: the same error replayed on a reattach updates its toast instead of stacking another one.
+          toast.error(event.content, { id: chatErrorToastId(sessionId, buffer?.assistantDbId ?? '', event.content) });
           break;
         case 'taskRegistered':
           // P0 契约：agent 会话按任务隔离，任务注册即绑定；
@@ -814,8 +837,8 @@ export function ChatColumn() {
           { const step = paidStepFromTaskRegistered(event);
             if (step) addStreamPaidStep(sessionId, step);
           }
-          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值。
-          void refreshApproval();
+          // 新提交的付费步骤会增加本会话的累计估算积分，向服务端取最新值（#665：重放时合并为一次读取）。
+          coalesceReads.current(`approval:${sessionId}`, async () => { await refreshApproval(); });
           break;
         case 'taskUpdate': {
           const trackedId = event.finalTaskID || event.taskID;
@@ -880,7 +903,8 @@ export function ChatColumn() {
     void reconnectTick;
     void serverTurnTick;
     setHistoryLoading(!(activeSessionId in useChatStore.getState().messagesBySession));
-    return recoverChatSession({
+    const stalledToast = `reply-stalled:${activeSessionId}`;
+    const stop = recoverChatSession({
       sessionId: activeSessionId,
       client: chatClient,
       pageSize: messagePageSize,
@@ -888,7 +912,18 @@ export function ChatColumn() {
       pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
       onLoading: setHistoryLoading,
       onLoadError: () => toast.error(ui.loadFailed),
+      onRead: (started) => setDrainGate((gate) => readCompleted(gate, activeSessionId, started)),
+      // #665: a reply that stays pending is no longer read on its own; say so and offer to read it again.
+      onGaveUp: () => toast.message(replyStalled.text, {
+        id: stalledToast,
+        duration: Infinity,
+        action: { label: replyStalled.retry, onClick: () => setServerTurnTick((tick) => tick + 1) },
+      }),
     });
+    return () => {
+      stop();
+      toast.dismiss(stalledToast);
+    };
   }, [
     activeSessionId,
     reconnectTick,
@@ -898,7 +933,39 @@ export function ChatColumn() {
     messagePageSize,
     schema.chat.frontend.fallback_poll_milliseconds,
     ui.loadFailed,
+    replyStalled,
   ]);
+
+  // #665: the queues of sessions this account no longer has (deleted in another tab or device, or another account's)
+  // leave the browser once the session list is known.
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    const known = new Set(useChatStore.getState().sessions.map((session) => session.id));
+    const controller = new AbortController();
+    void pruneQueuedSessions(
+      Object.keys(useSendQueueStore.getState().queue),
+      known,
+      (sessionId, signal) => chatClient.getSession(sessionId, signal),
+      (sessionId) => useSendQueueStore.getState().forgetSession(sessionId),
+      controller.signal,
+    );
+    return () => controller.abort();
+  }, [sessionsLoaded, chatClient]);
+
+  // #665: another tab claimed a queued turn of this session, or the turn it sent ended: this tab's messages cannot
+  // show that yet, so its drain waits for a read started from now on (a read already in flight does not count).
+  const foreignChanges = useSendQueueStore((state) => (activeSessionId ? state.foreignChanges[activeSessionId] ?? 0 : 0));
+  useEffect(() => {
+    if (!activeSessionId || foreignChanges === 0) return;
+    const next = lastReadStarted() + 1;
+    setDrainGate((gate) => holdDrainForRead(gate, activeSessionId, next));
+  }, [activeSessionId, foreignChanges]);
+
+  // #665: the session's turn as this page sees it; a stalled-reply notice goes away once the reply is settled.
+  const activeTurnRunning = sessionTurnRunning(activeSessionId ? messagesBySession[activeSessionId] : undefined, isStreaming);
+  useEffect(() => {
+    if (activeSessionId && !activeTurnRunning) toast.dismiss(`reply-stalled:${activeSessionId}`);
+  }, [activeSessionId, activeTurnRunning]);
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
@@ -969,7 +1036,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string } },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1039,11 +1106,10 @@ export function ChatColumn() {
       // (which wins over the selection; the chip says so), leaves the object and the artboard out of the turn.
       const skipped = sessionObject != null
         && (deselectedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
-      // The Agent's current object is what the dashed artboard shows while the current picture's layer is in it:
-      // the artboard is rasterised at the chosen output pixels like every other delivery (export, send to chat,
-      // inpaint, merge) and uploaded as an input asset, even a lone untouched picture. #610: other pictures on
-      // the board without the current one (a version clicked on the strip), or no current picture, never make
-      // the board the turn's source; only @画布 or a painted mask send it then.
+      // #644: the board is the turn's source only on a canvas turn (以画板为主). Then the dashed artboard is
+      // rasterised at the chosen output pixels like every other delivery (export, inpaint, merge) and uploaded as
+      // an input asset. Every other turn works on the conversation (the current object's own picture, the
+      // attached pictures and the outputs) and the board takes no part: #610/#631 were the board leaking in.
       let canvasSelection: ChatAttachmentClaim[] | null = null;
       // Writing @画布 asks for the artboard itself: the same rasteriser, whatever the current object is.
       const namesBoard = reuseImages === undefined && mentionsBoard(written, mentionsRef.current);
@@ -1051,31 +1117,33 @@ export function ChatColumn() {
       const maskDraftNow = reuseImages === undefined && queuedSelection === undefined ? useMaskStore.getState().draft : null;
       const maskStrokesNow = maskDraftNow ? maskStrokeCount(maskDraftNow, sessionId) : 0;
       const withMask = maskStrokesNow > 0 && artboard !== null;
-      if (!queuedSelection && (namesBoard || withMask || !skipped) && artboard) {
-        const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard, sessionObject, proxyAssetUrl);
-        if (source === 'canvas') {
-          try {
-            // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
-            let boardNodes = useCanvasStore.getState().getNodes(sessionId);
-            const { url } = await exportAndUploadSnapshot({
-              flush: () => flushPendingEdits(sessionId),
-              exportPicture: () => {
-                boardNodes = useCanvasStore.getState().getNodes(sessionId);
-                return exportArtboardToBlob(boardNodes, schema.canvas, artboard, deliveryPixels);
-              },
-              upload: (picture) => uploadWorkspaceInputAsset(schema, picture, snapshotFilename(schema)),
-              maximumBytes: schema.runtime.input_assets.upload_max_bytes,
-            });
-            // #272: the claim says how many visible layers the snapshot flattens; the server measures its size.
-            canvasSelection = [canvasSnapshotClaim(url, boardNodes, artboard)];
-          } catch (error) {
-            // The draft stays in the box: nothing below clears it on this path.
-            const text = reportSnapshotFailure(schema, 'chat-send', error);
-            if (isCurrentSessionScope(scope)) toast.error(text);
-            return;
-          }
-          if (!isCurrentSessionScope(scope)) return;
+      // The toggle belongs to the box: a stage action, a card answer or a replayed round never picks it up.
+      const fromBox = reuseImages === undefined && queuedSelection === undefined && !choiceAnswer;
+      const boardTurn = boardMode({
+        chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,
+      }).on;
+      if (!queuedSelection && boardTurn && artboard) {
+        try {
+          // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
+          let boardNodes = useCanvasStore.getState().getNodes(sessionId);
+          const { url } = await exportAndUploadSnapshot({
+            flush: () => flushPendingEdits(sessionId),
+            exportPicture: () => {
+              boardNodes = useCanvasStore.getState().getNodes(sessionId);
+              return exportArtboardToBlob(boardNodes, schema.canvas, artboard, deliveryPixels);
+            },
+            upload: (picture) => uploadWorkspaceInputAsset(schema, picture, snapshotFilename(schema)),
+            maximumBytes: schema.runtime.input_assets.upload_max_bytes,
+          });
+          // #272: the claim says how many visible layers the snapshot flattens; the server measures its size.
+          canvasSelection = [canvasSnapshotClaim(url, boardNodes, artboard)];
+        } catch (error) {
+          // The draft stays in the box: nothing below clears it on this path.
+          const text = reportSnapshotFailure(schema, 'chat-send', error);
+          if (isCurrentSessionScope(scope)) toast.error(text);
+          return;
         }
+        if (!isCurrentSessionScope(scope)) return;
       }
       // #244: the mask is painted on the same artboard at the same delivery pixels, so a stroke lands on the
       // same pixel of the snapshot and of the mask. Upload it as an input asset; the server measures and freezes it.
@@ -1112,10 +1180,11 @@ export function ChatColumn() {
         selectionMask = { maskAssetId };
       }
       // #266: a turn that sends the artboard says so; the server binds that snapshot as the turn's source
-      // whatever the Agent names. A queued turn keeps the source it was queued with.
+      // whatever the Agent names. A queued turn keeps the source it was queued with. #644: only a canvas turn
+      // sends a snapshot, so every other turn goes out without an input source and the server keeps the board out.
       const inputSource = queuedSelection !== undefined
         ? queuedInputSource
-        : canvasSelection ? schema.chat.context.canvas_input_source : undefined;
+        : boardInputSource(canvasSelection !== null, schema.chat.context.canvas_input_source);
       const stageSelection = queuedSelection ?? canvasSelection ?? (skipped ? [] : buildChatSelection({
         sessionId,
         currentObject: sessionObject,
@@ -1170,6 +1239,7 @@ export function ChatColumn() {
       if (turnRunning) {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          idempotencyKey: newSendKey(),
           text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
@@ -1195,6 +1265,8 @@ export function ChatColumn() {
           setCanvasReference(null);
           setAttachmentPurpose(null);
           setBranchFrom(null);
+          // #644: 以画板为主 is this message's; the next one starts off again.
+          setBoardModeChosen(false);
         }
         // Queued is accepted: the box and the draft are already spent.
         extra?.onSent?.();
@@ -1268,7 +1340,11 @@ export function ChatColumn() {
           if (replaceIds && replaceIds.length > 0) {
             const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
             try {
-              for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);
+              // #645: each deletion names the turn's messages still to delete; the server deletes only while they
+              // are its last turn, so a page that missed a newer turn gets a 409 and nothing is deleted.
+              for (const [index, id] of replaceIds.entries()) {
+                await chatClient.deleteMessage(sessionId, id, replaceIds.slice(index));
+              }
             } catch (error) {
               const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
               if (page) applyNewestMessagePage(sessionId, page);
@@ -1285,7 +1361,7 @@ export function ChatColumn() {
           const starting = { sessionId, text };
           startingRef.current = starting;
           setPreparingSession(null);
-          initStreaming(sessionId, {
+          const turn = initStreaming(sessionId, {
             content: text,
             images: images.map((url) => ({ url, taskId: '' })),
           });
@@ -1300,27 +1376,35 @@ export function ChatColumn() {
           // (转 3D) or a choice-card answer also carries its own selection, but was never in the box or the queue.
           const queued = extra?.queued === true;
           try {
-            await chatClient.startTurn(
+            const turnOptions: ChatTurnOptions = {
+              ...(selectedModel ? { model: selectedModel } : {}),
+              creativeDomain: domain,
+              ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
+              ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
+              ...(images.length > 0 ? { imageURLs: images } : {}),
+              ...(claims.length > 0 ? { attachments: claims } : {}),
+              ...(selection.length > 0 ? { selection } : {}),
+              ...(mentions.length > 0 ? { mentions } : {}),
+              ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
+              ...(inputSource ? { inputSource } : {}),
+              ...(selectionMask ? { selectionMask } : {}),
+              ...(choiceAnswer ? { choiceAnswer } : {}),
+              ...(multiview ? { multiview } : {}),
+              ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
+            };
+            // #665: the same request as a send whose answer never came goes out under that send's key, so the server
+            // answers the turn it may already have started; any other send gets a key of its own. The locale is part
+            // of the request (the server's fingerprint has it), and so is a queued message's id: two queued messages
+            // with the same words are two requests. A key the server refuses is dropped and the send goes once more
+            // under a fresh one (sendUnderKey).
+            const locale = activeLocale(schema);
+            const queuedId = extra?.queuedId;
+            await sendUnderKey(uncertainSends, {
               sessionId,
-              text,
-              {
-                ...(selectedModel ? { model: selectedModel } : {}),
-                creativeDomain: domain,
-                ...(Object.keys(otherDomainModels).length > 0 ? { domainModels: otherDomainModels } : {}),
-                ...(selectedSkill ? { skill: { id: selectedSkill.id, name: selectedSkill.name } } : {}),
-                ...(images.length > 0 ? { imageURLs: images } : {}),
-                ...(claims.length > 0 ? { attachments: claims } : {}),
-                ...(selection.length > 0 ? { selection } : {}),
-                ...(mentions.length > 0 ? { mentions } : {}),
-                ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
-                ...(inputSource ? { inputSource } : {}),
-                ...(selectionMask ? { selectionMask } : {}),
-                ...(choiceAnswer ? { choiceAnswer } : {}),
-                ...(multiview ? { multiview } : {}),
-                ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
-              },
-              controller.signal,
-            );
+              signature: sendSignature(sessionId, text, turnOptions, { locale, ...(queuedId ? { queuedId } : {}) }),
+              ...(queuedId ? { typedSignature: sendSignature(sessionId, text, turnOptions, { locale }) } : {}),
+              ...(extra?.idempotencyKey ? { preferred: extra.idempotencyKey } : {}),
+            }, (key) => chatClient.startTurn(sessionId, text, { ...turnOptions, idempotencyKey: key }, controller.signal), idempotencyRefused);
             sent = true;
             extra?.onSent?.();
             // A one-shot Skill (declared in the Schema) is spent once the server has the turn; a failed send keeps it.
@@ -1349,6 +1433,8 @@ export function ChatColumn() {
                 setCanvasReference(null);
                 setAttachmentPurpose(null);
                 setBranchFrom(null);
+                // #644: 以画板为主 is this message's; the next one starts off again.
+                setBoardModeChosen(false);
               }
             } else {
               void refreshChoices();
@@ -1374,13 +1460,19 @@ export function ChatColumn() {
             // or the message had waited in the queue), so they go back, not lost.
             const restore = !sent && (replaced || queued) && isCurrentSessionScope(scope) && !controller.signal.aborted;
             if ((error as Error).name !== 'AbortError') {
-              toast.error(
-                restore && queued
-                  ? schemaText(schema, 'ui.studio.chat.queued_restored')
-                  : error instanceof Error && error.message !== ''
-                    ? withErrorReference(error.message, error)
-                    : ui.sendFailed,
-              );
+              if (restore && queued && turnActiveRefusal(error)) {
+                // #665: another tab's turn of the session runs (it sent first): nothing failed, the words wait in the box.
+                toast.info(schemaText(schema, 'ui.studio.chat.queued_other_tab'));
+              } else if (idempotencyRefused(error)) {
+                // #665: the key was refused twice; the message was not sent and the key is gone.
+                toast.error(schemaText(schema, 'ui.studio.chat.send_key_refused'));
+              } else {
+                toast.error(
+                  restore && queued
+                    ? schemaText(schema, 'ui.studio.chat.queued_restored')
+                    : turnFailureText(error, [schema.chat.presentation.messages.sse_interrupted], ui.sendFailed),
+                );
+              }
             }
             if (restore) {
               setInput((current) => (current === '' ? written : current));
@@ -1396,14 +1488,15 @@ export function ChatColumn() {
             // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
             let settled = false;
             const settleFallback = window.setTimeout(() => {
-              if (!settled) finishStreaming(sessionId);
+              if (!settled) finishStreaming(sessionId, turn);
             }, STREAM_SETTLE_FALLBACK_MILLISECONDS);
             chatClient
               .listMessagePage(sessionId, { limit: messagePageSize })
               .then((page) => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                settleStreaming(sessionId, page);
+                // #665: a read that comes back after a later turn started is that earlier turn's: it is dropped.
+                if (!settleStreaming(sessionId, page, turn)) return;
                 const shown = () => useChatStore.getState().activeSessionId === sessionId && !useChatStore.getState().streamingBuffers[sessionId];
                 // #605: the server ended this turn's tasks with it; read them now and with the rereads below rather
                 // than leave them running (and the branch disabled) until the next task poll.
@@ -1443,7 +1536,7 @@ export function ChatColumn() {
               .catch(() => {
                 settled = true;
                 window.clearTimeout(settleFallback);
-                finishStreaming(sessionId);
+                finishStreaming(sessionId, turn);
               });
             void refreshApproval();
             void pending.refresh();
@@ -1471,6 +1564,7 @@ export function ChatColumn() {
       setAttachmentPurpose,
       setAttachmentPurposes,
       setBranchFrom,
+      setBoardModeChosen,
       canvasReference,
       hasCanvasReference,
       chatClient,
@@ -1500,6 +1594,7 @@ export function ChatColumn() {
       refreshChoices,
       refreshNotes,
       ui.sendFailed,
+      uncertainSends,
       uploading,
     ],
   );
@@ -1517,39 +1612,98 @@ export function ChatColumn() {
   // 会写明基础积分、额外积分和用途，批准才算同意。
   useEffect(() => {
     if (!turnRequest) return;
+    // #665: a send refuses while attachments upload; the request is kept (and said to wait) instead of being dropped,
+    // and goes out when the upload ends (this effect runs again then).
+    const step = stageRequestStep({
+      hasSession: useChatStore.getState().activeSessionId !== null,
+      uploadsPending: uploading || attachmentsPending(attachmentReads, captureSessionScope()),
+    });
+    if (step === 'wait') {
+      toast.message(schemaText(schema, 'ui.chat.toast.stage_request_waiting'), { id: `stage-request-waiting:${turnRequest.seq}` });
+      return;
+    }
     clearTurnRequest();
-    if (useChatStore.getState().activeSessionId === null) return;
+    if (step === 'drop') return;
     void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
       turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
-  }, [turnRequest, clearTurnRequest]);
+  }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
   // 输入框，不让用户的话丢掉。
+  // #665: after a reload the queue waits for the session's messages to be read, and for a reply the server still runs
+  // to end, so it never goes out beside a turn this page did not start. A turn is claimed from the stored queue before
+  // it is sent: another tab that already sent (or cancelled) it makes the claim fail, and it is not sent twice.
+  const drainMessages = activeSessionId ? messagesBySession[activeSessionId] : undefined;
   useEffect(() => {
-    if (!activeSessionId || isStreaming || preparing || uploading || drainingRef.current) return;
+    if (!activeSessionId || drainingRef.current) return;
+    if (!queueMayDrain({ busy: preparing || uploading, historyLoading, messages: drainMessages, streaming: isStreaming })) return;
     // The turn that just ended may still hold the send lock while it cleans up; its release bumps drainTick.
     if (sendPreparation.current.has(activeSessionId)) return;
     const { turn } = takeQueuedTurn(queue, activeSessionId);
     if (!turn) return;
-    const sessionId = activeSessionId;
-    drainingRef.current = true;
-    setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
-    const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
-      drainingRef.current = false;
-      if (startedTurnsRef.current === started) {
-        if (useChatStore.getState().activeSessionId === sessionId) {
-          setInput((current) => (current === '' ? turn.text : current));
-          useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
-          setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
-            turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
-          setStyleLockSkipped(turn.styleLockSkipped === true);
-        }
-        toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
-      }
-      setDrainTick((tick) => tick + 1);
+    // #665: another tab holds the session's send while the turn it sent runs: wait for its release (a storage event)
+    // or for the hold to lapse (a tab that closed without releasing it). After another tab's claim or send, or a claim
+    // of this tab that failed, read the session again first; a read that failed or was cut short is asked for again
+    // after the Schema's poll interval.
+    const step = nextDrainStep({
+      hold: useSendQueueStore.getState().foreignHold(activeSessionId),
+      now: Date.now(),
+      required: drainGate[activeSessionId],
+      forcedRead: forcedRead.current,
+      pollMilliseconds: schema.chat.frontend.fallback_poll_milliseconds,
     });
-  }, [activeSessionId, drainTick, isStreaming, preparing, queue, schema, setAttachmentPurposes, setInput, uploading]);
+    if (step.kind === 'wait') {
+      const timer = setTimeout(() => {
+        forcedRead.current = null;
+        setDrainTick((tick) => tick + 1);
+      }, step.delay);
+      return () => clearTimeout(timer);
+    }
+    if (step.kind === 'read') {
+      forcedRead.current = step.required;
+      setServerTurnTick((tick) => tick + 1);
+      return;
+    }
+    const sessionId = activeSessionId;
+    drainingRef.current = sessionId;
+    void (async () => {
+      if (!(await useSendQueueStore.getState().claim(sessionId, turn.id))) {
+        drainingRef.current = null;
+        const next = lastReadStarted() + 1;
+        setDrainGate((gate) => holdDrainForRead(gate, sessionId, next));
+        // The hold this tab may still keep from its last turn goes now (the release effect runs on drainTick), so
+        // another tab's queued messages for the session are not held back by an idle heartbeat and turn lock.
+        setDrainTick((tick) => tick + 1);
+        return;
+      }
+      const started = startedTurnsRef.current;
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+        drainingRef.current = null;
+        if (startedTurnsRef.current === started) {
+          if (useChatStore.getState().activeSessionId === sessionId) {
+            setInput((current) => (current === '' ? turn.text : current));
+            useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
+            setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
+              turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
+            setStyleLockSkipped(turn.styleLockSkipped === true);
+          }
+          toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
+        }
+        setDrainTick((tick) => tick + 1);
+      });
+    })();
+  }, [activeSessionId, drainGate, drainTick, historyLoading, isStreaming, preparing, queue, schema, drainMessages, setAttachmentPurposes, setInput, uploading]);
+
+  // #665: each hold this tab took with a claim lives while the turn it sent runs (the store keeps it alive), and is
+  // released once that turn is over or the person left the session, so another tab drains next. A page that goes away
+  // releases them all.
+  useEffect(() => {
+    const store = useSendQueueStore.getState();
+    for (const sessionId of holdsToRelease(store.heldSessions(), { sending: drainingRef.current, activeSessionId, activeTurnRunning })) {
+      store.releaseHold(sessionId);
+    }
+  }, [activeSessionId, activeTurnRunning, drainTick]);
+  useEffect(() => releaseAllHolds, []);
 
   // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
@@ -1604,9 +1758,11 @@ export function ChatColumn() {
 
   const timeline = useMemo(() => interleaveGroups(displayMessages, threeViews), [displayMessages, threeViews]);
   // #321: each choice card follows the assistant message that asked; an open one not on the page goes last.
+  // #645: an open card of a reply before the latest user message is not drawn (the person typed instead).
   const choicePlacement = useMemo(
-    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id)),
-    [sessionChoices.cards, displayMessages],
+    () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id),
+      latestReplies(displayMessages, schema.chat.frontend.optimistic_assistant_message_id), answeringChoice),
+    [sessionChoices.cards, displayMessages, schema, answeringChoice],
   );
   // #327: a production list follows the message that proposed it; every other list goes to the end.
   const assetListCards = useMemo(
@@ -1715,11 +1871,15 @@ export function ChatColumn() {
       if (!activeSessionId) return;
       const sessionId = activeSessionId;
       const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
+      const removed = previous.find((message) => message.id === messageId);
       deleteMessage(sessionId, messageId);
       try {
         await chatClient.deleteMessage(sessionId, messageId);
       } catch {
-        setMessages(sessionId, previous);
+        // #665: only the removed message goes back; pages read since the deletion started are kept.
+        if (removed) {
+          setMessages(sessionId, restoreRemovedMessage(useChatStore.getState().messagesBySession[sessionId] ?? [], previous, removed));
+        }
         toast.error(
           schemaText(schema, 'ui.chat.toast.delete_message_retry'),
         );
@@ -1759,7 +1919,8 @@ export function ChatColumn() {
       consume: (input, projection) => {
         const store = useWorkspaceStore.getState();
         if (store.trackedTasks.some((task) => task.taskId === input.taskId)) return;
-        store.registerTask({ ...input, autoPreview: false });
+        // #651: a task already terminal on the server is history, not a failure this page just saw happen.
+        store.registerTask({ ...input, autoPreview: false, restored: projection.terminal });
         useWorkspaceStore.getState().applyTaskDetail(input.taskId, projection, useChatStore.getState().activeSessionId);
       },
     }).catch(() => {});
@@ -2052,7 +2213,7 @@ export function ChatColumn() {
         flush: () => flushPendingEdits(sessionId), isCurrent: () => useChatStore.getState().activeSessionId === sessionId,
         clear: clearTrackedTasks, select: addSession, remember: useChatStore.getState().rememberSession,
         done: (copied) => toast.success(schemaText(schema, 'ui.studio.message.branch_done'), branchCopiedCurrentState(copied) ? { description: schemaText(schema, 'ui.chat.branch_canvas_current') } : undefined),
-        failed: (error) => toast.error(error instanceof Error && error.message ? withErrorReference(error.message, error) : schemaText(schema, 'ui.studio.message.branch_failed')),
+        failed: (error) => toast.error(turnFailureText(error, [], schemaText(schema, 'ui.studio.message.branch_failed'))),
       });
     } finally {
       branchBusyRef.current = false;
@@ -2116,22 +2277,12 @@ export function ChatColumn() {
     return previous && sameData(previous, next) ? previous : next;
   }, [sessionMessages]);
   handleReferencesRef.current = sessionHandleReferences;
-  const boardNodes = useCanvasStore((state) => (activeSessionId ? state.nodesBySession[activeSessionId] : undefined) ?? NO_NODES);
   const chip = useMemo((): ComposerChip | null => {
     if (!sessionSelection) return null;
     const tile = tileOfObject(versions, sessionSelection);
     // A picture drawn on the board that is no version has no chip; a merged version (手绘) is one.
     if (sessionSelection.taskId.startsWith('canvas:') && !tile) return null;
-    // The artboard holds the current picture's layer: the turn carries the whole artboard (#610: not when the
-    // board holds only other pictures; the chip then shows the picture the turn names).
-    if (artboard && currentObjectSource(boardNodes, artboard, sessionSelection, proxyAssetUrl) === 'canvas') {
-      return {
-        kind: 'image',
-        thumbnail: previewAssetUrl(sessionSelection.url),
-        label: schemaText(schema, 'ui.studio.composer.chip.canvas'),
-        handle: '',
-      };
-    }
+    // #644: the chip names the picture the turn works on; a canvas turn shows the board instead (composerChip).
     return {
       kind: sessionSelection.kind,
       // #290: chips are small; they show the preview of a task picture.
@@ -2141,7 +2292,7 @@ export function ChatColumn() {
       label: versionLabel(schema, tile, sessionSelection.kind),
       handle: sessionSelection.handle ?? handleOfObject(sessionMessages, sessionSelection),
     };
-  }, [artboard, boardNodes, previewAssetUrl, proxyAssetUrl, schema, sessionMessages, sessionSelection, versions]);
+  }, [previewAssetUrl, schema, sessionMessages, sessionSelection, versions]);
   // The branch chip belongs to the version it was made for: another version on the stage drops it.
   const branchChip = useMemo((): ComposerBranch | null => {
     if (!branchFrom || !sessionSelection || objectKey(sessionSelection) !== branchFrom.key) return null;
@@ -2214,6 +2365,39 @@ export function ChatColumn() {
     return withBoardMention(listed, artboard ? boardMentionCandidate(schemaText(schema, 'ui.studio.composer.mention.token_board')) : null);
   }, [artboard, attachedImages, canvasNodes, canvasReference, hasCanvasReference, pendingSources, schema, sessionMessages, versions.tiles]);
   mentionsRef.current = mentionList;
+  // #644: what the next message is sent as. The same rule the send reads, so the toggle never shows one thing
+  // while the message goes out as another; a canvas turn shows the board as the chip.
+  const boardTurnNow = boardMode({
+    chosen: boardModeChosen, artboard: artboard !== null, maskSteps: maskStrokes, namesBoard: mentionsBoard(input, mentionList),
+  });
+  const composerChip = useMemo((): ComposerChip | null => (boardTurnNow.on && chip?.kind === 'image'
+    ? { kind: 'image', thumbnail: chip.thumbnail, label: schemaText(schema, 'ui.studio.composer.chip.canvas'), handle: '' }
+    : chip), [boardTurnNow.on, chip, schema]);
+  const composerBoardMode = useMemo((): ComposerBoardMode | null => (artboard === null ? null : {
+    on: boardTurnNow.on,
+    forced: boardTurnNow.forced,
+    onToggle: () => setBoardModeChosen((current) => !current),
+  }), [artboard, boardTurnNow.forced, boardTurnNow.on, setBoardModeChosen]);
+  // The composer's context for the next turn's settings and the canvas size notice (use-canvas-artboard): whether
+  // a picture rides along, and whether the board is the turn's source (#644: only a canvas turn).
+  const boardTurnOn = boardTurnNow.on;
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected, boardTurn: boardTurnOn };
+    useStudioStore.getState().setGenerationReferenceContext(context);
+    return () => {
+      if (useStudioStore.getState().generationReferenceContext === context) {
+        useStudioStore.getState().setGenerationReferenceContext(null);
+      }
+    };
+  }, [activeSessionId, boardTurnOn, hasReference, objectDeselected]);
+  // 「发送到对话」 from the board: this message goes out as a canvas turn (#644).
+  const boardModeRequest = useWorkspaceStore((state) => state.boardModeRequest);
+  useEffect(() => {
+    if (!boardModeRequest || boardModeRequest !== activeSessionId) return;
+    useWorkspaceStore.getState().clearBoardModeRequest();
+    setBoardModeChosen(true);
+  }, [activeSessionId, boardModeRequest, setBoardModeChosen]);
   const mentions = useMemo((): ComposerMention[] => mentionList.map((candidate) => {
     let thumbnail = '';
     if (candidate.kind === 'image') {
@@ -2228,9 +2412,13 @@ export function ChatColumn() {
 
   const stopTurn = () => {
     // 真停止：请求服务端取消轮次（含在飞生成任务），再断开本地 SSE；失败时仍退回仅断开连接。
+    // #665: a cancel the server did not take is said, and the turn is still followed (it still runs).
     if (activeSessionId) {
-      void chatClient.cancelTurn(activeSessionId).catch(() => undefined);
-      controllers.current.get(activeSessionId)?.abort();
+      const sessionId = activeSessionId;
+      void requestTurnStop(chatClient, sessionId, {
+        onStopped: () => controllers.current.get(sessionId)?.abort(),
+        onRefused: () => toast.error(schemaText(schema, 'ui.chat.toast.stop_failed')),
+      });
     }
   };
   // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting
@@ -2249,9 +2437,7 @@ export function ChatColumn() {
   const stopInBackground = () => {
     if (!activeSessionId) return;
     void chatClient.continueTurnInBackground(activeSessionId).catch((error: unknown) => {
-      toast.error(error instanceof Error && error.message !== ''
-        ? withErrorReference(error.message, error)
-        : schema.chat.presentation.messages.internal_error);
+      toast.error(turnFailureText(error, [], schema.chat.presentation.messages.internal_error));
     });
   };
 
@@ -2376,6 +2562,7 @@ export function ChatColumn() {
                   <ChatMessage
                     message={item.message}
                     taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}
+                    statusBubbleShown={statusBubbleShown(isStreaming, statusText, runningTaskCount)}
                     sessionId={activeSessionId}
                     onImageClick={openImageDetail}
                     handleReferences={sessionHandleReferences}
@@ -2492,7 +2679,7 @@ export function ChatColumn() {
                     key={card.requestId}
                     model={card}
                     busy={card.source === 'turn' ? consentBusy : decisionBusy.has(card.requestId)}
-                    now={now}
+                    now={now + (pending.clockOffset ?? 0)}
                     error={decisionError[card.requestId] ?? null}
                     onDecide={(approved) => {
                       if (card.source === 'turn') void decideTurnConsent(approved);
@@ -2552,7 +2739,8 @@ export function ChatColumn() {
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}
-            chip={objectDeselected ? null : chip}
+            chip={objectDeselected ? null : composerChip}
+            boardMode={composerBoardMode}
             onDeselectChip={() => {
               if (sessionSelection) setDeselectedObject(objectKey(sessionSelection));
             }}

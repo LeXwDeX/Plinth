@@ -83,6 +83,16 @@ describe('TaskRefetchPanel', () => {
     expect(html).not.toContain('data-testid="task-refetch-unavailable"');
   });
 
+  it('#665: reads a delivered refetch from the Schema task states, not a fixed state name', () => {
+    const renamed = structuredClone(schema);
+    renamed.task_states = renamed.task_states.map((state) => (state.outcome === 'success'
+      ? { ...state, internal_state: 'DELIVERED', public_state: 'delivered' } : state));
+    testState.schema = renamed;
+    const html = markup({ sourceTaskId: 'source-1', eligible: false, reason: 'delivered', refetchTaskId: 'task-2', refetchState: 'DELIVERED' });
+    expect(html).toContain(messages['ui.task.refetch.succeeded']);
+    testState.schema = schema;
+  });
+
   it('stays hidden on a server without the refetch route', () => {
     const oldSchema = structuredClone(schema);
     delete oldSchema.runtime.http.routes.task_refetch;

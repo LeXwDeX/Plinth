@@ -113,8 +113,14 @@ type Step struct {
 	State            string                `json:"state"`
 	TaskID           generation.TaskID     `json:"task_id,omitempty"`
 	Retry            int                   `json:"retry"`
-	Failure          string                `json:"failure,omitempty"`
-	Retryable        bool                  `json:"retryable,omitempty"`
+	// AgentRetries counts the retries the Agent's revise retry started for
+	// this step (#665). Retry also counts the person's panel retries and the
+	// new keys a reconcile after a cancel takes; only this one is capped by
+	// MaxAgentStepRetries. It is always written, so a step stored before it
+	// existed is told apart on load (see UnmarshalJSON).
+	AgentRetries int    `json:"agent_retries"`
+	Failure      string `json:"failure,omitempty"`
+	Retryable    bool   `json:"retryable,omitempty"`
 	// Resumable marks a PAUSED step that Resume may continue after the user
 	// confirms the current cost; unreconciled submissions are never resumable.
 	Resumable bool `json:"resumable,omitempty"`
@@ -136,9 +142,36 @@ type Step struct {
 	PlanStepID          string                     `json:"plan_step_id,omitempty"`
 	IdempotencyKey      string                     `json:"idempotency_key,omitempty"`
 	AuthorizationRef    string                     `json:"authorization_request_id,omitempty"`
+	// PolicyDecidedRef is the grant the session approval policy already
+	// decided for this frozen step (#665). A grant the policy left to a
+	// person is not decided again by a later mode: the person decides it.
+	PolicyDecidedRef string `json:"policy_decided_request_id,omitempty"`
 	// QueuedUntil 记录生成内核因在途准入已满拒绝本步提交后的下一次重试
 	// 时间：内核确定没有提交，计划保持活动，到点后后台按同一幂等键再提交。
 	QueuedUntil *time.Time `json:"queued_until,omitempty"`
+}
+
+// UnmarshalJSON reads a stored step. A step stored before agent_retries
+// existed (#665) does not say which of its retries the Agent started, so all
+// of them count as the Agent's: the Agent cannot start a step again beyond its
+// bound by reading an old plan, while the person can still retry it from the
+// panel.
+func (s *Step) UnmarshalJSON(data []byte) error {
+	type plain Step
+	var decoded struct {
+		plain
+		AgentRetries *int `json:"agent_retries"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = Step(decoded.plain)
+	if decoded.AgentRetries != nil {
+		s.AgentRetries = *decoded.AgentRetries
+	} else {
+		s.AgentRetries = s.Retry
+	}
+	return nil
 }
 
 // Origins of a processing plan. An Agent-created plan's steps are eligible for
@@ -265,6 +298,26 @@ type Service struct {
 	// sizedTextureEdge names the deliverables a purpose sized, which a
 	// checkpoint's texture_size judges instead of the native file (#292).
 	sizedTextureEdge SizedTextureEdge
+	// agentStepRetries is the Schema's
+	// processing.plan.revision.max_agent_retries_per_step; see
+	// WithAgentStepRetries.
+	agentStepRetries int
+}
+
+// WithAgentStepRetries sets how often the Agent's revise retry may start one
+// step again (catalog.ProcessingAgentStepRetries). Zero or less keeps
+// MaxAgentStepRetries, the bound of a plan tool that declares none.
+func (s *Service) WithAgentStepRetries(limit int) *Service {
+	s.agentStepRetries = limit
+	return s
+}
+
+// maxAgentStepRetries is the retry bound in force.
+func (s *Service) maxAgentStepRetries() int {
+	if s.agentStepRetries > 0 {
+		return s.agentStepRetries
+	}
+	return MaxAgentStepRetries
 }
 
 // WithGrants enables approval by session policy for plan steps. The grant is
@@ -330,8 +383,16 @@ func (s *Service) approveStepByPolicy(ctx context.Context, plan *Plan, step *Ste
 		PlanStepID:        step.PlanStepID,
 		BudgetEligible:    plan.Origin == OriginAgent,
 	})
+	if err == nil && grant.Status == executiongrant.Pending && step.PolicyDecidedRef == grant.RequestID {
+		// Decided once already and left to a person (#665): switching the
+		// mode afterwards does not approve it.
+		return ""
+	}
 	if err == nil {
 		grant, err = s.grants.ApplyPolicy(ctx, grant)
+	}
+	if err == nil {
+		step.PolicyDecidedRef = grant.RequestID
 	}
 	if err != nil {
 		s.logger.Warn("按批准方式准备处理步骤失败，改为等待确认", "plan_id", plan.ID, "error", err)
@@ -1208,8 +1269,13 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 			if errors.Is(err, generation.ErrConversionInProgress) {
 				// Another active run of this exact conversion (a direct Agent
 				// run or another step) owns the source and formats. Nothing
-				// was submitted; pause and let the user continue after it ends.
-				return s.stop(ctx, plan, step, Paused, ReasonPrepareUnavailable)
+				// was submitted and nothing was charged: the step stays queued
+				// (shown as queued, no timeout) and the background submits it
+				// again under the same key once that run has ended.
+				until := time.Now().UTC().Add(generation.ConversionRetryAfter)
+				step.QueuedUntil = &until
+				plan.UpdatedAt = time.Now().UTC()
+				return s.savePlan(ctx, plan)
 			}
 			if generation.IsCode(err, generation.ErrForbidden) {
 				step.AuthorizationRef = ""

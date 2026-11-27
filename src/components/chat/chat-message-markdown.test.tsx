@@ -83,6 +83,15 @@ describe('an Agent reply in Markdown (#333)', () => {
     expect(html).not.toContain('data-chat-markdown');
   });
 
+  it('draws no spinner of its own while the status bubble below the list already shows one (#641)', () => {
+    const message = reply('我来把这两条灯笼鱼的材质', { isStreaming: true });
+    const spinnerLabel = messages['ui.chat.message.generating'];
+    expect(renderToStaticMarkup(<ChatMessage message={message} sessionId="s" />)).toContain(`aria-label="${spinnerLabel}"`);
+    const withBubble = renderToStaticMarkup(<ChatMessage message={message} sessionId="s" statusBubbleShown />);
+    expect(withBubble).not.toContain(`aria-label="${spinnerLabel}"`);
+    expect(withBubble).toContain('我来把这两条灯笼鱼的材质');
+  });
+
   it('formats an unclosed bold while the reply streams, and shows it as written once complete', () => {
     const streaming = render(reply('这是 **重', { isStreaming: true }));
     expect(streaming).toContain('这是 <strong class="font-semibold">重</strong>');

@@ -142,7 +142,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
     () => Array.from(new Set(plan.steps.map((step) => step.capability))).sort(),
     [plan],
   );
-  const { data: offeringsByCapability } = useSWR<Record<string, OfferingWire[]>>(
+  const { data: offeringsByCapability, error: offeringsError } = useSWR<Record<string, OfferingWire[]>>(
     capabilities.length > 0 ? ['plan-card-offerings', schema.revision, capabilities] : null,
     async () => Object.fromEntries(await Promise.all(
       capabilities.map(async (capability) => [capability, await fetchCapabilityOfferings(schema, capability)]),
@@ -220,6 +220,8 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
     && !stepsMayStillRun && remaining > 0;
   const modelName = (capability: string, offeringId: string): string => {
     if (!offeringId) return text('ui.studio.plan.model_unspecified');
+    // #670: while the Offering names are read, the cell holds the loading text instead of the raw id.
+    if (!offeringsByCapability && !offeringsError) return text('ui.loading');
     return offeringsByCapability?.[capability]?.find((offering) => offering.id === offeringId)?.model_name || offeringId;
   };
   // #103: a state this build's Schema does not name is shown as "unknown", never as pending.
@@ -452,7 +454,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
         // are left. This is a display state, not a stored one: continuing
         // starts the plan's turn again and the badge goes back to running.
         <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-warning" data-testid="studio-plan-stopped">
-          <span>{formatSchemaText(text('ui.studio.plan.stopped'), { count: remaining })}</span>
+          <span>{schemaCountMessage(schema, 'ui.studio.plan.stopped', remaining, { count: remaining })}</span>
           {onContinue ? (
             <Action
               type="button"

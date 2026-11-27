@@ -824,8 +824,8 @@ func TestRetexturePromptOverLimitRefusesBeforePaidSubmission(t *testing.T) {
 	content := h.content(result)
 	message, _ := content["error"].(string)
 	if content["success"] != false ||
-		!strings.Contains(message, "over the limit of 800 characters") ||
-		!strings.Contains(message, "Nothing was submitted and nothing was charged") {
+		!strings.Contains(message, "上限 800 个字符") ||
+		!strings.Contains(message, "没有提交，也没有扣费") {
 		t.Fatalf("refusal = %v", content)
 	}
 }
@@ -862,8 +862,8 @@ func TestRetexturePromptOverLimitTruncatesAndReportsTheCut(t *testing.T) {
 		t.Fatalf("prompt_note = %#v", note)
 	}
 	rendered, _ := json.Marshal(note)
-	if !strings.Contains(string(rendered), "length limit") ||
-		!strings.Contains(string(rendered), "cutting the last 1 characters") {
+	if !strings.Contains(string(rendered), "长度上限") ||
+		!strings.Contains(string(rendered), "截掉末尾 1 个字符") {
 		t.Fatalf("prompt_note does not report the cut: %s", rendered)
 	}
 }
@@ -906,7 +906,7 @@ func TestRetexturePromptTruncationIsReportedTheSameOnResume(t *testing.T) {
 			firstContent["prompt_note"], secondContent["prompt_note"])
 	}
 	rendered, _ := json.Marshal(secondContent["prompt_note"])
-	if !strings.Contains(string(rendered), "length limit") {
+	if !strings.Contains(string(rendered), "长度上限") {
 		t.Fatalf("resume lost the cut layer: %s", rendered)
 	}
 }

@@ -54,7 +54,7 @@ export function ApprovalMenu() {
         <HintTooltip name={schemaText(schema, 'ui.workspace.approval.label')} hint={current?.tooltip} className="shrink-0">
           <Popover.Trigger
             data-testid="studio-approval-menu"
-            aria-label={`${schemaText(schema, 'ui.workspace.approval.label')}: ${current?.label ?? ''}`}
+            aria-label={formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label: schemaText(schema, 'ui.workspace.approval.label'), value: current?.label ?? '' })}
             className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-primary/15 data-popup-open:text-primary"
           >
             <ShieldCheck aria-hidden className="size-3.5" />

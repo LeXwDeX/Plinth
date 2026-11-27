@@ -113,13 +113,20 @@ func (r *Repository) CreateChoice(ctx context.Context, choice chat.Choice) (chat
 	return choice, nil
 }
 
+// choiceReplyExists keeps a card whose reply still exists (#645): deleting a
+// reply deletes its cards, and a card an earlier deletion left behind is not
+// read.
+const choiceReplyExists = `EXISTS (SELECT 1 FROM go_chat_messages WHERE go_chat_messages.id = chat_choices.assistant_message_id
+	AND go_chat_messages.session_id = chat_choices.session_id)`
+
 // ListChoices returns the session's newest cards first, at most limit.
 func (r *Repository) ListChoices(ctx context.Context, ownerID, sessionID string, limit int) ([]chat.Choice, error) {
 	if limit <= 0 {
 		limit = 1
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT `+choiceColumns+` FROM chat_choices
-		WHERE owner_id = ? AND session_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, ownerID, sessionID, limit)
+		WHERE owner_id = ? AND session_id = ? AND `+choiceReplyExists+`
+		ORDER BY created_at DESC, id DESC LIMIT ?`, ownerID, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list chat choices: %w", err)
 	}
@@ -137,7 +144,7 @@ func (r *Repository) ListChoices(ctx context.Context, ownerID, sessionID string,
 
 func (r *Repository) GetChoice(ctx context.Context, ownerID, sessionID, choiceID string) (chat.Choice, error) {
 	choice, err := scanChoice(r.db.QueryRowContext(ctx, `SELECT `+choiceColumns+` FROM chat_choices
-		WHERE id = ? AND owner_id = ? AND session_id = ?`, choiceID, ownerID, sessionID))
+		WHERE id = ? AND owner_id = ? AND session_id = ? AND `+choiceReplyExists, choiceID, ownerID, sessionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return chat.Choice{}, chat.ErrChoiceNotFound
 	}
@@ -192,6 +199,18 @@ func (r *Repository) ReopenChoice(ctx context.Context, ownerID, sessionID, choic
 		string(chat.ChoicePending), choiceID, ownerID, sessionID, string(chat.ChoiceAnswered), messageID)
 	if err != nil {
 		return fmt.Errorf("reopen chat choice: %w", err)
+	}
+	return nil
+}
+
+// SupersedeChoicesBefore supersedes the session's pending cards created no
+// later than before by any reply but keep (#645).
+func (r *Repository) SupersedeChoicesBefore(ctx context.Context, ownerID, sessionID, keep string, before time.Time) error {
+	if _, err := r.db.ExecContext(ctx, `UPDATE chat_choices SET state = ?
+		WHERE owner_id = ? AND session_id = ? AND state = ? AND assistant_message_id <> ? AND created_at <= ?`,
+		string(chat.ChoiceSuperseded), ownerID, sessionID, string(chat.ChoicePending), keep,
+		formatTaskTime(before.UTC())); err != nil {
+		return fmt.Errorf("supersede stale chat choices: %w", err)
 	}
 	return nil
 }

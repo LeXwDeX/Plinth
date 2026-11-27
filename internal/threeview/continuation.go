@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
@@ -46,8 +47,10 @@ type ContinuationResult struct {
 // group inside an approved budget.
 func (s *Service) ContinuationEnabled() bool { return s.schema.Continuation.Enabled }
 
-// CanContinue reports whether the session's active production plan explicitly
-// covers every required view of the run (#243). It never submits anything.
+// CanContinue reports whether the server may submit this run's views by itself:
+// the session approves every paid step (the auto mode, #663), or its active
+// production plan explicitly covers every required view of the run (#243). The
+// strict mode never continues. It never submits anything.
 func (s *Service) CanContinue(ctx context.Context, owner, session, runID string) (bool, error) {
 	if !s.schema.Continuation.Enabled {
 		return false, nil
@@ -72,7 +75,8 @@ func (s *Service) CanContinue(ctx context.Context, owner, session, runID string)
 			return false, nil
 		}
 	}
-	return s.runtime.Grants.BudgetContinuation(ctx, owner, session, string(first.Spec.Capability), string(first.Spec.OfferingID), len(steps))
+	basis, err := s.runtime.Grants.Continuation(ctx, owner, session, string(first.Spec.Capability), string(first.Spec.OfferingID), len(steps))
+	return basis != executiongrant.ContinuationNone, err
 }
 
 // Continue advances one group after a Task the Agent (or a person) started
@@ -81,6 +85,16 @@ func (s *Service) CanContinue(ctx context.Context, owner, session, runID string)
 // submits the next required view only when the budget plan approves it. It
 // never submits a view outside the plan and never touches an accepted view.
 func (s *Service) Continue(ctx context.Context, owner, session, runID, taskID, turnID string) (ContinuationResult, error) {
+	return s.ContinueWith(ctx, owner, session, runID, taskID, turnID, false)
+}
+
+// ContinueWith is Continue for a four-view request: with includeRight, the
+// optional right view is also made in sequence when the session approves every
+// paid step (the auto mode, #663). A budget plan covers the required views only,
+// so there the right view stays the person's choice on the card, as before.
+func (s *Service) ContinueWith(ctx context.Context, owner, session, runID, taskID, turnID string,
+	includeRight bool,
+) (ContinuationResult, error) {
 	if !s.schema.Continuation.Enabled {
 		return ContinuationResult{}, ErrInvalid
 	}
@@ -107,16 +121,95 @@ func (s *Service) Continue(ctx context.Context, owner, session, runID, taskID, t
 	case err != nil:
 		return ContinuationResult{}, err
 	}
-	return s.advanceRequired(ctx, settled, turnID)
+	steps := s.requiredSteps(settled)
+	rightDropped := false
+	if includeRight {
+		basis, err := s.autoBasis(ctx, settled, steps)
+		if err != nil {
+			return ContinuationResult{}, err
+		}
+		if basis {
+			steps = s.stepsWithOptional(settled, steps)
+		} else {
+			// The group started in the auto mode and the person switched away
+			// from it: the right view no longer continues by itself (#665).
+			rightDropped, err = s.startedOnPolicy(ctx, settled, steps)
+			if err != nil {
+				return ContinuationResult{}, err
+			}
+		}
+	}
+	result, err := s.advanceRequired(ctx, settled, turnID, steps)
+	if err != nil || !rightDropped || result.Paused || result.TaskID != "" {
+		return result, err
+	}
+	// The required views are done but the four-view request is not: say so
+	// instead of reporting the group complete, so the Agent tells the person
+	// the right view waits for them on the card (#665).
+	for _, step := range s.stepsWithOptional(settled, nil) {
+		if step.ReplacementAssetID == "" && !(step.Phase == skillrun.OutputReady && step.Review == skillrun.Accepted) {
+			result.Paused, result.Reason, result.View = true, ReasonBudgetNotCovered, step.Spec.Key
+			result.Completed = nil
+			return result, nil
+		}
+	}
+	return result, nil
 }
 
-// advanceRequired walks the required views in order: it pauses on a view that
+// startedOnPolicy reports whether the group's first required view was approved
+// by the auto mode's policy actor, so a four-view request was made on the auto
+// basis. The strict and budget modes approve cheap views by policy too
+// (policy:manual, policy:budget); such a group never had the right view on
+// that basis and finishes as a three-view group (#665).
+func (s *Service) startedOnPolicy(ctx context.Context, run skillrun.Run, required []skillrun.Step) (bool, error) {
+	if len(required) == 0 || required[0].GrantRequestID == "" {
+		return false, nil
+	}
+	grant, err := s.runtime.Grants.Grants.GetExecutionGrant(ctx, string(run.OwnerID), required[0].GrantRequestID)
+	if err != nil {
+		return false, err
+	}
+	return grant.Status != executiongrant.Pending &&
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto, nil
+}
+
+// autoBasis reports whether the session approves every paid step by itself, the
+// one basis on which the optional right view continues with the others.
+func (s *Service) autoBasis(ctx context.Context, run skillrun.Run, required []skillrun.Step) (bool, error) {
+	if len(required) == 0 {
+		return false, nil
+	}
+	first := required[0]
+	basis, err := s.runtime.Grants.Continuation(ctx, string(run.OwnerID), run.SessionID,
+		string(first.Spec.Capability), string(first.Spec.OfferingID), len(required))
+	return basis == executiongrant.ContinuationAuto, err
+}
+
+// stepsWithOptional is the required views followed by the run's optional views
+// in the multiview order (the right view).
+func (s *Service) stepsWithOptional(run skillrun.Run, required []skillrun.Step) []skillrun.Step {
+	steps := append([]skillrun.Step(nil), required...)
+	for _, key := range s.schema.Multiview.ViewOrder {
+		for _, step := range run.Steps {
+			if step.Spec.Key == key && step.Spec.Optional {
+				steps = append(steps, step)
+				break
+			}
+		}
+	}
+	return steps
+}
+
+// advanceRequired walks the given views (the required ones, and with the auto
+// mode's four-view request the right view) in order: it pauses on a view that
 // did not finish, redraws the first rejected view within the attempt limit,
 // submits the first planned view the active plan covers, and reports the group
 // complete when every required view is accepted.
-func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID string) (ContinuationResult, error) {
+func (s *Service) advanceRequired(ctx context.Context, run skillrun.Run, turnID string,
+	steps []skillrun.Step,
+) (ContinuationResult, error) {
 	owner := run.OwnerID
-	for _, step := range s.requiredSteps(run) {
+	for _, step := range steps {
 		if step.ReplacementAssetID != "" {
 			continue
 		}
@@ -251,10 +344,11 @@ type submission struct {
 	Reason string
 }
 
-// prepareAndSubmit prepares one view's frozen input, requests its budget
-// grant, and submits it only when the active plan approved the grant. A grant
-// left pending for a person, a denial, or a policy approval that did not come
-// from the budget all stop without submitting.
+// prepareAndSubmit prepares one view's frozen input, requests its grant, and
+// submits it only when the basis the series continues on approved the grant: the
+// active plan (budget mode) or the session policy (auto mode, #663). A grant
+// left pending for a person, a denial, or an approval from the other source all
+// stop without submitting.
 func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	stepKey, turnID string,
 ) (submission, error) {
@@ -264,12 +358,12 @@ func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID
 	}
 	step := run.Steps[index]
 	required := s.requiredSteps(run)
-	covered, err := s.runtime.Grants.BudgetContinuation(ctx, string(owner), run.SessionID,
+	basis, err := s.runtime.Grants.Continuation(ctx, string(owner), run.SessionID,
 		string(step.Spec.Capability), string(step.Spec.OfferingID), len(required))
 	if err != nil {
 		return submission{}, err
 	}
-	if !covered {
+	if basis == executiongrant.ContinuationNone {
 		return submission{Reason: ReasonBudgetNotCovered}, nil
 	}
 	if _, _, err := s.runtime.PrepareStep(ctx, owner, run.ID, stepKey); err != nil {
@@ -279,7 +373,13 @@ func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID
 	if err != nil {
 		return submission{}, translate(err)
 	}
-	if grant.Status != executiongrant.Approved || !grant.ApprovedByBudget() {
+	// The grant must come from the basis the series continues on: the plan's
+	// budget, or (auto mode) the session policy. A grant left pending for a
+	// person, a denial, or an approval from the other source stops here.
+	approved := grant.Status == executiongrant.Approved &&
+		((basis == executiongrant.ContinuationBudget && grant.ApprovedByBudget()) ||
+			(basis == executiongrant.ContinuationAuto && grant.ApprovedByPolicy()))
+	if !approved {
 		return submission{Reason: ReasonBudgetNotCovered}, nil
 	}
 	_, accepted, err := s.runtime.SubmitStep(context.WithoutCancel(ctx), owner, run.ID, stepKey)
@@ -508,12 +608,14 @@ func stepIndexByTask(run skillrun.Run, taskID string) int {
 	return -1
 }
 
-// acceptedViews lists the accepted required views in recipe order for the
-// Agent's same-turn pictures.
+// acceptedViews lists the finished views in recipe order for the Agent's
+// same-turn pictures: the required ones and any finished optional one.
 func acceptedViews(group Group) []View {
 	views := make([]View, 0, len(group.Slots))
 	for _, slot := range group.Slots {
-		if slot.Optional || slot.Status != Succeeded || slot.OutputAssetID == "" {
+		// A finished optional view (the right view of a four-view request, #663) is a
+		// finished view too: the Agent's receipt and its checking pictures include it.
+		if slot.Status != Succeeded || slot.OutputAssetID == "" {
 			continue
 		}
 		view := View{Key: slot.Key, TaskID: slot.TaskID, AssetID: slot.OutputAssetID}

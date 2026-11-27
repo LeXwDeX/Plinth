@@ -163,9 +163,9 @@ func TestGetTaskReturnsState(t *testing.T) {
 	executor, err := New(Config{
 		Params:   store,
 		Generate: &fakeGenerate{},
-		ReadTask: func(_ context.Context, ownerID, taskID string) (json.RawMessage, error) {
-			if ownerID != "owner" || taskID != "task_1" {
-				t.Fatalf("ReadTask(%q, %q)", ownerID, taskID)
+		ReadTask: func(_ context.Context, command chat.ToolCommand, taskID string) (json.RawMessage, error) {
+			if command.OwnerID != "owner" || taskID != "task_1" {
+				t.Fatalf("ReadTask(%q, %q)", command.OwnerID, taskID)
 			}
 			return json.RawMessage(`{"state":"SUCCEEDED"}`), nil
 		},
@@ -197,7 +197,7 @@ func TestRetiredToolNamesHaveNoExecutorBranch(t *testing.T) {
 	executor, err := New(Config{
 		Params:   agentparams.NewStore(),
 		Generate: gen,
-		ReadTask: func(context.Context, string, string) (json.RawMessage, error) {
+		ReadTask: func(context.Context, chat.ToolCommand, string) (json.RawMessage, error) {
 			t.Fatal("a retired tool name reached the task reader")
 			return nil, nil
 		},

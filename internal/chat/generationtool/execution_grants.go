@@ -202,7 +202,7 @@ func (executor *Executor) prepareAgentOperation(
 		if _, duplicate, err := executor.pendingDuplicate(ctx, command, prepared); err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
 		} else if duplicate {
-			return chat.ToolResult{AgentContent: executor.chat.Agent.ConsentDuplicateContent, NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: executor.localized(command, executor.chat.Agent.ConsentDuplicateContent), NoSubmission: true}, nil
 		}
 	}
 	op, err := executor.operations.InsertAgentOperation(ctx, Operation{
@@ -484,7 +484,7 @@ func (executor *Executor) resumeAgentOperation(
 			}
 			return executor.stepCapResult(ctx, command, summary), nil
 		}
-		return chat.ToolResult{AgentContent: executor.chat.Agent.ConsentDeniedContent, NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: executor.localized(command, executor.chat.Agent.ConsentDeniedContent), NoSubmission: true}, nil
 	case executiongrant.Claimed:
 		return chat.ToolResult{Suspend: true}, nil
 	case executiongrant.Approved, executiongrant.Bound:

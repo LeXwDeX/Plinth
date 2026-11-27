@@ -670,7 +670,7 @@ function BoardCell({
   const stepsText = steps
     ? stepLimit(steps) > 0
       ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: stepLimit(steps) })
-      : formatSchemaText(text('ui.asset_list.board.steps'), { steps: steps.used })
+      : schemaCountMessage(schema, 'ui.asset_list.board.steps', steps.used, { steps: steps.used })
     : text('ui.asset_list.board.steps_unknown');
   const showSteps = itemShowsSteps(item);
   const exhausted = stepsExhausted(item);
@@ -762,7 +762,7 @@ function BoardCell({
         {showSteps ? (
           <span className="flex flex-wrap items-baseline gap-x-2 tabular-nums text-[11px] leading-4 text-muted-foreground">
             {steps && !(stepLimit(steps) > 0) && steps.model3d > 0 ? (
-              <span>{formatSchemaText(text('ui.asset_list.board.steps_3d'), { steps: steps.model3d })}</span>
+              <span>{schemaCountMessage(schema, 'ui.asset_list.board.steps_3d', steps.model3d, { steps: steps.model3d })}</span>
             ) : null}
             <span className="ml-auto" data-testid={`asset-board-steps-${item.id}`}>{stepsText}</span>
           </span>

@@ -6,7 +6,8 @@
  * 防御式解析与路由拼装，不持有格式表、转换关系或原因文案。
  */
 
-import { schemaText, type ProductSchema } from '@/lib/product-schema';
+import { schemaText, type ProductSchema, type TaskStateSchema } from '@/lib/product-schema';
+import { findTaskState } from '@/lib/workspace/task-projection';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote, type PriceTotal } from '@/lib/pricing';
 
 export type ModelFormatStatus = 'available' | 'obtainable' | 'converting' | 'unavailable';
@@ -175,13 +176,18 @@ export function pausedSteps(coverage: ModelFormatCoverage): ModelFormatStep[] {
   return coverage.steps.filter((step) => step.state === 'PAUSED');
 }
 
-export function failedSteps(coverage: ModelFormatCoverage): ModelFormatStep[] {
-  return coverage.steps.filter((step) => step.state === 'FAILED' && step.planId !== '' && !refetchUnderway(step));
+export function failedSteps(states: readonly TaskStateSchema[], coverage: ModelFormatCoverage): ModelFormatStep[] {
+  return coverage.steps.filter((step) => step.state === 'FAILED' && step.planId !== '' && !refetchUnderway(states, step));
 }
 
-/** A failed step whose free refetch is running or already delivered: nothing to act on (#330). */
-export function refetchUnderway(step: ModelFormatStep): boolean {
-  return Boolean(step.refetch?.taskId) && step.refetch?.state !== 'FAILED' && step.refetch?.state !== 'CANCELED';
+/**
+ * A failed step whose free refetch is running or already delivered: nothing to act on (#330). A refetch Task that
+ * ended without success (its outcome read from the Schema's task_states) leaves the step to act on again.
+ */
+export function refetchUnderway(states: readonly TaskStateSchema[], step: ModelFormatStep): boolean {
+  if (!step.refetch?.taskId) return false;
+  const state = findTaskState(states, step.refetch.state);
+  return !(state?.terminal && state.outcome !== 'success');
 }
 
 /**
@@ -346,12 +352,12 @@ export type FormatRowAction =
   | { kind: 'retry'; step: ModelFormatStep; formats: string[] }
   | { kind: 'refetch'; step: ModelFormatStep; formats: string[] };
 
-export function formatRowAction(coverage: ModelFormatCoverage | null, row: ModelFormatRow): FormatRowAction | null {
+export function formatRowAction(states: readonly TaskStateSchema[], coverage: ModelFormatCoverage | null, row: ModelFormatRow): FormatRowAction | null {
   if (!coverage || row.status !== 'obtainable') return null;
   const step = coverage.steps.find((candidate) => candidate.formats.includes(row.id));
   if (!step) return null;
   if (step.state === '') return { kind: 'start', step, formats: step.formats };
-  if (step.state === 'FAILED' && step.planId !== '' && !refetchUnderway(step)) {
+  if (step.state === 'FAILED' && step.planId !== '' && !refetchUnderway(states, step)) {
     if (refetchOffered(step)) return { kind: 'refetch', step, formats: step.formats };
     return step.retryBlocked ? null : { kind: 'retry', step, formats: step.formats };
   }

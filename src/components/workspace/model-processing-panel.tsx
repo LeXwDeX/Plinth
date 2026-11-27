@@ -115,8 +115,8 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     }
   }, [plans, registerTask, schema.runtime.frontend.percentage_multiplier, sessionID]);
   const steps = useMemo(() => source && asset
-    ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
-    : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
+    ? processingSourceSteps(schema.task_states, availableCapabilities, selected, offerings, source, asset, chosen)
+    : [], [schema.task_states, source, asset, availableCapabilities, selected, offerings, chosen]);
   // What the session purpose gives the parameters that follow it (#306), for the chosen steps of the person's own
   // session: an untouched one says "按会话用途：2K" instead of only that it follows the purpose. The server fills the
   // plan with the same values on confirm; the request itself still leaves such a parameter out.
@@ -170,10 +170,10 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   const withStep = useCallback((current: string[], capabilityID: string) => {
     if (current.includes(capabilityID)) return current;
     const next = [...current, capabilityID];
-    const prerequisite = source && asset ? processingPrerequisite(capabilityID, availableCapabilities, offerings, source, asset) : null;
+    const prerequisite = source && asset ? processingPrerequisite(schema.task_states, capabilityID, availableCapabilities, offerings, source, asset) : null;
     if (prerequisite && !next.includes(prerequisite)) next.push(prerequisite);
     return next;
-  }, [asset, availableCapabilities, offerings, source]);
+  }, [schema.task_states, asset, availableCapabilities, offerings, source]);
   const toggle = (capabilityID: string) => setSelected((current) => (current.includes(capabilityID)
     ? current.filter((id) => id !== capabilityID)
     : withStep(current, capabilityID)));
@@ -208,7 +208,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       const key = lastSubmit.current?.body === body ? lastSubmit.current.key : randomKey();
       lastSubmit.current = { body, key };
       const response = await fetch(schema.runtime.http.routes.processing_plans, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body });
-      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || `HTTP ${response.status}`); }
+      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || schemaText(schema, 'ui.workspace.processing.submit_failed')); }
       await reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : schemaText(schema, 'ui.workspace.processing.submit_failed')); }
     finally { setBusy(false); }
@@ -263,7 +263,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       const route = schema.runtime.http.routes.processing_plan_retry.replace('{planID}', encodeURIComponent(currentPlan.id));
       const response = await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expected_plan_version: currentPlan.version, expected_offering_revision: failedOffering.revision }) });
-      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || `HTTP ${response.status}`); }
+      if (!response.ok) { const problem: { detail?: string } = await response.json().catch(() => ({})); throw new Error(problem.detail || schemaText(schema, 'ui.workspace.processing.submit_failed')); }
       await reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : schemaText(schema, 'ui.workspace.processing.submit_failed')); }
     finally { setBusy(false); }
@@ -355,7 +355,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
             {schemaText(schema, 'ui.workspace.processing.plan_waiting_alternative')}
           </p>}
           {checkpointStep && <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')} className="mt-3"
-            reason={!working && !schema.runtime.http.routes.processing_plan_resume ? reasonText('unavailable') : undefined}>
+            reason={!working && !schema.runtime.http.routes.processing_plan_resume ? schemaText(schema, 'ui.workspace.processing.unavailable_reason.unavailable') : undefined}>
             <Action type="button"
               loading={working} disabled={working || !schema.runtime.http.routes.processing_plan_resume} onClick={() => void continueCheckpoint()}>
               {schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')}
@@ -394,9 +394,9 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               </p> : <UnavailableNotice testId={`processing-refused-${capability.id}`}
                 {...processingUnavailableNotice(schema, step.blocked || !source || !asset ? { blocked: step.blocked, step: capability.id } : {
                   step: capability.id, size: asset.size,
-                  refusals: sourceRefusals(offerings?.[capability.id] ?? [], source, asset),
+                  refusals: sourceRefusals(schema.task_states, offerings?.[capability.id] ?? [], source, asset),
                   // #326: the step that would come first cannot run on the model either: say why and what works.
-                  prerequisite: prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset),
+                  prerequisite: prerequisiteRefusal(schema.task_states, capability.id, availableCapabilities, offerings, source, asset),
                 })} />}
               <p data-testid={`processing-quote-${capability.id}`}>{offering ? offeringQuoteText(schema, offering) : schemaText(schema, 'ui.workspace.harness.credits_unknown')}</p>
               {offering && <ReasonHint name={capability.label_cn} reason={lockReason} className="flex w-full flex-col"><SchemaParameters parameters={parameters}

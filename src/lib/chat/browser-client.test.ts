@@ -995,6 +995,33 @@ describe('ChatBrowserClient', () => {
     expect(requestedMethod).toBe('DELETE');
   });
 
+  // #645: replacing the last turn names the turn's messages still to delete in the Schema's repeated query member;
+  // the server's 409 for a stale page reaches the caller with its words.
+  it('names the last turn of a replacing deletion and surfaces the 409 of a stale page', async () => {
+    const schema = schemaFixture();
+    schema.chat.api.fields.last_turn = 'lastTurn';
+    const requested: string[] = [];
+    let status = 204;
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input) => {
+        requested.push(String(input));
+        return status === 204
+          ? new Response(null, { status })
+          : new Response(JSON.stringify({ [schema.chat.api.response_fields.error]: '对话已有更新，请刷新后再试' }), { status });
+      },
+    });
+
+    await client.deleteMessage('s', 'reply-2', ['reply-2', 'user-2']);
+    await client.deleteMessage('s', 'other');
+    expect(requested[0]).toMatch(/\/messages\/reply-2\?lastTurn=reply-2&lastTurn=user-2$/);
+    expect(requested[1]).toMatch(/\/messages\/other$/);
+
+    status = 409;
+    await expect(client.deleteMessage('s', 'reply-1', ['reply-1', 'user-1'])).rejects.toMatchObject({
+      status: 409, message: '对话已有更新，请刷新后再试',
+    });
+  });
+
   it('deletes a session through the Schema-configured item route', async () => {
     const schema = schemaFixture();
     schema.runtime.http.legacy_routes.chat_session =
@@ -1248,6 +1275,18 @@ describe('chat stream silence watchdog (#375)', () => {
     watched.sources[0].emit(watched.heartbeat, '');
     vi.advanceTimersByTime(100);
     expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(3)]);
+  });
+
+  it('#665: a reconnect from the original cursor skips the events the stream already delivered', () => {
+    const watched = watch();
+    // Frames without an id line: the browser has no last event id to resume from.
+    watched.sources[0].emit(watched.text('a'), '');
+    watched.sources[0].emit(watched.text('b'), '');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(3)]);
+    // The server replays from the cursor: a and b again, then what the client never saw.
+    for (const content of ['a', 'b', 'c']) watched.sources[1].emit(watched.text(content), '');
+    expect(watched.events).toEqual(['a', 'b', 'c'].map((content) => ({ type: 'text', content })));
   });
 
   it('keeps a quiet stream open while visible heartbeats arrive and never delivers them', () => {

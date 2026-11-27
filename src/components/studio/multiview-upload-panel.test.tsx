@@ -87,6 +87,15 @@ describe('the multiview panel note about the picked 3D model', () => {
     expect(note.textContent).toContain('Tripo P2 多视图');
   });
 
+  // #670: each picture and its view picker are named in words, not by a bare number.
+  it('names each picture and its view picker in words', () => {
+    const messages = schema.content.messages as Record<string, string>;
+    const view = render(<MultiviewUploadPanel images={images} target={target} onConfirm={vi.fn()} />);
+    const second = (key: string) => messages[key].replace('{index}', '2');
+    expect(view.getAllByRole('img').map((node) => node.getAttribute('alt'))[1]).toBe(second('ui.studio.multiview_upload.image_label'));
+    expect(view.getAllByTestId('studio-multiview-upload-view')[1].getAttribute('aria-label')).toBe(second('ui.studio.multiview_upload.view_label'));
+  });
+
   it('shows no note when the target is the pick or nothing is picked', () => {
     const same = render(<MultiviewUploadPanel images={images} target={target} lockNote={null} onConfirm={vi.fn()} />);
     expect(same.queryByTestId('studio-multiview-upload-lock-note')).toBeNull();

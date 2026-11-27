@@ -1334,6 +1334,12 @@ var (
 // retry after that Task reaches a terminal state.
 var ErrConversionInProgress = errors.New("active format conversion overlaps")
 
+// ConversionRetryAfter is how long a caller that queues a refused conversion
+// (a processing plan step, shown as queued) waits before submitting it again
+// under the same idempotency key. There is no overall timeout: the step stays
+// queued until the other run ends or the person stops the plan.
+const ConversionRetryAfter = 30 * time.Second
+
 func mapRepositoryError(operation string, err error) error {
 	if err == nil {
 		return nil

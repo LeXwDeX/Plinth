@@ -49,11 +49,13 @@ func TestThreeViewCountsAgainstTheTurnGenerationLimit(t *testing.T) {
 		t.Fatalf("the same call was counted twice: %+v %v", result, err)
 	}
 
-	// A second new three-view in the same turn reaches the bound.
+	// A second new three-view of the same source in the same turn is refused
+	// before any run is created: since #665 the duplicate guard answers it
+	// first (the first group waits on its card), so it uses no generation.
 	second := command
 	second.Call.ID = "call-second"
 	result, err = executor.Execute(ctx, second, nil)
-	if err != nil || !result.NoSubmission || result.AgentContent != executor.limitContent {
+	if err != nil || !result.NoSubmission || result.Suspend || result.GenerationUnits != 0 {
 		t.Fatalf("a second three-view in the turn = %+v %v", result, err)
 	}
 	if _, _, _, err := executor.existingThreeView(ctx, second); !errors.Is(err, skillrun.ErrMissing) {

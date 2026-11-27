@@ -1,6 +1,7 @@
 import { offeringParamSchemas, type OfferingWire } from '@/lib/agent-offerings';
 import type { ParamSchema } from '@/lib/providers/types';
-import type { TrackedAsset } from '@/lib/workspace/task-projection';
+import type { TaskStateSchema } from '@/lib/product-schema';
+import { findTaskState, type TrackedAsset } from '@/lib/workspace/task-projection';
 
 export interface ProcessingSourceTask {
   id: string;
@@ -103,12 +104,14 @@ export function upstreamJobExpired(parameter: SourceParameter,
  * declared age the saved file goes instead (#325), marked taskExpired so the panel can say why.
  */
 export function chooseProcessingSource(
+  states: readonly TaskStateSchema[],
   offering: OfferingWire,
   task: ProcessingSourceTask,
   asset: ProcessingSourceAsset,
   now: number = Date.now(),
 ): ProcessingSource | null {
-  if (!offering.available || task.state !== 'SUCCEEDED' || asset.kind !== 'model' || !asset.id || !asset.url) return null;
+  // Only a task that ended in success has a result to process; the outcome is read from the Schema's task_states.
+  if (!offering.available || findTaskState(states, task.state)?.outcome !== 'success' || asset.kind !== 'model' || !asset.id || !asset.url) return null;
   if (exceedsSourceModelLimit(offering, asset)) return null;
   const taskParameter = offering.parameters.find((parameter) => sourceParameterRole(parameter) === 'task' && parameter.type === 'task');
   let taskExpired = false;
@@ -210,6 +213,7 @@ export interface ProcessingSourceStep {
  * states why instead of silently changing service.
  */
 export function processingSourceSteps(
+  states: readonly TaskStateSchema[],
   capabilities: readonly { id: string }[],
   selected: readonly string[],
   offerings: Record<string, OfferingWire[]> | undefined,
@@ -229,7 +233,7 @@ export function processingSourceSteps(
     }
     const bound = available.map((offering) => ({
       offering,
-      route: previous ? chooseProjectedProcessingSource(offering, previous) : chooseProcessingSource(offering, source, asset),
+      route: previous ? chooseProjectedProcessingSource(offering, previous) : chooseProcessingSource(states, offering, source, asset),
     }));
     const compatible = bound.filter((entry) => entry.route !== null);
     const pick = compatible.find((entry) => entry.offering.id === chosen[capability.id]) ?? compatible[0] ?? { offering: available[0], route: null };
@@ -247,6 +251,7 @@ export function processingSourceSteps(
  * with a disabled confirm (#321 E), so then there is none and the step says why instead.
  */
 export function processingPrerequisite(
+  states: readonly TaskStateSchema[],
   capabilityID: string,
   capabilities: readonly { id: string }[],
   offerings: Record<string, OfferingWire[]> | undefined,
@@ -254,7 +259,7 @@ export function processingPrerequisite(
   asset: ProcessingSourceAsset,
 ): string | null {
   const available = offerings?.[capabilityID]?.filter((choice) => choice.available) ?? [];
-  if (available.length === 0 || available.some((choice) => chooseProcessingSource(choice, source, asset))) return null;
+  if (available.length === 0 || available.some((choice) => chooseProcessingSource(states, choice, source, asset))) return null;
   // Over a step's face limit only a step that sets how many faces it delivers helps (Remesh before UV unwrap, #93).
   const needsFewerFaces = available.every((choice) => exceedsSourceModelLimit(choice, asset));
   const wanted = new Set(available.flatMap((choice) => choice.parameters
@@ -262,7 +267,7 @@ export function processingPrerequisite(
     .flatMap((parameter) => parameter.task_capabilities ?? [])));
   for (const candidate of capabilities) {
     if (candidate.id === capabilityID || !wanted.has(candidate.id)) continue;
-    const runs = (offerings?.[candidate.id] ?? []).filter((choice) => choice.available && chooseProcessingSource(choice, source, asset)
+    const runs = (offerings?.[candidate.id] ?? []).filter((choice) => choice.available && chooseProcessingSource(states, choice, source, asset)
       && (!needsFewerFaces || Boolean(choice.output_triangles)));
     if (runs.some((first) => available.some((step) => chooseProjectedProcessingSource(step, first)))) return candidate.id;
   }
@@ -283,6 +288,7 @@ export interface PrerequisiteRefusal {
  * Mirrors the Go Agent tools' refusal (generationtool noServiceText), so both say the same.
  */
 export function prerequisiteRefusal(
+  states: readonly TaskStateSchema[],
   capabilityID: string,
   capabilities: readonly { id: string }[],
   offerings: Record<string, OfferingWire[]> | undefined,
@@ -291,8 +297,8 @@ export function prerequisiteRefusal(
   now: number = Date.now(),
 ): PrerequisiteRefusal | null {
   const available = offerings?.[capabilityID]?.filter((choice) => choice.available) ?? [];
-  if (available.length === 0 || available.some((choice) => chooseProcessingSource(choice, source, asset, now))
-    || processingPrerequisite(capabilityID, capabilities, offerings, source, asset)) return null;
+  if (available.length === 0 || available.some((choice) => chooseProcessingSource(states, choice, source, asset, now))
+    || processingPrerequisite(states, capabilityID, capabilities, offerings, source, asset)) return null;
   const wanted = new Set(available.flatMap((choice) => choice.parameters
     .filter((parameter) => sourceParameterRole(parameter) === 'task')
     .flatMap((parameter) => parameter.task_capabilities ?? [])));
@@ -300,7 +306,7 @@ export function prerequisiteRefusal(
     if (candidate.id === capabilityID || !wanted.has(candidate.id)) continue;
     const feeders = (offerings?.[candidate.id] ?? []).filter((choice) => choice.available
       && available.some((step) => chooseProjectedProcessingSource(step, choice)));
-    if (feeders.length > 0) return { capability: candidate.id, refusals: sourceRefusals(feeders, source, asset, now) };
+    if (feeders.length > 0) return { capability: candidate.id, refusals: sourceRefusals(states, feeders, source, asset, now) };
   }
   return null;
 }
@@ -317,10 +323,10 @@ export type SourceRefusal =
   | { offering: OfferingWire; kind: 'face_limit'; limit: number; faces: number };
 
 /** The reasons, per available service that does not accept the model, in server order (#321 E). */
-export function sourceRefusals(offerings: readonly OfferingWire[], task: ProcessingSourceTask, asset: ProcessingSourceAsset, now: number = Date.now()): SourceRefusal[] {
+export function sourceRefusals(states: readonly TaskStateSchema[], offerings: readonly OfferingWire[], task: ProcessingSourceTask, asset: ProcessingSourceAsset, now: number = Date.now()): SourceRefusal[] {
   const refusals: SourceRefusal[] = [];
   for (const offering of offerings) {
-    if (!offering.available || chooseProcessingSource(offering, task, asset, now)) continue;
+    if (!offering.available || chooseProcessingSource(states, offering, task, asset, now)) continue;
     if (exceedsSourceModelLimit(offering, asset)) {
       refusals.push({ offering, kind: 'face_limit', limit: offering.source_model_limit!.max_triangles, faces: asset.triangles! });
       continue;

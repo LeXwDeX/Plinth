@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -117,8 +118,11 @@ func (executor *Executor) CompareModelReference(ctx context.Context, command cha
 		MaxBytes:  executor.chat.ImageReview.Limits.MaxBytes,
 		MaxPixels: executor.chat.ImageReview.Limits.MaxPixels,
 	}
+	// The source Task's frozen reference pictures are its own inputs: the
+	// Task was checked against the session scope above (#665).
+	frozen, _ := frozenReferencePictures(source.task)
 	for _, pair := range pairs {
-		data, reason, err := executor.openReferencePicture(ctx, command, pair.Image)
+		data, reason, err := executor.openReferencePicture(ctx, command, pair.Image, frozen)
 		if err != nil {
 			return chat.ToolResult{}, err
 		}
@@ -299,9 +303,10 @@ func (executor *Executor) modelReviewRefusalResult(command chat.ToolCommand, tex
 
 // openReferencePicture reads an explicit handle or asset id, or a frozen input
 // asset named by its id. reason is the Schema-facing failure; err is a
-// service failure that must abort the call.
+// service failure that must abort the call. An asset id that is not one of the
+// source Task's frozen pictures must be readable from the session (#665).
 func (executor *Executor) openReferencePicture(ctx context.Context, command chat.ToolCommand,
-	token string) (data []byte, reason string, err error) {
+	token string, frozen []string) (data []byte, reason string, err error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, "empty reference", nil
@@ -319,8 +324,13 @@ func (executor *Executor) openReferencePicture(ctx context.Context, command chat
 		}
 		return data, "", nil
 	}
-	attachment := chat.Attachment{Handle: token, Kind: chat.AttachmentKindImage, AssetID: token}
-	data, openErr := executor.pictureReader.OpenPicture(ctx, command.OwnerID, attachment, "")
+	var openErr error
+	if slices.Contains(frozen, token) {
+		attachment := chat.Attachment{Handle: token, Kind: chat.AttachmentKindImage, AssetID: token}
+		data, openErr = executor.pictureReader.OpenPicture(ctx, command.OwnerID, attachment, "")
+	} else {
+		data, openErr = executor.pictureReader.OpenAgentPicture(ctx, command, token)
+	}
 	if openErr != nil {
 		// An explicit unknown token is reported by the caller as unreadable,
 		// not as an internal failure.

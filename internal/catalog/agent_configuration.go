@@ -81,6 +81,11 @@ type AgentMCPPolicySchema struct {
 	TimeoutMilliseconds int   `json:"timeout_milliseconds"`
 	MaxResponseBytes    int64 `json:"max_response_bytes"`
 	MaxTools            int   `json:"max_tools"`
+	// MaxStringArgumentCharacters bounds every string argument of an MCP
+	// peer tool (#665): a declared maxLength may not exceed it, and a string
+	// parameter without one takes it. Zero (an older Catalog) leaves strings
+	// bounded only by their own declarations.
+	MaxStringArgumentCharacters int `json:"max_string_argument_characters,omitempty"`
 }
 
 type PublicAgentConfigurationSchema struct {
@@ -111,7 +116,8 @@ func validateAgentConfiguration(schema AgentConfigurationSchema) error {
 	if schema.Permission == "" || schema.AuditAction == "" || schema.ModelLabel == "" || schema.ParameterSource == "" {
 		return fmt.Errorf("agent configuration metadata missing")
 	}
-	if schema.MCPPolicy.TimeoutMilliseconds <= 0 || schema.MCPPolicy.MaxResponseBytes <= 0 || schema.MCPPolicy.MaxTools <= 0 {
+	if schema.MCPPolicy.TimeoutMilliseconds <= 0 || schema.MCPPolicy.MaxResponseBytes <= 0 || schema.MCPPolicy.MaxTools <= 0 ||
+		schema.MCPPolicy.MaxStringArgumentCharacters < 0 {
 		return fmt.Errorf("invalid MCP policy")
 	}
 	presets := map[string]bool{}

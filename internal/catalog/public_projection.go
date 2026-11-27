@@ -178,9 +178,9 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		for _, field := range cloned.Project.Conventions.Fields {
 			fields = append(fields, field.Name)
 		}
-		texts := make([]string, 0, len(cloned.Project.Conventions.Texts))
+		texts := make([]PublicProjectConventionText, 0, len(cloned.Project.Conventions.Texts))
 		for _, text := range cloned.Project.Conventions.Texts {
-			texts = append(texts, text.Name)
+			texts = append(texts, PublicProjectConventionText{Name: text.Name, LabelKey: text.LabelKey})
 		}
 		publicProject = &PublicProjectSchema{
 			Limits:      cloned.Project.Limits,

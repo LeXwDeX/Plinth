@@ -332,15 +332,19 @@ func TestProposeProductionPlanRefusesInvalidPlansWithoutStoringThem(t *testing.T
 		},
 		"unknown field": {
 			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}],"secret":true}`,
-			want:      "arguments must match the declared plan object",
+			want:      `arguments must match the declared plan object: unknown field "secret" is not declared`,
+		},
+		"wrongly typed step field": {
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a","optional":"yes"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
+			want:      "arguments must match the declared plan object: field steps.0.optional must be a boolean",
 		},
 		"not an object": {
 			arguments: `[]`,
-			want:      "arguments must match the declared plan object",
+			want:      "arguments must match the declared plan object: the arguments must be one JSON object",
 		},
 		"trailing json": {
 			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]} {}`,
-			want:      "arguments must match the declared plan object",
+			want:      "arguments must match the declared plan object: trailing content after the object",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -363,6 +367,37 @@ func TestProposeProductionPlanRefusesInvalidPlansWithoutStoringThem(t *testing.T
 				t.Fatalf("refusal content = %q err=%v", result.AgentContent, err)
 			}
 		})
+	}
+}
+
+// #665: the tool declares optional on a step (the right view of a four-view
+// recipe), so a plan that marks one is stored with the flag instead of being
+// refused as an unknown field.
+func TestProposeProductionPlanKeepsOptionalSteps(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	result, err := service.ProposeProductionPlan(context.Background(), planCommand(`{
+		"title":"四视图",
+		"steps":[
+			{"capability":"text-to-image","purpose":"正面"},
+			{"capability":"text-to-image","purpose":"左侧"},
+			{"capability":"text-to-image","purpose":"背面"},
+			{"capability":"text-to-image","purpose":"右侧","optional":true}
+		],
+		"budgets":[{"unit":"legacy.credits","amount":20}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error != "" || len(store.plans) != 1 {
+		t.Fatalf("proposal = %+v stored=%d", result, len(store.plans))
+	}
+	steps := store.plans[0].Steps
+	if len(steps) != 4 || steps[0].Optional || steps[2].Optional || !steps[3].Optional {
+		t.Fatalf("stored steps = %+v", steps)
+	}
+	if !store.plans[0].Covers("text-to-image", "", 3) {
+		t.Fatal("the plan must still cover the three required views")
 	}
 }
 

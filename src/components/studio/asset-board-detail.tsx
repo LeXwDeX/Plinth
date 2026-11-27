@@ -9,7 +9,9 @@ import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   boardArtifacts,
+  boardCheckDetail,
   boardCheckGroups,
+  boardCheckName,
   boardSlotKey,
   boardSteps,
   boardTaskID,
@@ -29,7 +31,7 @@ import type { AssetListBoardItem, AssetListClient } from '@/lib/asset-lists/clie
 import { formatDateTime } from '@/lib/i18n/format';
 import { activeLocale } from '@/lib/i18n/locale';
 import { formatFileSize } from '@/lib/size-text';
-import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
 
 export interface AssetBoardDetailProps {
@@ -151,13 +153,13 @@ export function AssetBoardDetail({
               {steps
                 ? stepLimit(steps) > 0
                   ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: stepLimit(steps) })
-                  : formatSchemaText(text('ui.asset_list.board.steps'), { steps: steps.used })
+                  : schemaCountMessage(schema, 'ui.asset_list.board.steps', steps.used, { steps: steps.used })
                 : text('ui.asset_list.board.steps_unknown')}
             </span>
           ) : null}
           {itemShowsSteps(item) && steps && !(stepLimit(steps) > 0) && steps.model3d > 0 ? (
             <span className="w-full text-right tabular-nums text-muted-foreground">
-              {formatSchemaText(text('ui.asset_list.board.steps_3d'), { steps: steps.model3d })}
+              {schemaCountMessage(schema, 'ui.asset_list.board.steps_3d', steps.model3d, { steps: steps.model3d })}
             </span>
           ) : null}
           {client && projectID && listID && canExtendSteps(schema, item) ? (
@@ -193,7 +195,7 @@ export function AssetBoardDetail({
                     data-status={check.status}
                   >
                     <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-medium">{check.check}</span>
+                      <span className="font-medium">{boardCheckName(schema, check.check)}</span>
                       <span className={check.status === 'fail' ? 'text-destructive' : 'text-muted-foreground'}>
                         {text(checkStatusKey(check.status))}
                       </span>
@@ -208,8 +210,10 @@ export function AssetBoardDetail({
                         {formatSchemaText(text('ui.asset_list.board.detail_budget'), { budget: check.budget })}
                       </p>
                     ) : null}
-                    {check.status !== 'pass' && check.detail ? (
-                      <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground [overflow-wrap:anywhere]">{check.detail}</p>
+                    {check.status !== 'pass' && boardCheckDetail(schema, check.detail) ? (
+                      <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground [overflow-wrap:anywhere]" data-testid="asset-board-check-detail">
+                        {boardCheckDetail(schema, check.detail)}
+                      </p>
                     ) : null}
                   </li>
                 ))}
@@ -303,7 +307,7 @@ export function AssetBoardDetail({
             {item.source ? (
               <p className="text-muted-foreground">
                 {[
-                  item.source.source_kind,
+                  text(`ui.asset_list.board.detail_crop_source_kind.${item.source.source_kind}`),
                   formatSchemaText(text('ui.asset_list.board.detail_crop_source_meta'), {
                     width: item.source.source_width ?? 0,
                     height: item.source.source_height ?? 0,

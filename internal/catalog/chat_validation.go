@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -47,6 +48,11 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 				connection.Protocol,
 			)
 		}
+	}
+	// #645: a refused last-turn replacement must say why.
+	if strings.TrimSpace(schema.API.Fields.LastTurn) != "" &&
+		strings.TrimSpace(schema.Presentation.Messages.NotLastTurn) == "" {
+		return errors.New("chat.api.fields.last_turn 已声明时 chat.presentation.messages.not_last_turn 不能为空")
 	}
 	required := map[string]string{
 		"api.fields.approval_mode":         schema.API.Fields.ApprovalMode,
@@ -516,6 +522,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		runtime.Frontend.ChatMessagePageSize > list.MaximumPageSize {
 		return errors.New("api.message_list 的默认页大小必须为正数且不超过上限，chat_message_page_size 不能超过上限")
 	}
+	if keys := schema.API.TurnIdempotency; keys.RetentionSeconds <= 0 || keys.MaximumKeyBytes <= 0 {
+		return errors.New("api.turn_idempotency 的 retention_seconds 与 maximum_key_bytes 必须为正数")
+	}
 	if schema.Agent.TitleMaxChars <= 0 || schema.Agent.TitleTimeoutSeconds <= 0 {
 		return errors.New("agent.title_max_characters 与 title_timeout_seconds 必须为正数")
 	}
@@ -539,6 +548,34 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	}
 	if schema.Agent.MaxGenerationCallsPerTurn <= 0 {
 		return errors.New("agent 的 max_generation_calls_per_turn 必须为正数")
+	}
+	// #665: the round bound is a soft guard against a runaway tool loop; it
+	// must leave room for every paid call of the turn.
+	if rounds := schema.Agent.MaxToolRoundsPerTurn; rounds < 0 ||
+		rounds > 0 && rounds < schema.Agent.MaxGenerationCallsPerTurn {
+		return errors.New("agent 的 max_tool_rounds_per_turn 不能为负，且不得小于 max_generation_calls_per_turn")
+	}
+	// #665: a bounded tool result needs the note that tells the Agent what
+	// was cut and how to narrow the request.
+	if limit := schema.Agent.MaxToolResultCharacters; limit < 0 {
+		return errors.New("agent 的 max_tool_result_characters 不能为负")
+	} else if limit > 0 {
+		messages := schema.Presentation.Messages
+		for name, value := range map[string]string{
+			"tool_result_truncated":   messages.ToolResultTruncated,
+			"tool_result_cut_strings": messages.ToolResultCutStrings,
+			"tool_result_cut_items":   messages.ToolResultCutItems,
+			"tool_result_cut_text":    messages.ToolResultCutText,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("设置了 agent.max_tool_result_characters 时必须声明 presentation.messages.%s", name)
+			}
+		}
+		// The note itself must fit well inside the bound, or every shortened
+		// result would be only the note.
+		if utf8.RuneCountInString(messages.ToolResultTruncated) >= limit/2 {
+			return errors.New("agent.max_tool_result_characters 必须大于 tool_result_truncated 文案长度的两倍")
+		}
 	}
 	if schema.Agent.MaxListedModels <= 0 {
 		return errors.New("agent 的 max_listed_models 必须为正数")
@@ -775,6 +812,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			}
 		}
 	}
+	if err := validateChatToolParameters(schema); err != nil {
+		return err
+	}
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
@@ -793,7 +833,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateImageMask(schema); err != nil {
 		return err
 	}
-	if err := validateImageCrop(schema); err != nil {
+	if err := validateImageCrop(schema, runtime); err != nil {
 		return err
 	}
 	if err := validateWorkLedger(schema); err != nil {
@@ -1437,7 +1477,8 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 		// #251: the Agent revision's reason bound and waived-checkpoint limit.
 		// A historical plan tool without the block falls back to the runtime
 		// constants, so it stays readable.
-		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 {
+		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 ||
+			plan.Revision.MaxAgentRetriesPerStep < 0 {
 			return nil, errors.New("plan.revision 的上限无效")
 		}
 		for step, capability := range processing.Steps {
@@ -1728,8 +1769,9 @@ func validateCanvasLayout(context ChatContextSchema) error {
 		"canvas_output_size_template":         context.CanvasOutputSizeTemplate,
 		"canvas_output_size_nearest_template": context.CanvasOutputSizeNearestTemplate,
 	} {
-		if !strings.Contains(template, "{canvas}") || !strings.Contains(template, "{size}") {
-			return fmt.Errorf("context.%s 必须包含 {canvas} 与 {size}", name)
+		// #653: the canvas is a ratio; the note names it, not its pixels.
+		if !strings.Contains(template, "{ratio}") || !strings.Contains(template, "{size}") {
+			return fmt.Errorf("context.%s 必须包含 {ratio} 与 {size}", name)
 		}
 	}
 	return nil
@@ -1825,10 +1867,29 @@ func validateImageMask(schema ChatSchema) error {
 // validateImageCrop checks the read-only crop_image_regions declaration
 // (#331): the tool it names exists as the declared control tool and every
 // error code the tool result can carry has its Agent-facing copy.
-func validateImageCrop(schema ChatSchema) error {
+func validateImageCrop(schema ChatSchema, runtime RuntimeSchema) error {
 	crop := schema.ImageCrop
 	if strings.TrimSpace(crop.Tool) == "" {
 		return nil
+	}
+	// #642: the tool's own crop limits. The region cap stays within the
+	// source decode bound and the PNG cap within the input-asset storage cap.
+	// An older Catalog without the section keeps the decompose crop limits.
+	if crop.Limits != (ChatImageCropLimits{}) {
+		maximumRegion := int64(100_000_000)
+		if sourcePixels := schema.ImageMask.Limits.MaxPixels; sourcePixels > 0 && sourcePixels < maximumRegion {
+			maximumRegion = sourcePixels
+		}
+		if crop.Limits.MaximumRegionPixels < 4096 || crop.Limits.MaximumRegionPixels > maximumRegion {
+			return fmt.Errorf("chat.image_crop.limits.maximum_region_pixels 必须在 4096 到 %d（chat.image_mask.limits.max_pixels）之间", maximumRegion)
+		}
+		maximumPNG := int64(256 << 20)
+		if upload := runtime.InputAssets.UploadMaxBytes; upload > 0 && upload < maximumPNG {
+			maximumPNG = upload
+		}
+		if crop.Limits.MaximumPNGBytes < 1 || crop.Limits.MaximumPNGBytes > maximumPNG {
+			return fmt.Errorf("chat.image_crop.limits.maximum_png_bytes 必须在 1 到 %d（runtime.input_assets.upload_max_bytes）之间", maximumPNG)
+		}
 	}
 	declared := false
 	for _, tool := range schema.AgentTools {
@@ -1987,11 +2048,18 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	messages := schema.Messages
 	required := map[string]string{
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
+		"duplicate_run":   messages.DuplicateRun,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
+		// #665: the recovery texts of a call that submits nothing. A Catalog
+		// written before #665 gets them from fillThreeViewMessageFallbacks
+		// (a declared text of the same meaning, else the built-in Catalog's).
+		"turn_stopped": messages.TurnStopped, "model_unavailable": messages.ModelUnavailable,
+		"image_unavailable": messages.ImageUnavailable, "arguments_invalid": messages.ArgumentsInvalid,
+		"denied": messages.Denied,
 	}
 	if schema.Continuation.Enabled || subjectTemplates || len(schema.SubjectTypes) > 0 {
 		required["agent_completed"] = messages.AgentCompleted
@@ -2024,6 +2092,10 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
+		}
+		if continuing := messages.AgentStartedContinuing; strings.TrimSpace(continuing) != "" &&
+			!strings.Contains(continuing, field) {
+			return fmt.Errorf("three_view.messages.agent_started_continuing 必须包含 %s", field)
 		}
 	}
 	for _, required := range []struct {
@@ -2584,12 +2656,16 @@ func validateThinkingEffort(index int, profile ChatThinkingModelProfile) error {
 	if !levels[profile.DefaultEffort] {
 		return fmt.Errorf("agent.thinking.model_profiles[%d] 的 default_effort %q 不在 effort_levels 里", index, profile.DefaultEffort)
 	}
-	// A kind declared without levels would silently do nothing, and one naming
-	// a level the family does not offer would silently fall back (#382).
+	// A kind declared without levels would silently do nothing, one naming
+	// a level the family does not offer would silently fall back (#382), and a
+	// kind no request reads (a typo) would silently keep the default (#638).
 	for kind, level := range profile.TurnEfforts {
 		switch {
 		case kind == "":
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts 含空回合类型", index)
+		case !slices.Contains(chatTurnEffortKinds, kind):
+			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts 含未知回合类型 %q（可用 %s）",
+				index, kind, strings.Join(chatTurnEffortKinds, "、"))
 		case !levels[level]:
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts[%s] = %q 不在 effort_levels 里",
 				index, kind, level)
@@ -2622,6 +2698,9 @@ func validateContextCompaction(compaction ChatContextCompactionSchema) error {
 		if value <= 0 {
 			return fmt.Errorf("context_compaction.%s 必须为正数", name)
 		}
+	}
+	if compaction.AutoFailureBackoffSeconds < 0 {
+		return fmt.Errorf("context_compaction.auto_failure_backoff_seconds 不能为负")
 	}
 	// Past the threshold there must be rounds to summarize beyond the kept ones.
 	if compaction.AutoMessageThreshold <= 2*compaction.KeepRecentRounds {
@@ -2727,6 +2806,14 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 func validateToolRejectionTexts(messages ChatMessageTexts) error {
 	if strings.TrimSpace(messages.ToolArgumentsInvalid) == "" {
 		return errors.New("presentation.tool_arguments_invalid 不能为空")
+	}
+	if text := messages.ToolArgumentsSchemaInvalid; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{tool}") || !strings.Contains(text, "{reason}")) {
+		return errors.New("presentation.tool_arguments_schema_invalid 须含 {tool} 与 {reason}")
+	}
+	if text := messages.ToolArgumentNotAllowed; strings.TrimSpace(text) != "" &&
+		(!strings.Contains(text, "{field}") || !strings.Contains(text, "{choices}")) {
+		return errors.New("presentation.tool_argument_not_allowed 须含 {field} 与 {choices}")
 	}
 	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
 		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")
@@ -4385,6 +4472,9 @@ func validateChatAgentResilience(agent ChatAgentSchema) error {
 		(agent.RoundTimeoutSeconds > 0 && agent.RoundTimeoutSeconds < agent.RequestTimeoutSeconds) {
 		return errors.New("agent.round_timeout_seconds 不能为负数，声明时不能小于 request_timeout_seconds")
 	}
+	if err := validateChatAgentQuotaMute(agent.QuotaMute); err != nil {
+		return err
+	}
 	retry := agent.Retry
 	if retry == nil {
 		return nil
@@ -4398,9 +4488,36 @@ func validateChatAgentResilience(agent ChatAgentSchema) error {
 	if retry.MaxRetryAfterSeconds <= 0 {
 		return errors.New("agent.retry.max_retry_after_seconds 必须为正数")
 	}
+	if retry.EmptyResponseRetries < 0 || retry.EmptyResponseRetries > 3 {
+		return errors.New("agent.retry.empty_response_retries 必须在 0 到 3 之间")
+	}
 	if agent.RoundTimeoutSeconds > 0 && (retry.MaxRetryAfterSeconds >= agent.RoundTimeoutSeconds ||
 		retry.MaxBackoffMillis >= agent.RoundTimeoutSeconds*1000) {
 		return errors.New("agent.retry 的等待上限必须小于 round_timeout_seconds")
+	}
+	return nil
+}
+
+// validateChatAgentQuotaMute checks chat.agent.quota_mute (#640): a declared
+// one needs a positive window, an HTTP error status and at least one
+// non-empty marker.
+func validateChatAgentQuotaMute(mute *ChatAgentQuotaMuteSchema) error {
+	if mute == nil {
+		return nil
+	}
+	if mute.WindowSeconds <= 0 {
+		return errors.New("agent.quota_mute.window_seconds 必须为正数")
+	}
+	if mute.HTTPStatus < 400 || mute.HTTPStatus > 599 {
+		return errors.New("agent.quota_mute.http_status 必须是 4xx 或 5xx 状态码")
+	}
+	if len(mute.ContainsAny) == 0 {
+		return errors.New("agent.quota_mute.contains_any 至少声明一个标记串")
+	}
+	for _, marker := range mute.ContainsAny {
+		if strings.TrimSpace(marker) == "" {
+			return errors.New("agent.quota_mute.contains_any 不能含空标记串")
+		}
 	}
 	return nil
 }

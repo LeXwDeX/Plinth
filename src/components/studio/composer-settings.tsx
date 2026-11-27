@@ -72,7 +72,12 @@ export function ComposerSettings({ skill, params, locked }: ComposerSettingsProp
   const offered = COMPOSER_SETTINGS_TABS.filter((id) => id !== 'chat' || chat.offered);
   const tab = visibleSettingsTab(wantedTab, offered) ?? 'models';
 
-  const skillName = skill.selectedId ? skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId : '';
+  // #670: the Skill is named once its catalog is read; until then the name reads as loading, never as its id.
+  const skillName = skill.selectedId
+    ? skill.catalog
+      ? skill.catalog.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId
+      : schemaText(schema, 'ui.workspace.skills.loading')
+    : '';
   const changes = changedSettings({
     models: { changed: modelsLocked(modelByDomain), value: generationModelPair(schema, image, model3d) },
     skills: { changed: Boolean(skill.selectedId), value: skillName },

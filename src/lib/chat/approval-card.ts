@@ -153,7 +153,7 @@ export function remainingValidity(expiresAt: string, now: number): Validity {
 export interface ApprovalOfferingNames { modelName: string; providerName: string }
 
 /** The Offering a card's model and provider id name; the model alone when no provider matches. */
-function matchedOffering(
+export function approvalOffering(
   offerings: readonly OfferingWire[] | undefined,
   model: Pick<ApprovalCardModel, 'model' | 'provider'>,
 ): OfferingWire | undefined {
@@ -171,7 +171,7 @@ export function approvalOfferingNames(
   offerings: readonly OfferingWire[] | undefined,
   model: Pick<ApprovalCardModel, 'model' | 'provider'>,
 ): ApprovalOfferingNames {
-  const match = matchedOffering(offerings, model);
+  const match = approvalOffering(offerings, model);
   return {
     modelName: match?.model_name || model.model,
     providerName: match?.provider_name || model.provider,
@@ -187,7 +187,7 @@ export function approvalShowsCredits(
   offerings: readonly OfferingWire[] | undefined,
   model: Pick<ApprovalCardModel, 'model' | 'provider'>,
 ): boolean {
-  const match = matchedOffering(offerings, model);
+  const match = approvalOffering(offerings, model);
   return match === undefined || offeringShowsCredits(match);
 }
 
@@ -202,7 +202,7 @@ export function approvalInputParameterLabel(
   parameter: string,
 ): string {
   if (!parameter) return '';
-  return matchedOffering(offerings, model)?.parameters?.find((item) => item.name === parameter)?.label ?? '';
+  return approvalOffering(offerings, model)?.parameters?.find((item) => item.name === parameter)?.label ?? '';
 }
 
 /**

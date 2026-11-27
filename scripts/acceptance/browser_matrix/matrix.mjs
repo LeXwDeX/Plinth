@@ -496,18 +496,17 @@ async function runCell(engine, loc, [W, H]) {
     await tid('stage-merge').click(); let tiles1 = tiles0; for (let i = 0; i < 12 && tiles1 === tiles0; i++) { await page.waitForTimeout(1000); tiles1 = await page.locator('[data-testid=version-tile]').count(); }
     await shot('merged');
     ok(tiles1 === tiles0 + 1, `merge created one new version (${tiles0}->${tiles1})`);
-    // send to chat -> attachment in composer
+    // send to chat -> the next message is a canvas turn: the composer's 以画板为主 toggle is on (#644)
     await goSession(); await tid('canvas-tool-select').click(); await page.mouse.click(Math.round(W * 0.5), Math.round(H * 0.5)); await page.waitForTimeout(500);
     if (await tid('stage-send-chat').isDisabled()) { await tid('right-panel-tab-layers').click(); await layerRows().first().click(); await page.waitForTimeout(400); }
     await tid('stage-send-chat').click(); await page.waitForTimeout(1500);
     await shot('sent-to-chat');
-    const chips = await page.locator('button[aria-label*="@"], [data-testid*=attachment], [data-testid*=composer-chip], img[alt]').count();
-    const composerText = await page.locator('main, body').first().innerText();
+    const boardMode = await tid('composer-board-mode').first().getAttribute('aria-pressed').catch(() => null);
     const tasks1 = await taskCount(); const cr1 = await credits();
     ok(tasks0 === tasks1, `no task created (${tasks0} -> ${tasks1})`);
     ok(cr0 === cr1, `credits unchanged ("${cr0.slice(-60)}" -> "${cr1.slice(-60)}")`);
-    ok(chips > 0 || /attach|附/.test(composerText), 'image became a composer attachment');
-    return `merge -> +1 version (${tiles0}->${tiles1}); send-to-chat adds attachment; tasks ${tasks0}->${tasks1}, header credits unchanged`;
+    ok(boardMode === 'true', `the next message is sent from the canvas (以画板为主 aria-pressed=${boardMode})`);
+    return `merge -> +1 version (${tiles0}->${tiles1}); send-to-chat turns 以画板为主 on; tasks ${tasks0}->${tasks1}, header credits unchanged`;
   };
 
   items['CNV-05'] = async () => {

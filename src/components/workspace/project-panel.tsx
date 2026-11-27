@@ -310,7 +310,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       {failed ? (
         <div role="alert" className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 px-2 py-1.5 text-xs">
           <span>{text('load_failed')}</span>
-          <button type="button" className="font-medium underline" onClick={() => void load()}>{text('save')}</button>
+          <button type="button" className="font-medium underline" onClick={() => void load()}>{text('retry')}</button>
         </div>
       ) : null}
 
@@ -322,11 +322,14 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
         </label>
         <label className="mt-2 block text-xs font-medium" htmlFor="project-style-text">{text('style_text')}</label>
         <textarea id="project-style-text" value={draftText} maxLength={maximumText} disabled={loading || savingGuide} rows={3} onChange={(event) => setDraftText(event.target.value)} className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary" data-testid="project-style-text" />
-        <label className="mt-2 block text-xs font-medium" htmlFor="project-style-palette">{text('palette')}</label>
+        <div className="mt-2 flex items-center justify-between gap-2 text-xs font-medium">
+          <label htmlFor="project-style-palette">{text('palette')}</label>
+          <span className="text-[11px] font-normal text-muted-foreground" data-testid="project-style-palette-count">{palette.length}/{maximumPalette}</span>
+        </div>
         <input id="project-style-palette" value={draftPalette} disabled={loading || savingGuide} onChange={(event) => setDraftPalette(event.target.value)} placeholder={text('palette_placeholder')} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary" data-testid="project-style-palette" />
         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span>{text('references')} · {schemaText(schema, 'ui.project.reference_limit').replace('{maximum}', String(maximumReferences))}</span>
-          <span>{palette.length}/{maximumPalette}</span>
+          <span data-testid="project-style-reference-count">{guide?.references.length ?? 0}/{maximumReferences}</span>
         </div>
         {guide && guide.references.length > 0 ? (
           <ul className="mt-1.5 flex flex-wrap gap-1.5" data-testid="project-style-references">
@@ -363,7 +366,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
         <textarea id="project-conventions-brief" value={draftBrief} disabled={loading || savingConventions} rows={3} onChange={(event) => setDraftBrief(event.target.value)} className="mt-1 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-primary" data-testid="project-conventions-brief" />
         {(projectSchema?.conventions.texts ?? []).map((name) => (
           <label key={name} className="mt-1.5 block text-xs font-medium">
-            {name}
+            {projectSchema?.conventions.textLabels[name] ? schemaText(schema, projectSchema.conventions.textLabels[name]) : name}
             <input value={draftTexts[name] ?? ''} disabled={loading || savingConventions} onChange={(event) => setDraftTexts((current) => ({ ...current, [name]: event.target.value }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary" data-testid={`project-conventions-text-${name}`} />
           </label>
         ))}
@@ -375,7 +378,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       <section data-testid="project-assets-section">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-semibold">{text('assets_section')}</h3>
-          <span className="text-[11px] text-muted-foreground">{schemaText(schema, 'ui.project.asset_count').replace('{count}', String(assets.length))}</span>
+          <span className="text-[11px] text-muted-foreground">{schemaCountMessage(schema, 'ui.project.asset_count', assets.length, { count: assets.length })}</span>
         </div>
         {assets.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">{text('asset_empty')}</p> : (
           <ul className="mt-2 flex flex-col gap-1.5" data-testid="project-asset-list">

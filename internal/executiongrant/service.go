@@ -50,10 +50,58 @@ const StoppedActor = "system:turn_stopped"
 // trigger turn was stopped before the card was detached.
 func (g Grant) CancelledByStop() bool { return g.Status == Denied && g.DecidedBy == StoppedActor }
 
+// ExpiredActor is Grant.DecidedBy of an Agent approval the system denied
+// because nobody decided it within the Schema's pending_approvals expiry
+// (#665). A person never has this actor ID.
+const ExpiredActor = "system:approval_expired"
+
+// ExpiredUndecided reports whether the system denied the grant because its
+// approval expired.
+func (g Grant) ExpiredUndecided() bool { return g.Status == Denied && g.DecidedBy == ExpiredActor }
+
+// ExpiredGrantStore denies an expired, still pending Agent grant as the system
+// (ExpiredActor, audited). A grant that is no longer pending is returned as it
+// is, unchanged.
+type ExpiredGrantStore interface {
+	ExpireExecutionGrant(ctx context.Context, ownerID, requestID string) (Grant, error)
+}
+
+// ExpirePending denies a pending Agent grant whose approval expired, so the
+// grant's state says what its card says: it can no longer be approved (#665).
+// A grant that has not expired, and a store without the capability, are left
+// untouched.
+func (s Service) ExpirePending(ctx context.Context, grant Grant) (Grant, error) {
+	if !s.Expired(grant) {
+		return grant, nil
+	}
+	store, ok := s.Grants.(ExpiredGrantStore)
+	if !ok {
+		return grant, nil
+	}
+	return store.ExpireExecutionGrant(ctx, grant.OwnerID, grant.RequestID)
+}
+
 // ApprovedByPolicy reports whether the grant was approved by session policy.
 func (g Grant) ApprovedByPolicy() bool {
 	return strings.HasPrefix(g.DecidedBy, PolicyActorPrefix)
 }
+
+// AgentOriginated reports whether the Agent started the step the grant
+// authorizes: its own tool step (AgentPending), or a step of a processing plan
+// an Agent tool created. Such a plan asks for its steps as browser grants that
+// carry the plan's budget eligibility, and only an Agent-created plan's steps
+// are ever budget eligible (#120). The Agent's approval rules (extra spend,
+// unpriced steps, the recharge guard) apply to all of them (#665).
+func (g Grant) AgentOriginated() bool {
+	return g.Source == AgentPending || (g.Source == HumanBrowser && g.BudgetEligible)
+}
+
+// RechargeGuard names the newest Task of the session that failed after the
+// upstream charged for it and whose result was never stored, of the given
+// capability, that nothing has answered since (#294); "" when there is none.
+// A step the Agent started that would repeat such a Task charges again, so the
+// policy never approves it: it waits for a person on its card (#665).
+type RechargeGuard func(ctx context.Context, ownerID, sessionID, capability string) (string, error)
 
 // Principal is supplied by authenticated server middleware, never decoded from
 // the grant request body. Other client sources require a separate identity and
@@ -132,6 +180,10 @@ type Service struct {
 	PendingTTL time.Duration
 	// Clock is the time source for expiry; nil means time.Now.
 	Clock func() time.Time
+	// Recharge is the #294 recharge guard every policy decision of an
+	// Agent-originated step consults (three-view views and their continuation,
+	// Agent processing-plan steps, #665). Nil means no guard.
+	Recharge RechargeGuard
 }
 
 func (s Service) now() time.Time {
@@ -237,7 +289,9 @@ func (s Service) Decide(ctx context.Context, principal Principal, requestID stri
 	if g.OwnerID != principal.OwnerID || (g.Source != HumanBrowser && g.Source != AgentPending) {
 		return Grant{}, ErrConflict
 	}
-	if decision == Approve && s.Expired(g) {
+	// An expired approval stays refused as expired after the sweep denied it
+	// (ExpiredActor, #665).
+	if decision == Approve && (s.Expired(g) || g.ExpiredUndecided()) {
 		return Grant{}, ErrExpired
 	}
 	return s.Grants.DecideExecutionGrant(ctx, principal.OwnerID, requestID, principal.ActorID, decision)
@@ -300,6 +354,18 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 		snapshot.OfferingRevision != grant.OfferingRevision || snapshot.InputHash != grant.PreparedInputHash {
 		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
 	}
+	// A step the Agent started that repeats a charged-but-unstored attempt of
+	// the session charges again: it is never the policy's to approve, whatever
+	// the mode, plan or step setting says (#294, #665).
+	if grant.AgentOriginated() && s.Recharge != nil {
+		taskID, err := s.Recharge(ctx, ownerID, grant.SessionID, snapshot.Capability)
+		if err != nil {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err
+		}
+		if taskID != "" {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman}, ErrHumanRequired
+		}
+	}
 	// The internal steps mode decides on its own: nothing waits for a person
 	// and the owner's 3D step setting is the only limit (#330).
 	if normalized == approvalpolicy.ModeSteps {
@@ -343,7 +409,18 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 			return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
 		}
 	}
-	if grant.Source == AgentPending && approvalpolicy.RequiresHumanForExtraSpend(s.Policy, mode, extra) {
+	// A step of an Agent-created processing plan is the Agent's step too, even
+	// though the plan asks for it as a browser grant (#665).
+	if grant.AgentOriginated() && approvalpolicy.RequiresHumanForExtraSpend(s.Policy, mode, extra) {
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
+	}
+	// An Agent step the server cannot price (an Offering that bills in credits
+	// with no estimate and no native quote) cannot be judged against the manual
+	// threshold: a zero estimate is "unknown", not "free", so it waits for a
+	// person wherever the threshold applies (#665).
+	if grant.AgentOriginated() && snapshot.CreditsMetered && snapshot.EstimatedCredits <= 0 &&
+		snapshot.NativeQuote == nil && s.Policy.ManualCreditsThreshold > 0 &&
+		normalized != approvalpolicy.ModeAuto {
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
 	approved, err := s.Grants.ApproveExecutionGrantByPolicy(ctx, ownerID, requestID, actor)
@@ -353,10 +430,53 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	return PolicyResult{Grant: approved, Outcome: PolicyOutcomeApproved}, nil
 }
 
+// ContinuationBasis says what lets the server submit the next step of a series
+// (the views of a three-view group) without a person.
+type ContinuationBasis string
+
+const (
+	// ContinuationNone: every step waits for a person.
+	ContinuationNone ContinuationBasis = ""
+	// ContinuationBudget: the session's approved production plan covers the steps.
+	ContinuationBudget ContinuationBasis = "budget"
+	// ContinuationAuto: the session approves every paid step by itself (the auto
+	// mode), so the next step is exactly what a person clicking it would start.
+	ContinuationAuto ContinuationBasis = "auto"
+)
+
+// Continuation is the basis on which a series of count steps of the capability
+// at the Offering continues without a person. The auto mode needs no plan; the
+// budget mode needs a plan that covers the steps (BudgetContinuation); the
+// strict (manual) mode never continues by itself. A missing mode reader answers
+// none.
+func (s Service) Continuation(ctx context.Context, ownerID, sessionID, capability, offeringID string,
+	count int,
+) (ContinuationBasis, error) {
+	if ownerID == "" || sessionID == "" || capability == "" || count < 1 || s.Modes == nil {
+		return ContinuationNone, nil
+	}
+	mode, err := s.Modes.SessionApprovalMode(ctx, ownerID, sessionID)
+	if err != nil {
+		return ContinuationNone, err
+	}
+	switch s.Policy.NormalizeMode(mode) {
+	case approvalpolicy.ModeAuto:
+		return ContinuationAuto, nil
+	case approvalpolicy.ModeBudget:
+		covered, err := s.BudgetContinuation(ctx, ownerID, sessionID, capability, offeringID, count)
+		if err != nil || !covered {
+			return ContinuationNone, err
+		}
+		return ContinuationBudget, nil
+	}
+	return ContinuationNone, nil
+}
+
 // BudgetContinuation reports whether the session's active, approved production
 // plan explicitly covers count steps of the capability at the given Offering.
-// Only the budget mode continues without a person: strict and auto modes keep
-// their per-step behavior (#243). A missing mode reader, plan store or plan, a
+// Only the budget mode answers true here: the auto mode continues on its own
+// basis (Continuation, #663) and the strict mode keeps its per-step behavior
+// (#243). A missing mode reader, plan store or plan, a
 // plan that is not active, or a mode that is not budget answers false.
 func (s Service) BudgetContinuation(ctx context.Context, ownerID, sessionID, capability, offeringID string,
 	count int,

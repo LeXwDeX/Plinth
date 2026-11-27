@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
@@ -48,7 +50,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 				return chat.ToolResult{NoSubmission: true}, stopErr
 			}
 			if stopped {
-				return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+				return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 			}
 			return e.continueThreeView(ctx, command, run, observe)
 		}
@@ -62,9 +64,56 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return chat.ToolResult{NoSubmission: true}, stopErr
 	}
 	if stopped {
-		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 	}
 	created := false
+	// release ends the duplicate guard's lock of a new group (#665).
+	release := func() {}
+	// superseded holds the earlier groups' approved, unsubmitted grants a new
+	// group replaces; counted says this call counted against the turn's
+	// generations, so a failure before its first grant takes it back (#665).
+	var superseded []supersededThreeViewGrant
+	counted := false
+	takeBack := func(result chat.ToolResult, err error) (chat.ToolResult, error) {
+		if counted {
+			e.forgetGenerationCall(e.scopeKey(command), command.AssistantMessageID, command.Call.ID)
+			result.GenerationUnitsTakenBack = true
+		}
+		return result, err
+	}
+	// resumed: the call's own run exists, but its first view never got a grant:
+	// the call failed, or the process restarted, between creating the run and
+	// requesting the grant. The replay finishes that start as a new run does
+	// (#665): under the session lock it runs the duplicate guard again for the
+	// run's own recipe and source, counts the call (once per call ID), weighs
+	// the continuation, replaces the ended groups' approvals and requests the
+	// grant. Before, it requested a plain grant only: the old approval stayed,
+	// the auto mode or plan did not continue it and the count was lost.
+	resumed := false
+	if err == nil && grant.RequestID == "" && command.BoundTaskID == "" {
+		releaseSource, lockErr := e.lockThreeViewSession(ctx, command.OwnerID, command.SessionID)
+		if lockErr != nil {
+			return chat.ToolResult{NoSubmission: true}, lockErr
+		}
+		defer releaseSource()
+		active, found, ended, guardErr := e.activeThreeViewForSource(ctx, command, run.RecipeID, run.SourceAssetID)
+		if guardErr != nil {
+			return chat.ToolResult{NoSubmission: true}, guardErr
+		}
+		// A refusal here leaves the run without a grant (inert: no card, not
+		// active for the guard); it takes back what an earlier attempt of the
+		// call may have left counted.
+		if found {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
+				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
+		}
+		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
+			command.Call.ID, command.PriorGenerationCalls) {
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
+				GenerationUnitsTakenBack: true}, nil
+		}
+		superseded, counted, resumed, release = ended, true, true, releaseSource
+	}
 	if errors.Is(err, skillrun.ErrMissing) {
 		// Mutable model/reference/recipe selection applies only to a new run.
 		// Existing runs keep their original recipe and frozen source.
@@ -72,13 +121,19 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			return chat.ToolResult{Error: "three-view skill unavailable", NoSubmission: true}, nil
 		}
 		var args struct {
-			ReferenceImageIndices []int    `json:"reference_image_indices"`
-			ReferenceHandles      []string `json:"reference_handles"`
-			SubjectType           string   `json:"subject_type"`
-			Purpose               string   `json:"purpose"`
+			ReferenceImageIndices []int           `json:"reference_image_indices"`
+			ReferenceHandles      []string        `json:"reference_handles"`
+			SubjectType           string          `json:"subject_type"`
+			Purpose               string          `json:"purpose"`
+			IncludeRight          json.RawMessage `json:"include_right"`
 		}
 		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
-			return chat.ToolResult{Error: "invalid three-view arguments", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ArgumentsInvalid, NoSubmission: true}, nil
+		}
+		// A four-view request must say so with a JSON boolean: a string "true"
+		// silently made three views before (#665).
+		if _, err := threeViewIncludeRight(args.IncludeRight); err != nil {
+			return chat.ToolResult{Error: err.Error(), NoSubmission: true}, nil
 		}
 		// The use decides the recipe: a design sheet keeps the source's shape
 		// and pose, a model input renders the orthographic set for 3D (#409).
@@ -99,7 +154,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		}
 		selected := e.threeViewModel(command, toolDomain)
 		if selected.ID == "" {
-			return chat.ToolResult{AgentContent: "所选模型没有可用的三视图图生图 Offering。", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ModelUnavailable, NoSubmission: true}, nil
 		}
 		urls, handleErr := e.threeViewImages(command, args.ReferenceImageIndices, args.ReferenceHandles)
 		if handleErr != "" {
@@ -112,20 +167,51 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			Owner: generation.OwnerID(command.OwnerID), SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
 		}, urls)
 		if err != nil || len(assets) != 1 || assets[0] == "" {
-			return chat.ToolResult{AgentContent: "所选图片不可用，请重新选择。", NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.threeView.Messages.ImageUnavailable, NoSubmission: true}, nil
 		}
 		revision := e.skillRecipes[purpose.RecipeID]
 		if revision == "" {
 			return chat.ToolResult{NoSubmission: true}, skillrun.ErrInvalid
 		}
+		// One group per source picture at a time (#665): a parallel call or a
+		// re-ask while the earlier group waits on its card or runs would start
+		// a second front view, charge it and raise a second card. The lock is
+		// held until this call's own first grant is recorded on its run.
+		releaseSource, err := e.lockThreeViewSession(ctx, command.OwnerID, command.SessionID)
+		if err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
+		defer releaseSource()
+		var active skillrun.Run
+		var found bool
+		active, found, superseded, err = e.activeThreeViewForSource(ctx, command, purpose.RecipeID, assets[0])
+		if err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		} else if found {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", active.ID),
+				NoSubmission: true}, nil
+		}
+		// A grant to replace that a person continued since the guard read it
+		// (claimed or bound) means that group runs again: answer duplicate_run
+		// before creating anything, so the new run is not left without a grant.
+		// The denial below reads back again for the short window after this.
+		if moved, err := e.supersededMovedOn(ctx, superseded); err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		} else if moved != "" {
+			return chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun, "{run}", moved),
+				NoSubmission: true}, nil
+		}
 		// A new run is one paid generation of the turn, counted against
 		// max_generation_calls_per_turn like generateWithParams (#563); the
 		// same call back on its own run (recovery, observation) does not
-		// reach here and is not counted again.
+		// reach here and is not counted again. A call the duplicate guard
+		// refused starts no run and is not counted (#665).
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
 			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitContent, NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
 		}
+		counted = true
+		release = releaseSource
 		// The frame of every view follows the source subject's shape instead
 		// of the Offering's default square (#283), or the source picture's own
 		// shape for a use that declares it (#409). It is frozen with the run;
@@ -145,23 +231,43 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			StaticInput: frame,
 		})
 		if err != nil {
-			return chat.ToolResult{NoSubmission: true}, err
+			return takeBack(chat.ToolResult{NoSubmission: true}, err)
 		}
 		created = true
 	}
 	if len(run.Steps) == 0 {
-		return chat.ToolResult{NoSubmission: true}, skillrun.ErrConflict
+		return takeBack(chat.ToolResult{NoSubmission: true}, skillrun.ErrConflict)
 	}
 	canContinue := false
-	if e.threeViewService != nil && e.threeViewService.ContinuationEnabled() && (created || grant.BudgetEligible) {
+	if e.threeViewService != nil && e.threeViewService.ContinuationEnabled() && (created || resumed || grant.BudgetEligible) {
 		canContinue, err = e.threeViewService.CanContinue(ctx, command.OwnerID, command.SessionID, run.ID)
 		if err != nil {
-			return chat.ToolResult{NoSubmission: true}, err
+			return takeBack(chat.ToolResult{NoSubmission: true}, err)
 		}
 	}
 	stepKey := run.Steps[0].Spec.Key
 	if _, _, err := e.skillRuntime.PrepareStep(ctx, generation.OwnerID(command.OwnerID), run.ID, stepKey); err != nil {
-		return chat.ToolResult{NoSubmission: true}, err
+		return takeBack(chat.ToolResult{NoSubmission: true}, err)
+	}
+	if created || resumed {
+		// The new group is created and its first view prepared; only now does
+		// it replace the earlier groups' approved views whose turn ended (a
+		// person could still continue one from the panel while the new group
+		// pays for the same views). A failure to create or prepare leaves
+		// those approvals as they were; the replay of the call finishes the
+		// start (resumed above). A grant that moved on since the check before
+		// Create (the person continued it: claimed or bound) is not denied:
+		// that group runs again, so the new one requests no grant and its run
+		// stays without one (inert: no card, not active for the guard; the
+		// SkillRun store has no way to abandon a run). The approvals denied
+		// before it are replaced by the group the person continued, which
+		// renders the same views (#665).
+		if replaced, err := e.replaceEndedThreeViewGrants(ctx, superseded); err != nil {
+			return takeBack(chat.ToolResult{NoSubmission: true}, err)
+		} else if replaced != "" {
+			return takeBack(chat.ToolResult{AgentContent: strings.ReplaceAll(e.threeView.Messages.DuplicateRun,
+				"{run}", replaced), NoSubmission: true}, nil)
+		}
 	}
 	if canContinue {
 		_, _, err = e.skillRuntime.RequestAgentGrantWithBudget(ctx, generation.OwnerID(command.OwnerID),
@@ -170,8 +276,9 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		_, _, err = e.skillRuntime.RequestAgentGrant(ctx, generation.OwnerID(command.OwnerID),
 			run.ID, stepKey, command.AssistantMessageID)
 	}
+	release()
 	if err != nil {
-		return chat.ToolResult{NoSubmission: true}, err
+		return takeBack(chat.ToolResult{NoSubmission: true}, err)
 	}
 	run, execution, grant, err = e.existingThreeView(ctx, command)
 	if err != nil {
@@ -181,7 +288,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	case executiongrant.Pending:
 		return chat.ToolResult{Suspend: true, NoSubmission: true}, nil
 	case executiongrant.Denied:
-		return chat.ToolResult{AgentContent: "三视图生成未获批准；任务没有提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.Denied, NoSubmission: true}, nil
 	case executiongrant.Claimed:
 		return chat.ToolResult{Suspend: true}, nil
 	case executiongrant.Bound:
@@ -195,7 +302,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	if stopped {
-		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+		return chat.ToolResult{AgentContent: e.threeView.Messages.TurnStopped, NoSubmission: true}, nil
 	}
 	run, accepted, err := e.skillRuntime.SubmitStep(context.WithoutCancel(ctx), generation.OwnerID(command.OwnerID), run.ID, stepKey)
 	if err != nil {
@@ -234,6 +341,317 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	result.AwaitTask = true
 	result.WaitUntil = e.threeViewWaitUntil(command, offering)
 	return result, nil
+}
+
+// threeViewIncludeRight reads the include_right argument strictly: absent or
+// null is false, a JSON boolean is its value, and anything else (a string
+// "true", a number) is an error naming the expected type (#665).
+func threeViewIncludeRight(raw json.RawMessage) (bool, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false, nil
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, fmt.Errorf("include_right must be a JSON boolean (true or false), got %s", trimmed)
+	}
+	return value, nil
+}
+
+// threeViewLocks is a keyed lock with reference counts: an entry lives only
+// while a call holds or waits for it, so sessions do not accumulate mutexes
+// (#665). A waiter gives up when its context ends.
+type threeViewLocks struct {
+	mu      sync.Mutex
+	entries map[string]*threeViewLock
+}
+
+type threeViewLock struct {
+	held chan struct{}
+	refs int
+}
+
+func (l *threeViewLocks) acquire(ctx context.Context, key string) (func(), error) {
+	l.mu.Lock()
+	if l.entries == nil {
+		l.entries = map[string]*threeViewLock{}
+	}
+	entry := l.entries[key]
+	if entry == nil {
+		entry = &threeViewLock{held: make(chan struct{}, 1)}
+		l.entries[key] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+	select {
+	case entry.held <- struct{}{}:
+	case <-ctx.Done():
+		l.drop(key, entry)
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-entry.held
+			l.drop(key, entry)
+		})
+	}, nil
+}
+
+func (l *threeViewLocks) drop(key string, entry *threeViewLock) {
+	l.mu.Lock()
+	entry.refs--
+	if entry.refs == 0 && l.entries[key] == entry {
+		delete(l.entries, key)
+	}
+	l.mu.Unlock()
+}
+
+// size is the number of keys held or waited for; tests read it.
+func (l *threeViewLocks) size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.entries)
+}
+
+// lockThreeViewSession serializes the start of new groups in one session and
+// returns an idempotent release. It gives up when ctx ends.
+func (e *Executor) lockThreeViewSession(ctx context.Context, owner, session string) (func(), error) {
+	return e.threeViewSources.acquire(ctx, owner+"\x00"+session)
+}
+
+// activeThreeViewForSource finds another group of the session, of the same
+// recipe and source picture, that still waits on a card or has a view in
+// flight (#665): a view whose grant is pending or approved while its turn can
+// still use it, or being claimed, or whose Task has not ended; or a group
+// between two views whose continuation turn is still going. A finished,
+// failed or paused group, and one whose card belongs to a stopped turn, is
+// not active: asking again for it starts a new group as before. Without an
+// active group it also returns the approved, unsubmitted grants of those
+// groups whose turn ended (superseded): a new group replaces them.
+func (e *Executor) activeThreeViewForSource(ctx context.Context, command chat.ToolCommand, recipeID string,
+	source generation.AssetID,
+) (skillrun.Run, bool, []supersededThreeViewGrant, error) {
+	owner := generation.OwnerID(command.OwnerID)
+	limit := e.threeView.MaximumListed
+	if limit <= 0 {
+		limit = 20
+	}
+	runs, err := e.skillRuntime.List(ctx, owner, command.SessionID, "", limit)
+	if err != nil {
+		return skillrun.Run{}, false, nil, err
+	}
+	key := threeViewRunKey(command)
+	var superseded []supersededThreeViewGrant
+	for _, run := range runs {
+		if run.RecipeID != recipeID || run.SourceAssetID != source || run.IdempotencyKey == key {
+			continue
+		}
+		for _, step := range run.Steps {
+			active, idle, err := e.threeViewStepActive(ctx, owner, step)
+			if err != nil {
+				return skillrun.Run{}, false, nil, err
+			}
+			if active {
+				return run, true, nil, nil
+			}
+			if idle.RequestID != "" {
+				superseded = append(superseded, supersededThreeViewGrant{runID: run.ID, grant: idle})
+			}
+		}
+		active, err := e.threeViewBetweenViews(ctx, owner, run)
+		if err != nil {
+			return skillrun.Run{}, false, nil, err
+		}
+		if active {
+			return run, true, nil, nil
+		}
+	}
+	return skillrun.Run{}, false, superseded, nil
+}
+
+// supersededThreeViewGrant is an approved, unsubmitted view of an earlier
+// group whose turn ended, with the run that holds it.
+type supersededThreeViewGrant struct {
+	runID string
+	grant executiongrant.Grant
+}
+
+// replaceEndedThreeViewGrants denies the superseded approvals for a new group
+// (AbandonedActor, audited), which releases what they held; the person can
+// still restart such a view. It returns the run of a grant the denial did not
+// reach because it moved on after the guard read it (claimed or bound by the
+// person continuing it): that group runs again and the new one must not start.
+func (e *Executor) replaceEndedThreeViewGrants(ctx context.Context, superseded []supersededThreeViewGrant) (string, error) {
+	for _, entry := range superseded {
+		grant := entry.grant
+		if err := e.skillRuntime.Grants.AbandonRefusedGrant(ctx, grant.OwnerID, grant.RequestID); err != nil {
+			return "", err
+		}
+		// The denial only applies to a grant still approved; read back what
+		// it did instead of trusting a silent no-op.
+		after, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, grant.OwnerID, grant.RequestID)
+		if err != nil {
+			return "", err
+		}
+		if after.Status != executiongrant.Denied {
+			return entry.runID, nil
+		}
+	}
+	return "", nil
+}
+
+// supersededMovedOn reads the grants to replace again and returns the run of
+// one that is no longer approved: a person continued it after the guard read
+// it, so its group runs again. A grant already denied (nothing to replace) does
+// not count.
+func (e *Executor) supersededMovedOn(ctx context.Context, superseded []supersededThreeViewGrant) (string, error) {
+	for _, entry := range superseded {
+		now, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, entry.grant.OwnerID, entry.grant.RequestID)
+		if err != nil {
+			return "", err
+		}
+		if now.Status != executiongrant.Approved && now.Status != executiongrant.Denied {
+			return entry.runID, nil
+		}
+	}
+	return "", nil
+}
+
+// threeViewTurnStopped reports whether the grant's trigger turn was stopped.
+// Such a grant can never be claimed (a three-view card is never detached from
+// its turn), so it does not keep its group active. A turn that no longer
+// exists is not a stop.
+func (e *Executor) threeViewTurnStopped(ctx context.Context, grant executiongrant.Grant) (bool, error) {
+	if grant.TriggerTurnID == "" || e.skillTurnStopped == nil {
+		return false, nil
+	}
+	stopped, err := e.skillTurnStopped(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return false, nil
+	}
+	return stopped, err
+}
+
+// threeViewTurnOver reports whether the grant's trigger turn has ended (any
+// end reason) or no longer exists. Without the turn reader, or without a
+// trigger turn, nothing is known and the turn counts as going on.
+func (e *Executor) threeViewTurnOver(ctx context.Context, grant executiongrant.Grant) (bool, error) {
+	if grant.TriggerTurnID == "" || e.threeViewTurnEnded == nil {
+		return false, nil
+	}
+	ended, err := e.threeViewTurnEnded(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return true, nil
+	}
+	return ended, err
+}
+
+// threeViewStepActive reports whether a view keeps its group active. A view
+// that does not, but holds an approval its ended turn never submitted, returns
+// that grant as idle: a person could still continue it from the panel.
+func (e *Executor) threeViewStepActive(ctx context.Context, owner generation.OwnerID, step skillrun.Step) (bool, executiongrant.Grant, error) {
+	none := executiongrant.Grant{}
+	taskActive := func(id generation.TaskID) (bool, executiongrant.Grant, error) {
+		task, err := e.skillRuntime.Generation.Get(ctx, owner, id)
+		if err != nil {
+			return false, none, err
+		}
+		return !task.State.Terminal(), none, nil
+	}
+	switch step.Phase {
+	case skillrun.GrantPending:
+		if step.GrantRequestID == "" {
+			return false, none, nil
+		}
+		grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), step.GrantRequestID)
+		if err != nil {
+			return false, none, err
+		}
+		switch grant.Status {
+		case executiongrant.Pending, executiongrant.Approved:
+			// A pending card waits until it expires; an approved grant counts
+			// only while the step can still submit with it. Neither counts once
+			// its turn was stopped: nobody can approve or claim it then. A
+			// grant the kernel refused for good is denied by SubmitStep.
+			if grant.Status == executiongrant.Pending && e.skillRuntime.Grants.Expired(grant) {
+				return false, none, nil
+			}
+			stopped, err := e.threeViewTurnStopped(ctx, grant)
+			if err != nil || stopped {
+				return false, none, err
+			}
+			if grant.Status == executiongrant.Approved {
+				// An approval is submitted by its turn when it replays the
+				// call. Once that turn has ended for any reason (an error
+				// between approval and submit included) or is gone, nothing
+				// replays it: the group no longer counts as running, or the
+				// guard would refuse every new ask for good (#665). A person
+				// can still continue the view from the panel. A turn a crash
+				// left running is ended by the turn recovery.
+				over, err := e.threeViewTurnOver(ctx, grant)
+				if err != nil {
+					return false, none, err
+				}
+				if over {
+					return false, grant, nil
+				}
+				return true, none, nil
+			}
+			return true, none, nil
+		case executiongrant.Claimed:
+			return true, none, nil
+		case executiongrant.Bound:
+			return taskActive(generation.TaskID(grant.TaskID))
+		}
+	case skillrun.TaskBound:
+		if step.TaskID != "" {
+			return taskActive(step.TaskID)
+		}
+	}
+	return false, none, nil
+}
+
+// threeViewBetweenViews reports a group the server continues by itself that
+// sits between two views (#665): an earlier view is finished and a later
+// required view is still planned, while the turn that approved the latest
+// view on the continuation basis (a production plan or the auto mode) is
+// still going and was not stopped. That turn submits the next view when it
+// replays the call. A group whose turn ended or stopped is paused.
+func (e *Executor) threeViewBetweenViews(ctx context.Context, owner generation.OwnerID, run skillrun.Run) (bool, error) {
+	if e.threeViewTurnEnded == nil {
+		return false, nil
+	}
+	latest, planned := "", false
+	for _, step := range run.Steps {
+		switch {
+		case step.Phase == skillrun.OutputReady && step.GrantRequestID != "":
+			latest = step.GrantRequestID
+		case (step.Phase == skillrun.Planned || step.Phase == skillrun.Prepared) && !step.Spec.Optional &&
+			step.ReplacementAssetID == "":
+			planned = true
+		}
+	}
+	if latest == "" || !planned {
+		return false, nil
+	}
+	grant, err := e.skillRuntime.Grants.Grants.GetExecutionGrant(ctx, string(owner), latest)
+	if err != nil {
+		return false, err
+	}
+	continued := grant.BudgetEligible && (grant.ApprovedByBudget() ||
+		grant.DecidedBy == executiongrant.PolicyActorPrefix+approvalpolicy.ModeAuto)
+	if !continued || grant.TriggerTurnID == "" {
+		return false, nil
+	}
+	if stopped, err := e.threeViewTurnStopped(ctx, grant); err != nil || stopped {
+		return false, err
+	}
+	ended, err := e.threeViewTurnEnded(ctx, grant.OwnerID, grant.SessionID, grant.TriggerTurnID)
+	if errors.Is(err, chat.ErrMessageNotFound) {
+		return false, nil
+	}
+	return !ended, err
 }
 
 func threeViewRunKey(command chat.ToolCommand) string {
@@ -435,7 +853,7 @@ func (e *Executor) TaskIdentityForCall(ctx context.Context, command chat.ToolCom
 func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offering generation.Offering, err error) (chat.ToolResult, error) {
 	deadline := e.threeViewWaitUntil(command, offering)
 	if !time.Now().Before(deadline) {
-		return chat.ToolResult{TaskID: taskID, Error: e.reconcileContent}, err
+		return chat.ToolResult{TaskID: taskID, Error: e.reconcileText(command)}, err
 	}
 	return chat.ToolResult{TaskID: taskID, AwaitTask: true, WaitUntil: deadline}, err
 }
@@ -479,16 +897,26 @@ func (e *Executor) threeViewSubjectType(requested string) (string, string) {
 		Replace(e.threeView.Messages.SubjectInvalid)
 }
 
-// continueThreeView advances a budget continuation after one view's Task
-// finished (#243): it settles and reviews that view, submits the next required
-// one the plan covers, and ends the tool call only when the group is complete
+// continueThreeView advances a continuation (the budget plan's, #243, or the
+// auto mode's, #663) after one view's Task finished: it settles and reviews
+// that view, submits the next view the basis covers, and ends the tool call
+// only when the group is complete
 // or paused for a person. Accepted views travel to the Agent as same-turn
 // pictures so it can check clothing and colors.
 func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
-	result, err := e.threeViewService.Continue(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID)
+	// The call replays with the arguments it was made with: a four-view request
+	// (include_right) also makes the right view when the session approves every
+	// paid step (#663).
+	// The value was checked when the group was created (threeViewIncludeRight).
+	var args struct {
+		IncludeRight json.RawMessage `json:"include_right"`
+	}
+	_ = json.Unmarshal(command.Call.Arguments, &args)
+	includeRight, _ := threeViewIncludeRight(args.IncludeRight)
+	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, command.AssistantMessageID, includeRight)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}
@@ -660,10 +1088,18 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 	if grant.ApprovedByPolicy() || grant.ApprovedByBudget() {
 		approval = messages.ApprovalPolicy
 	}
+	// #665: a run the server continues (the same predicate as continuationRun
+	// in createThreeView) says so; the other receipt tells the Agent the views
+	// wait on the card.
+	template := messages.AgentStarted
+	if grant.BudgetEligible && messages.AgentStartedContinuing != "" &&
+		e.threeViewService != nil && e.threeViewService.ContinuationEnabled() {
+		template = messages.AgentStartedContinuing
+	}
 	return chat.ToolResult{TaskID: grant.TaskID, AgentContent: strings.NewReplacer(
 		"{run}", run.ID, "{view}", execution.Step.Spec.Label, "{approval}", approval,
 		"{credits}", threeViewPriceText(task), "{task}", string(task.ID),
-	).Replace(messages.AgentStarted)}, nil
+	).Replace(template)}, nil
 }
 
 // threeViewImages picks the source picture: handles (and the selection alias)

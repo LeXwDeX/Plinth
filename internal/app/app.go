@@ -592,6 +592,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		StreamCleanupTTL: time.Duration(
 			applicationSchema.Chat.Stream.CleanupTTLMilliseconds,
 		) * time.Millisecond,
+		TurnKeyRetention: time.Duration(
+			applicationSchema.Chat.API.TurnIdempotency.RetentionSeconds,
+		) * time.Second,
 		SubscriberBufferSize: applicationSchema.Chat.Stream.
 			SubscriberBufferSize,
 		EventFields: chat.EventFieldPolicy{
@@ -861,6 +864,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// An Agent approval stays approvable for the Schema's duration; after
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,
+		// #665: the recharge guard of #294 decides every Agent-originated
+		// step's policy approval (three-view views, their continuation and
+		// Agent processing-plan steps), not only the generation tools'.
+		Recharge: func(ctx context.Context, ownerID, sessionID, capability string) (string, error) {
+			unstored, err := generationtool.UnstoredChargedTasks(ctx, module, applicationSchema.Chat,
+				generation.OwnerID(ownerID), sessionID, []generation.Capability{generation.Capability(capability)})
+			if err != nil || len(unstored) == 0 {
+				return "", err
+			}
+			return string(unstored[0]), nil
+		},
 	}
 	// #410: collect the plans that finished while nothing settled — a
 	// deployment that was stopped when the last step succeeded, or a plan whose
@@ -929,6 +943,21 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	cropService, err := listcrop.New(cropConfig)
 	if err != nil {
 		return nil, fmt.Errorf("裁剪服务: %w", err)
+	}
+	// #642: the Agent crop tool keeps its own region and PNG caps
+	// (application.chat.image_crop.limits) so a whole 4096x4096 board can be
+	// cut; the asset-list decompose crop above keeps the smaller decompose
+	// caps. Both services share the crop store, so the per-source storage
+	// guardrail and the rectangle dedup stay common.
+	toolCropService := cropService
+	if limits := applicationSchema.Chat.ImageCrop.Limits; limits.MaximumRegionPixels > 0 && limits.MaximumPNGBytes > 0 {
+		toolCropConfig := cropConfig
+		toolCropConfig.MaximumRegionPixels = limits.MaximumRegionPixels
+		toolCropConfig.UploadMaxBytes = limits.MaximumPNGBytes
+		toolCropService, err = listcrop.New(toolCropConfig)
+		if err != nil {
+			return nil, fmt.Errorf("裁剪工具服务: %w", err)
+		}
 	}
 	// Production lists (#327): the service reuses the plan's offering
 	// selection through the chat adapters, so an explicit model lock and an
@@ -1077,11 +1106,23 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// #251: the acceptance wording is frozen in the proposal turn's language.
 	// Text takes the turn locale; an empty locale would never translate.
 	chatService.SetProductionPlanLocalizer(texts.Text)
+	// #665: the read-only Agent tools (get_task, compare_model_reference's
+	// pictures named by ID) read only the session's scope: its own Tasks, a
+	// branch's ancestors, its list item's references and its project.
+	agentReadScope := &chat.AgentReadScope{
+		TaskInSession: module.TaskInSession,
+		Refused:       applicationSchema.Chat.Presentation.Messages.AgentReadOutOfScope,
+		Texts:         texts,
+	}
+	if applicationSchema.Project != nil {
+		agentReadScope.ProjectReference = repository.ProjectRepository().RegisteredReference
+	}
 	imageReview, err := imagereview.New(imagereview.Config{
 		Context: applicationSchema.Chat.Context,
 		Review:  applicationSchema.Chat.ImageReview,
 		Inputs:  inputAssetService,
 		Tasks:   module,
+		Scope:   agentReadScope,
 		// #282/#284/#287: the delivery checklist judges a picture against the
 		// session's 2D purpose, and names the Offerings that can reach its
 		// minimum resolution from the Catalog.
@@ -1129,7 +1170,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
 			Context:  applicationSchema.Chat.Context,
 			Schema:   applicationSchema.Chat.ImageCrop,
-			Crops:    cropService,
+			Crops:    toolCropService,
 			Localize: texts.Text,
 			// #552: every crop is shown to the person as a reply picture.
 			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
@@ -1191,6 +1232,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #665: without the grant ports a generation tool would submit through the
+	// legacy path with no execution grant and no approval mode at all. A
+	// partially wired application must not start.
+	if err := requireExecutionGrants(toolExecutor); err != nil {
+		return nil, err
+	}
 	// A planned step is checked against the session purpose's budget by the
 	// generation tools that own it (#129).
 	chatService.SetProductionPlanPurposeBudget(toolExecutor.PlanStepPurposeBudgetNote)
@@ -1231,7 +1278,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
 		Params:                paramsStore,
 		Generate:              toolExecutor,
-		ReadTask:              newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		ReadTask:              newSessionAgentTaskReader(module, agentReadScope, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		RecoverTask:           newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:            toolExecutor.ListSessionModels,
 		ReadProcessingPlan:    toolExecutor.ReadProcessingPlan,
@@ -1278,6 +1325,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
 		ConsentReconcileContent:   applicationSchema.Chat.Agent.ConsentReconcileContent,
 		ConsentLimitContent:       applicationSchema.Chat.Agent.ConsentLimitContent,
+		Texts:                     texts,
 		TaskObservationTimeout:    time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
 		Projection: func(capability, model string) json.RawMessage {
 			return buildAgentOfferingsProjection(
@@ -2015,6 +2063,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	processingService.WithGrants(executionGrants)
 	processingService.WithSourcePreference(catalog.ProcessingSourcePreference(applicationSchema.Chat.Tools))
+	// #665: the Agent's revise retry bound is the plan tool's declared one.
+	processingService.WithAgentStepRetries(catalog.ProcessingAgentStepRetries(applicationSchema.Chat.Tools))
 	// #251: checkpoints read the saved model through the review tool's bounded,
 	// owner-scoped cache; a read failure is recorded as unknown, not a pass.
 	processingService.WithModelReport(toolExecutor.ModelReport)
@@ -2135,6 +2185,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	agentToolExecutor.SetThreeView(applicationSchema.Chat.ThreeView)
+	agentToolExecutor.SetThreeViewTurnEnded(func(ctx context.Context, owner, session, turn string) (bool, error) {
+		current, err := chatService.GetTurn(ctx, owner, session, turn)
+		if err != nil {
+			return false, err
+		}
+		return chatService.TurnStateTerminal(current.State), nil
+	})
 	if applicationSchema.Chat.ThreeView.RecipeID != "" {
 		threeViewService, err = threeview.New(threeview.Config{
 			Runtime: skillRuntime, Sessions: chatService, Schema: applicationSchema.Chat.ThreeView,

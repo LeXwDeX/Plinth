@@ -109,9 +109,12 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 		status, event = executiongrant.Approved, "approved"
 	}
 	stamp := formatTime(time.Now().UTC())
+	// The steps mode never approves a stopped turn's own grant (#665); a
+	// denial is always allowed.
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status = ?, decided_by = ?, decided_at = ?, updated_at = ?
- WHERE request_id = ? AND owner_id = ? AND status = 'pending'`,
-		string(status), decidedBy, stamp, stamp, requestID, owner)
+ WHERE request_id = ? AND owner_id = ? AND status = 'pending'
+ AND (? = 'denied' OR `+turnOwnsStoppedGrantNot+`)`,
+		string(status), decidedBy, stamp, stamp, requestID, owner, string(status))
 	if err != nil {
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 	}

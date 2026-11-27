@@ -34,6 +34,8 @@ type continuationGateway struct {
 	repo     *Repository
 	prepares int
 	submits  int
+	// refuse, when set, is returned by SubmitPrepared before any write.
+	refuse error
 }
 
 func (g *continuationGateway) PrepareInput(ctx context.Context, cmd generation.PrepareInputCommand) (generation.PreparedInput, error) {
@@ -69,6 +71,9 @@ func (g *continuationGateway) GetPreparedInput(ctx context.Context, owner genera
 
 func (g *continuationGateway) SubmitPrepared(ctx context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
 	g.submits++
+	if g.refuse != nil {
+		return generation.Accepted{}, g.refuse
+	}
 	prepared, err := g.GetPreparedInput(ctx, cmd.OwnerID, cmd.PreparedInputID)
 	if err != nil {
 		return generation.Accepted{}, err
@@ -693,4 +698,244 @@ func TestAgentToolContinuesTheBudgetViewsInOneCall(t *testing.T) {
 
 func threeViewRunKeyForTest(session, call string) string {
 	return "chat-skill:" + session + ":" + call
+}
+
+// startFrontByPolicy starts the front view the way the Agent does in the auto
+// mode (#663): the grant is eligible for continuation and the session policy,
+// not a plan's budget, approves it.
+func (f *continuationFixture) startFrontByPolicy(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
+		t.Fatal(err)
+	}
+	_, grant, err := f.runtime.RequestAgentGrantWithBudget(ctx, "owner-a", f.run.ID, "front", "turn-a")
+	if err != nil || grant.Status != executiongrant.Approved || !grant.ApprovedByPolicy() || grant.ApprovedByBudget() {
+		t.Fatalf("front grant = %+v err=%v", grant, err)
+	}
+	_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(accepted.TaskID)
+}
+
+// continueAll finishes each submitted view and asks for the next, returning the
+// views in the order the server submitted them and the last result.
+func (f *continuationFixture) continueAll(t *testing.T, includeRight bool, first string) ([]string, threeview.ContinuationResult) {
+	t.Helper()
+	ctx := context.Background()
+	task := first
+	var order []string
+	for i := 0; i < 6; i++ {
+		f.finish(t, task, "asset-"+strconv.Itoa(i))
+		result, err := f.views.ContinueWith(ctx, "owner-a", "session-a", f.run.ID, task, "turn-a", includeRight)
+		if err != nil {
+			t.Fatalf("continue %d: %v", i, err)
+		}
+		if result.TaskID == "" {
+			return order, result
+		}
+		if result.Paused {
+			t.Fatalf("continue %d paused: %+v", i, result)
+		}
+		order = append(order, result.View)
+		task = result.TaskID
+	}
+	t.Fatal("the series did not end")
+	return nil, threeview.ContinuationResult{}
+}
+
+// #663: in the auto mode no plan is needed. The server finishes the required
+// views of a three-view request by itself, in order, each approved by the
+// session policy, and leaves the optional right view alone.
+func TestAutoModeContinuesTheRequiredViewsWithoutAPlan(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	ctx := context.Background()
+	if ok, err := f.views.CanContinue(ctx, "owner-a", "session-a", f.run.ID); err != nil || !ok {
+		t.Fatalf("auto mode cannot continue: %v %v", ok, err)
+	}
+	order, last := f.continueAll(t, false, f.startFrontByPolicy(t))
+	if len(order) != 2 || order[0] != "left" || order[1] != "back" {
+		t.Fatalf("submitted views after the front = %v, want left then back", order)
+	}
+	if last.Paused || len(last.Completed) != 3 || !last.Group.Complete {
+		t.Fatalf("final result = %+v", last)
+	}
+	if f.gateway.submits != 3 {
+		t.Fatalf("submissions = %d, want one per required view", f.gateway.submits)
+	}
+	if right := f.step(t, "right"); right.TaskID != "" || right.Phase != skillrun.Planned {
+		t.Fatalf("a three-view request started the optional right view: %+v", right)
+	}
+	for _, key := range []string{"left", "back"} {
+		execution, err := f.runtime.Runs.ResolveExecution(ctx, "owner-a", f.run.ID, key)
+		if err != nil || execution.SourceAssetID != "asset-0" {
+			t.Fatalf("%s source = %q err=%v, want the front output", key, execution.SourceAssetID, err)
+		}
+	}
+}
+
+// #663: a four-view request (include_right) in the auto mode makes the right
+// view too, after the three required ones, with the front output as its source.
+func TestAutoModeMakesTheRightViewForAFourViewRequest(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	order, last := f.continueAll(t, true, f.startFrontByPolicy(t))
+	if len(order) != 3 || order[0] != "left" || order[1] != "back" || order[2] != "right" {
+		t.Fatalf("submitted views after the front = %v, want left, back, right", order)
+	}
+	if last.Paused || len(last.Completed) != 4 {
+		t.Fatalf("final result = %+v", last)
+	}
+	if f.gateway.submits != 4 {
+		t.Fatalf("submissions = %d, want four", f.gateway.submits)
+	}
+	execution, err := f.runtime.Runs.ResolveExecution(context.Background(), "owner-a", f.run.ID, "right")
+	if err != nil || execution.SourceAssetID != "asset-0" {
+		t.Fatalf("right source = %q err=%v, want the front output", execution.SourceAssetID, err)
+	}
+}
+
+// #663: a budget plan covers the required views only, so include_right changes
+// nothing in the budget mode: the right view stays the person's choice.
+func TestBudgetModeIgnoresIncludeRight(t *testing.T) {
+	f := newContinuationFixture(t, true)
+	order, last := f.continueAll(t, true, f.startFront(t))
+	if len(order) != 2 || last.Paused || len(last.Completed) != 3 {
+		t.Fatalf("budget series = %v, last %+v", order, last)
+	}
+	if right := f.step(t, "right"); right.TaskID != "" {
+		t.Fatalf("the budget mode started the right view: %+v", right)
+	}
+}
+
+// #663: the strict mode still does not continue, whatever the request asks.
+func TestStrictModeIgnoresIncludeRight(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "manual")
+	ctx := context.Background()
+	if ok, err := f.views.CanContinue(ctx, "owner-a", "session-a", f.run.ID); err != nil || ok {
+		t.Fatalf("strict mode can continue: %v %v", ok, err)
+	}
+	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
+		t.Fatal(err)
+	}
+	_, grant, err := f.runtime.RequestAgentGrant(ctx, "owner-a", f.run.ID, "front", "turn-a")
+	if err != nil || grant.Status != executiongrant.Approved {
+		t.Fatalf("front grant = %+v err=%v", grant, err)
+	}
+	_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finish(t, string(accepted.TaskID), "asset-front")
+	result, err := f.views.ContinueWith(ctx, "owner-a", "session-a", f.run.ID, string(accepted.TaskID), "turn-a", true)
+	if err != nil || !result.Paused || result.TaskID != "" {
+		t.Fatalf("strict continuation = %+v err=%v", result, err)
+	}
+	if f.gateway.submits != 1 {
+		t.Fatalf("submissions = %d, want only the front view", f.gateway.submits)
+	}
+}
+
+// toolFor builds the create_three_view tool over the fixture, the way the chat
+// turn runs it, and the command of one call with the given arguments.
+func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttools.Executor, chat.ToolCommand) {
+	t.Helper()
+	executor, err := agenttools.New(agenttools.Config{Params: agentparams.NewStore(),
+		Generate: unusedSkillGenerator{}, TaskObservationTimeout: time.Minute,
+		Context:                 catalog.ChatContextSchema{AssetURLTemplate: "/api/v1/tasks/{task_id}/assets/{asset_id}"},
+		ConsentReconcileContent: "Task observation unavailable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.SetSkillRuntime(f.runtime, &skillRecoveryReferences{},
+		&skillRecoveryOfferings{}, []catalog.ChatSkillRecipeSchema{{ID: "image-three-view", Revision: "r1"}},
+		f.repo.TurnStopRequested); err != nil {
+		t.Fatal(err)
+	}
+	executor.SetThreeView(catalog.ChatThreeViewSchema{
+		RecipeID: "image-three-view", ModelSourceStepKey: "front", Label: "views", MaximumListed: 5,
+		ModelSourceNote: "front", DefaultSubjectType: "generic", SubjectArgument: "subject_type",
+		SubjectTypes: []catalog.ChatThreeViewSubjectType{
+			{ID: "generic", Label: "Generic"}, {ID: "humanoid", Label: "Humanoid"}},
+		Messages: catalog.ChatThreeViewMessages{
+			AgentStarted: "started {run} {view} {approval} {credits} {task}", ApprovalHuman: "person",
+			ApprovalPolicy: "policy", ReferenceRequired: "one image",
+			AgentCompleted: "completed {run}: {views}", AgentPaused: "paused {run} {view} {reason}",
+			ConsistencyRetry:  "retry {view} {attempt}/{maximum} {reasons}",
+			ConsistencyFailed: "failed {view} {reasons}", SubjectInvalid: "bad {subject} {choices}",
+		},
+		Continuation: catalog.ChatThreeViewContinuationSchema{Enabled: true,
+			Reasons: map[string]string{"budget_not_covered": "budget", "view_not_finished": "unfinished",
+				"view_already_started": "busy", "consistency_retries_exhausted": "exhausted"}},
+		Multiview: catalog.ChatThreeViewMultiviewSchema{ViewOrder: []string{"front", "left", "back", "right"},
+			ViewSeparator: " / "},
+	})
+	executor.SetThreeViewService(f.views)
+	return executor, chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
+		Call:    agents.ToolCall{ID: "auto-call", Name: "create_three_view", Arguments: []byte(arguments)},
+		Options: chat.TurnOptions{AIModel: "original-model", CreativeDomain: "image"},
+		History: []chat.Message{{Role: "user", ImageURLs: []string{"/owned/source-a"}}}}
+}
+
+// runTool runs one create_three_view call to its end the way the orchestrator
+// replays it: each replay after a view's Task finished submits the next view.
+// It returns the number of views submitted and the call's final result.
+func (f *continuationFixture) runTool(t *testing.T, executor *agenttools.Executor, command chat.ToolCommand) (int, chat.ToolResult) {
+	t.Helper()
+	ctx := context.Background()
+	observe := func(chat.ToolObservation) error { return nil }
+	result, err := executor.Execute(ctx, command, observe)
+	if err != nil || !result.AwaitTask || result.TaskID == "" {
+		t.Fatalf("front: %+v err=%v", result, err)
+	}
+	for i := 0; i < 6; i++ {
+		command.BoundTaskID = result.TaskID
+		command.FrozenIdempotencyKey = ""
+		f.finish(t, command.BoundTaskID, "asset-auto-"+strconv.Itoa(i))
+		result, err = executor.Execute(ctx, command, observe)
+		if err != nil {
+			t.Fatalf("replay %d: %v", i, err)
+		}
+		if !result.AwaitTask {
+			return f.gateway.submits, result
+		}
+	}
+	t.Fatal("the call did not end")
+	return 0, chat.ToolResult{}
+}
+
+// #663: in the auto mode one create_three_view call makes the front, left and
+// back views and ends complete, with no plan and no click on the card.
+func TestAgentToolMakesAllThreeViewsInOneCallInAutoMode(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	executor, command := f.toolFor(t, `{"subject_type":"humanoid"}`)
+	submits, final := f.runTool(t, executor, command)
+	if submits != 3 || len(final.Pictures) != 3 || !strings.Contains(final.AgentContent, "completed") {
+		t.Fatalf("submissions = %d, final = %+v", submits, final)
+	}
+	if right := f.step(t, "right"); right.TaskID != "" {
+		t.Fatalf("a three-view request started the right view: %+v", right)
+	}
+}
+
+// #663: with include_right the same call also makes the right view.
+func TestAgentToolMakesAllFourViewsInOneCallInAutoMode(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	executor, command := f.toolFor(t, `{"subject_type":"humanoid","include_right":true}`)
+	submits, final := f.runTool(t, executor, command)
+	if submits != 4 || len(final.Pictures) != 4 || !strings.Contains(final.AgentContent, "completed") {
+		t.Fatalf("submissions = %d, final = %+v", submits, final)
+	}
+}
+
+// #663: the strict mode keeps the card: the call ends after the front view and
+// the later views wait for the person.
+func TestAgentToolStopsAfterTheFrontViewInStrictMode(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, false, "manual")
+	executor, command := f.toolFor(t, `{"subject_type":"humanoid","include_right":true}`)
+	first, err := executor.Execute(context.Background(), command, func(chat.ToolObservation) error { return nil })
+	if err != nil || first.AwaitTask || f.gateway.submits != 1 {
+		t.Fatalf("strict first call: %+v err=%v submissions=%d", first, err, f.gateway.submits)
+	}
 }

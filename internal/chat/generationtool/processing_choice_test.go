@@ -151,7 +151,7 @@ func TestManualModeAsksForTheServiceFirstAndTheApprovalAfterwards(t *testing.T) 
 		`{"source_task_id":"rodin-1","prompt":"mossy stone","offering_id":"hyper3d/texture/local-model"}`, turn)
 	if !result.NoSubmission || h.gateway.submitCount != 0 || len(h.gateway.frozen) != 1 ||
 		h.gateway.frozen[0].OfferingID != "hyper3d/texture/local-model" || strings.Contains(result.AgentContent, "choice_required") ||
-		!strings.Contains(result.AgentContent, "approval card") {
+		!strings.Contains(result.AgentContent, "批准卡") {
 		t.Fatalf("the chosen retexture did not wait for approval: %+v frozen=%+v", result, h.gateway.frozen)
 	}
 }

@@ -35,7 +35,7 @@ export interface ProjectProductSchema {
   };
   assets: { kinds: Array<{ id: string; label_key: string }> };
   /** Field names; the raw Catalog declares objects, the public projection strings. */
-  conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string }> };
+  conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string; label_key?: string }> };
 }
 
 /**
@@ -122,7 +122,8 @@ export interface AccessKeysProductSchema {
 
 /** The browser contract after convention names are reduced to strings. */
 export type NormalizedProjectProductSchema = Omit<ProjectProductSchema, 'conventions'> & {
-  conventions: { fields: string[]; texts: string[] };
+  /** textLabels maps a text name to its label message key (#668); a name without one shows as its name. */
+  conventions: { fields: string[]; texts: string[]; textLabels: Record<string, string> };
 };
 
 /**
@@ -141,6 +142,8 @@ export function projectContract(schema: ProductSchema): NormalizedProjectProduct
     conventions: {
       fields: names(source.conventions.fields),
       texts: names(source.conventions.texts),
+      textLabels: Object.fromEntries((Array.isArray(source.conventions.texts) ? source.conventions.texts : [])
+        .flatMap((value) => (value && typeof value === 'object' && typeof value.label_key === 'string' && value.label_key !== '' ? [[String(value.name), value.label_key]] : []))),
     },
   };
 }
@@ -548,6 +551,8 @@ export interface ProductSchema {
           | 'bottom-center'
           | 'bottom-right';
         rich_colors: boolean;
+        /** How long every notice stays on screen, failure notices included (#651). */
+        duration_milliseconds: number;
       };
     };
   };
@@ -1694,6 +1699,8 @@ export interface ChatProductSchema {
       selection_mask?: string;
       from_id: string;
       turn_canceled: string;
+      /** #645: the repeated query member naming the last turn's messages still to delete when it is replaced. */
+      last_turn?: string;
       /** #137: the background-continue response and availability members. */
       turn_backgrounded?: string;
       turn_background_available?: string;
@@ -1911,6 +1918,10 @@ export interface ChatProductSchema {
       stopped: string;
       background: string;
       error: string;
+      /** #638: a model round answered with nothing, also after its retry. */
+      empty_response: string;
+      /** #638: a model round drew a picture itself; it was dropped, not retried. */
+      inline_image: string;
     };
     placeholder_stale_milliseconds: number;
     failed_prompt_preview_characters: number;

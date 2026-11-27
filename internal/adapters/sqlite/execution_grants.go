@@ -339,18 +339,24 @@ func (r *Repository) DecideExecutionGrant(ctx context.Context, owner, requestID,
 		// lost. Repeating the same decision by the same authenticated actor is
 		// read-only; it must not create another audit event or change a denial.
 		previous, readErr := grantByRequest(ctx, conn, owner, requestID)
-		if readErr != nil || previous.DecidedBy != authenticatedActorID {
+		if readErr != nil {
 			return executiongrant.Grant{}, executiongrant.ErrState
 		}
-		if decision == executiongrant.Approve &&
-			(previous.Status == executiongrant.Approved || previous.Status == executiongrant.Claimed || previous.Status == executiongrant.Bound) {
+		// A denial is final whoever made it: a person denying a card the
+		// expiry sweep or a Stop already denied (system actors, #665) gets
+		// the denied grant back, without another audit event.
+		if decision == executiongrant.Deny && previous.Status == executiongrant.Denied {
 			if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 				return executiongrant.Grant{}, err
 			}
 			committed = true
 			return previous, nil
 		}
-		if decision == executiongrant.Deny && previous.Status == executiongrant.Denied {
+		if previous.DecidedBy != authenticatedActorID {
+			return executiongrant.Grant{}, executiongrant.ErrState
+		}
+		if decision == executiongrant.Approve &&
+			(previous.Status == executiongrant.Approved || previous.Status == executiongrant.Claimed || previous.Status == executiongrant.Bound) {
 			if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 				return executiongrant.Grant{}, err
 			}
@@ -406,8 +412,13 @@ func (r *Repository) ApproveExecutionGrantByPolicy(ctx context.Context, owner, r
 		}
 	}()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Like a person's approval, the policy's is refused in the same statement
+	// when the grant's trigger turn was stopped while it still owns the grant:
+	// a Stop that commits between the mode read and this write must not leave
+	// an approved grant nobody can claim (#665).
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status='approved', decided_by=?, decided_at=?, updated_at=?
- WHERE request_id=? AND owner_id=? AND source IN (`+sources+`) AND status='pending'`,
+ WHERE request_id=? AND owner_id=? AND source IN (`+sources+`) AND status='pending'
+ AND `+turnOwnsStoppedGrantNot,
 		decidedBy, now, now, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, err

@@ -78,7 +78,7 @@ func TestPromptOverLimitRefusesBeforeSubmission(t *testing.T) {
 	if !result.NoSubmission || result.TaskID != "" || gateway.submitted.OfferingID != "" {
 		t.Fatalf("over-limit prompt was submitted: %#v / %#v", result, gateway.submitted)
 	}
-	if !strings.Contains(result.Error, "over the limit of 10 characters") || !strings.Contains(result.Error, "by 17 characters") {
+	if !strings.Contains(result.Error, "上限 10 个字符") || !strings.Contains(result.Error, "多出 17 个字符") {
 		t.Fatalf("refusal = %q", result.Error)
 	}
 }
@@ -138,7 +138,7 @@ func TestPromptReportCarriesActualPromptAndAppliedLayers(t *testing.T) {
 		t.Fatalf("prompt_note layers = %#v", note)
 	}
 	rendered, _ := json.Marshal(layers)
-	if !strings.Contains(string(rendered), "Skill prompt template") || !strings.Contains(string(rendered), "default negative prompt") {
+	if !strings.Contains(string(rendered), "Skill 提示词模板") || !strings.Contains(string(rendered), "默认反向提示词") {
 		t.Fatalf("prompt_note layers = %s", rendered)
 	}
 	if !strings.Contains(string(rendered), "{skill_prompt}") {
@@ -228,7 +228,7 @@ func TestResumedAgentOperationReportsTheSamePromptAsTheFirstSubmission(t *testin
 			firstContent["prompt_note"], secondContent["prompt_note"])
 	}
 	rendered, _ := json.Marshal(firstContent["prompt_note"])
-	for _, layer := range []string{"reference-image template", "style lock", "default negative prompt"} {
+	for _, layer := range []string{"参考图模板", "风格锁", "默认反向提示词"} {
 		if !strings.Contains(string(rendered), layer) {
 			t.Fatalf("prompt_note lacks %q: %s", layer, rendered)
 		}

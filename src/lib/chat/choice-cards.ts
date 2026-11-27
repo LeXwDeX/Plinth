@@ -276,17 +276,53 @@ export function heldChoiceRelease(state: { sameScope: boolean; cardOpen: boolean
 }
 
 /**
+ * The latest turn's replies (#645): the messages after the last user message, and whether one of them is a
+ * reply still streaming under its optimistic ID. Undefined when no user message is shown.
+ */
+export interface LatestReplies {
+  ids: readonly string[];
+  unnamed: boolean;
+}
+
+export function latestReplies(
+  messages: readonly { id: string; role: string }[],
+  optimisticAssistantId: string,
+): LatestReplies | undefined {
+  let index = -1;
+  for (let position = messages.length - 1; position >= 0; position -= 1) {
+    if (messages[position].role === 'user') { index = position; break; }
+  }
+  if (index < 0) return undefined;
+  const ids = messages.slice(index + 1).map((message) => message.id);
+  return { ids, unnamed: ids.includes(optimisticAssistantId) };
+}
+
+/**
  * Where the cards go in the conversation: after the assistant message that
  * asked. An open card whose message is not on the page (not loaded yet, or
  * still streaming) is shown at the end so it can still be answered.
+ *
+ * #645: an open card is shown only while it belongs to the latest turn's replies. Once the person typed a new
+ * message, the earlier reply's open card is not drawn at all (the server supersedes it when that turn ends
+ * unless the Agent mapped the message to it); answered and superseded cards stay as the record of their reply.
+ * A card whose message is not shown belongs to the latest turn only while that turn's reply is still unnamed.
+ * `answering` is the card the person is answering on the card right now: its own answer turn does not hide it.
  */
-export function choiceCardPlacement(cards: readonly ChoiceCardModel[], shownMessageIds: readonly string[]) {
+export function choiceCardPlacement(
+  cards: readonly ChoiceCardModel[],
+  shownMessageIds: readonly string[],
+  latest?: LatestReplies,
+  answering?: string | null,
+) {
   const shown = new Set(shownMessageIds);
+  const current = latest ? new Set(latest.ids) : undefined;
   const byMessage = new Map<string, ChoiceCardModel[]>();
   const loose: ChoiceCardModel[] = [];
   for (const card of [...cards].sort((left, right) => left.createdAt.localeCompare(right.createdAt))) {
-    if (shown.has(card.assistantMessageId)) byMessage.set(card.assistantMessageId, [...(byMessage.get(card.assistantMessageId) ?? []), card]);
-    else if (card.state === 'pending') loose.push(card);
+    if (shown.has(card.assistantMessageId)) {
+      if (card.state === 'pending' && current && !current.has(card.assistantMessageId) && card.id !== answering) continue;
+      byMessage.set(card.assistantMessageId, [...(byMessage.get(card.assistantMessageId) ?? []), card]);
+    } else if (card.state === 'pending' && (!latest || latest.unnamed)) loose.push(card);
   }
   return { byMessage, loose };
 }

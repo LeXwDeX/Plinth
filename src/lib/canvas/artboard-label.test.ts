@@ -7,10 +7,10 @@ import { artboardLabelBox } from './artboard-label';
 const artboardSchema = catalog.application.canvas.frontend.artboard;
 const board = canvasArtboard(artboardSchema, { width: 2048, height: 2048 });
 
-describe('the size label sits inside the frame (#282)', () => {
-  it('reads "工作区：2048×2048，1:1" from the Schema text', () => {
+describe('the ratio label sits inside the frame (#282, #653)', () => {
+  it('reads "画布比例：1:1" from the Schema text, without the canvas pixels', () => {
     const template = schemaText(catalog.application as unknown as ProductSchema, 'ui.canvas.size.label');
-    expect(formatSchemaText(template, { width: 2048, height: 2048, ratio: '1:1' })).toBe('工作区：2048×2048，1:1');
+    expect(formatSchemaText(template, { ratio: '1:1' })).toBe('画布比例：1:1');
   });
 
   it('is inset in the top-left corner and keeps its screen size at any zoom', () => {

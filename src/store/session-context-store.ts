@@ -80,6 +80,9 @@ export async function loadSessionReasoning(client: ChatBrowserClient, sessionId:
 
 /** Shows the new level at once; puts the previous one back when the server refuses. */
 export async function switchSessionReasoning(client: ChatBrowserClient, sessionId: string, level: string): Promise<boolean> {
+  // #665: one switch at a time, as for the chat model: a second one would take the first's optimistic level as the
+  // one to put back, and a refused first switch would then overwrite the second's answer.
+  if (useSessionContextStore.getState().reasoningBusy[sessionId]) return false;
   const previous = useSessionContextStore.getState().reasoning[sessionId];
   if (previous) put('reasoning', sessionId, { ...previous, effort: level });
   put('reasoningBusy', sessionId, true);
@@ -150,4 +153,18 @@ export async function switchSessionChatModel(client: ChatBrowserClient, sessionI
     loadSessionContext(client, sessionId).catch(() => undefined),
   ]);
   return true;
+}
+
+/** #665: a deleted session leaves nothing behind here. */
+export function forgetSessionContext(sessionId: string): void {
+  const state = useSessionContextStore.getState();
+  const keys = Object.keys(state).filter((key) => {
+    const value = state[key as keyof SessionContextStore];
+    return typeof value === 'object' && value !== null && sessionId in value;
+  }) as (keyof SessionContextStore)[];
+  if (keys.length === 0) return;
+  useSessionContextStore.setState((current) => Object.fromEntries(keys.map((key) => {
+    const { [sessionId]: _, ...rest } = current[key];
+    return [key, rest];
+  })) as Partial<SessionContextStore>);
 }

@@ -10,7 +10,7 @@ import { Surface } from '@/components/ui/surface';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { unavailableLabel } from '@/lib/unavailable';
-import { schemaText } from '@/lib/product-schema';
+import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import {
   createLLMSettingsClient,
   LLMSettingsError,
@@ -20,6 +20,17 @@ import {
   type LLMSettingsManagement,
 } from '@/lib/llm-settings';
 import { formatTokenCount } from '@/lib/chat/token-count';
+
+/** A stored ISO time in the admin pages' date format (#670); an unreadable value shows the placeholder. */
+function formatDateTime(schema: ProductSchema, value: string | undefined): string {
+  const presentation = schema.administration.audit_logs.presentation;
+  const date = new Date(value ?? '');
+  if (!value || Number.isNaN(date.getTime())) return presentation.empty_placeholder;
+  return new Intl.DateTimeFormat(
+    presentation.date_locale,
+    presentation.date_time_options as Intl.DateTimeFormatOptions,
+  ).format(date);
+}
 
 /**
  * #322: the administrator's LLM settings. Connections come from the runtime environment; this page shows
@@ -155,7 +166,7 @@ export default function LLMSettingsPage() {
                     ? <p>{ui('reachable')} · {ui(`outcome_${check.outcome}`) || check.outcome}</p>
                     : <div>{unavailable('llm_unreachable', `${ui('unreachable')} · ${ui(`outcome_${check.outcome}`) || check.outcome}`, `llm-unreachable-${connection.id}`)}</div>}
                   <p>{check.vision === 'supported' ? ui('vision_supported') : check.vision === 'unsupported' ? ui('vision_unsupported') : ui('vision_unknown')}</p>
-                  <p className="text-muted-foreground">{ui('checked_at')}: {check.checked_at}</p>
+                  <p className="text-muted-foreground">{ui('checked_at')}: {formatDateTime(schema, check.checked_at)}</p>
                 </> : <p className="text-muted-foreground">{ui('never_tested')}</p>}
               </div>
             </div>
@@ -201,7 +212,7 @@ export default function LLMSettingsPage() {
         <h2 className="font-semibold">{ui('history')}</h2>
         {management.history.length === 0 ? <p>{ui('history_empty')}</p> : <ul className="space-y-2">
           {management.history.map((version) => <li key={version.revision} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="break-all">{version.revision} · {version.created_at} · {version.source}</span>
+            <span className="break-all">{version.revision} · {formatDateTime(schema, version.created_at)} · {version.source}</span>
             <Action variant="outline" size="sm" disabled={busy || version.revision === management.revision}
               onClick={() => void run(() => client.restore(management.revision, version.revision), ui('restored'))}>{ui('restore_version')}</Action>
           </li>)}

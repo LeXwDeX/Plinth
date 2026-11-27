@@ -22,7 +22,7 @@ func (a waitingAgent) Stream(_ context.Context, request agents.Request, _ func(a
 		}
 	}
 	return agents.Completion{ToolCalls: []agents.ToolCall{
-		{ID: "control", Name: a.control, Arguments: []byte(`{"params":{}}`)},
+		{ID: "control", Name: a.control, Arguments: []byte(`{"offering_id":"configured","params":{}}`)},
 		{ID: "paid", Name: a.generate, Arguments: []byte(`{"prompt":"paint"}`)},
 	}}, nil
 }
@@ -483,4 +483,43 @@ func TestWaitingTaskStopAndWrongOwnerFact(t *testing.T) {
 	if control, submitted := executor.counts(session.ID); control != 1 || submitted != 1 {
 		t.Fatalf("stop replayed tools: control=%d submit=%d", control, submitted)
 	}
+}
+
+// #665: a keyed send whose request ended after its turn was persisted (queued)
+// and before Schedule leaves a queued turn nobody enqueued. The running
+// orchestrator picks it up by itself (the waiting scanner enqueues queued
+// turns, the restart's RecoverTurns lists them), so the repeat of the key that
+// answers this turn does not have to schedule it again.
+func TestQueuedTurnNobodyScheduledIsPickedUp665(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	service := newChatService(t, newMemoryChatRepository())
+	executor := newWaitingExecutor()
+	orchestrator := waitingOrchestrator(t, service, executor)
+	done := make(chan error, 1)
+	go func() { done <- orchestrator.Run(ctx) }()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "unscheduled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Give the startup recovery its pass first, so the scanner is what finds
+	// the turn below.
+	time.Sleep(50 * time.Millisecond)
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		turn, err := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)
+		if err == nil && turn.State != service.TurnQueuedState() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the queued turn was never picked up: %+v %v", turn, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
 }

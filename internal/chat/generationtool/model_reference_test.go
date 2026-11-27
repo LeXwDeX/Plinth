@@ -95,6 +95,9 @@ type reviewPictures struct {
 	opened   []string
 	owners   []string
 	err      error
+	// agentOpened lists the reads of an asset named by ID (#665).
+	agentOpened []string
+	scoped      func(chat.ToolCommand, string) bool
 }
 
 func (pictures *reviewPictures) OpenPicture(_ context.Context, owner string, attachment chat.Attachment,
@@ -109,6 +112,17 @@ func (pictures *reviewPictures) OpenPicture(_ context.Context, owner string, att
 		return nil, fmt.Errorf("asset %s is not a stored picture", attachment.AssetID)
 	}
 	return data, nil
+}
+
+// OpenAgentPicture serves the same pictures; scoped, when set, decides
+// whether the command's session may read the asset (#665).
+func (pictures *reviewPictures) OpenAgentPicture(ctx context.Context, command chat.ToolCommand,
+	assetID string) ([]byte, error) {
+	pictures.agentOpened = append(pictures.agentOpened, assetID)
+	if pictures.scoped != nil && !pictures.scoped(command, assetID) {
+		return nil, &chat.ReadScopeRefusal{Message: "out of scope " + assetID}
+	}
+	return pictures.OpenPicture(ctx, command.OwnerID, chat.Attachment{AssetID: assetID}, "")
 }
 
 func referencePNG(t *testing.T, width, height int) []byte {

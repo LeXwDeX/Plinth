@@ -281,17 +281,29 @@ func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budget
 // back. Other grants without a reservation, claimed
 // grants (a submit is in flight) and decided grants are left untouched.
 func abandonUnboundGrantOnConn(ctx context.Context, conn *sql.Conn, owner, requestID string, now time.Time) error {
+	return abandonApprovedGrantOnConn(ctx, conn, owner, requestID, now, false)
+}
+
+// abandonApprovedGrantOnConn is abandonUnboundGrantOnConn; with anyApproval
+// it denies the approved grant whoever approved it, with or without a
+// reservation (#665): the kernel refused it for good, so no later submit can
+// use it, and a step holding it must become restartable.
+func abandonApprovedGrantOnConn(ctx context.Context, conn *sql.Conn, owner, requestID string, now time.Time, anyApproval bool) error {
 	if owner == "" || requestID == "" {
 		return nil
+	}
+	anyFlag := 0
+	if anyApproval {
+		anyFlag = 1
 	}
 	stamp := formatTime(now)
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants
  SET status = 'denied', decided_by = ?, decided_at = ?, updated_at = ?
  WHERE request_id = ? AND owner_id = ? AND status = 'approved'
- AND (decided_by IN (?, ?) OR EXISTS (SELECT 1 FROM budget_reservations
+ AND (? = 1 OR decided_by IN (?, ?) OR EXISTS (SELECT 1 FROM budget_reservations
   WHERE budget_reservations.grant_request_id = execution_grants.request_id
   AND budget_reservations.state = 'reserved' AND budget_reservations.task_id = ''))`,
-		executiongrant.AbandonedActor, stamp, stamp, requestID, owner, executiongrant.StepsActor, executiongrant.AccessKeyActor)
+		executiongrant.AbandonedActor, stamp, stamp, requestID, owner, anyFlag, executiongrant.StepsActor, executiongrant.AccessKeyActor)
 	if err != nil {
 		return err
 	}
@@ -318,6 +330,32 @@ func abandonUnboundGrantOnConn(ctx context.Context, conn *sql.Conn, owner, reque
  WHERE grant_request_id = ? AND state = 'reserved' AND task_id = ''`,
 		stamp, requestID)
 	return err
+}
+
+// AbandonRefusedExecutionGrant is the data-layer side of
+// executiongrant.Service.AbandonRefusedGrant (#665).
+func (r *Repository) AbandonRefusedExecutionGrant(ctx context.Context, owner, requestID string) error {
+	if owner == "" || requestID == "" {
+		return executiongrant.ErrInvalid
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	if err := abandonApprovedGrantOnConn(ctx, conn, owner, requestID, time.Now().UTC(), true); err != nil {
+		return err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 // ReleaseUnboundBudgetReservation is the data-layer side of
@@ -1143,9 +1181,10 @@ func (r *Repository) ApproveExecutionGrantWithBudget(ctx context.Context, owner,
 		return executiongrant.Grant{}, err
 	}
 	stamp := formatTime(now)
+	// A stopped turn's own grant is never approved by its plan either (#665).
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants
  SET status = 'approved', decided_by = ?, decided_at = ?, updated_at = ?
- WHERE request_id = ? AND owner_id = ? AND status = 'pending'`,
+ WHERE request_id = ? AND owner_id = ? AND status = 'pending' AND `+turnOwnsStoppedGrantNot,
 		actor, stamp, stamp, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, err
