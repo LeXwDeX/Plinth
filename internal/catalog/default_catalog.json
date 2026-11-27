@@ -12243,7 +12243,7 @@
             "budget_not_covered": "后续视角没有获得自动批准：已批准计划的预算不覆盖，或需要你确认",
             "view_not_finished": "这个视角的任务没有成功完成",
             "view_already_started": "这个视角已经开始，正在准备或生成，不是失败",
-            "view_awaiting_approval": "这个视角在等待批准（卡片上的批准，或超出已批准计划的预算），不是失败",
+            "view_awaiting_approval": "这个视角在等待卡片上的批准，不是失败",
             "consistency_retries_exhausted": "自动重做次数已用完，这一张仍与正面图不一致",
             "generation_checkpoint": "这一轮的生成次数已达上限"
           }
