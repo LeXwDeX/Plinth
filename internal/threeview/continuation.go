@@ -396,8 +396,8 @@ type submission struct {
 // prepareAndSubmit prepares one view's frozen input, requests its grant, and
 // submits it only when the basis the series continues on approved the grant: the
 // active plan (budget mode) or the session policy (auto mode, #663). A grant
-// left pending for a person, a denial, or an approval from the other source all
-// stop without submitting.
+// left pending for a person stops as awaiting approval; a denial or an approval
+// from the other source stops as not covered. None of them submits.
 func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	stepKey, turnID string,
 ) (submission, error) {
@@ -422,9 +422,14 @@ func (s *Service) prepareAndSubmit(ctx context.Context, owner generation.OwnerID
 	if err != nil {
 		return submission{}, translate(err)
 	}
+	// A grant left pending for a person (the auto or budget approval window,
+	// #702) is not a failure: the view waits on its card.
+	if grant.Status == executiongrant.Pending {
+		return submission{Reason: ReasonViewAwaitingApproval}, nil
+	}
 	// The grant must come from the basis the series continues on: the plan's
-	// budget, or (auto mode) the session policy. A grant left pending for a
-	// person, a denial, or an approval from the other source stops here.
+	// budget, or (auto mode) the session policy. A denial or an approval from
+	// the other source stops here.
 	approved := grant.Status == executiongrant.Approved &&
 		((basis == executiongrant.ContinuationBudget && grant.ApprovedByBudget()) ||
 			(basis == executiongrant.ContinuationAuto && grant.ApprovedByPolicy()))

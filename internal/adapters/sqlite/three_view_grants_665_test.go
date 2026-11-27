@@ -76,7 +76,8 @@ func TestThreeViewContinuationLeavesARechargeToAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Paused || result.Reason != threeview.ReasonBudgetNotCovered || result.TaskID != "" || f.gateway.submits != submits {
+	// #702: a grant left to a person waits on its card; it is not a budget gap.
+	if !result.Paused || result.Reason != threeview.ReasonViewAwaitingApproval || result.TaskID != "" || f.gateway.submits != submits {
 		t.Fatalf("continuation = %+v submits %d->%d, want paused without a submit", result, submits, f.gateway.submits)
 	}
 	left := f.step(t, "left")
@@ -85,6 +86,31 @@ func TestThreeViewContinuationLeavesARechargeToAPerson(t *testing.T) {
 	}
 	if got, err := f.repo.GetExecutionGrant(ctx, "owner-a", left.GrantRequestID); err != nil || got.Status != executiongrant.Pending {
 		t.Fatalf("left grant = %+v err=%v, want pending", got, err)
+	}
+}
+
+// #702: in the auto mode the approval window can fall between two views. The
+// continuation stops at the next view as awaiting approval (its card asks the
+// person once), not as a budget the plan does not cover.
+func TestThreeViewContinuationWaitsOnTheApprovalWindowCard(t *testing.T) {
+	ctx := context.Background()
+	f := newContinuationFixtureWithMode(t, false, "auto")
+	task := f.startFrontByPolicy(t)
+	f.finish(t, task, "asset-front-702")
+	f.runtime.Grants.Policy = f.runtime.Grants.Policy.WithCheckpoints(map[string]int{"auto": 100})
+	f.runtime.Grants.SessionPaidSteps = func(context.Context, string, string) (int, error) { return 100, nil }
+	submits := f.gateway.submits
+	result, err := f.views.Continue(ctx, "owner-a", "session-a", f.run.ID, task, "turn-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Paused || result.View != "left" || result.Reason != threeview.ReasonViewAwaitingApproval ||
+		result.TaskID != "" || f.gateway.submits != submits {
+		t.Fatalf("continuation = %+v submits %d->%d, want paused at left awaiting approval", result, submits, f.gateway.submits)
+	}
+	left := f.step(t, "left")
+	if got, err := f.repo.GetExecutionGrant(ctx, "owner-a", left.GrantRequestID); err != nil || got.Status != executiongrant.Pending {
+		t.Fatalf("left grant = %+v err=%v, want pending on its card", got, err)
 	}
 }
 

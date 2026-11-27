@@ -14,8 +14,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   viewer and multi-format downloads (GLB, glTF, OBJ, STL, FBX, USDZ and more, depending on
   what each Provider supports).
 - **Agent**: describe what you want in plain language; the Agent picks models and
-  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, budget
-  plan or strict). The Agent works with any multimodal model behind an OpenAI chat completions
+  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, approve
+  or strict). The Agent works with any multimodal model behind an OpenAI chat completions
   compatible API.
 - **Built-in Providers**: Meshy, Tripo, Hyper3D, Jimeng, Gemini, plus OpenAI images and a
   self-hosted matting service. Providers become available when a valid key and any

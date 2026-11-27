@@ -106,8 +106,9 @@ service probes (matting-probe.py); the fake's gaps (small fixed pictures, an opa
 document) are INFO lines there, not passes;
 "auto-approval" the #406/#432 automatic default: a new session and the public Schema start in auto,
 an existing session keeps its mode, the unplanned steps after a generation (retexture, resize, convert,
-an image-to-image rework) submit without a card, the 21st paid call of one turn is refused with the Schema
-sentence, strict and budget-without-a-plan raise a card, and extra credits are granted with the step;
+an image-to-image rework) submit without a card, one paid call past the private stack's per-turn guard
+(FAKE_TURN_LIMIT; the shipped 200 is asserted) is refused with the Schema sentence, strict and
+budget-without-a-plan raise a card, and extra credits are granted with the step;
 "plan-checkpoint" the #251 budget plan checkpoint: a failed inherited check pauses the next step,
 the declared contingency is inserted within the approved budget, and no second approval card appears;
 "preferences" the #241 session choices: four candidates, pick/reject with reasons, the next prompt carrying them,
@@ -428,6 +429,10 @@ def build(work):
     return fake, stack
 
 
+# The per-turn paid-call guard of the private stack (see private_catalog, #702).
+FAKE_TURN_LIMIT = 20
+
+
 def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None, plan_continuation_message=None, auto_completion=False, auto_completion_scan_milliseconds=None, auto_completion_poll_milliseconds=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
@@ -455,6 +460,11 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
+    # #702: the shipped per-turn guard (200) lies past the session's approval
+    # window (100), so one turn of a fake stack cannot reach it without a card
+    # in between; the private stack keeps the guard at FAKE_TURN_LIMIT so the
+    # "auto-approval" scenario can still exceed it in one turn.
+    catalog["application"]["chat"]["agent"]["max_generation_calls_per_turn"] = FAKE_TURN_LIMIT
     delivery = catalog["application"]["model_delivery"]
     if auto_completion:
         # The shipped block, with the two intervals a smoke run needs: the
@@ -2267,11 +2277,30 @@ def _three_view_auto(work, api, offerings):
     _three_view_auto_arm(work, api, picture_url, "four-view auto", True)
 
 
+def _approve_view_card(api, session, request_id):
+    """Approve a three-view view's grant the way the chat's approval card does."""
+    return api.json("PUT", f"/api/v1/agent/consent?scope={session}", {"request_id": request_id, "approved": True})
+
+
+def _wait_view_grant(api, session, key, seconds=45):
+    """The grant request id of a three-view slot that waits on its approval card
+    (status awaiting_approval) within seconds, or "". A view's card lives on the
+    three-view card, not in the session's pending-approvals list."""
+    end = time.time() + seconds
+    while time.time() < end:
+        slots = {slot.get("key"): slot for slot in (_three_view_group(api, session) or {}).get("slots") or []}
+        slot = slots.get(key) or {}
+        if slot.get("status") == "awaiting_approval" and slot.get("request_id"):
+            return slot["request_id"]
+        time.sleep(0.3)
+    return ""
+
+
 def _three_view_budget_and_strict(work, api, offerings):
     """#243: an approved budget finishes front, left and back without a click,
     feeds the front output into the later views and submits a P2 multiview 3D
-    step; manual mode starts only the front view until the person asks for the
-    next one. #283: the reference is a tall character (32x144 in a 96x192
+    step; manual mode asks a card for the front view (#702) and starts only it
+    until the person asks for the next one, which asks a card again. #283: the reference is a tall character (32x144 in a 96x192
     picture), so the frozen size of every view is a portrait one instead of the
     model's default square."""
     picture = upload_asset(api, "reference.png",
@@ -2399,8 +2428,9 @@ def _three_view_budget_and_strict(work, api, offerings):
            f"task {task.get('id') if task else None} state {task.get('state') if task else None} "
            f"offering {task.get('offering_id') if task else None}")
 
-    # Manual (strict) mode: only the front view starts by itself; the person
-    # starts the left view, whose frozen input names the front output.
+    # Manual (strict) mode asks for every step, 2D too (#702): the front view
+    # waits on a card first and starts once the person approves it; the person
+    # then starts the left view, whose frozen input names the front output.
     strict = new_session(api)
     status, _ = api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
     if status != 200:
@@ -2411,6 +2441,16 @@ def _three_view_budget_and_strict(work, api, offerings):
     if status not in (200, 201, 202):
         record("three-view strict: start the front view", False, f"send {status}")
         return
+    request_id = _wait_view_grant(api, strict, "front")
+    group = _three_view_group(api, strict)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    record("three-view strict: the front view waits on an approval card and nothing runs",
+           bool(request_id) and not slots.get("front", {}).get("task_id") and
+           not [t for t in session_tasks(api, strict) if t.get("capability") == "image-to-image"],
+           f"grant {request_id or 'none'}, front {slots.get('front', {}).get('status')}")
+    if not request_id:
+        return
+    status, _ = _approve_view_card(api, strict, request_id)
     group = None
     end = time.time() + 60
     while time.time() < end:
@@ -2421,12 +2461,12 @@ def _three_view_budget_and_strict(work, api, offerings):
         time.sleep(0.3)
     slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
     front = slots.get("front") or {}
-    record("three-view strict: only the front view starts by itself",
-           bool(group) and front.get("status") in ("succeeded", "running") and
+    record("three-view strict: the approved front view starts, and only it",
+           status == 200 and bool(group) and front.get("status") in ("succeeded", "running") and
            slots.get("left", {}).get("status") == "not_started" and
            len([t for t in session_tasks(api, strict)
                 if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]) == 1,
-           f"front {front.get('status')}, left {slots.get('left', {}).get('status')}")
+           f"approve {status}, front {front.get('status')}, left {slots.get('left', {}).get('status')}")
     if front.get("task_id"):
         wait_task(api, front.get("task_id"))
     else:
@@ -2445,10 +2485,17 @@ def _three_view_budget_and_strict(work, api, offerings):
            f"back {slots.get('back', {}).get('status')}, tasks {[t.get('state') for t in strict_tasks]}")
     view_route = f"/api/v1/chat/sessions/{strict}/three-views/{(group or {}).get('run_id')}/views/left"
     status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
-    record("three-view strict: the person starts the left view", status == 200 and
-           next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
-                 if slot.get("key") == "left"), "") in ("starting", "running", "succeeded"),
-           f"POST {status}")
+    left_status = next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
+                        if slot.get("key") == "left"), "")
+    # Strict asks for the clicked view too (#702): its card is approved as a person.
+    request_id = _wait_view_grant(api, strict, "left")
+    record("three-view strict: the person starts the left view and it waits on its card",
+           status == 200 and left_status in ("awaiting_approval", "starting") and bool(request_id),
+           f"POST {status}, left {left_status}, grant {request_id or 'none'}")
+    # Approved on its card, the clicked view must run without a second click
+    # (the card offers none while the view waits).
+    if request_id:
+        _approve_view_card(api, strict, request_id)
     end = time.time() + 90
     group = None
     while time.time() < end:
@@ -2522,9 +2569,13 @@ def _three_view_heavy_front(work, api, offerings):
             record("three-view heavy front: upload the reference picture", False, "upload refused")
             return
         session = new_session(api)
-        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+        # The review (budget) mode without a plan: the Agent's front view and the
+        # person's left and back clicks are 2D steps the policy approves, and the
+        # server does not continue the views by itself (#702: strict now asks a
+        # card for every view, which is not what this scenario is about).
+        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
         if status != 200:
-            record("three-view heavy front: manual approval mode", False, f"PUT {status}")
+            record("three-view heavy front: budget approval mode", False, f"PUT {status}")
             return
         views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
         status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
@@ -3158,10 +3209,11 @@ def scenario_auto_approval(work, api, offerings):
     session keeps the mode it was given. Under auto the unplanned steps after a
     generation (retexture, resize, convert, an image-to-image rework) submit with
     no card, report the policy as the approval source and land in the session's
-    credit estimate and the account usage; the 21st paid call of one turn is
+    credit estimate and the account usage; the paid call past the per-turn guard is
     refused with the Schema's own limit sentence and creates no Task; the same
     call under strict (manual) and under budget without an approved plan raises a
-    card and submits nothing; and extra credits are granted with the step.
+    card and submits nothing; and extra credits are granted with the step. The
+    per-turn refusal runs at the private stack's FAKE_TURN_LIMIT (#702).
     What a real model would decide to append is not expressible here: that is
     #407's live measurement."""
     fields, _route = chat_schema_facts(api)
@@ -3312,13 +3364,20 @@ def scenario_auto_approval(work, api, offerings):
         record("auto-approval: the strict card runs its step once approved",
                task.get("state") == "SUCCEEDED", f"task {task.get('state')}")
 
-    # (f) One turn, 21 paid calls: the Schema's 20 pass and the 21st is refused
-    # with the Schema sentence, without a Task.
+    # (f) The per-turn guard (#665, #702). The shipped value is a loose runaway
+    # bound past the approval window; the private stack keeps it at
+    # FAKE_TURN_LIMIT, so one turn of limit+1 paid calls submits the limit and
+    # the last call is refused with the Schema sentence, without a Task.
+    shipped = _shipped_schema_value(["application", "chat", "agent", "max_generation_calls_per_turn"])
+    window = _shipped_schema_value(["application", "chat", "approval_policy", "generation_checkpoint"])
+    record("auto-approval: the shipped per-turn guard is 200, past the approval window",
+           shipped == 200 and all(shipped > value for value in window.values()),
+           f"max_generation_calls_per_turn={shipped}, generation_checkpoint={window}")
     stress = new_session(api)
     markers = " ".join(
         '[[fake:tool:create_model_3d {"prompt":"a plain cube %d","model":"meshy-7.1"}]]' % index
-        for index in range(1, 22))
-    ok, why = _auto_turn(api, stress, "make twenty-one cubes " + markers,
+        for index in range(1, FAKE_TURN_LIMIT + 2))
+    ok, why = _auto_turn(api, stress, "make one cube too many " + markers,
                          creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D,
                          domainModels={"model-3d": MESHY_TEXT_TO_3D})
     contents = _tool_message_contents(work, "main", stress, "create_model_3d")
@@ -3332,8 +3391,8 @@ def scenario_auto_approval(work, api, offerings):
             submitted.append(payload["task_id"])
     refused = [content for content in contents if content.strip() == limit_text]
     stress_tasks = [task for task in session_tasks(api, stress) if task.get("capability") == "text-to-3d"]
-    record("auto-approval: the 21st paid call of one turn is refused with the Schema sentence",
-           ok and len(submitted) == 20 and len(refused) == 1 and len(stress_tasks) == 20
+    record(f"auto-approval: paid call {FAKE_TURN_LIMIT + 1} of one turn is refused with the Schema sentence",
+           ok and len(submitted) == FAKE_TURN_LIMIT and len(refused) == 1 and len(stress_tasks) == FAKE_TURN_LIMIT
            and _auto_card(api, stress) is None,
            f"{why or 'turn finished'}, receipts={len(submitted)}, refusals={len(refused)}, "
            f"tasks={len(stress_tasks)}, pending={_auto_card(api, stress) is not None}")

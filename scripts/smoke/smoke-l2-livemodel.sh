@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # L2 真实模型链路探针（含小额付费生成；发布后按需跑，非每次必跑）。
 #
-# 批准方式（会话级，2026-10 起）：手工方式下只有文生 3D、图生 3D、换贴图等待人工
-# 批准；2D、重拓扑、绑骨、动画、转格式由策略直接批准（grant.decided_by 为
-# "policy:manual"）。本脚本按这条规则分两部分，每个会话开头都显式设为手工方式：
+# 批准方式（会话级，#702）：严格（manual）每一个付费步骤都等人工批准，2D 也一样；
+# 审批（budget，无制作计划）只有文生 3D、图生 3D、换贴图等 3D 步骤等人工批准，2D
+# 由策略直接批准（grant.decided_by 为 "policy:budget"）。本脚本分两部分，每个会话
+# 开头都显式设好批准方式：
 #
-#   第一部分  2D 手工方式 = 策略批准（一张小额文生图，与改造前费用相同）
+#   第一部分  2D 审批方式 = 策略批准（一张小额文生图，与改造前费用相同）
 #             不出现待批准同意；任务 SUCCEEDED；批准来源为 policy；显示积分；
-#             有 DB 读权限时核对 grant.decided_by = policy:manual。
-#   第二部分  3D 手工方式 = 人工批准（AGT-12）
+#             有 DB 读权限时核对 grant.decided_by = policy:budget。
+#   第二部分  3D 严格方式 = 人工批准（AGT-12）
 #             A、B 各自挂起在待批准同意，C 不冻结；拒绝 B 并断言零任务。
 #             A 默认停止本轮（零费用、零任务）；设 L2_APPROVE_3D=1 才批准 A，
 #             产生一次真实 3D 生成（约 25 积分）并断言 SUCCEEDED。
@@ -66,7 +67,7 @@ mk() { # 创建会话，失败重试一次
   done
   echo "$sid"
 }
-set_mode() { # $1=session $2=auto|manual；返回 0 仅当服务端回读与请求一致
+set_mode() { # $1=session $2=auto|budget|manual；返回 0 仅当服务端回读与请求一致
   local status mode
   status=$(req /tmp/s2-mode.json -X PUT "$BASE/api/v1/chat/sessions/$1/approval" \
     -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$J" -d "{\"approvalMode\":\"$2\"}")
@@ -154,12 +155,12 @@ PYEOF
 fi
 
 # ---------------------------------------------------------------------------
-# 第一部分：2D 在手工方式下由策略批准（一张小额文生图）
+# 第一部分：2D 在审批方式下由策略批准（一张小额文生图；严格方式下 2D 也出卡，#702）
 # ---------------------------------------------------------------------------
-echo "--- part 1: 2D in manual mode is approved by policy"
+echo "--- part 1: 2D in budget (review) mode is approved by policy"
 S2D=$(mk "smoke2-2D")
 [ -n "$S2D" ] || { bad "2D session"; exit 1; }
-set_mode "$S2D" manual && ok "2D session set to manual ($S2D)" || { bad "set manual mode (2D)"; exit 1; }
+set_mode "$S2D" budget && ok "2D session set to budget ($S2D)" || { bad "set budget mode (2D)"; exit 1; }
 send "$S2D" "请使用已选择的 $IMAGE_MODEL 模型调用 refine_image，生成一只橘猫简笔画；直接调用生成工具。" image "$IMAGE_MODEL" >/dev/null \
   || { bad "2D message request failed"; exit 1; }
 
@@ -178,8 +179,8 @@ while [ $SECONDS -lt $dl ]; do
   fi
   sleep 4
 done
-[ "$SAW_PENDING" = 0 ] && ok "2D: no pending consent in manual mode" \
-  || bad "2D: a consent became pending in manual mode (2D must be approved by policy)"
+[ "$SAW_PENDING" = 0 ] && ok "2D: no pending consent in budget mode" \
+  || bad "2D: a consent became pending in budget mode (2D must be approved by policy)"
 case "$P1" in
   ok) ok "2D: task SUCCEEDED without a person" ;;
   pending) bad "2D: waiting on a human instead of running — 策略未批准 2D" ;;
@@ -211,8 +212,8 @@ PYEOF
   req /tmp/s2-ap.json "$BASE/api/v1/chat/sessions/$S2D/approval" -b "$J" >/dev/null
   CRED=$(python3 -c "import json;d=json.load(open('/tmp/s2-ap.json'));print(d.get('approvalMode',''),d.get('estimatedCredits',0))" 2>/dev/null)
   case "$CRED" in
-    "manual "[1-9]*) ok "2D: session still manual, accumulated credits=${CRED#manual }" ;;
-    *) bad "2D: session approval state '$CRED' (expected manual with credits > 0)" ;;
+    "budget "[1-9]*) ok "2D: session still budget, accumulated credits=${CRED#budget }" ;;
+    *) bad "2D: session approval state '$CRED' (expected budget with credits > 0)" ;;
   esac
   # grant.decided_by 只在库里；有读权限就核对，没有就明说跳过
   DECIDED=$(python3 - "$ART_AI_DB" "$S2D" <<'PYEOF' 2>/dev/null
@@ -226,10 +227,10 @@ except Exception:
 PYEOF
 )
   case "$DECIDED" in
-    policy:manual) ok "2D: grant decided_by = policy:manual" ;;
+    policy:budget) ok "2D: grant decided_by = policy:budget" ;;
     UNREADABLE|"") echo "SKIP: grant decided_by not verified (database not readable at $ART_AI_DB)" ;;
     NOROWS) bad "2D: no execution grant row for the session" ;;
-    *) bad "2D: grant decided_by '$DECIDED' (expected policy:manual)" ;;
+    *) bad "2D: grant decided_by '$DECIDED' (expected policy:budget)" ;;
   esac
 fi
 

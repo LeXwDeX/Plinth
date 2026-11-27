@@ -55,7 +55,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import l5_common as common  # noqa: E402
 
 REQUEST = ("先用这张图做四视图（front/left/back/right）：按正面、左侧、背面、右侧的顺序各出一张，"
-           "左右按角色自己的身体算；四张都完成后，再用这组四视图生成一个 3D 模型。")
+           "左右按角色自己的身体算；四张都完成后，再用这组四视图生成一个 3D 模型。"
+           "请先提交制作计划，按积分单位列出预算，发给我批准，批准后再按计划执行。")
+# #702: the Agent proposes a plan only when the person asks for one, so the request says so.
 FOLLOW_UP = "四视图已经全部完成。请用这组四视图（正面、左侧、背面、右侧）继续生成一个 3D 模型。"
 CONTROL = "用这张角色图生成一个 3D 模型。"
 CHARACTER = ("生成一张Q版小狐狸角色的正面全身立绘，白色背景。小狐狸的右手（它自己的右手）高举一面红色小旗，"
