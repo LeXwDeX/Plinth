@@ -68,9 +68,15 @@ export function reportClientError(kind: string, error: unknown, extra: { stack?:
   }
 }
 
+// #705：浏览器在一帧内没送完 ResizeObserver 通知时发出的良性提示，不是页面错误，不进服务端错误日志。
+const BENIGN_WINDOW_ERROR = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/;
+
 /** 安装全局错误监听，返回卸载函数。 */
 export function installGlobalErrorReporting(): () => void {
-  const onError = (event: ErrorEvent) => reportClientError('window-error', event.error ?? event.message);
+  const onError = (event: ErrorEvent) => {
+    if (!event.error && BENIGN_WINDOW_ERROR.test(String(event.message ?? ''))) return;
+    reportClientError('window-error', event.error ?? event.message);
+  };
   const onRejection = (event: PromiseRejectionEvent) => reportClientError('unhandled-rejection', event.reason);
   window.addEventListener('error', onError);
   window.addEventListener('unhandledrejection', onRejection);
