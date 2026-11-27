@@ -10,8 +10,7 @@ import { ChatBrowserError, createChatBrowserClient } from '@/lib/chat/browser-cl
 import {
   briefIsEmpty,
   briefPayload,
-  briefSelectText,
-  briefValueText,
+  briefFieldText,
   parseProductionBrief,
   productionBriefFields,
   type ProductionBrief,
@@ -24,28 +23,6 @@ const EMPTY: ProductionBrief = {};
 
 function hasValue(value: unknown): boolean {
   return value !== undefined && value !== null && value !== '';
-}
-
-function purposeLabel(schema: ReturnType<typeof useProductSchema>['schema'], value: unknown): string {
-  if (typeof value !== 'string' || value === '') return '';
-  return schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === value)?.label ?? value;
-}
-
-/** #239: the 2D purpose labels come from the public image2d_usage projection. */
-function imagePurposeLabel(schema: ReturnType<typeof useProductSchema>['schema'], value: unknown): string {
-  if (typeof value !== 'string' || value === '') return '';
-  return schema.chat.image2d_usage?.profiles?.find((profile) => profile.id === value)?.label ?? value;
-}
-
-function valueText(
-  schema: ReturnType<typeof useProductSchema>['schema'],
-  field: ProductionBriefField,
-  value: unknown,
-): string {
-  if (field.type === 'profile') return purposeLabel(schema, value);
-  if (field.type === 'image_profile') return imagePurposeLabel(schema, value);
-  if (field.type === 'select') return briefSelectText(field, value);
-  return briefValueText(value, schemaText(schema, 'ui.studio.brief.yes'), schemaText(schema, 'ui.studio.brief.no'));
 }
 
 /** One editable control per declared field; the field type and limits come from the Schema. */
@@ -300,7 +277,7 @@ export function BriefPanel({ sessionId }: { sessionId: string | null }) {
             <div key={field.name} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 py-1 text-xs">
               <dt className="text-muted-foreground">{field.label}</dt>
               <dd className="min-w-0 [overflow-wrap:anywhere]" data-testid={`studio-brief-value-${field.name}`}>
-                {valueText(schema, field, brief[field.name])}
+                {briefFieldText(schema, field, brief[field.name])}
               </dd>
             </div>
           ))}

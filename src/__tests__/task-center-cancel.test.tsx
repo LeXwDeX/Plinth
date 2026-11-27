@@ -116,7 +116,9 @@ it('declares task completion notification controls in the schema', () => {
 
 it('renders cancel only for running tasks', () => {
   const html = renderToStaticMarkup(<><TaskCenterButton /><TaskDrawer /></>);
-  const openLabel = `${msg('ui.workspace.tasks.open')}（2，${msg('ui.workspace.tasks.progress')} 40${defaultCatalog.application.runtime.frontend.percentage_suffix}）`;
+  // #670: the label counts the running task the badge shows (one of the two listed), with its unit.
+  const running = msg('ui.workspace.tasks.running_count').replace('{count}', '1');
+  const openLabel = `${msg('ui.workspace.tasks.open')}（${running}，${msg('ui.workspace.tasks.progress')} 40${defaultCatalog.application.runtime.frontend.percentage_suffix}）`;
   expect(html).toContain(`aria-label="${openLabel}"`);
   // The icon's progress track reflects the active task's normalized progress.
   expect(html).toContain('style="width:40%"');

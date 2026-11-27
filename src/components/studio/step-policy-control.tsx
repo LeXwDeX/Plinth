@@ -8,6 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import {
+  StepPolicyRequestError,
   useAccountStepPolicy,
   type AccountStepPolicy,
   type StepPolicyMode,
@@ -135,13 +136,16 @@ export function StepPolicyControl() {
       setNotice({ kind: 'conflict', text: schemaText(schema, 'ui.step_policy.conflict') });
       return;
     }
+    // #670: only the server's own words are quoted; an internal reason reads as the generic failure.
     setNotice({
       kind: 'error',
-      text: formatSchemaText(schemaText(schema, 'ui.step_policy.error'), { reason: result.error.message }),
+      text: result.error.detail
+        ? formatSchemaText(schemaText(schema, 'ui.step_policy.error'), { reason: result.error.detail })
+        : schemaText(schema, 'ui.step_policy.error_generic'),
     });
   };
 
-  const errorReason = error instanceof Error ? error.message : '';
+  const errorReason = error instanceof StepPolicyRequestError ? error.detail : '';
   const loadFailed = Boolean(error) && !policy;
 
   return (
@@ -166,7 +170,9 @@ export function StepPolicyControl() {
             <Popover.Title className="px-1 text-xs font-semibold">{schemaText(schema, 'ui.step_policy.title')}</Popover.Title>
             {loadFailed ? (
               <div role="alert" data-testid="step-policy-load-error" className="flex flex-col items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
-                <span>{formatSchemaText(schemaText(schema, 'ui.step_policy.load_failed'), { reason: errorReason })}</span>
+                <span>{errorReason
+                  ? formatSchemaText(schemaText(schema, 'ui.step_policy.load_failed'), { reason: errorReason })
+                  : schemaText(schema, 'ui.step_policy.load_failed_generic')}</span>
                 <Action type="button" size="sm" variant="outline" onClick={() => void refresh()}>
                   {schemaText(schema, 'ui.step_policy.retry')}
                 </Action>

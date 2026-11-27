@@ -377,6 +377,11 @@ export default function UserAssetsPage() {
       setDownloadingTaskId(null);
     }
   }, [generationSchema, generationsClient]);
+  // #670: the type column names the capability, not its id.
+  const capabilityLabels = useMemo(
+    () => new Map(schema.capabilities.map((capability) => [capability.id, capability.label_cn])),
+    [schema.capabilities],
+  );
   const model3DCapabilities = useMemo(
     () => new Set(
       schema.capabilities
@@ -768,7 +773,7 @@ export default function UserAssetsPage() {
                                 {formatDateTime(record.createdAt, presentation)}
                               </td>
                               <td className="py-3 text-muted-foreground">
-                                {record.taskType}
+                                {capabilityLabels.get(record.taskType) ?? record.taskType}
                               </td>
                               <td className="py-3 font-mono text-xs text-muted-foreground">
                                 <HintTooltip name={record.taskId}>
@@ -786,7 +791,7 @@ export default function UserAssetsPage() {
                                   variant="secondary"
                                   className={state.color}
                                 >
-                                  {record.taskStatus}
+                                  {state.label}
                                 </Badge>
                               </td>
                               <td className="py-3 text-muted-foreground tabular-nums">

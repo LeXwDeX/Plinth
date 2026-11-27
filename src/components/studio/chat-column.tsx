@@ -111,6 +111,7 @@ import { turnActiveRefusal, turnFailureText } from '@/lib/chat/turn-error-text';
 import { createUncertainSendStore, newSendKey, sendSignature, sendUnderKey } from '@/lib/chat/send-key';
 import { idempotencyRefused } from '@/lib/chat/send-error-codes';
 import { activeLocale } from '@/lib/i18n/locale';
+import { groupedCount } from '@/lib/workspace/model-stats';
 import { releaseAllHolds, useSendQueueStore } from '@/store/send-queue-store';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { lastReadStarted, recoverChatSession } from '@/lib/chat/session-recovery';
@@ -618,7 +619,7 @@ export function ChatColumn() {
           toast.error(schemaMessage(schema, `ui.form.image_upload.${code}`, {
             filename: file.name,
             size: formatSizeLimit(maximumImageBytes),
-            pixels: schema.runtime.frontend.image_upload.maximum_pixels,
+            pixels: groupedCount(schema.runtime.frontend.image_upload.maximum_pixels, activeLocale(schema)),
           }));
         }
       }

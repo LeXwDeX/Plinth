@@ -13,7 +13,7 @@ import { dateRangeBounds } from '@/components/ui/date-field-math';
 import { Field } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { schemaText, taskStatePresentation } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { createAccountResourcesClient, type AccountResources, type AccountTask } from '@/lib/account-resources';
 import { ResultDetailHost } from '@/components/result/result-detail';
 import { openResultDetail } from '@/components/result/result-card-parts';
@@ -40,6 +40,17 @@ function formatDate(value: string, locale: string): string {
 /** Sizes are written one way across the product: decimal MB with the unit (#327). */
 const formatSize = formatFileSize;
 
+/** A capability's product name; a type the Schema no longer declares keeps its id (#670). */
+function capabilityLabel(schema: ProductSchema, id: string): string {
+  return schema.capabilities.find((capability) => capability.id === id)?.label_cn ?? id;
+}
+
+/** An asset role's product name, the same labels the result attachments use (#670). */
+function assetRoleLabel(schema: ProductSchema, role: string): string {
+  const attachments = schema.task_history.assets.attachments;
+  return attachments.role_labels[role] ?? attachments.fallback_role;
+}
+
 /** A task row's results for the shared result detail: pictures and GLB/glTF models preview, other files download. */
 function taskTargets(schema: ProductSchema, task: AccountTask): ResultTarget[] {
   const status = detailStatus(schema, task.state) ?? 'ready';
@@ -50,7 +61,7 @@ function taskTargets(schema: ProductSchema, task: AccountTask): ResultTarget[] {
     return [{
       taskId: task.id, assetId: asset.id, url, status, capability: task.capability, mediaType: asset.media_type,
       kind: asset.media_type.startsWith('image/') ? 'image' : model ? 'model' : 'other',
-      title: `${task.capability} · ${asset.variant || asset.role}`,
+      title: `${capabilityLabel(schema, task.capability)} · ${assetRoleLabel(schema, asset.role)}`,
     }];
   });
 }
@@ -70,7 +81,7 @@ export default function AccountPage() {
     const target = group.find((item) => item.kind === 'model') ?? group.find((item) => item.kind === 'image') ?? group[0];
     openResultDetail(target
       ? (group.length > 1 ? { ...target, group } : target)
-      : { taskId: task.id, kind: 'other', url: '', title: `${task.capability} · ${task.id}`, capability: task.capability, status: detailStatus(schema, task.state) ?? 'pending' });
+      : { taskId: task.id, kind: 'other', url: '', title: `${capabilityLabel(schema, task.capability)} · ${formatDate(task.created_at, schema.runtime.frontend.display_locale)}`, capability: task.capability, status: detailStatus(schema, task.state) ?? 'pending' });
   };
   const client = useMemo(() => createAccountResourcesClient(schema), [schema]);
   const usageQuery = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
@@ -137,7 +148,7 @@ export default function AccountPage() {
               <Metric label={copy('estimated_credits')} value={usage.price_totals
                 ? sessionPriceTotalsText(schema, usage.price_totals)
                 : usage.estimated_credits ?? schemaText(schema, 'ui.pricing.unknown')} />
-              <Metric label={copy('usage_range')} value={Object.entries(usage.by_type ?? {}).map(([key, value]) => `${key}: ${value}`).join(' · ') || '—'} />
+              <Metric label={copy('usage_by_type')} value={Object.entries(usage.by_type ?? {}).map(([key, value]) => `${capabilityLabel(schema, key)}: ${value}`).join(' · ') || '—'} />
             </div>
           ) : null}
         </CardContent>
@@ -175,7 +186,7 @@ export default function AccountPage() {
             )}
             {uploads && uploads.total > uploads.page_size ? (
               <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">{copy('page')} {uploads.page} · {copy('total')} {uploads.total}</span>
+                <span className="text-xs text-muted-foreground">{formatSchemaText(copy('page_of'), { page: uploads.page, total: uploads.total })}</span>
                 <div className="flex gap-2">
                   <Action size="sm" variant="outline" disabled={uploadPage <= 1} onClick={() => setUploadPage((page) => page - 1)}>{copy('previous')}</Action>
                   <Action size="sm" variant="outline" disabled={uploadPage * uploads.page_size >= uploads.total} onClick={() => setUploadPage((page) => page + 1)}>{copy('next')}</Action>
@@ -196,7 +207,7 @@ export default function AccountPage() {
                   return <li key={task.id} className="py-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <button type="button" className="min-w-0 rounded-sm text-left hover:text-primary focus-visible:outline-2 focus-visible:outline-ring" onClick={() => openTask(task)} data-testid="account-task-open">
-                        <p className="truncate text-sm font-medium">{task.capability} · {task.id}</p>
+                        <p className="truncate text-sm font-medium">{capabilityLabel(schema, task.capability)}</p>
                         <p className="text-xs text-muted-foreground">{formatDate(task.created_at, schema.runtime.frontend.display_locale)}</p>
                       </button>
                       <span className={`text-xs ${state?.color ?? ''}`}>{state?.label ?? task.state}</span>
@@ -205,7 +216,7 @@ export default function AccountPage() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         {task.assets.map((asset) => {
                           const href = safeAssetURL(asset.url);
-                          return href ? <a key={asset.id} className="rounded border px-2 py-1 text-xs text-primary hover:bg-muted" href={href} target="_blank" rel="noopener noreferrer" download>{copy('download')} · {asset.variant || asset.role}</a> : null;
+                          return href ? <a key={asset.id} className="rounded border px-2 py-1 text-xs text-primary hover:bg-muted" href={href} target="_blank" rel="noopener noreferrer" download>{copy('download')} · {assetRoleLabel(schema, asset.role)}</a> : null;
                         })}
                       </div>
                     ) : null}

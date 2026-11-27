@@ -1,4 +1,4 @@
-import type { ProductSchema } from '@/lib/product-schema';
+import { schemaText, type ProductSchema } from '@/lib/product-schema';
 
 import type {
   AssetListBoard,
@@ -76,6 +76,24 @@ export function boardCheckCounts(item: AssetListBoardItem): BoardCheckCounts {
     }
   }
   return counts;
+}
+
+/** #670: a check is named by the Schema's words; a check the Schema does not name keeps its id. */
+export function boardCheckName(schema: ProductSchema, check: string): string {
+  return schemaText(schema, `ui.chat.review.check_names.${check}`) || check;
+}
+
+/**
+ * #670: the reason under a check that did not pass. A stable code (no_glb,
+ * read_error…) is worded by the Schema and hidden when the Schema has no words
+ * for it; a delivery hint is already a sentence in the interface language and
+ * is shown as it is.
+ */
+export function boardCheckDetail(schema: ProductSchema, detail: string | undefined): string {
+  if (!detail) return '';
+  const worded = schemaText(schema, `ui.asset_list.board.check_detail.${detail}`);
+  if (worded) return worded;
+  return /^[a-z0-9_]+$/.test(detail) ? '' : detail;
 }
 
 /** The copy key of one judged status; anything not pass/fail reads as not judged. */

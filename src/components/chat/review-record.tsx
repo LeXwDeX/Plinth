@@ -208,9 +208,8 @@ function ReviewDetails({ schema, call }: { schema: ProductSchema; call: ReviewCa
       <ul className="flex flex-col gap-0.5 pl-1 text-[11px] text-muted-foreground" data-testid="chat-review-details">
         {checks.map((check) => (
           <li key={check.check} className="flex flex-wrap items-baseline gap-1">
-            <span className={cn(check.status === 'fail' && 'text-warning')}>{reviewCheckName(schema, check.check)}</span>
-            <span>·</span>
-            <span>{checkStatusText(schema, check)}</span>
+            {/* #670: the status sentence already names the check; it is not written twice. */}
+            <span className={cn(check.status === 'fail' && 'text-warning')}>{checkStatusText(schema, check)}</span>
             {check.fixHint && check.status === 'fail' && <span className="text-muted-foreground/80">{check.fixHint}</span>}
           </li>
         ))}

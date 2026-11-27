@@ -93,7 +93,7 @@ export function Stage() {
           <RegionErrorBoundary region="viewer_3d"><Stage3D object={object} /></RegionErrorBoundary>
         ) : (
           <RegionErrorBoundary region="canvas">
-          <Suspense fallback={<div role="status" className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{schemaText(schema, 'ui.workspace.harness.loading')}</div>}>
+          <Suspense fallback={<div role="status" className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{schemaText(schema, 'ui.loading')}</div>}>
             <WorkspaceCanvasBoard />
           </Suspense>
           </RegionErrorBoundary>

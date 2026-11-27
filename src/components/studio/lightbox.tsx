@@ -161,7 +161,7 @@ function LightboxView() {
           <HintTooltip name={text('zoom_out')}>
             <Action type="button" variant="ghost" size="icon-sm" onClick={() => zoomBy(1 / ZOOM_STEP)} disabled={view.zoom <= ZOOM_MINIMUM} aria-label={text('zoom_out')}><Minus /></Action>
           </HintTooltip>
-          <output className="w-12 text-center text-xs tabular-nums" data-testid="lightbox-zoom">{percent}%</output>
+          <output className="w-12 text-center text-xs tabular-nums" data-testid="lightbox-zoom">{percent}{schema.runtime.frontend.percentage_suffix}</output>
           <HintTooltip name={text('zoom_in')}>
             <Action type="button" variant="ghost" size="icon-sm" onClick={() => zoomBy(ZOOM_STEP)} aria-label={text('zoom_in')}><Plus /></Action>
           </HintTooltip>

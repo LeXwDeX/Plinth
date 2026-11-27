@@ -126,6 +126,15 @@ describe('the gear (#405)', () => {
     expect(screen.getByTestId('gear-hint').getAttribute('data-hint')).toContain('三视图');
   });
 
+  // #670: before the Skill catalog is read, the selected Skill reads as loading, never as its id.
+  it('names a selected Skill as loading until its catalog is read', () => {
+    const view = props();
+    render(<ComposerSettings {...view} skill={{ ...view.skill, catalog: undefined as never, selectedId: 'three-view' }} />);
+    const label = gear().getAttribute('aria-label') ?? '';
+    expect(label).toContain(messages['ui.workspace.skills.loading']);
+    expect(label).not.toContain('three-view');
+  });
+
   it('shows a dot when a generation model is locked, with the model pair as its value', () => {
     useWorkspaceStore.setState({ modelByDomain: { image: 'gpt-image', 'model-3d': null } });
     render(<ComposerSettings {...props()} />);

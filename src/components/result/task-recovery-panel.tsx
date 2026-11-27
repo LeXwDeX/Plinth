@@ -8,6 +8,7 @@ import { Action } from '@/components/ui/button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { submitDirectTask, type PendingDirectTask } from '@/components/workspace/canvas-image-actions';
 import { approvalDecisionBody } from '@/lib/approval-decision';
+import { reasonOf, withErrorReference } from '@/lib/problem-reference';
 import { fetchRecoveryEligibility, prepareRecovery, type RecoveryEligibility, type RecoveryGrant } from '@/lib/workspace/task-recovery';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -80,6 +81,9 @@ function ScopedRecoveryPanel({ taskId, sessionId, capability, prompt, onOpenTask
   if (!enabled) return null;
   const pending = stored === 'denied' ? null : stored;
   const t = (key: string) => recoveryLabel(schema, key);
+  // #670: only a reason the server wrote for people reaches the panel; internal messages and HTTP codes
+  // ("grant decision 500", "recovery task response malformed") fall back to the Schema copy.
+  const failureText = (cause: unknown, fallback: string) => withErrorReference(reasonOf(cause) || t(fallback), cause);
 
   const submit = async (grant: RecoveryGrant, isActive: () => boolean) => {
     const pendingTask: PendingDirectTask = {
@@ -123,7 +127,7 @@ function ScopedRecoveryPanel({ taskId, sessionId, capability, prompt, onOpenTask
       }
       await submit(result.grant, isActive);
     } catch (cause) {
-      if (isActive()) setError(cause instanceof Error && cause.message ? cause.message : t('prepare_failed'));
+      if (isActive()) setError(failureText(cause, 'prepare_failed'));
     } finally { if (isActive()) setBusy(false); }
   };
 
@@ -145,7 +149,7 @@ function ScopedRecoveryPanel({ taskId, sessionId, capability, prompt, onOpenTask
       }
       await submit({ ...pending, grantApproved: false }, isActive);
     } catch (cause) {
-      if (isActive()) setError(cause instanceof Error && cause.message ? cause.message : t('submit_failed'));
+      if (isActive()) setError(failureText(cause, 'submit_failed'));
     } finally { if (isActive()) setBusy(false); }
   };
 

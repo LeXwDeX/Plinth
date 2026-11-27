@@ -125,9 +125,9 @@ export function ParamsPanel({ params, domains, hasSession, disabled = false, ski
         <div className="mt-1.5 flex flex-col gap-1">
           {effective.loading ? <p>{text('ui.workspace.harness.loading')}</p> : effective.failed ? <p role="alert">{schema.agent_configuration.ui.load_failed}</p> : effective.data ? (
             <>
-              <p>{schema.agent_configuration.ui.dialogue_model}: {effective.data.model.label}</p>
-              <p>{schema.agent_configuration.ui.revision}: {effective.data.revision}</p>
-              <p>{schema.agent_configuration.ui.source}: {effective.data.parameter_source}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.dialogue_model, value: effective.data.model.label })}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.revision, value: effective.data.revision })}</p>
+              <p>{formatSchemaText(text('ui.common.label_value'), { label: schema.agent_configuration.ui.source, value: effective.data.parameter_source })}</p>
             </>
           ) : <p>{schema.agent_configuration.ui.effective_empty}</p>}
         </div>
@@ -165,7 +165,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
       const dependency = model.paramSchemas.find((entry) => entry.name === condition.parameter);
       const value = values[condition.parameter];
       const label = dependency?.options?.find((option) => option.value === String(value))?.label ?? String(value ?? '');
-      return `${dependency?.label ?? condition.parameter}: ${label}`;
+      return formatSchemaText(text('ui.common.label_value'), { label: dependency?.label ?? condition.parameter, value: label });
     });
     return formatSchemaText(text('ui.studio.params.condition_disabled'), { conditions: labels.join(text('ui.studio.list_separator')) });
   };
@@ -192,7 +192,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
     ? nativeQuote ? [
         formatSchemaText(text('ui.pricing.default_estimate'), { amount: formatNativePrice(nativeQuote.total_amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') }),
         formatSchemaText(text('ui.pricing.base_amount'), { amount: formatNativePrice(nativeQuote.base_amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') }),
-        ...(nativeQuote.components ?? []).map((component) => `${component.label}: ${formatNativePrice(component.amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown')}`),
+        ...(nativeQuote.components ?? []).map((component) => formatSchemaText(text('ui.common.label_value'), { label: component.label, value: formatNativePrice(component.amount, nativeQuote.unit_label) ?? text('ui.pricing.unknown') })),
         ...(nativeUpperQuote && (nativeUpperQuote.unit !== nativeQuote.unit || nativeUpperQuote.total_amount !== nativeQuote.total_amount)
           ? [formatSchemaText(text('ui.pricing.upper_estimate'), { amount: formatNativePrice(nativeUpperQuote.total_amount, nativeUpperQuote.unit_label) ?? text('ui.pricing.unknown') })]
           : []),

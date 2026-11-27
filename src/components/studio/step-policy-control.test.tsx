@@ -217,6 +217,30 @@ describe('the 3D step mode control (#330)', () => {
     expect(view.getByRole('button', { name: text('ui.step_policy.retry') })).toBeTruthy();
   });
 
+  // #670: a failure without the server's own words never shows `HTTP 500` or another internal reason.
+  it('words a save failure without a server reason generically', async () => {
+    stub(vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') return new Response('oops', { status: 500 });
+      return json(policy);
+    }));
+    const view = renderControl();
+    fireEvent.click(await view.findByTestId('studio-step-policy-badge'));
+    await view.findByTestId('step-policy-list-mode-agent');
+
+    fireEvent.click(view.getByRole('button', { name: text('ui.step_policy.save') }));
+    const notice = await view.findByTestId('step-policy-notice');
+    expect(notice.textContent).toBe(text('ui.step_policy.error_generic'));
+    expect(notice.textContent).not.toContain('HTTP');
+  });
+
+  it('words a load failure without a server reason generically', async () => {
+    stub(vi.fn(async () => json({ unexpected: true })));
+    const view = renderControl();
+    fireEvent.click(await view.findByTestId('studio-step-policy-badge'));
+    await waitFor(() => expect(view.getByText(text('ui.step_policy.load_failed_generic'))).toBeTruthy());
+    expect(view.queryByText(/invalid step policy response/)).toBeNull();
+  });
+
   it('has both locales\' copy for every key the control reads', () => {
     const keys = [
       'ui.step_policy.title', 'ui.step_policy.badge', 'ui.step_policy.list', 'ui.step_policy.mcp',
@@ -224,6 +248,7 @@ describe('the 3D step mode control (#330)', () => {
       'ui.step_policy.cap', 'ui.step_policy.cap_hint', 'ui.step_policy.cap_invalid',
       'ui.step_policy.save', 'ui.step_policy.saving', 'ui.step_policy.retry',
       'ui.step_policy.conflict', 'ui.step_policy.error', 'ui.step_policy.load_failed', 'ui.step_policy.loading',
+      'ui.step_policy.error_generic', 'ui.step_policy.load_failed_generic',
     ];
     for (const key of keys) {
       expect(messages[key], key).toBeTruthy();

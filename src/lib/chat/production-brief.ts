@@ -1,4 +1,4 @@
-import type { ChatModel3DBriefFieldSchema, ProductSchema } from '@/lib/product-schema';
+import { schemaText, type ChatModel3DBriefFieldSchema, type ProductSchema } from '@/lib/product-schema';
 
 /**
  * The session's production brief (#103): one object whose members are declared
@@ -106,6 +106,23 @@ export function briefValueText(value: unknown, yes: string, no: string): string 
 export function briefSelectText(field: Pick<ProductionBriefField, 'options'>, value: unknown): string {
   if (typeof value !== 'string' || value === '') return '';
   return field.options?.find((option) => option.id === value)?.label ?? value;
+}
+
+/**
+ * One declared field's stored value as people read it: a 3D or 2D purpose by
+ * its profile label, a select by its option label, a boolean as yes/no. The
+ * brief panel and the asset list card both read the brief this way (#670).
+ */
+export function briefFieldText(schema: ProductSchema, field: ProductionBriefField, value: unknown): string {
+  if (field.type === 'profile' || field.type === 'image_profile') {
+    if (typeof value !== 'string' || value === '') return '';
+    const profiles = field.type === 'image_profile'
+      ? schema.chat.image2d_usage?.profiles
+      : schema.chat.model3d_usage?.profiles;
+    return profiles?.find((profile) => profile.id === value)?.label ?? value;
+  }
+  if (field.type === 'select') return briefSelectText(field, value);
+  return briefValueText(value, schemaText(schema, 'ui.studio.brief.yes'), schemaText(schema, 'ui.studio.brief.no'));
 }
 
 export function briefRoute(schema: ProductSchema, sessionId: string): string | null {

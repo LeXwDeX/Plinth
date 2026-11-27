@@ -108,6 +108,19 @@ describe('agent configuration page (#554)', () => {
   });
 });
 
+// #670: a history version shows its time in the admin date format, not the stored ISO string.
+describe('agent configuration history time (#670)', () => {
+  it('formats the version time instead of showing the ISO string', async () => {
+    const iso = '2026-11-20T08:30:00Z';
+    served = { ...snapshot, history: [{ revision: '7', source: 'publish', created_at: iso }] };
+    render(<AgentConfigurationPage />);
+    const presentation = schema.administration.audit_logs.presentation;
+    const formatted = new Intl.DateTimeFormat(presentation.date_locale, presentation.date_time_options as Intl.DateTimeFormatOptions).format(new Date(iso));
+    expect(await screen.findByText(`7 · ${formatted} · publish`)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(iso))).toBeNull();
+  });
+});
+
 describe('agent configuration shared Skills (#601)', () => {
   const field = (container: HTMLElement, name: string) => container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[id^="agent-skill-skill_"][id$="-${name}"]`);
   const addButton = () => screen.getByRole('button', { name: ui.add_skill }) as HTMLButtonElement;

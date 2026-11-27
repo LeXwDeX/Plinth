@@ -297,6 +297,15 @@ describe('where a version came from, in time order (#558)', () => {
     expect(html.match(/data-testid="version-link"/g)).toHaveLength(1);
   });
 
+  // #670: a recorded parent that is not among the loaded versions has no name, so the link reads as unknown.
+  it('says the source is unknown instead of leaving its name blank', () => {
+    state.tiles = [picture('p2', 2), model('m1', [from('n:gone', 'to_model')])];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    const unknown = (catalog.application.content.messages as Record<string, string>)['ui.studio.strip.link.unknown'];
+    expect(html).toContain(`data-full-label="${unknown.replace(/'/g, '&#x27;')}"`);
+    expect(html).not.toContain('由  转成 3D');
+  });
+
   it('keeps a single source as one link and names it when it is not the version just before', () => {
     state.tiles = [picture('p1', 1), picture('p2', 2), model('m1', [from('n:p1', 'to_model')])];
     const html = renderToStaticMarkup(<VersionStrip />);

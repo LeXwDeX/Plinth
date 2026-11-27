@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot, type AgentSkillConfiguration } from '@/lib/agent-configuration';
-import { schemaText } from '@/lib/product-schema';
+import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
@@ -11,6 +11,17 @@ import { Field } from '@/components/ui/field';
 import { OptionSelect } from '@/components/ui/option-select';
 import { Action } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
+
+/** A stored ISO time in the admin pages' date format (#670); an unreadable value shows the placeholder. */
+function formatDateTime(schema: ProductSchema, value: string | undefined): string {
+  const presentation = schema.administration.audit_logs.presentation;
+  const date = new Date(value ?? '');
+  if (!value || Number.isNaN(date.getTime())) return presentation.empty_placeholder;
+  return new Intl.DateTimeFormat(
+    presentation.date_locale,
+    presentation.date_time_options as Intl.DateTimeFormatOptions,
+  ).format(date);
+}
 
 function newSkillID() { return `skill_${Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('')}`; }
 
@@ -128,7 +139,7 @@ export default function AgentConfigurationPage() {
       {validated !== JSON.stringify(draft) ? <div className="text-sm">{unavailableNotice('agent_preview_required', ui('preview_required'), 'agent-preview-required')}</div> : null}
       {preview ? <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('preview')}</h2>{Object.entries(preview).map(([domain, prompt]) => <div key={domain}><h3 className="text-sm font-medium">{ui(domain === 'image' ? 'domain_image' : 'domain_model_3d')}</h3><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{prompt}</pre></div>)}</Surface> : null}
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('history')}</h2>
-        {snapshot.history.length === 0 ? <p>{ui('history_empty')}</p> : <ul className="space-y-2">{snapshot.history.map(version => <li key={version.revision} className="flex flex-wrap items-center justify-between gap-2 text-xs"><span className="break-all">{version.revision} · {version.created_at} · {version.source}</span><Action variant="outline" size="sm" disabled={busy || version.revision === snapshot.revision} onClick={() => void run(() => client.restore(snapshot.revision, version.revision, signal()), ui('restore_version'))}>{ui('restore_version')}</Action></li>)}</ul>}
+        {snapshot.history.length === 0 ? <p>{ui('history_empty')}</p> : <ul className="space-y-2">{snapshot.history.map(version => <li key={version.revision} className="flex flex-wrap items-center justify-between gap-2 text-xs"><span className="break-all">{version.revision} · {formatDateTime(schema, version.created_at)} · {version.source}</span><Action variant="outline" size="sm" disabled={busy || version.revision === snapshot.revision} onClick={() => void run(() => client.restore(snapshot.revision, version.revision, signal()), ui('restore_version'))}>{ui('restore_version')}</Action></li>)}</ul>}
       </Surface>
     </>}
   </main>;

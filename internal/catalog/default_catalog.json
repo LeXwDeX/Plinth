@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-27.10.63",
+    "revision": "2026-11-27.10.64",
     "terminology": {
       "user_facing": [
         {
@@ -2928,6 +2928,7 @@
       "ui.project.switch": "切换项目",
       "ui.project.clear": "不归入项目",
       "ui.project.save": "保存",
+      "ui.project.retry": "重试",
       "ui.project.delete": "删除项目",
       "ui.project.delete_confirm": "删除项目会同时删除其风格指南、资产与约定；已有会话和任务产物不受影响。",
       "ui.project.style_section": "风格指南",
@@ -3003,7 +3004,9 @@
       "ui.asset_list.items_count": "{count} 项",
       "ui.asset_list.items_count_one": "{count} 项",
       "ui.asset_list.planned_steps": "计划 {steps} 步",
+      "ui.asset_list.planned_steps_one": "计划 {steps} 步",
       "ui.asset_list.planned_model3d_steps": "其中 3D {steps} 步",
+      "ui.asset_list.planned_model3d_steps_one": "其中 3D {steps} 步",
       "ui.asset_list.brief_summary": "制作简报",
       "ui.asset_list.availability_warning": "{count} 项当前不可用",
       "ui.asset_list.availability_warning_one": "{count} 项当前不可用",
@@ -3087,6 +3090,14 @@
       "ui.asset_list.board.check_pass": "通过",
       "ui.asset_list.board.check_fail": "未达标",
       "ui.asset_list.board.check_unknown": "未判定",
+      "ui.asset_list.board.check_detail.no_glb": "没有可检查的 GLB 模型文件",
+      "ui.asset_list.board.check_detail.model_inspection_unavailable": "模型检查暂不可用",
+      "ui.asset_list.board.check_detail.unreadable": "文件读不出来",
+      "ui.asset_list.board.check_detail.image_inspection_unavailable": "图片检查暂不可用",
+      "ui.asset_list.board.check_detail.read_error": "模型文件读取出错",
+      "ui.asset_list.board.check_detail.not_declared": "用途没有给这项设要求",
+      "ui.asset_list.board.check_detail.unknown_check": "暂不支持这项检查",
+      "ui.asset_list.board.check_detail.sized_export": "按导出时缩放后的贴图判定",
       "ui.asset_list.board.checks_3d": "3D 验收",
       "ui.asset_list.board.checks_2d": "2D 验收",
       "ui.asset_list.board.checks_none": "还没有验收判定",
@@ -3094,7 +3105,9 @@
       "ui.asset_list.board.checks_summary_pass": "验收全部通过",
       "ui.asset_list.board.checks_summary_fail": "{fail} 项未达标",
       "ui.asset_list.board.steps": "已用 {steps} 步",
+      "ui.asset_list.board.steps_one": "已用 {steps} 步",
       "ui.asset_list.board.steps_3d": "其中 3D {steps} 步",
+      "ui.asset_list.board.steps_3d_one": "其中 3D {steps} 步",
       "ui.asset_list.board.steps_capped": "已用 {used} / {cap} 步",
       "ui.asset_list.board.steps_unknown": "尚无步数记录",
       "ui.asset_list.board.steps_exhausted": "步数用完",
@@ -3125,6 +3138,8 @@
       "ui.asset_list.board.detail_crop": "裁剪来源",
       "ui.asset_list.board.detail_crop_source": "源图",
       "ui.asset_list.board.detail_crop_source_meta": "尺寸 {width} × {height}",
+      "ui.asset_list.board.detail_crop_source_kind.input_asset": "上传的图片",
+      "ui.asset_list.board.detail_crop_source_kind.task_asset": "生成的结果",
       "ui.asset_list.board.detail_crop_region": "归一化区域：x {x}，y {y}，宽 {width}，高 {height}",
       "ui.asset_list.board.detail_crop_pixels": "像素区域：({x0}, {y0}) – ({x1}, {y1})",
       "ui.asset_list.board.detail_previous": "上一轮结果",
@@ -3297,7 +3312,7 @@
         "error.limit_positive": "limit 必须是正整数",
         "error.after_nonnegative": "after 必须是非负整数",
         "ui.providers.load_failed": "加载模型列表失败",
-        "ui.header.menu_toggle": "Toggle menu",
+        "ui.header.menu_toggle": "切换菜单",
         "ui.header.failures_show_title": "点击显示失败任务",
         "ui.header.failures_hide_title": "点击隐藏失败任务",
         "ui.header.failures_hidden": "已隐藏失败",
@@ -3334,7 +3349,7 @@
         "ui.workbench.enhance_failed": "提示词增强失败",
         "ui.workbench.enhance_no_change": "增强未产生变化，请稍后重试",
         "ui.workbench.enhance_success": "提示词已增强",
-        "ui.model_3d.native_mode_notice": "✦ Native 模式：直接输出最高精度网格，不限制面数",
+        "ui.model_3d.native_mode_notice": "✦ 原生模式：直接输出最高精度网格，不限制面数",
         "ui.model_3d.parameter_value": "{label}：{value}",
         "ui.model_3d.export_formats": "导出格式",
         "ui.model_3d.preview_required": "(预览必需)",
@@ -3411,7 +3426,7 @@
         "ui.image_to_image.result": "转换结果",
         "ui.image_to_image.empty": "上传图片和提示词后开始转换",
         "ui.loading": "加载中...",
-        "ui.retexture.title": "Retexture",
+        "ui.retexture.title": "换贴图",
         "ui.retexture.description": "AI 重新为 3D 模型生成贴图纹理",
         "ui.retexture.input_section": "输入模型",
         "ui.retexture.input_task_tab": "任务 ID",
@@ -3438,19 +3453,19 @@
         "ui.retexture.upload_failed_status": "上传失败 ({status})",
         "ui.retexture.response_parse_failed": "解析服务端响应失败",
         "ui.retexture.network_upload_failed": "网络错误，上传失败",
-        "ui.retexture.upload_task_created": "模型已上传，Retexture 任务已创建",
+        "ui.retexture.upload_task_created": "模型已上传，换贴图任务已创建",
         "ui.retexture.upload_failed": "上传失败",
-        "ui.retexture.task_created": "Retexture 任务已创建",
+        "ui.retexture.task_created": "换贴图任务已创建",
         "ui.retexture.create_failed": "创建任务失败",
         "ui.retexture.enhance": "AI 增强",
-        "ui.retexture.start": "开始 Retexture",
+        "ui.retexture.start": "开始换贴图",
         "ui.retexture.progress": "任务进度",
         "ui.retexture.task_id_prefix": "ID:",
         "ui.retexture.preview": "3D 预览",
         "ui.retexture.download": "下载模型",
         "ui.retexture.download_filename_fallback": "model",
         "ui.retexture.empty": "输入模型和风格描述后开始换贴图",
-        "ui.background_removal.title": "Background Removal",
+        "ui.background_removal.title": "去背景",
         "ui.background_removal.description": "上传图片批量去除背景，支持透明物体和精细抠图",
         "ui.background_removal.upload_section": "上传图片",
         "ui.background_removal.parameters_section": "高级参数（可选）",
@@ -3654,6 +3669,23 @@
         "ui.chat.review.check_names.degenerate": "退化三角形",
         "ui.chat.review.check_names.task_failed": "任务失败",
         "ui.chat.review.check_names.checkpoint_failed": "检查点未通过",
+        "ui.chat.review.check_names.readable": "可读取",
+        "ui.chat.review.check_names.nonblank": "有可见主体",
+        "ui.chat.review.check_names.background": "背景",
+        "ui.chat.review.check_names.subject_size": "主体大小",
+        "ui.chat.review.check_names.edge": "主体未被裁切",
+        "ui.chat.review.check_names.components": "主体数量",
+        "ui.chat.review.check_names.main_component": "单一主体",
+        "ui.chat.review.check_names.short_edge": "短边分辨率",
+        "ui.chat.review.check_names.alpha": "透明背景",
+        "ui.chat.review.check_names.edge_fringe": "透明边缘",
+        "ui.chat.review.check_names.seamless": "无缝平铺",
+        "ui.chat.review.check_names.subject_size_delta": "主体大小一致",
+        "ui.chat.review.check_names.silhouette_height_delta": "轮廓高度一致",
+        "ui.chat.review.check_names.palette_distance": "配色一致",
+        "ui.chat.review.check_names.part_count_delta": "部件数量一致",
+        "ui.chat.review.check_names.mirror_overlap": "镜像轮廓重合",
+        "ui.chat.review.check_names.mirror_orientation": "左右朝向",
         "ui.chat.review.used_tool": "执行了 {capability}",
         "ui.chat.message.expand_full": "展开全文",
         "ui.chat.message.used_skills": "本轮使用 Skill：{names}",
@@ -3705,6 +3737,7 @@
         "ui.workspace.model_formats.download_failed": "下载失败，请重试。",
         "ui.workspace.model_formats.complete": "补齐格式（约 {credits} 积分）",
         "ui.workspace.model_formats.complete_free": "补齐格式（免费）",
+        "ui.workspace.model_formats.complete_native": "补齐格式（{totals}）",
         "ui.workspace.model_formats.completing": "正在补齐格式…",
         "ui.workspace.model_formats.completed": "格式已补齐",
         "ui.workspace.model_formats.complete_failed": "补齐格式失败，请重试。",
@@ -3791,7 +3824,7 @@
         "ui.chat.input.paste.image_unreadable_one": "有 {count} 张图片无法读取，文字已保留；可先保存图片再上传",
         "ui.chat.input.attachment_upload_failed": "附件图片上传失败，消息没有发出，请重试",
         "ui.chat.input.attachment_too_large": "附件 {index} 为 {size}，超过 {limit} 的上传上限，消息没有发出",
-        "ui.chat.input.skill_locked": "已锁定参数面板（quality 自动 high）",
+        "ui.chat.input.skill_locked": "已锁定参数面板（质量自动设为高）",
         "ui.chat.input.attachment_alt": "附件 {index}",
         "ui.chat.input.remove_attachment": "移除附件 {index}",
         "ui.chat.input.multi_image_hint": "提示词里用「第1张图」「第2张图」指定角色，AI 会自动识别。",
@@ -3931,7 +3964,7 @@
         "ui.workspace.processing.plan_step_queued": "排队等待提交",
         "ui.workspace.processing.plan_auto_rigging": "动作需要先绑骨，已加入绑骨步骤。",
         "ui.workspace.processing.plan_incompatible": "所选步骤没有可用的输入路径，请调整步骤或模型。",
-        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」（Remesh），把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
+        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」，把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
         "ui.workspace.processing.source_refused_face_limit": "{service} 最多接受 {limit} 个三角面，当前模型约 {faces} 个",
         "ui.unavailable.label": "无法使用，{reason}",
         "ui.unavailable.reason.canvas.reference_ratio_unsupported": "模型不支持参考图比例",
@@ -4075,7 +4108,9 @@
         "ui.workspace.processing.plan_offering_unavailable": "处理服务当前不可用，恢复可用后可继续。",
         "ui.workspace.processing.plan_task_canceled": "处理步骤已取消；确认费用后会重新执行这一步。",
         "ui.workspace.processing.plan_task_failed": "处理步骤失败；确认费用与结果后可重试。",
-        "ui.workspace.canvas.load_failed": "加载任务资产失败",
+        "ui.workspace.canvas.load_failed": "画布加载失败",
+        "ui.workspace.canvas.loading": "画布加载中…",
+        "ui.workspace.canvas.save_failed": "画布保存失败，请重试",
         "ui.workspace.canvas.conflict": "画布已在其他窗口被修改，已加载服务器最新内容；本窗口未保存的改动已被替换",
         "ui.workspace.agent.placeholder": "告诉 Agent 你想创作什么…",
         "ui.workspace.agent.send": "发送",
@@ -4096,6 +4131,8 @@
         "ui.workspace.tasks.close": "关闭任务详情",
         "ui.workspace.tasks.empty": "Agent 创建的任务会显示在这里",
         "ui.workspace.tasks.progress": "进度",
+        "ui.workspace.tasks.running_count": "{count} 个任务进行中",
+        "ui.workspace.tasks.running_count_one": "{count} 个任务进行中",
         "ui.workspace.tasks.resources_pending": "附加产物生成中…",
         "ui.workspace.tasks.load_failed": "加载任务状态失败",
         "ui.workspace.tasks.error_title": "任务失败",
@@ -4568,7 +4605,7 @@
         "ui.canvas.crop.apply": "应用裁剪",
         "ui.canvas.crop.cancel": "取消裁剪",
         "ui.canvas.models.title": "模型选择",
-        "ui.canvas.models.auto": "Auto",
+        "ui.canvas.models.auto": "自动",
         "ui.canvas.models.empty": "暂无可用模型",
         "ui.canvas.style.line_width": "线宽",
         "ui.canvas.style.line_color": "线色",
@@ -4647,11 +4684,10 @@
         "ui.account.view": "查看",
         "ui.account.download": "下载",
         "ui.account.load_more": "加载更多",
-        "ui.account.total": "总计",
-        "ui.account.page": "页",
+        "ui.account.page_of": "第 {page} 页，共 {total} 项",
         "ui.account.previous": "上一页",
         "ui.account.next": "下一页",
-        "ui.account.usage_range": "用量范围",
+        "ui.account.usage_by_type": "按功能统计",
         "ui.account.from_date": "开始日期",
         "ui.account.to_date": "结束日期",
         "ui.account.empty_tasks": "暂无任务",
@@ -4713,10 +4749,10 @@
         "ui.workspace.skills.draft_invalid": "请填写名称和要求。",
         "ui.workspace.skills.write_myself": "我自己写",
         "ui.workspace.skills.back": "返回",
-        "ui.workspace.skills.slug": "标识（slug）",
+        "ui.workspace.skills.slug": "标识",
         "ui.workspace.skills.slug_hint": "小写字母、数字和单个连字符；留空则自动生成。",
         "ui.workspace.skills.slug_invalid": "标识只能用小写字母、数字和单个连字符（1–64 个字符），且不能与已有 Skill 重复。",
-        "ui.workspace.skills.description": "说明（description）",
+        "ui.workspace.skills.description": "说明",
         "ui.workspace.skills.description_hint": "一行，说清做什么、什么时候用；Agent 只凭它决定是否使用。",
         "ui.workspace.skills.description_invalid": "说明必须是一行，不能为空，不超过 1024 个字符，不能含 < 或 >。",
         "ui.workspace.skills.description_derived": "自动生成，建议补写",
@@ -4806,8 +4842,8 @@
         "ui.studio.approval.card.step": "步骤",
         "ui.studio.approval.card.kind": "类型",
         "ui.studio.approval.card.model": "模型",
-        "ui.studio.approval.card.model_choice_line": "{model} · 来源：{source}；理由：{reason}",
-        "ui.studio.approval.card.model_choice_line_no_reason": "{model} · 来源：{source}",
+        "ui.studio.approval.card.model_choice_basis_label": "选择依据",
+        "ui.studio.approval.card.model_choice_basis": "{source}；理由：{reason}",
         "ui.studio.approval.card.skill": "风格 Skill",
         "ui.studio.approval.card.skill_line": "{name}（{source}）",
         "ui.studio.approval.card.skill_source_agent": "Agent 选用",
@@ -4967,7 +5003,9 @@
         "ui.step_policy.retry": "重试",
         "ui.step_policy.conflict": "设置已在别处更新，已重新载入最新值；请确认后再保存。",
         "ui.step_policy.error": "保存失败：{reason}",
+        "ui.step_policy.error_generic": "保存失败，请稍后重试",
         "ui.step_policy.load_failed": "读取 3D 步数设置失败：{reason}",
+        "ui.step_policy.load_failed_generic": "读取 3D 步数设置失败，请稍后重试",
         "ui.step_policy.loading": "正在读取…",
         "ui.step_policy.session_steps": "本会话已用 {used} / {limit} 步",
         "ui.studio.chat.queued": "排队中",
@@ -5073,7 +5111,7 @@
         "ui.studio.agent_scope.mode_2d": "2D 模式",
         "ui.studio.agent_scope.mode_3d": "3D 模式",
         "ui.studio.agent_scope.mode_auto": "自动模式",
-        "ui.studio.agent_scope.short_auto": "Auto",
+        "ui.studio.agent_scope.short_auto": "自动",
         "ui.studio.agent_scope.short_2d": "2D",
         "ui.studio.agent_scope.short_3d": "3D",
         "ui.studio.agent_scope.col.mode": "模式",
@@ -5423,6 +5461,7 @@
         "ui.studio.three_view.replace_type": "只能用 PNG 或 JPEG 图片替换。",
         "ui.studio.three_view.generate_rest": "生成剩余视图",
         "ui.studio.three_view.generate_rest_with_cost": "生成剩余视图（约 {credits} 积分）",
+        "ui.studio.three_view.generate_rest_with_cost_one": "生成剩余视图（约 {credits} 积分）",
         "ui.studio.three_view.to_3d_multiview": "用三视图生成 3D（{model}）",
         "ui.studio.three_view.to_3d_front_only": "只用正面转 3D",
         "ui.studio.three_view.multiview_uses": "将使用：{views}",
@@ -5438,6 +5477,7 @@
         "ui.studio.multiview_upload.turn": "用这几张图的 {views} 视图生成 3D 模型",
         "ui.studio.multiview_upload.invalid": "每个视角只能用一次，必须有正面，且至少用两张图。请调整后再确认",
         "ui.studio.multiview_upload.image_label": "第 {index} 张图",
+        "ui.studio.multiview_upload.view_label": "第 {index} 张图的视角",
         "ui.studio.multiview_upload.open_image": "在舞台上查看第 {index} 张图",
         "ui.studio.stage_image.title": "图片查看",
         "ui.studio.stage_image.close": "关闭图片查看（Esc）",
@@ -17675,6 +17715,7 @@
         "chat.choice.kinds",
         "model_delivery",
         "asset_list",
+        "project.messages",
         "offerings"
       ],
       "locale_fields": [
@@ -17736,6 +17777,7 @@
             "ui.project.switch": "Switch project",
             "ui.project.clear": "No project",
             "ui.project.save": "Save",
+            "ui.project.retry": "Retry",
             "ui.project.delete": "Delete project",
             "ui.project.delete_confirm": "Deleting the project also deletes its style guide, assets and conventions; existing sessions and finished task results stay.",
             "ui.project.style_section": "Style guide",
@@ -17797,7 +17839,7 @@
             "ui.project.style_save_failed": "Could not save the style guide; try again.",
             "ui.project.conventions_saved": "Production conventions saved.",
             "ui.project.conventions_save_failed": "Could not save the production conventions; check the values and try again.",
-            "ui.project.reference_limit": "At most {maximum}",
+            "ui.project.reference_limit": "At most {maximum} images",
             "ui.project.inherit_hint": "This session inherits the style guide of \"{project}\"; choose \"This session\" to override it.",
             "ui.project.no_project_hint": "Assign the session to a project to reuse its style guide and assets.",
             "ui.project.promote_title": "Promote to project asset",
@@ -17811,7 +17853,9 @@
             "ui.asset_list.items_count": "{count} items",
             "ui.asset_list.items_count_one": "{count} item",
             "ui.asset_list.planned_steps": "{steps} planned steps",
+            "ui.asset_list.planned_steps_one": "{steps} planned step",
             "ui.asset_list.planned_model3d_steps": "{steps} of them 3D steps",
+            "ui.asset_list.planned_model3d_steps_one": "{steps} of them is a 3D step",
             "ui.asset_list.brief_summary": "Production brief",
             "ui.asset_list.availability_warning": "{count} items are currently unavailable",
             "ui.asset_list.availability_warning_one": "{count} item is currently unavailable",
@@ -17895,6 +17939,14 @@
             "ui.asset_list.board.check_pass": "Pass",
             "ui.asset_list.board.check_fail": "Fail",
             "ui.asset_list.board.check_unknown": "Not judged",
+            "ui.asset_list.board.check_detail.no_glb": "No GLB model file to inspect",
+            "ui.asset_list.board.check_detail.model_inspection_unavailable": "Model inspection is unavailable",
+            "ui.asset_list.board.check_detail.unreadable": "The file could not be read",
+            "ui.asset_list.board.check_detail.image_inspection_unavailable": "Image inspection is unavailable",
+            "ui.asset_list.board.check_detail.read_error": "The model file could not be read correctly",
+            "ui.asset_list.board.check_detail.not_declared": "The purpose sets no requirement for this",
+            "ui.asset_list.board.check_detail.unknown_check": "This check isn't supported",
+            "ui.asset_list.board.check_detail.sized_export": "Judged on the textures as sized for export",
             "ui.asset_list.board.checks_3d": "3D checks",
             "ui.asset_list.board.checks_2d": "2D checks",
             "ui.asset_list.board.checks_none": "Not judged yet",
@@ -17902,7 +17954,9 @@
             "ui.asset_list.board.checks_summary_pass": "All checks passed",
             "ui.asset_list.board.checks_summary_fail": "{fail} checks failed",
             "ui.asset_list.board.steps": "{steps} steps used",
+            "ui.asset_list.board.steps_one": "{steps} step used",
             "ui.asset_list.board.steps_3d": "{steps} of them 3D",
+            "ui.asset_list.board.steps_3d_one": "{steps} of them 3D",
             "ui.asset_list.board.steps_capped": "{used} / {cap} steps used",
             "ui.asset_list.board.steps_unknown": "No steps recorded",
             "ui.asset_list.board.steps_exhausted": "Steps used up",
@@ -17933,6 +17987,8 @@
             "ui.asset_list.board.detail_crop": "Crop source",
             "ui.asset_list.board.detail_crop_source": "Source picture",
             "ui.asset_list.board.detail_crop_source_meta": "Size {width} × {height}",
+            "ui.asset_list.board.detail_crop_source_kind.input_asset": "Uploaded picture",
+            "ui.asset_list.board.detail_crop_source_kind.task_asset": "Generated result",
             "ui.asset_list.board.detail_crop_region": "Normalized region: x {x}, y {y}, width {width}, height {height}",
             "ui.asset_list.board.detail_crop_pixels": "Pixel region: ({x0}, {y0}) – ({x1}, {y1})",
             "ui.asset_list.board.detail_previous": "Previous decision",
@@ -18462,6 +18518,23 @@
             "ui.chat.review.check_names.degenerate": "Degenerate triangles",
             "ui.chat.review.check_names.task_failed": "Task failure",
             "ui.chat.review.check_names.checkpoint_failed": "Checkpoint failed",
+            "ui.chat.review.check_names.readable": "Readable",
+            "ui.chat.review.check_names.nonblank": "Visible subject",
+            "ui.chat.review.check_names.background": "Background",
+            "ui.chat.review.check_names.subject_size": "Subject size",
+            "ui.chat.review.check_names.edge": "Subject not cropped",
+            "ui.chat.review.check_names.components": "Subject count",
+            "ui.chat.review.check_names.main_component": "Single main subject",
+            "ui.chat.review.check_names.short_edge": "Short-edge resolution",
+            "ui.chat.review.check_names.alpha": "Transparent background",
+            "ui.chat.review.check_names.edge_fringe": "Transparent edges",
+            "ui.chat.review.check_names.seamless": "Seamless tiling",
+            "ui.chat.review.check_names.subject_size_delta": "Matching subject size",
+            "ui.chat.review.check_names.silhouette_height_delta": "Matching silhouette height",
+            "ui.chat.review.check_names.palette_distance": "Matching palette",
+            "ui.chat.review.check_names.part_count_delta": "Matching part count",
+            "ui.chat.review.check_names.mirror_overlap": "Mirrored silhouette overlap",
+            "ui.chat.review.check_names.mirror_orientation": "Left-right orientation",
             "ui.chat.review.used_tool": "Ran {capability}",
             "ui.chat.message.expand_full": "Show full reply",
             "ui.chat.message.used_skills": "Skills used this turn: {names}",
@@ -18513,6 +18586,7 @@
             "ui.workspace.model_formats.download_failed": "Download failed, please retry.",
             "ui.workspace.model_formats.complete": "Fill in missing formats (about {credits} credits)",
             "ui.workspace.model_formats.complete_free": "Fill in missing formats (free)",
+            "ui.workspace.model_formats.complete_native": "Fill in missing formats ({totals})",
             "ui.workspace.model_formats.completing": "Filling in missing formats…",
             "ui.workspace.model_formats.completed": "Formats filled in",
             "ui.workspace.model_formats.complete_failed": "Failed to fill in formats, please retry.",
@@ -18883,7 +18957,9 @@
             "ui.workspace.processing.plan_offering_unavailable": "The processing service is currently unavailable; you can continue once it is available again.",
             "ui.workspace.processing.plan_task_canceled": "The processing step was canceled; after you confirm the cost, this step will run again.",
             "ui.workspace.processing.plan_task_failed": "The processing step failed; after you confirm the cost and result, you can retry.",
-            "ui.workspace.canvas.load_failed": "Failed to load task assets",
+            "ui.workspace.canvas.load_failed": "Failed to load the canvas",
+            "ui.workspace.canvas.loading": "Loading canvas…",
+            "ui.workspace.canvas.save_failed": "Failed to save the canvas, please retry",
             "ui.workspace.canvas.conflict": "The canvas was modified in another window and the latest server version has been loaded; unsaved changes in this window were replaced",
             "ui.workspace.agent.placeholder": "Tell the Agent what you want to create…",
             "ui.workspace.agent.send": "Send",
@@ -18904,6 +18980,8 @@
             "ui.workspace.tasks.close": "Close task details",
             "ui.workspace.tasks.empty": "Tasks created by the Agent appear here",
             "ui.workspace.tasks.progress": "Progress",
+            "ui.workspace.tasks.running_count": "{count} tasks running",
+            "ui.workspace.tasks.running_count_one": "{count} task running",
             "ui.workspace.tasks.resources_pending": "Additional outputs are being generated…",
             "ui.workspace.tasks.load_failed": "Failed to load task status",
             "ui.workspace.tasks.error_title": "Task failed",
@@ -19459,11 +19537,10 @@
             "ui.account.view": "View",
             "ui.account.download": "Download",
             "ui.account.load_more": "Load more",
-            "ui.account.total": "Total",
-            "ui.account.page": "Page",
+            "ui.account.page_of": "Page {page} of {total}",
             "ui.account.previous": "Previous page",
             "ui.account.next": "Next page",
-            "ui.account.usage_range": "Usage range",
+            "ui.account.usage_by_type": "By feature",
             "ui.account.from_date": "Start date",
             "ui.account.to_date": "End date",
             "ui.account.empty_tasks": "No tasks yet",
@@ -19618,8 +19695,8 @@
             "ui.studio.approval.card.step": "Step",
             "ui.studio.approval.card.kind": "Type",
             "ui.studio.approval.card.model": "Model",
-            "ui.studio.approval.card.model_choice_line": "{model} · source: {source}; reason: {reason}",
-            "ui.studio.approval.card.model_choice_line_no_reason": "{model} · source: {source}",
+            "ui.studio.approval.card.model_choice_basis_label": "Why this model",
+            "ui.studio.approval.card.model_choice_basis": "{source}; reason: {reason}",
             "ui.studio.approval.card.skill": "Style Skill",
             "ui.studio.approval.card.skill_line": "{name} ({source})",
             "ui.studio.approval.card.skill_source_agent": "chosen by the Agent",
@@ -19779,7 +19856,9 @@
             "ui.step_policy.retry": "Retry",
             "ui.step_policy.conflict": "The setting changed elsewhere; the latest values were reloaded. Review them, then save again.",
             "ui.step_policy.error": "Could not save: {reason}",
+            "ui.step_policy.error_generic": "Could not save. Try again later.",
             "ui.step_policy.load_failed": "Could not load the 3D step settings: {reason}",
+            "ui.step_policy.load_failed_generic": "Could not load the 3D step settings. Try again later.",
             "ui.step_policy.loading": "Loading…",
             "ui.step_policy.session_steps": "This session used {used} of {limit} steps",
             "ui.studio.chat.queued": "Queued",
@@ -20235,6 +20314,7 @@
             "ui.studio.three_view.replace_type": "Only PNG or JPEG pictures can replace a view.",
             "ui.studio.three_view.generate_rest": "Generate remaining views",
             "ui.studio.three_view.generate_rest_with_cost": "Generate remaining views (about {credits} credits)",
+            "ui.studio.three_view.generate_rest_with_cost_one": "Generate remaining views (about {credits} credit)",
             "ui.studio.three_view.to_3d_multiview": "3D from three views ({model})",
             "ui.studio.three_view.to_3d_front_only": "Front view only to 3D",
             "ui.studio.three_view.multiview_uses": "Uses: {views}",
@@ -20250,6 +20330,7 @@
             "ui.studio.multiview_upload.turn": "Make a 3D model from the {views} views of these pictures",
             "ui.studio.multiview_upload.invalid": "Use each view once, include a front view and at least two pictures. Adjust the choices and confirm again",
             "ui.studio.multiview_upload.image_label": "Picture {index}",
+            "ui.studio.multiview_upload.view_label": "View of picture {index}",
             "ui.studio.multiview_upload.open_image": "View picture {index} on the stage",
             "ui.studio.stage_image.title": "Picture view",
             "ui.studio.stage_image.close": "Close picture view (Esc)",
@@ -20580,6 +20661,28 @@
             "ui.viewer.splat.load_failed": "This Gaussian Splat can't be previewed right now. The original file can still be downloaded."
           },
           "fields": {
+            "project.messages.name_required": "Project name cannot be empty.",
+            "project.messages.name_too_long": "Project name cannot exceed {maximum} characters.",
+            "project.messages.project_limit": "Each user can create at most {maximum} projects.",
+            "project.messages.asset_name_required": "Asset name cannot be empty.",
+            "project.messages.asset_name_too_long": "Asset name cannot exceed {maximum} characters.",
+            "project.messages.asset_limit": "Each project can hold at most {maximum} assets.",
+            "project.messages.style_text_too_long": "Style notes cannot exceed {maximum} characters.",
+            "project.messages.palette_color_invalid": "Palette colors must be in #RRGGBB form.",
+            "project.messages.reference_limit": "At most {maximum} style reference images.",
+            "project.messages.reference_invalid": "The reference image is unavailable or does not belong to the current user.",
+            "project.messages.unknown_project": "The project does not exist or does not belong to the current user.",
+            "project.messages.asset_not_found": "The project asset does not exist.",
+            "project.messages.promotion_source_invalid": "Only your own completed task outputs or uploaded images can be promoted.",
+            "project.messages.style_guide_inherited": "Sessions in this project inherit the style guide of project “{project}” by default.",
+            "project.messages.style_guide_overridden": "This session overrides the project style guide.",
+            "project.messages.style_guide_off": "This session injects no style reference.",
+            "project.messages.style_guide_empty": "Not enabled",
+            "project.messages.style_guide_references_only": "(reference images only)",
+            "project.messages.style_guide_palette": "Palette: {palette} (the main colors of a 2D generation must stay within the palette)",
+            "project.messages.conventions_empty": "None",
+            "project.messages.assets_empty": "None",
+            "runtime.provider_connections[id=jimeng-images].display_name": "Jimeng",
             "content.brand.metadata_title": "Plinth - Multi-model creation platform",
             "content.brand.metadata_description": "Plinth multi-model creation and asset platform",
             "content.home.title": "Plinth pure Go runtime",
@@ -22416,6 +22519,27 @@
             "model_delivery.archive.readme.missing_line": "- {label}: {reason}"
           },
           "offering_texts": {
+            "中心": "Center",
+            "FDM（熔融沉积）": "FDM (fused deposition)",
+            "SLA（光固化）": "SLA (resin)",
+            "全彩": "Full color",
+            "写实": "Realistic",
+            "拓竹（Bambu Lab）": "Bambu Lab",
+            "最高质量（Prime）": "Highest quality (Prime)",
+            "圆形": "Circle",
+            "圆角矩形": "Rounded rectangle",
+            "六边形": "Hexagon",
+            "盾形": "Shield",
+            "星形": "Star",
+            "线性": "Linear",
+            "伽马": "Gamma",
+            "S 形曲线": "S-curve",
+            "角色": "Character",
+            "风景": "Landscape",
+            "拓竹 MH001（60 mm）": "Bambu Lab MH001 (60 mm)",
+            "Cherry MX 1×1 键帽（R1 排）": "Cherry MX 1×1 keycap (row R1)",
+            "人物": "Person",
+            "方形": "Square",
             "16:9 宽屏": "16:9 widescreen",
             "1990 霹雳舞 (Breakdance_1990)": "1990 breakdance",
             "2K Ultra 几何": "2K Ultra geometry",
@@ -41983,11 +42107,11 @@
           "options": [
             {
               "value": "bottom",
-              "label": "bottom"
+              "label": "底部"
             },
             {
               "value": "center",
-              "label": "center"
+              "label": "中心"
             }
           ],
           "presentation": {
@@ -42147,15 +42271,15 @@
           "options": [
             {
               "value": "fdm",
-              "label": "fdm"
+              "label": "FDM（熔融沉积）"
             },
             {
               "value": "sla",
-              "label": "sla"
+              "label": "SLA（光固化）"
             },
             {
               "value": "full_color",
-              "label": "full_color"
+              "label": "全彩"
             }
           ],
           "presentation": {
@@ -42335,15 +42459,15 @@
           "options": [
             {
               "value": "fdm",
-              "label": "fdm"
+              "label": "FDM（熔融沉积）"
             },
             {
               "value": "sla",
-              "label": "sla"
+              "label": "SLA（光固化）"
             },
             {
               "value": "full_color",
-              "label": "full_color"
+              "label": "全彩"
             }
           ],
           "presentation": {
@@ -42543,7 +42667,7 @@
           "options": [
             {
               "value": "realistic",
-              "label": "realistic"
+              "label": "写实"
             }
           ],
           "presentation": {
@@ -42590,7 +42714,7 @@
           "options": [
             {
               "value": "bambu",
-              "label": "bambu"
+              "label": "拓竹（Bambu Lab）"
             }
           ],
           "presentation": {
@@ -42706,7 +42830,7 @@
           "options": [
             {
               "value": "prime",
-              "label": "prime"
+              "label": "最高质量（Prime）"
             }
           ],
           "presentation": {
@@ -45055,23 +45179,23 @@
           "options": [
             {
               "value": "circle",
-              "label": "circle"
+              "label": "圆形"
             },
             {
               "value": "rounded-rect",
-              "label": "rounded-rect"
+              "label": "圆角矩形"
             },
             {
               "value": "hexagon",
-              "label": "hexagon"
+              "label": "六边形"
             },
             {
               "value": "shield",
-              "label": "shield"
+              "label": "盾形"
             },
             {
               "value": "star",
-              "label": "star"
+              "label": "星形"
             }
           ]
         },
@@ -45146,15 +45270,15 @@
           "options": [
             {
               "value": "linear",
-              "label": "linear"
+              "label": "线性"
             },
             {
               "value": "gamma",
-              "label": "gamma"
+              "label": "伽马"
             },
             {
               "value": "s-curve",
-              "label": "s-curve"
+              "label": "S 形曲线"
             }
           ]
         },
@@ -45556,23 +45680,23 @@
           "options": [
             {
               "value": "circle",
-              "label": "circle"
+              "label": "圆形"
             },
             {
               "value": "rounded-rect",
-              "label": "rounded-rect"
+              "label": "圆角矩形"
             },
             {
               "value": "hexagon",
-              "label": "hexagon"
+              "label": "六边形"
             },
             {
               "value": "shield",
-              "label": "shield"
+              "label": "盾形"
             },
             {
               "value": "star",
-              "label": "star"
+              "label": "星形"
             }
           ]
         },
@@ -45647,15 +45771,15 @@
           "options": [
             {
               "value": "linear",
-              "label": "linear"
+              "label": "线性"
             },
             {
               "value": "gamma",
-              "label": "gamma"
+              "label": "伽马"
             },
             {
               "value": "s-curve",
-              "label": "s-curve"
+              "label": "S 形曲线"
             }
           ]
         },
@@ -45971,11 +46095,11 @@
           "options": [
             {
               "value": "character",
-              "label": "character"
+              "label": "角色"
             },
             {
               "value": "landscape",
-              "label": "landscape"
+              "label": "风景"
             }
           ]
         }
@@ -46142,11 +46266,11 @@
           "options": [
             {
               "value": "bambu_mh001_60mm",
-              "label": "bambu_mh001_60mm"
+              "label": "拓竹 MH001（60 mm）"
             },
             {
               "value": "none",
-              "label": "none"
+              "label": "无"
             }
           ]
         },
@@ -46222,7 +46346,7 @@
           "options": [
             {
               "value": "stl",
-              "label": "stl"
+              "label": "STL"
             }
           ],
           "fixed": true
@@ -47276,7 +47400,7 @@
           "options": [
             {
               "value": "cherry-mx-1x1-r1",
-              "label": "cherry-mx-1x1-r1"
+              "label": "Cherry MX 1×1 键帽（R1 排）"
             }
           ],
           "fixed": true
@@ -47446,11 +47570,11 @@
           "options": [
             {
               "value": "person",
-              "label": "person"
+              "label": "人物"
             },
             {
               "value": "other",
-              "label": "other"
+              "label": "其他"
             }
           ],
           "required": true
@@ -47549,11 +47673,11 @@
           "options": [
             {
               "value": "square",
-              "label": "square"
+              "label": "方形"
             },
             {
               "value": "hex",
-              "label": "hex"
+              "label": "六边形"
             }
           ]
         },
@@ -47648,7 +47772,7 @@
           "options": [
             {
               "value": "3mf",
-              "label": "3mf"
+              "label": "3MF"
             }
           ],
           "fixed": true
