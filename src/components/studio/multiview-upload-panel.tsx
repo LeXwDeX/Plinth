@@ -78,12 +78,12 @@ export function MultiviewUploadPanel({ images, target, lockNote = null, disabled
               className="cursor-zoom-in rounded-sm transition-shadow hover:ring-2 hover:ring-primary focus-visible:outline-2 focus-visible:outline-ring"
               data-testid="studio-multiview-upload-thumb"
             >
-              <img src={url} alt={String(index + 1)} className="size-9 rounded-sm border border-border object-cover" />
+              <img src={url} alt={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.image_label'), { index: index + 1 })} className="size-9 rounded-sm border border-border object-cover" />
             </button>
             </HintTooltip>
             <select
               value={choices[index] ?? ''} disabled={disabled} data-testid="studio-multiview-upload-view"
-              aria-label={String(index + 1)}
+              aria-label={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.view_label'), { index: index + 1 })}
               onChange={(event) => setChoices((current) => current.map((value, at) => (at === index ? event.target.value : value)))}
               className="h-7 rounded-md border border-border bg-surface px-1"
             >

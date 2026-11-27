@@ -61,6 +61,14 @@ describe('the context meter (#322)', () => {
     expect(hintOf(html, 'composer-context-meter')).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })}"`);
   });
 
+  // #670: the meter's name joins its label and value with the Schema's label/value words, not an ASCII colon.
+  it('names the meter through the Schema label and value pattern', () => {
+    open({ tokens: 356_000, window: 1_000_000, compactions: [] });
+    const html = renderToStaticMarkup(<ContextMeter />);
+    const name = formatSchemaText(messages['ui.common.label_value'], { label: messages['ui.studio.context.label'], value: '356K / 1M' });
+    expect(tag(html, 'composer-context-meter')).toContain(`aria-label="${name}"`);
+  });
+
   it('names the vision token estimate against its declared token budget and the picture places (#247)', () => {
     open({ tokens: 356_000, visionTokens: 1_105, visionTokenBudget: 12_000, visionBudget: 10, window: 1_000_000, compactions: [] });
     const html = renderToStaticMarkup(<ContextMeter />);

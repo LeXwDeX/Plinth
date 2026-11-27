@@ -96,8 +96,19 @@ describe('approval card', () => {
 
   it('shows a user lock without inventing a reason', () => {
     const html = render({ ...card(null), modelChoice: { source: 'user' } });
-    expect(html).toContain(messages['ui.studio.approval.card.model_source_user']);
-    expect(html).not.toContain(messages['ui.studio.approval.card.model_choice_line']);
+    expect(html).toContain(`data-testid="studio-approval-model-choice">${messages['ui.studio.approval.card.model_source_user']}<`);
+  });
+
+  // #670: the row is labelled as the reason for the pick and does not repeat the model or the word "source".
+  it('labels the model choice row as why the model was picked, without repeating the model', () => {
+    const html = render({ ...card(null), modelChoice: { source: 'agent', reason: '细节更好' } });
+    const label = messages['ui.studio.approval.card.model_choice_basis_label'];
+    expect(html).toContain(`>${label}</dt><dd class="text-muted-foreground" data-testid="studio-approval-model-choice">`);
+    const row = html.slice(html.indexOf('data-testid="studio-approval-model-choice">'));
+    const shown = row.slice(row.indexOf('>') + 1, row.indexOf('</dd>'));
+    expect(shown).toBe(messages['ui.studio.approval.card.model_choice_basis']
+      .replace('{source}', messages['ui.studio.approval.card.model_source_agent']).replace('{reason}', '细节更好'));
+    expect(html).not.toContain(`>${messages['ui.studio.approval.card.parameter_source']}</dt><dd class="text-muted-foreground" data-testid="studio-approval-model-choice">`);
   });
 
   it('parses the model choice from a detached pending approval', () => {

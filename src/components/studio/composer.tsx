@@ -233,7 +233,12 @@ export function Composer({
   ];
   const overriding = chip ? overridingHandle(value, chip.handle) : '';
   const currentName = chip ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label }) : '';
-  const skillName = skill.selectedId ? skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId : '';
+  // #670: the Skill is named once its catalog is read; until then the name reads as loading, never as its id.
+  const skillName = skill.selectedId
+    ? skill.catalog
+      ? skill.catalog.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId
+      : schemaText(schema, 'ui.workspace.skills.loading')
+    : '';
   const purposeLabelId = useId();
   const stopLabel = schemaText(schema, 'ui.workspace.agent.stop');
   const sendLabel = schemaText(schema, 'ui.workspace.agent.send');

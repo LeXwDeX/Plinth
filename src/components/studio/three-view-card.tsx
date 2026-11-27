@@ -11,7 +11,7 @@ import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useThreeViews } from '@/hooks/use-three-views';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import {
@@ -259,7 +259,7 @@ export function ThreeViewCardView({
             data-testid="three-view-start-remaining"
             onClick={onStartRemaining}
           >
-            {restCredits > 0 ? formatSchemaText(text(schema, 'generate_rest_with_cost'), { credits: restCredits }) : text(schema, 'generate_rest')}
+            {restCredits > 0 ? schemaCountMessage(schema, 'ui.studio.three_view.generate_rest_with_cost', restCredits, { credits: restCredits }) : text(schema, 'generate_rest')}
           </Action>
         ) : null}
         {model && multiview && onMultiview ? (

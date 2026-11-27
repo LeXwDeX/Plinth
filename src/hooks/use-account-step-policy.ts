@@ -39,11 +39,14 @@ export interface StepPolicyUpdate {
 
 /**
  * A refused request. `status` is the HTTP status; `message` is the server's own
- * `detail` when it sent one. A 409 is not a failure here: `update` re-reads the
- * setting and reports `conflict` so the panel can show the values now in force.
+ * `detail` when it sent one. `detail` is that server text alone (in the
+ * interface language), empty when the failure only has an internal reason such
+ * as `HTTP 500`, which people are never shown (#670). A 409 is not a failure
+ * here: `update` re-reads the setting and reports `conflict` so the panel can
+ * show the values now in force.
  */
 export class StepPolicyRequestError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly detail = '') {
     super(message);
     this.name = 'StepPolicyRequestError';
   }
@@ -103,10 +106,8 @@ async function payloadOf(response: Response): Promise<unknown> {
 
 function requestError(response: Response, payload: unknown): StepPolicyRequestError {
   const detail = record(payload)?.detail;
-  return new StepPolicyRequestError(
-    response.status,
-    typeof detail === 'string' && detail ? detail : `HTTP ${response.status}`,
-  );
+  const text = typeof detail === 'string' ? detail : '';
+  return new StepPolicyRequestError(response.status, text || `HTTP ${response.status}`, text);
 }
 
 async function readPolicy(url: string): Promise<AccountStepPolicy> {

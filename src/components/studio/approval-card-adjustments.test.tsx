@@ -13,7 +13,8 @@ const messages = defaultCatalog.application.content.messages as Record<string, s
 vi.mock('@/components/product-schema-provider', () => ({
   useProductSchema: () => ({ schema: defaultCatalog.application, text: (key: string) => messages[key] ?? '' }),
 }));
-vi.mock('swr', () => ({ default: () => ({ data: undefined, isLoading: false }) }));
+const offeringsRead = vi.hoisted(() => ({ value: { data: undefined as unknown, isLoading: false } }));
+vi.mock('swr', () => ({ default: () => offeringsRead.value }));
 vi.mock('@/hooks/use-balance', () => ({ useBalance: () => ({ accounts: [] }) }));
 vi.mock('@/hooks/use-handle-references', () => ({ useHandleReferences: () => new Map() }));
 vi.mock('@/components/ui/hint-tooltip', () => ({
@@ -48,9 +49,29 @@ const renderCard = (items: ParameterAdjustment[] = adjustments) =>
   render(<ApprovalCard model={card(items)} busy={false} now={Date.parse('2026-10-09T00:00:00Z')} onDecide={() => {}} onRerequest={() => {}} />);
 
 beforeEach(() => undefined);
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  offeringsRead.value = { data: undefined, isLoading: false };
+});
 
 describe('the adjustments of one approval step (#103)', () => {
+  // #670: a boolean reads as yes/no and an option by its label from the step's Offering, never as the raw value.
+  it('words a boolean as yes/no and an option by its Offering label', () => {
+    offeringsRead.value = { isLoading: false, data: [{
+      id: 'o1', model_id: 'tripo-v3.1-full', model_name: 'Tripo v3.1', provider_id: 'tripo', provider_name: 'Tripo',
+      parameters: [{ name: 'texture_resolution', label: '贴图分辨率', type: 'select',
+        options: [{ value: '2k', label: '2K 贴图' }, { value: '4k', label: '4K 贴图' }] }],
+    }] };
+    const pbr: ParameterAdjustment = { ...agentAdjustment, name: 'pbr', label: 'PBR', recommendedValue: false, value: true };
+    const view = renderCard([agentAdjustment, pbr]);
+    const lines = view.getAllByTestId('studio-approval-agent-line').map((line) => line.textContent ?? '');
+    const line = (name: string, recommended: string, actual: string) => messages['ui.studio.approval.card.parameter_agent_line']
+      .replace('{name}', name).replace('{recommended}', recommended).replace('{actual}', actual);
+    expect(lines[0]).toContain(line('贴图分辨率', '2K 贴图', '4K 贴图'));
+    expect(lines[1]).toContain(line('PBR', messages['ui.studio.brief.no'], messages['ui.studio.brief.yes']));
+    expect(lines.join(' ')).not.toContain('true');
+  });
+
   it('merges the adjustments of one usage profile into one line with one shared reason', () => {
     const view = renderCard();
     const summaries = view.getAllByTestId('studio-approval-profile-summary');

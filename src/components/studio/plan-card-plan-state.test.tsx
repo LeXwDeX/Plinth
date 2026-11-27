@@ -24,9 +24,10 @@ vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () =>
 vi.mock('@/components/ui/hint-tooltip', () => ({
   HintTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock('swr', () => ({
-  default: () => ({ data: { 'text-to-image': [{ id: 'jimeng-4', model_name: '即梦 4.5' }] } }),
+const offeringsRead = vi.hoisted(() => ({
+  value: { data: { 'text-to-image': [{ id: 'jimeng-4', model_name: '即梦 4.5' }] } } as { data?: unknown; error?: unknown },
 }));
+vi.mock('swr', () => ({ default: () => offeringsRead.value }));
 
 const text = (key: string) => schemaText(schema, key);
 const estimate = { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '7' };
@@ -102,6 +103,47 @@ describe('the steps of a plan, as the server projected them (#410)', () => {
     expect(banner.textContent).toContain(formatCount(1));
     view.getByTestId('studio-plan-continue').click();
     expect(onContinue).toHaveBeenCalledTimes(1);
+  });
+
+  // #670: English says "1 step left", through the Schema's singular text.
+  it('words one step left in the singular', () => {
+    const messages = raw.content.messages as Record<string, string>;
+    const en = raw.localization.bundles.en.messages as Record<string, string>;
+    const previous = { locale: schema.localization, plural: messages['ui.studio.plan.stopped'], one: messages['ui.studio.plan.stopped_one'] };
+    messages['ui.studio.plan.stopped'] = en['ui.studio.plan.stopped'];
+    messages['ui.studio.plan.stopped_one'] = en['ui.studio.plan.stopped_one'];
+    schema.localization = { ...raw.localization, active_locale: 'en', default_locale: 'en' } as ProductSchema['localization'];
+    try {
+      const stopped = budget('active', [
+        { index: 1, state: 'done', taskId: 't1', taskState: 'SUCCEEDED', optional: false },
+        { index: 2, state: 'not_run', taskId: '', taskState: '', optional: false },
+        { index: 3, state: 'optional_not_run', taskId: '', taskState: '', optional: true },
+      ]);
+      const view = render(<PlanCard plan={plan} tasks={[]} progress={stopped} stepsMayStillRun={false} />);
+      expect(view.getByTestId('studio-plan-stopped').textContent).toContain('Stopped, 1 step left');
+    } finally {
+      schema.localization = previous.locale;
+      messages['ui.studio.plan.stopped'] = previous.plural;
+      messages['ui.studio.plan.stopped_one'] = previous.one;
+    }
+  });
+
+  // #670: a chosen model reads as loading while the Offering names are read, never as its raw id.
+  it('shows the loading text, not the offering id, while the model names are read', () => {
+    const chosen: ProductionPlan = { ...plan, steps: [{ ...plan.steps[0], offeringId: 'jimeng-4' }] };
+    const previous = offeringsRead.value;
+    offeringsRead.value = {};
+    try {
+      const loading = render(<PlanCard plan={chosen} tasks={[]} />);
+      expect(loading.getByTestId('studio-plan-card').textContent).toContain(text('ui.loading'));
+      expect(loading.getByTestId('studio-plan-card').textContent).not.toContain('jimeng-4');
+      cleanup();
+      offeringsRead.value = previous;
+      const loaded = render(<PlanCard plan={chosen} tasks={[]} />);
+      expect(loaded.getByTestId('studio-plan-card').textContent).toContain('即梦 4.5');
+    } finally {
+      offeringsRead.value = previous;
+    }
   });
 
   it('shows no continue button while the turn still runs or the plan is done', () => {
