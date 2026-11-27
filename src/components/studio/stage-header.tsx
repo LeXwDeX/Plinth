@@ -24,7 +24,7 @@ import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { artboardDiffersFromObject } from '@/lib/canvas/current-object';
-import { currentObjectLayer } from '@/lib/canvas/inpaint-entry';
+import { currentObjectLayer, stagePictureOffBoard } from '@/lib/canvas/inpaint-entry';
 import { handleOfObject } from '@/lib/workspace/object-handle';
 import { HandleTag } from '@/components/chat/handle-tag';
 import { useHandleReferences } from '@/hooks/use-handle-references';
@@ -95,8 +95,9 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   // The version's own layer; the person may have deleted it while other layers stay (#278).
   const objectLayer = currentObjectLayer(boardNodes, object, sessionId, proxyAssetUrl);
   // #681: a click selects a picture without putting it on the board, so the picture on the stage may not be on the
-  // board at all. The board actions would then act on other content: they stay off and say how to put it there.
-  const offBoard = object?.kind === 'image' && boardNodes !== undefined && objectLayer === undefined;
+  // board at all. The board actions would then act on other content: they stay off and say how to put it there,
+  // unless a picture is selected on the board (#705).
+  const offBoard = stagePictureOffBoard(object, boardNodes, objectLayer, boardPicture);
   const offBoardReason = schemaText(schema, 'ui.studio.stage.action.not_on_board');
   const showProcess = useStudioStore((state) => state.showProcess);
   const processing = useModelProcessingCapabilities().available;

@@ -44,3 +44,17 @@ export function currentObjectLayer<T extends Pick<CanvasNode, 'type' | 'imageUrl
   const url = resolveUrl(object.url, object.taskId);
   return url ? nodes.find((node) => node.type === 'image' && node.imageUrl === url) : undefined;
 }
+
+/**
+ * #681: the picture on the stage is not on the board (a click selects without placing it), so the board actions
+ * would act on other content and stay off. #705: a picture layer the person selected on the board is explicit
+ * board content, so it lifts that guard (as it already does for 去背景).
+ */
+export function stagePictureOffBoard(
+  object: { kind: string } | null | undefined,
+  boardNodes: readonly unknown[] | undefined,
+  objectLayer: unknown,
+  boardPicture: unknown,
+): boolean {
+  return object?.kind === 'image' && boardNodes !== undefined && objectLayer === undefined && !boardPicture;
+}
