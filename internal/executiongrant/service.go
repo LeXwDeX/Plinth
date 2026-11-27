@@ -108,6 +108,22 @@ type RechargeGuard func(ctx context.Context, ownerID, sessionID, capability stri
 // the count the approval mode's checkpoint window is measured against.
 type SessionApprovedSteps func(ctx context.Context, ownerID, sessionID string) (int, error)
 
+type continuingSeriesKey struct{}
+
+// ContinuingSeries marks a policy decision made for the next step of a series
+// the person already let run: the next view of a three-view group, a bounded 2D
+// series (#702). The approval window does not stop such a step, since nothing
+// would show its card; its grant still counts toward the window. Every other
+// rule of the mode applies as usual.
+func ContinuingSeries(ctx context.Context) context.Context {
+	return context.WithValue(ctx, continuingSeriesKey{}, true)
+}
+
+func continuingSeries(ctx context.Context) bool {
+	marked, _ := ctx.Value(continuingSeriesKey{}).(bool)
+	return marked
+}
+
 // Principal is supplied by authenticated server middleware, never decoded from
 // the grant request body. Other client sources require a separate identity and
 // decision policy before they can use this service.
@@ -382,8 +398,10 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	// Every window of approved steps of the session, the next step asks a
 	// person once, whatever the mode or a plan would decide (#702). Approving
 	// it moves the count on, so the window starts again; denying it leaves the
-	// count where it is, so the step after it asks again.
-	if s.SessionPaidSteps != nil && (normalized == approvalpolicy.ModeAuto || normalized == approvalpolicy.ModeBudget) {
+	// count where it is, so the step after it asks again. A continuing series
+	// (ContinuingSeries) is counted but not stopped.
+	if s.SessionPaidSteps != nil && !continuingSeries(ctx) &&
+		(normalized == approvalpolicy.ModeAuto || normalized == approvalpolicy.ModeBudget) {
 		approvedSteps, err := s.SessionPaidSteps(ctx, ownerID, grant.SessionID)
 		if err != nil {
 			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err

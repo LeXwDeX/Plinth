@@ -129,3 +129,29 @@ func TestStrictSparesThePersonsOwnTwoDClick(t *testing.T) {
 		}
 	}
 }
+
+// #702: a step of a series the person already let run (the next view of a
+// three-view group, ContinuingSeries) is not stopped by the window: no card
+// exists for it to wait on. The Agent's own single steps still ask there, and
+// strict is not affected.
+func TestCheckpointDoesNotStopAContinuingSeries(t *testing.T) {
+	approved := 100
+	for _, mode := range []string{"auto", "budget"} {
+		store := policyFixture("text-to-image")
+		store.grant.Source = AgentPending
+		got, err := checkpointService(store, &approved).ApproveByPolicy(ContinuingSeries(context.Background()), "owner-a", "request-a", mode)
+		if err != nil || got.Status != Approved || got.DecidedBy != PolicyActorPrefix+mode {
+			t.Fatalf("%s continuing view at the checkpoint: %+v %v", mode, got, err)
+		}
+		single := policyFixture("text-to-image")
+		single.grant.Source = AgentPending
+		if _, err := checkpointService(single, &approved).ApproveByPolicy(context.Background(), "owner-a", "request-a", mode); !errors.Is(err, ErrHumanRequired) {
+			t.Fatalf("%s single Agent step at the checkpoint was approved: %v", mode, err)
+		}
+	}
+	strict := policyFixture("text-to-image")
+	strict.grant.Source = AgentPending
+	if _, err := checkpointService(strict, &approved).ApproveByPolicy(ContinuingSeries(context.Background()), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+		t.Fatalf("strict continuing view was approved: %v", err)
+	}
+}

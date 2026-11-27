@@ -89,28 +89,40 @@ func TestThreeViewContinuationLeavesARechargeToAPerson(t *testing.T) {
 	}
 }
 
-// #702: in the auto mode the approval window can fall between two views. The
-// continuation stops at the next view as awaiting approval (its card asks the
-// person once), not as a budget the plan does not cover.
-func TestThreeViewContinuationWaitsOnTheApprovalWindowCard(t *testing.T) {
+// #702: in the auto mode the approval window can fall between two views. A
+// three-view group is a bounded 2D series the person already let run, and the
+// continuation's view grant has no card a person could answer, so the window
+// does not stop it: the view is submitted, and its grant still counts toward
+// the window.
+func TestThreeViewContinuationRunsThroughTheApprovalWindow(t *testing.T) {
 	ctx := context.Background()
 	f := newContinuationFixtureWithMode(t, false, "auto")
 	task := f.startFrontByPolicy(t)
 	f.finish(t, task, "asset-front-702")
 	f.runtime.Grants.Policy = f.runtime.Grants.Policy.WithCheckpoints(map[string]int{"auto": 100})
-	f.runtime.Grants.SessionPaidSteps = func(context.Context, string, string) (int, error) { return 100, nil }
+	// 99 earlier approvals plus the front view: the left view is the 101st.
+	f.runtime.Grants.SessionPaidSteps = func(ctx context.Context, owner, session string) (int, error) {
+		n, err := f.repo.SessionApprovedGrants(ctx, owner, session)
+		return n + 99, err
+	}
+	if n, _ := f.runtime.Grants.SessionPaidSteps(ctx, "owner-a", "session-a"); n != 100 {
+		t.Fatalf("approved before the left view = %d, want 100", n)
+	}
 	submits := f.gateway.submits
 	result, err := f.views.Continue(ctx, "owner-a", "session-a", f.run.ID, task, "turn-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Paused || result.View != "left" || result.Reason != threeview.ReasonViewAwaitingApproval ||
-		result.TaskID != "" || f.gateway.submits != submits {
-		t.Fatalf("continuation = %+v submits %d->%d, want paused at left awaiting approval", result, submits, f.gateway.submits)
+	if result.Paused || result.View != "left" || result.TaskID == "" || f.gateway.submits != submits+1 {
+		t.Fatalf("continuation = %+v submits %d->%d, want the left view submitted", result, submits, f.gateway.submits)
 	}
 	left := f.step(t, "left")
-	if got, err := f.repo.GetExecutionGrant(ctx, "owner-a", left.GrantRequestID); err != nil || got.Status != executiongrant.Pending {
-		t.Fatalf("left grant = %+v err=%v, want pending on its card", got, err)
+	if got, err := f.repo.GetExecutionGrant(ctx, "owner-a", left.GrantRequestID); err != nil ||
+		got.Status == executiongrant.Pending || !got.ApprovedByPolicy() {
+		t.Fatalf("left grant = %+v err=%v, want approved by the policy", got, err)
+	}
+	if n, _ := f.runtime.Grants.SessionPaidSteps(ctx, "owner-a", "session-a"); n != 101 {
+		t.Fatalf("approved after the left view = %d, want 101 (the view still counts)", n)
 	}
 }
 
