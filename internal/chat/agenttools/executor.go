@@ -232,6 +232,10 @@ type Config struct {
 	// MaxGenerationCallsPerTurn 限定单轮付费生成次数（Schema 声明；
 	// <=0 表示不设限，仅测试允许）。
 	MaxGenerationCallsPerTurn int
+	// GenerationCheckpoint is approval_policy.generation_checkpoint (#694):
+	// per approval mode, the generations one reply runs before it stops. A
+	// mode it does not name keeps MaxGenerationCallsPerTurn.
+	GenerationCheckpoint map[string]int
 	// ConsentLimitContent is what the Agent reads when the turn's generation
 	// call limit is reached; ConsentReconcileContent is the failure text of a
 	// three-view view whose submission outcome stayed unknown past its wait
@@ -301,6 +305,8 @@ type Executor struct {
 	usage         map[string]generationUsage
 	usageClock    uint64
 	maxGeneration int
+	// generationCheckpoint is the per-approval-mode count (#694).
+	generationCheckpoint map[string]int
 
 	// limitContent and reconcileContent are the Schema's texts for a reached
 	// generation call limit and an unknown three-view submission outcome.
@@ -467,6 +473,7 @@ func New(config Config) (*Executor, error) {
 		taskObservationTimeout: config.TaskObservationTimeout,
 		usage:                  map[string]generationUsage{},
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
+		generationCheckpoint:   config.GenerationCheckpoint,
 		limitContent:           config.ConsentLimitContent,
 		reconcileContent:       config.ConsentReconcileContent,
 		texts:                  config.Texts,
@@ -519,8 +526,8 @@ func (e *Executor) execute(
 		adds := revisionAddsPaidStep(command)
 		scope := e.scopeKey(command)
 		if adds && e.generationLimitWouldBeReached(scope, command.AssistantMessageID, command.Call.ID,
-			command.PriorGenerationCalls, 1) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+			command.PriorGenerationCalls, 1, e.generationLimit(command)) {
+			return e.limitResult(command), nil
 		}
 		result, err := e.reviseProcessingPlan(ctx, command)
 		if adds && err == nil && result.Error == "" {
@@ -782,10 +789,7 @@ func (e *Executor) findHistoryImages(command chat.ToolCommand) chat.ToolResult {
 	if err != nil {
 		var unknown *chat.UnknownHandleError
 		if errors.As(err, &unknown) {
-			template := e.context.UnknownHandleTemplate
-			if unknown.Reason == "kind" {
-				template = e.context.WrongHandleKindTemplate
-			}
+			template := chat.HandleRefusalTemplate(e.context, unknown.Handle, unknown.Reason)
 			return chat.ToolResult{Error: strings.ReplaceAll(template, "{handle}", unknown.Handle)}
 		}
 		return chat.ToolResult{Error: "invalid arguments"}
@@ -1046,8 +1050,8 @@ func (e *Executor) generateWithParams(
 		// processing plan its paid steps, without refusing it (#665).
 		e.recordGenerationCall(scope, command.AssistantMessageID, command.Call.ID, command.PriorGenerationCalls, weight)
 	} else if e.generationLimitReachedForCallWeighted(scope, command.AssistantMessageID,
-		command.Call.ID, command.PriorGenerationCalls, weight) {
-		return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+		command.Call.ID, command.PriorGenerationCalls, weight, e.generationLimit(command)) {
+		return e.limitResult(command), nil
 	}
 	command.ExplicitParameters = explicitParameters(command)
 	command.Options = e.mergedOptions(scope, command)
@@ -1072,42 +1076,60 @@ func refusedBeforeSubmission(result chat.ToolResult, err error) bool {
 		result.RetryAfter == 0 && (err != nil || result.Error != "")
 }
 
-func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior int) bool {
-	return e.generationLimitReachedForCallWeighted(scope, turn, callID, prior, 1)
+func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior, limit int) bool {
+	return e.generationLimitReachedForCallWeighted(scope, turn, callID, prior, 1, limit)
+}
+
+// generationLimit is the turn's generation checkpoint (#694): the count the
+// session's approval mode declares in approval_policy.generation_checkpoint,
+// else max_generation_calls_per_turn.
+func (e *Executor) generationLimit(command chat.ToolCommand) int {
+	if count, declared := e.generationCheckpoint[command.ApprovalMode]; declared && count > 0 {
+		return count
+	}
+	return e.maxGeneration
+}
+
+// limitResult answers a call refused at the turn's generation checkpoint: the
+// Agent's text, nothing submitted, and the checkpoint the orchestrator ends
+// the reply with (#694).
+func (e *Executor) limitResult(command chat.ToolCommand) chat.ToolResult {
+	return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
+		GenerationCheckpoint: e.generationLimit(command)}
 }
 
 // generationLimitReachedForCallWeighted counts one call as weight paid
 // generations (#665): a processing plan counts each of its paid steps when it
 // is created. The call is refused when its weight does not fit the rest of
 // the turn's max_generation_calls_per_turn; a call already counted is free.
-func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID string, prior, weight int) bool {
-	return e.countGenerationCall(scope, turn, callID, prior, weight, true, true)
+func (e *Executor) generationLimitReachedForCallWeighted(scope, turn, callID string, prior, weight, limit int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, limit, true, true)
 }
 
 // generationLimitWouldBeReached is the check of
 // generationLimitReachedForCallWeighted without counting the call: a call
 // counted only after it was applied asks first.
-func (e *Executor) generationLimitWouldBeReached(scope, turn, callID string, prior, weight int) bool {
-	return e.countGenerationCall(scope, turn, callID, prior, weight, true, false)
+func (e *Executor) generationLimitWouldBeReached(scope, turn, callID string, prior, weight, limit int) bool {
+	return e.countGenerationCall(scope, turn, callID, prior, weight, limit, true, false)
 }
 
 // recordGenerationCall counts an applied call whatever the limit says: the
 // check came before it was applied. A call already counted is not counted
 // again.
 func (e *Executor) recordGenerationCall(scope, turn, callID string, prior, weight int) {
-	e.countGenerationCall(scope, turn, callID, prior, weight, false, true)
+	e.countGenerationCall(scope, turn, callID, prior, weight, e.maxGeneration, false, true)
 }
 
 // countGenerationCall checks (check) and counts (record) one call of weight
 // units against the turn's generation count, which starts at prior (the units
 // the orchestrator rebuilt from the turn checkpoint) when this process holds
-// less. It reports whether the call does not fit; a call already counted
-// always fits.
-func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight int, check, record bool) bool {
+// less. It reports whether the call does not fit limit (generationLimit); a
+// call already counted always fits.
+func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight, limit int, check, record bool) bool {
 	if weight < 1 {
 		weight = 1
 	}
-	if e.maxGeneration <= 0 {
+	if e.maxGeneration <= 0 || limit <= 0 {
 		return false
 	}
 	e.usageMu.Lock()
@@ -1128,7 +1150,7 @@ func (e *Executor) countGenerationCall(scope, turn, callID string, prior, weight
 	if current.count < prior {
 		current.count = prior
 	}
-	if check && current.count+weight > e.maxGeneration {
+	if check && current.count+weight > limit {
 		e.usage[scope] = current
 		return true
 	}
@@ -1169,6 +1191,59 @@ func (e *Executor) countedGenerationUnits(scope, turn, callID string) int {
 		return 0
 	}
 	return current.calls[callID]
+}
+
+// generationRemaining is how many more units the turn's generation count
+// takes before limit (generationLimit) once callID holds own units (#693); -1
+// when the turn has no limit. prior is the count before the call
+// (PriorGenerationCalls), own what the turn checkpoint holds for the call
+// (OwnGenerationUnits), used when this process lost the call's count.
+func (e *Executor) generationRemaining(scope, turn, callID string, prior, own, limit int) int {
+	if e.maxGeneration <= 0 || limit <= 0 {
+		return -1
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	used := prior + own
+	if current, known := e.usage[scope]; known && current.turn == turn {
+		if counted, seen := current.calls[callID]; seen {
+			used = max(current.count, prior+counted)
+		} else {
+			used = max(current.count, prior) + own
+		}
+	}
+	return max(limit-used, 0)
+}
+
+// addGenerationUnits adds units to callID's share of the turn's generation
+// count (#693): a three-view continuation counts every view it submits on the
+// call that started the group. A call this process lost is first restored
+// with own units on top of prior, as generationRemaining reads it.
+func (e *Executor) addGenerationUnits(scope, turn, callID string, prior, own, units int) {
+	if e.maxGeneration <= 0 || units <= 0 {
+		return
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	current, known := e.usage[scope]
+	if !known && len(e.usage) >= maxUsageScopes {
+		e.evictOldestUsageLocked()
+	}
+	e.usageClock++
+	if current.turn != turn {
+		current = generationUsage{turn: turn, calls: map[string]int{}}
+	}
+	current.used = e.usageClock
+	if current.calls == nil {
+		current.calls = map[string]int{}
+	}
+	if _, seen := current.calls[callID]; !seen {
+		current.count = max(current.count, prior) + own
+		current.calls[callID] = own
+	}
+	current.count += units
+	current.calls[callID] += units
+	e.usage[scope] = current
 }
 
 // evictOldestUsageLocked drops the scope whose last generation call is the

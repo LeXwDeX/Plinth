@@ -55,7 +55,7 @@ func TestRebuiltGenerationCountEqualsTheLiveCount665(t *testing.T) {
 	live := &Executor{maxGeneration: 6, usage: map[string]generationUsage{}}
 	persisted := map[string]int{}
 	count := func(executor *Executor, id string, prior, weight int) bool {
-		reached := executor.generationLimitReachedForCallWeighted("s", "turn", id, prior, weight)
+		reached := executor.generationLimitReachedForCallWeighted("s", "turn", id, prior, weight, executor.maxGeneration)
 		if units := executor.countedGenerationUnits("s", "turn", id); units > 0 {
 			persisted[id] = units
 		}
@@ -76,9 +76,9 @@ func TestRebuiltGenerationCountEqualsTheLiveCount665(t *testing.T) {
 	if persisted["plan"] != 5 {
 		t.Fatalf("persisted units = %v, want the plan's five steps", persisted)
 	}
-	liveRefusesTwo := live.generationLimitWouldBeReached("s", "turn", "two", prior("two"), 2)
+	liveRefusesTwo := live.generationLimitWouldBeReached("s", "turn", "two", prior("two"), 2, live.maxGeneration)
 	restarted := &Executor{maxGeneration: 6, usage: map[string]generationUsage{}}
-	if refused := restarted.generationLimitWouldBeReached("s", "turn", "two", prior("two"), 2); refused != liveRefusesTwo || !refused {
+	if refused := restarted.generationLimitWouldBeReached("s", "turn", "two", prior("two"), 2, restarted.maxGeneration); refused != liveRefusesTwo || !refused {
 		t.Fatalf("rebuilt refusal of two units = %v, live = %v, want both refused", refused, liveRefusesTwo)
 	}
 	if count(restarted, "one", prior("one"), 1) {
@@ -102,7 +102,7 @@ func TestThreeViewDuplicateRefusalIsNotCounted665(t *testing.T) {
 	if err != nil || result.AgentContent != "already running: run-earlier" || result.GenerationUnits != 0 {
 		t.Fatalf("duplicate = %+v err=%v", result, err)
 	}
-	if executor.generationLimitWouldBeReached(executor.scopeKey(command), command.AssistantMessageID, "next", 0, 1) {
+	if executor.generationLimitWouldBeReached(executor.scopeKey(command), command.AssistantMessageID, "next", 0, 1, executor.maxGeneration) {
 		t.Fatal("the refused duplicate used up the turn's only generation")
 	}
 }

@@ -4337,7 +4337,8 @@ type ChatThreeViewReviewItem struct {
 type ChatThreeViewContinuationSchema struct {
 	Enabled bool `json:"enabled"`
 	// Reasons keys: budget_not_covered, view_not_finished,
-	// view_already_started, consistency_retries_exhausted.
+	// view_already_started, consistency_retries_exhausted,
+	// generation_checkpoint.
 	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
@@ -4416,10 +4417,19 @@ type ChatThreeViewMessages struct {
 	// AgentPaused says the budget continuation stopped without finishing the
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
+	// AgentPausedStarted is AgentPaused for a view that was already started
+	// (view_already_started): the person started it, it is not a failure, and
+	// the Agent does not send the person to click or retry (#689). Same
+	// fields; a Catalog without it uses AgentPaused.
+	AgentPausedStarted string `json:"agent_paused_started,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
 	// {attempt}, {maximum}, {reasons}. The reasons are worded by
 	// consistency.reasons, one per failed check (#283).
 	ConsistencyRetry string `json:"consistency_retry,omitempty"`
+	// ConsistencyRedraw reports one redraw of a continuation bounded by the
+	// turn's generation checkpoint instead of an attempt limit (#693):
+	// {view}, {attempt}, {reasons}.
+	ConsistencyRedraw string `json:"consistency_redraw,omitempty"`
 	// ConsistencyFailed reports a view that stayed inconsistent; the group
 	// waits for a person. Fields: {view}, {reasons}.
 	ConsistencyFailed string `json:"consistency_failed,omitempty"`
@@ -4530,6 +4540,12 @@ type ChatApprovalPolicySchema struct {
 	// that does not declare the field (every one written before #490) reads as 0.
 	// Server-only: the browser cannot price a step before it is frozen.
 	ManualCreditsThreshold int `json:"manual_credits_threshold"`
+	// GenerationCheckpoint is, per approval mode, how many paid generations
+	// one reply runs before it stops at a checkpoint (#694): the reply ends
+	// with presentation.messages.generation_checkpoint_reached and the
+	// person's next message starts a fresh count. A mode it does not name
+	// keeps agent.max_generation_calls_per_turn. Server-only.
+	GenerationCheckpoint map[string]int `json:"generation_checkpoint,omitempty"`
 	// Budget is the production-plan budget of budget mode. Server-only.
 	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
@@ -5849,6 +5865,10 @@ type ChatContextSchema struct {
 	// the wrong kind. Field: {handle}.
 	UnknownHandleTemplate   string `json:"unknown_handle_template"`
 	WrongHandleKindTemplate string `json:"wrong_handle_kind_template"`
+	// EmptySelectionTemplate is the refusal when the selection alias names
+	// nothing because the turn has no selected object of the wanted kind
+	// (#684). Field: {handle}. Empty keeps UnknownHandleTemplate.
+	EmptySelectionTemplate string `json:"empty_selection_template,omitempty"`
 	// ResultHandlesField is the key of the tool result that lists the handles
 	// given to the pictures and models the call produced (#25), so a later
 	// step of the same reply names them without guessing. Empty omits it.
@@ -6843,6 +6863,10 @@ type ChatMessageTexts struct {
 	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
 	// Optional: without it the reply ends without a note.
 	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
+	// GenerationCheckpointReached ends a reply stopped at its approval mode's
+	// generation checkpoint (#694); {count} is that checkpoint. Required when
+	// approval_policy.generation_checkpoint is declared.
+	GenerationCheckpointReached string `json:"generation_checkpoint_reached,omitempty"`
 	// ToolResultTruncated is the note on a tool result shortened to
 	// chat.agent.max_tool_result_characters (#665): {tool} is the tool name,
 	// {size} the original length and {limit} the bound, both in characters,
@@ -8255,6 +8279,12 @@ type ChatVisionSchema struct {
 	StyleAnchorLabelTemplate   string `json:"style_anchor_label_template,omitempty"`
 	StyleAnchorDroppedTemplate string `json:"style_anchor_dropped_template,omitempty"`
 	UnnamedPictureLabel        string `json:"unnamed_picture_label,omitempty"`
+	// SelectionIntro and SelectionLabelTemplate frame the pictures of the
+	// current selection that have no picture slot (#679): a board raster or
+	// another newly selected picture the message itself does not carry
+	// ({handle} is its handle). Both are required with a selection role.
+	SelectionIntro         string `json:"selection_intro,omitempty"`
+	SelectionLabelTemplate string `json:"selection_label_template,omitempty"`
 	// ContactSheet folds pictures of one tool result over their quota into one
 	// labelled sheet with every handle.
 	ContactSheet ChatVisionContactSheetSchema `json:"contact_sheet"`
@@ -8294,9 +8324,12 @@ type ChatVisionInvalidPictureSchema struct {
 // Vision role sources. A picture belongs to exactly one source: the artboard
 // snapshot, the current user's references, the style lock, a render of the
 // model-review tools, another generated picture, or an older user picture.
+// Selection is a picture of the current selection that no message carries as
+// a picture slot and that is not the artboard snapshot (#679).
 const (
 	ChatVisionSourceCanvas    = "canvas"
 	ChatVisionSourceTurn      = "turn"
+	ChatVisionSourceSelection = "selection"
 	ChatVisionSourceStyle     = "style"
 	ChatVisionSourceRender    = "render"
 	ChatVisionSourceGenerated = "generated"

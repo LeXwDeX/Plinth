@@ -192,6 +192,10 @@ type continuationFixture struct {
 	run     skillrun.Run
 	schema  catalog.ChatThreeViewSchema
 	review  catalog.ChatImageReviewSchema
+	// toolConfig, when set, changes the Agent tool's config in toolFor.
+	toolConfig func(*agenttools.Config)
+	// toolSchema, when set, changes the Agent tool's three-view Schema.
+	toolSchema func(*catalog.ChatThreeViewSchema)
 }
 
 // useSchema rebuilds the fixture's service with a changed Schema, over the
@@ -841,10 +845,14 @@ func TestStrictModeIgnoresIncludeRight(t *testing.T) {
 // turn runs it, and the command of one call with the given arguments.
 func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttools.Executor, chat.ToolCommand) {
 	t.Helper()
-	executor, err := agenttools.New(agenttools.Config{Params: agentparams.NewStore(),
+	config := agenttools.Config{Params: agentparams.NewStore(),
 		Generate: unusedSkillGenerator{}, TaskObservationTimeout: time.Minute,
 		Context:                 catalog.ChatContextSchema{AssetURLTemplate: "/api/v1/tasks/{task_id}/assets/{asset_id}"},
-		ConsentReconcileContent: "Task observation unavailable"})
+		ConsentReconcileContent: "Task observation unavailable"}
+	if f.toolConfig != nil {
+		f.toolConfig(&config)
+	}
+	executor, err := agenttools.New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +861,7 @@ func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttoo
 		f.repo.TurnStopRequested); err != nil {
 		t.Fatal(err)
 	}
-	executor.SetThreeView(catalog.ChatThreeViewSchema{
+	schema := catalog.ChatThreeViewSchema{
 		RecipeID: "image-three-view", ModelSourceStepKey: "front", Label: "views", MaximumListed: 5,
 		ModelSourceNote: "front", DefaultSubjectType: "generic", SubjectArgument: "subject_type",
 		SubjectTypes: []catalog.ChatThreeViewSubjectType{
@@ -870,7 +878,11 @@ func (f *continuationFixture) toolFor(t *testing.T, arguments string) (*agenttoo
 				"view_already_started": "busy", "consistency_retries_exhausted": "exhausted"}},
 		Multiview: catalog.ChatThreeViewMultiviewSchema{ViewOrder: []string{"front", "left", "back", "right"},
 			ViewSeparator: " / "},
-	})
+	}
+	if f.toolSchema != nil {
+		f.toolSchema(&schema)
+	}
+	executor.SetThreeView(schema)
 	executor.SetThreeViewService(f.views)
 	return executor, chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
 		Call:    agents.ToolCall{ID: "auto-call", Name: "create_three_view", Arguments: []byte(arguments)},

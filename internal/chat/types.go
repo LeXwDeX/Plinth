@@ -225,6 +225,10 @@ type Turn struct {
 	// (#665). Repository.StartTurn writes it with the turn; no read of a turn
 	// returns it.
 	Key *TurnKey
+	// generationCheckpoint is set by a round whose call was refused at the
+	// turn's generation checkpoint (#694); the reply ends after that round.
+	// It is never stored.
+	generationCheckpoint int
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.
@@ -385,6 +389,19 @@ func (checkpoint TurnCheckpoint) priorGenerationUnits(callID string, bound ...ma
 		}
 	}
 	return total
+}
+
+// ownGenerationUnits is what the turn's generation count holds for callID
+// itself; a task-bound call without a record counts one, as in
+// priorGenerationUnits.
+func (checkpoint TurnCheckpoint) ownGenerationUnits(callID string, bound bool) int {
+	if units := checkpoint.GenerationUnits[callID]; units > 0 {
+		return units
+	}
+	if bound {
+		return 1
+	}
+	return 0
 }
 
 // WaitingCall is one call of a tool round that still lacks its receipt.

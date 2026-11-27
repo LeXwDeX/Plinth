@@ -108,9 +108,10 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 				NoSubmission: true, GenerationUnitsTakenBack: true}, nil
 		}
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true,
-				GenerationUnitsTakenBack: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.generationLimit(command)) {
+			result := e.limitResult(command)
+			result.GenerationUnitsTakenBack = true
+			return result, nil
 		}
 		superseded, counted, resumed, release = ended, true, true, releaseSource
 	}
@@ -207,8 +208,8 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		// reach here and is not counted again. A call the duplicate guard
 		// refused starts no run and is not counted (#665).
 		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.limitText(command), NoSubmission: true}, nil
+			command.Call.ID, command.PriorGenerationCalls, e.generationLimit(command)) {
+			return e.limitResult(command), nil
 		}
 		counted = true
 		release = releaseSource
@@ -902,7 +903,9 @@ func (e *Executor) threeViewSubjectType(requested string) (string, string) {
 // that view, submits the next view the basis covers, and ends the tool call
 // only when the group is complete
 // or paused for a person. Accepted views travel to the Agent as same-turn
-// pictures so it can check clothing and colors.
+// pictures so it can check clothing and colors. Every view it submits counts
+// against the turn's generation checkpoint on this call (#693); a view a
+// person already started is waited for, not counted.
 func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
@@ -915,13 +918,23 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 	}
 	_ = json.Unmarshal(command.Call.Arguments, &args)
 	includeRight, _ := threeViewIncludeRight(args.IncludeRight)
-	result, err := e.threeViewService.ContinueWith(ctx, command.OwnerID, command.SessionID, run.ID,
-		command.BoundTaskID, command.AssistantMessageID, includeRight)
+	scope, turn := e.scopeKey(command), command.AssistantMessageID
+	remaining := e.generationRemaining(scope, turn, command.Call.ID, command.PriorGenerationCalls,
+		command.OwnGenerationUnits, e.generationLimit(command))
+	result, err := e.threeViewService.ContinueWithin(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, turn, includeRight, remaining)
 	if err != nil {
 		return chat.ToolResult{TaskID: command.BoundTaskID}, err
 	}
 	messages := e.threeView.Messages
+	if result.Awaiting {
+		// A view the person started on the card: wait for it, then go on
+		// (#689, #693). It is not this call's submission.
+		return chat.ToolResult{TaskID: result.TaskID, AwaitTask: true,
+			WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
+	}
 	if result.TaskID != "" {
+		e.addGenerationUnits(scope, turn, command.Call.ID, command.PriorGenerationCalls, command.OwnGenerationUnits, 1)
 		if observe != nil {
 			task := result.Task
 			if err := observe(chat.ToolObservation{Registered: true, TaskID: result.TaskID,
@@ -932,7 +945,14 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			}
 		}
 		content := ""
-		if result.Retried {
+		if result.Retried && result.MaximumAttempts == 0 {
+			// A bounded continuation redraws until the turn's checkpoint (#693).
+			content = strings.NewReplacer(
+				"{view}", e.threeViewSlotLabel(result, result.View),
+				"{attempt}", strconv.Itoa(result.Attempt),
+				"{reasons}", result.FailedReasons,
+			).Replace(messages.ConsistencyRedraw)
+		} else if result.Retried {
 			content = strings.NewReplacer(
 				"{view}", e.threeViewSlotLabel(result, result.View),
 				"{attempt}", strconv.Itoa(result.Attempt),
@@ -944,6 +964,13 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			AwaitTask: true, WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
 	}
 	pictures := e.threeViewPictures(result)
+	if result.Paused && result.Reason == threeview.ReasonGenerationCheckpoint {
+		// The turn ends at its generation checkpoint (#694); the views left
+		// continue when the person answers.
+		limited := e.limitResult(command)
+		limited.Pictures = pictures
+		return limited, nil
+	}
 	if result.Paused {
 		content := ""
 		if result.Reason == threeview.ReasonConsistencyExhausted {
@@ -954,8 +981,13 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 			if reason == "" {
 				reason = result.Reason
 			}
+			template := messages.AgentPaused
+			if result.Reason == threeview.ReasonViewAlreadyStarted && messages.AgentPausedStarted != "" {
+				// Not a failure: the person started it (#689).
+				template = messages.AgentPausedStarted
+			}
 			content = strings.NewReplacer("{run}", run.ID, "{view}", e.threeViewSlotLabel(result, result.View),
-				"{reason}", reason).Replace(messages.AgentPaused)
+				"{reason}", reason).Replace(template)
 		}
 		return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
 	}
@@ -1110,15 +1142,12 @@ func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, toke
 	if len(tokens) > 0 && len(command.Options.ReferenceImageIndices) == 0 {
 		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 		if err != nil || len(resolved) == 0 {
-			handle, template := tokens[0], e.context.UnknownHandleTemplate
+			handle, reason := tokens[0], "unknown"
 			var unknown *chat.UnknownHandleError
 			if errors.As(err, &unknown) {
-				handle = unknown.Handle
-				if unknown.Reason == "kind" {
-					template = e.context.WrongHandleKindTemplate
-				}
+				handle, reason = unknown.Handle, unknown.Reason
 			}
-			return nil, strings.ReplaceAll(template, "{handle}", handle)
+			return nil, strings.ReplaceAll(chat.HandleRefusalTemplate(e.context, handle, reason), "{handle}", handle)
 		}
 		urls := make([]string, 0, len(resolved))
 		for _, item := range resolved {
