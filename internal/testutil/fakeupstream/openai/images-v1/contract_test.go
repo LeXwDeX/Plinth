@@ -317,9 +317,15 @@ func editParts(t *testing.T, pictures [][]byte, mask []byte, fields map[string]s
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	_ = writer.WriteField("model", Model)
-	_ = writer.WriteField("prompt", "edit it")
+	prompt := "edit it"
+	if value, ok := fields["prompt"]; ok {
+		prompt = value
+	}
+	_ = writer.WriteField("prompt", prompt)
 	for name, value := range fields {
-		_ = writer.WriteField(name, value)
+		if name != "prompt" {
+			_ = writer.WriteField(name, value)
+		}
 	}
 	part := func(name string, data []byte) {
 		header := make(textproto.MIMEHeader)
@@ -452,7 +458,7 @@ func TestEditRefusesMasksTheContractRefuses(t *testing.T) {
 func TestMaskedEditWithSeveralCandidatesComposesEveryOne(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	source := solidPNG(t, 64, 48, color.NRGBA{R: 200, G: 40, B: 30, A: 255})
-	status, body := edit(f, editParts(t, [][]byte{source}, holedMask(t, 64, 48), map[string]string{"n": "3"}))
+	status, body := edit(f, editParts(t, [][]byte{source}, holedMask(t, 64, 48), map[string]string{"n": "3", "background": "opaque", "prompt": maskedPrompt}))
 	if status != http.StatusOK {
 		t.Fatalf("masked edit: %d %v", status, body)
 	}

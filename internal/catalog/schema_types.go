@@ -2068,6 +2068,10 @@ type CanvasMaskSchema struct {
 	// TintColorToken names a CSS custom property such as --info.
 	TintColorToken string  `json:"tint_color_token"`
 	TintOpacity    float64 `json:"tint_opacity"`
+	// ReferencePreviewBackground (#rrggbb) is what the inpaint dialog lays the board picture over in its
+	// "picture that will be sent" preview (#687): a masked edit's reference is flattened over the image-to-image
+	// Offering's alpha_flatten background before it goes upstream, so the preview shows the same picture.
+	ReferencePreviewBackground string `json:"reference_preview_background"`
 }
 
 // CanvasArtboardLabelSchema styles the size label inside the artboard's top-left corner (#282), in screen
@@ -2265,7 +2269,6 @@ type CanvasKeyboardSchema struct {
 	CutShortcut             string `json:"cut_shortcut"`
 	DuplicateShortcut       string `json:"duplicate_shortcut"`
 	DeselectShortcut        string `json:"deselect_shortcut"`
-	InvertSelectionShortcut string `json:"invert_selection_shortcut"`
 	ZoomInShortcut          string `json:"zoom_in_shortcut"`
 	ZoomOutShortcut         string `json:"zoom_out_shortcut"`
 	ZoomActualShortcut      string `json:"zoom_actual_shortcut"`

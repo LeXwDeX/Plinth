@@ -1893,11 +1893,10 @@ async function maskBrushContract(browser, engine, viewport) {
       await page.screenshot({ path: path.join(OUT, `${engine}-${viewport.width}-brush-inverted.png`) });
     }
     {
-      // A pure marquee selection (no brush stroke) keeps the selection tint, laid once.
-      const selectionTint = await page.evaluate(() => window.__probe.selectionTint());
+      // #692: a pure marquee selection (no brush stroke) is darkened with the same mask tint, laid once: every
+      // erased area is what gets repainted, whichever tool marked it.
       const [bare, , , regionOnly] = await mixed(false, true);
-      const expected = bare.map((value, index) => Math.round(value * (1 - selectionTint.opacity) + selectionTint.rgb[index] * selectionTint.opacity));
-      assert(near(regionOnly, expected), `marquee only: ${regionOnly} is the selection tint ${selectionTint.color} at ${selectionTint.opacity} over ${bare} (${expected})`);
+      assert(near(regionOnly, tinted(bare)), `marquee only: ${regionOnly} is the mask tint over ${bare} (${tinted(bare)})`);
     }
     assert.deepEqual(unexpectedErrors(errors), []);
     return `zoom ${fitted.zoom.toFixed(3)}→${zoomed.zoom.toFixed(3)}; width ${fitted.thickness.toFixed(1)}/${zoomed.thickness.toFixed(1)}px; tint ${fitted.aOnly} overlap ${fitted.overlap}; repeat rim px ${twice.differing}`;

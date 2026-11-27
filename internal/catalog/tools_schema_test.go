@@ -88,10 +88,10 @@ func TestRailToolsAreWordedFromSchemaMessages(t *testing.T) {
 		}
 	}
 	for key, want := range map[string]string{
-		"ui.canvas.toolbar.mask":           "蒙版",
+		"ui.canvas.toolbar.mask":           "擦除重绘区",
 		"ui.canvas.toolbar.brush":          "画笔",
 		"ui.canvas.toolbar.snap":           "吸附",
-		"ui.shortcuts.item.tool_mask":      "蒙版",
+		"ui.shortcuts.item.tool_mask":      "擦除重绘区",
 		"ui.studio.stage.view.texture":     "贴图",
 		"ui.studio.stage.view.clay":        "白模",
 		"ui.studio.stage.view.wire":        "线框",

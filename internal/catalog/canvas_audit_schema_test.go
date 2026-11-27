@@ -244,15 +244,16 @@ func TestCanvasPhotoshopKeysPanelsAndSelectionAreSchemaDeclaredAndValidated(t *t
 		frontend.Artboard.OutsideDim.Opacity <= 0 || len(frontend.Selection.AntsDash) == 0 {
 		t.Fatalf("frontend = %+v %+v %+v", frontend.PanelTabs, frontend.Brush, frontend.Artboard.OutsideDim)
 	}
-	// #310: the board mask keeps its own tint (the pre-#310 single-stroke look: the --info token at 0.75), so it
-	// stays clearly readable and is not the lighter marquee/lasso selection tint.
-	if frontend.Mask.TintColorToken != "--info" || frontend.Mask.TintOpacity != 0.75 {
+	// #310: the board mask keeps its own tint, not the lighter marquee/lasso selection tint. #692: the erased
+	// (repainted) area is darkened with the dark --background token, so what is kept stays bright.
+	if frontend.Mask.TintColorToken != "--background" || frontend.Mask.TintOpacity != 0.72 {
 		t.Fatalf("mask = %+v", frontend.Mask)
 	}
 	mutations := map[string]func(*ApplicationSchema){
 		"mask tint not a token":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintColorToken = "#38bdf8" },
 		"mask tint fully clear":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintOpacity = 0 },
 		"mask tint over one":     func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintOpacity = 1.5 },
+		"no preview background":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.ReferencePreviewBackground = "white" },
 		"two tools on one key":   func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.LassoToolKey = "M" },
 		"swap key on a tool key": func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.SwapColorsKey = "b" },
 		"empty zoom tool key":    func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.ZoomToolKey = "" },

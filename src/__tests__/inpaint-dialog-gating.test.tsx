@@ -25,8 +25,6 @@ Object.assign(catalogMessages ?? {}, {
   'ui.canvas.inpaint.output_size': '将按 {size} 输出，与画布和蒙版一致。',
   'ui.canvas.inpaint.output_size_nearest': '这个模型不能输出画布尺寸 {canvas}（最接近的合法尺寸是 {size}）。请换一个支持该尺寸的模型，或先把画布改成该尺寸。',
   'ui.canvas.inpaint.output_size_unconfirmed': '无法确认这个模型的输出尺寸与画布 {size} 一致，不能提交局部重绘。请选择支持该尺寸的模型。',
-  'ui.canvas.inpaint.mask_scope': '蒙版属于整张画布（{canvas}）；不透明区域保留，透明区域重绘。',
-  'ui.canvas.inpaint.mask_preview_alt': '局部重绘蒙版预览：不透明处保留，透明处重绘',
   'ui.canvas.inpaint.layer_size_mismatch': '重绘结果尺寸是 {actual}，与画布和蒙版 {expected} 不一致，未放到画板；结果可在任务中心查看。',
 });
 
@@ -226,7 +224,27 @@ it('refuses a ratio whose Schema pixels are not the canvas pixels', () => {
   expect(html).toMatch(/\sdisabled=""/);
 });
 
-it('says the mask belongs to the whole canvas and names its editable area', () => {
-  const html = renderDialog([sizedOffering(['2048x2048'])], 'model-a', { width: 3840, height: 2160 });
-  expect(html).toContain('蒙版属于整张画布（3840×2160）');
+// #687: what the model receives is shown before submitting. The board picture is laid over the Schema colour
+// that matches the Offering's alpha_flatten background, with a Schema label.
+it('shows the picture that will be sent over the Schema preview colour', () => {
+  const html = renderDialog([offeringWire({ model_id: 'model-a' })], 'model-a');
+  const label = catalogMessages?.['ui.canvas.inpaint.reference_preview_label'];
+  expect(label).toBeTruthy();
+  expect(html).toContain('data-testid="inpaint-reference-preview"');
+  expect(html).toContain(label);
+  const background = (defaultCatalog.application as { canvas: { frontend: { mask: { reference_preview_background: string } } } })
+    .canvas.frontend.mask.reference_preview_background;
+  expect(background).toMatch(/^#[0-9a-f]{6}$/i);
+  expect(html).toContain(`background-color:${background}`);
+});
+
+// #692: the dialog explains the mask in one Schema sentence, in the board's own terms, not in mask bytes.
+it('explains the mask in one sentence without opaque / transparent wording', () => {
+  const html = renderDialog([offeringWire({ model_id: 'model-a' })], 'model-a');
+  const legend = catalogMessages?.['ui.canvas.mask.hint'];
+  expect(legend).toBe('高亮的保留，暗部的重绘。');
+  expect(html).toContain(legend);
+  expect(html).not.toContain('不透明');
+  expect(html).not.toContain('透明区域');
+  expect(html).toContain(catalogMessages?.['ui.canvas.inpaint.prompt_placeholder']);
 });

@@ -265,7 +265,6 @@ export function shortcutSections(schema: ProductSchema, platform: PlatformInfo =
       item('duplicate', [caps(keyboard.duplicate_shortcut)]),
       item('cut', [caps(keyboard.cut_shortcut)]),
       item('deselect', [caps(keyboard.deselect_shortcut), single(bindings.closeKey)]),
-      item('invert_selection', [caps(keyboard.invert_selection_shortcut)]),
       item('zoom_in', [caps(keyboard.zoom_in_shortcut), caps(keyboard.zoom_out_shortcut)]),
       item('zoom_actual', [caps(keyboard.zoom_actual_shortcut)]),
       item('zoom_selection', [caps(keyboard.zoom_selection_shortcut)]),

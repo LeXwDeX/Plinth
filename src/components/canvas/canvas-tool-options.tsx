@@ -22,7 +22,6 @@ import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { alignUnitCount, type AlignMode, type DistributeAxis, type Rect } from '@/lib/canvas/align';
 import { clampChannel, hexToRgb, normalizeHex, rgbToHex } from '@/lib/canvas/color-input';
-import { useMaskStore } from '@/store/mask-store';
 import { useStudioStore } from '@/store/studio-store';
 import { layerBarClearance, railClearance } from '@/lib/workspace/tool-rail-layout';
 import { layerBarShown, selectedImageLayer } from '@/lib/canvas/selected-layer';
@@ -182,8 +181,6 @@ export function CanvasToolOptions({ sessionId, activeTool, hint, actions, artboa
   const setAutoSelect = useCanvasStore((state) => state.setAutoSelect);
   const alignSelected = useCanvasStore((state) => state.alignSelected);
   const distributeSelected = useCanvasStore((state) => state.distributeSelected);
-  const erasing = useMaskStore((state) => state.erasing);
-  const toggleErasing = useMaskStore((state) => state.toggleErasing);
   // The bar floats beside the tool rail, so it starts where the rail (collapsed or expanded) ends.
   const barLeft = railClearance(useStudioStore((state) => state.railExpanded));
 
@@ -360,21 +357,6 @@ export function CanvasToolOptions({ sessionId, activeTool, hint, actions, artboa
             />
           </div>
         </Group>
-      ) : null}
-      {activeTool === 'mask' ? (
-        <HintTooltip name={text('ui.canvas.mask.erase_toggle')} shortcut={shortcutCaps(schema, 'swap_colors_key')}>
-          <Action
-            type="button"
-            variant="outline"
-            size="xs"
-            data-testid="mask-erase-toggle"
-            aria-pressed={erasing}
-            onClick={toggleErasing}
-            className={cn(erasing ? 'border-primary text-primary' : 'border-border text-muted-foreground')}
-          >
-            {text(erasing ? 'ui.canvas.mask.mode_erase' : 'ui.canvas.mask.mode_paint')}
-          </Action>
-        </HintTooltip>
       ) : null}
       {selection ? (
         <>

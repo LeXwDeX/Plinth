@@ -598,6 +598,19 @@ func (s TaskState) Valid() bool {
 	}
 }
 
+// PromptWrap rewrites the wire text of the Offering's prompt parameter (semantic
+// prompt) when the normalized input matches When (#687): Template holds
+// {prompt} exactly once, and the user's prompt replaces it. The frozen input
+// keeps the user's own words; only the upstream request carries the wrapped
+// text. GPT Image follows a mask only when the prompt names the masked area.
+type PromptWrap struct {
+	When     ParameterCondition `json:"when"`
+	Template string             `json:"template"`
+}
+
+// PromptPlaceholder is the slot of PromptWrap.Template the prompt fills.
+const PromptPlaceholder = "{prompt}"
+
 type ImageProtocol struct {
 	MaxResponseBytes int64           `json:"max_response_bytes"`
 	AuthHeader       string          `json:"auth_header,omitempty"`
@@ -605,7 +618,10 @@ type ImageProtocol struct {
 	Endpoint         string          `json:"endpoint"`
 	RequestEncoding  string          `json:"request_encoding,omitempty"`
 	RequestTemplate  json.RawMessage `json:"request_template"`
-	Response         struct {
+	// PromptWraps are tried in order; the first whose condition matches wraps
+	// the prompt (#687). None matching sends the prompt unchanged.
+	PromptWraps []PromptWrap `json:"prompt_wraps,omitempty"`
+	Response    struct {
 		ImagesPath       string `json:"images_path"`
 		DefaultMediaType string `json:"default_media_type"`
 		Base64Field      string `json:"base64_field"`

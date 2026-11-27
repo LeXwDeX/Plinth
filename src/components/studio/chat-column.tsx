@@ -74,7 +74,7 @@ import { canvasSnapshotClaim } from '@/lib/canvas/current-object';
 import { boardInputSource, boardMode } from '@/lib/chat/board-mode';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
-import { inpaintGeometry, paintMask } from '@/lib/canvas/inpaint-export';
+import { inpaintGeometry, paintSubmittedMask } from '@/lib/canvas/inpaint-export';
 import { exportAndUploadSnapshot, reportSnapshotFailure, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { uploadWorkspaceInputAsset, uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { inlineImageFilename, isInlineImage, reportInlineImageFailure, uploadInlineImages } from '@/lib/chat/inline-images';
@@ -1205,7 +1205,7 @@ export function ChatColumn() {
         maskCanvas.height = geometry.size.height;
         const maskContext = maskCanvas.getContext('2d');
         if (!maskContext || !maskDraftNow) return;
-        paintMask(maskContext, geometry, maskDraftNow.strokes, '#000000');
+        paintSubmittedMask(maskContext, geometry, maskDraftNow.strokes, '#000000');
         let maskAssetId = '';
         try {
           await exportAndUploadSnapshot({

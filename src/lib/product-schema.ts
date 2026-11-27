@@ -1464,6 +1464,8 @@ export interface CanvasProductSchema {
       /** CSS custom property name, such as --info. */
       tint_color_token: string;
       tint_opacity: number;
+      /** #687: the colour the inpaint dialog lays the board picture over in its "will be sent" preview. */
+      reference_preview_background: string;
     };
     snap: {
       default_enabled: boolean;
@@ -1619,7 +1621,6 @@ export interface CanvasProductSchema {
       cut_shortcut: string;
       duplicate_shortcut: string;
       deselect_shortcut: string;
-      invert_selection_shortcut: string;
       zoom_in_shortcut: string;
       zoom_out_shortcut: string;
       zoom_actual_shortcut: string;

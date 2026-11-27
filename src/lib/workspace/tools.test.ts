@@ -105,8 +105,8 @@ describe('which buttons a rail gets, and in what order', () => {
 });
 
 describe('names, hints and the renamed tools', () => {
-  it('words the unified names (UI spec §10): 蒙版 and 画笔, not 局部重绘蒙版 and 像素画笔', () => {
-    expect(view('mask').label).toBe('蒙版');
+  it('words the unified names (UI spec §10; #692 names the mask 擦除重绘区): not 局部重绘蒙版 and 像素画笔', () => {
+    expect(view('mask').label).toBe('擦除重绘区');
     expect(view('brush').label).toBe('画笔');
     expect(view('snap').label).toBe('吸附');
     for (const tool of schema.canvas.frontend.tools) {
@@ -114,7 +114,7 @@ describe('names, hints and the renamed tools', () => {
       expect(messages[tool.hint_key]).not.toMatch(/局部重绘蒙版|像素画笔/);
     }
     for (const text of Object.values(messages)) expect(text).not.toMatch(/局部重绘蒙版|像素画笔/);
-    expect(messages['ui.shortcuts.item.tool_mask']).toBe('蒙版');
+    expect(messages['ui.shortcuts.item.tool_mask']).toBe('擦除重绘区');
   });
 
   it('names the 3D views after what the viewer shows', () => {

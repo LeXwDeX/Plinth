@@ -339,7 +339,8 @@ func TestMaskedEditChangesOnlyTheMaskedPixels(t *testing.T) {
 		var buffer bytes.Buffer
 		writer := multipart.NewWriter(&buffer)
 		_ = writer.WriteField("model", Model)
-		_ = writer.WriteField("prompt", "replace the middle")
+		_ = writer.WriteField("prompt", maskedPrompt)
+		_ = writer.WriteField("background", "opaque")
 		for name, data := range map[string][]byte{"image": encode(source), "mask": maskBytes} {
 			header := make(textproto.MIMEHeader)
 			header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.png"`)
@@ -417,7 +418,8 @@ func TestMaskedEditAppliesToTheFirstPicture(t *testing.T) {
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	_ = writer.WriteField("model", Model)
-	_ = writer.WriteField("prompt", "edit the first one")
+	_ = writer.WriteField("prompt", maskedPrompt)
+	_ = writer.WriteField("background", "opaque")
 	part := func(name string, data []byte) {
 		header := make(textproto.MIMEHeader)
 		header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.png"`)
@@ -453,5 +455,52 @@ func TestMaskedEditAppliesToTheFirstPicture(t *testing.T) {
 				t.Fatalf("pixel %d,%d outside the mask = %+v, want the first picture", x, y, got)
 			}
 		}
+	}
+}
+
+// maskedPrompt names the masked area the way Plinth's prompt_wraps does (#687).
+const maskedPrompt = "Edit only the masked area: replace it. Keep everything outside the masked area exactly unchanged."
+
+// #687: the real gateway follows a mask only with an explicit background and a
+// prompt that names the masked area. background=auto (or omitted) and a short
+// prompt answer the spoiled shape it was seen to answer: a hole where the mask
+// is clear and a recoloured picture around it.
+func TestMaskedEditIsSpoiledWithoutExplicitBackgroundOrMaskedAreaPrompt(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := solidPNG(t, 64, 48, color.NRGBA{R: 200, G: 40, B: 30, A: 255})
+	for name, fields := range map[string]map[string]string{
+		"auto background":        {"background": "auto", "prompt": maskedPrompt},
+		"omitted background":     {"prompt": maskedPrompt},
+		"short prompt":           {"background": "opaque", "prompt": "换成红色"},
+		"short prompt with auto": {"background": "auto", "prompt": "换个颜色"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := edit(f, editParts(t, [][]byte{source}, holedMask(t, 64, 48), fields))
+			if status != http.StatusOK {
+				t.Fatalf("masked edit: %d %v", status, body)
+			}
+			decoded, _ := pictureAt(t, body, 0)
+			if got := color.NRGBAModel.Convert(decoded.At(32, 24)).(color.NRGBA); got.A != 0 {
+				t.Fatalf("the masked area = %+v, want the erased hole", got)
+			}
+			if got := color.NRGBAModel.Convert(decoded.At(0, 0)).(color.NRGBA); got == (color.NRGBA{R: 200, G: 40, B: 30, A: 255}) {
+				t.Fatal("a pixel outside the mask survived a spoiled edit")
+			}
+		})
+	}
+	for name, fields := range map[string]map[string]string{
+		"opaque":      {"background": "opaque", "prompt": maskedPrompt},
+		"transparent": {"background": "transparent", "prompt": "Change the color of the masked area to red."},
+	} {
+		t.Run("followed "+name, func(t *testing.T) {
+			status, body := edit(f, editParts(t, [][]byte{source}, holedMask(t, 64, 48), fields))
+			if status != http.StatusOK {
+				t.Fatalf("masked edit: %d %v", status, body)
+			}
+			decoded, _ := pictureAt(t, body, 0)
+			if got := color.NRGBAModel.Convert(decoded.At(0, 0)).(color.NRGBA); got != (color.NRGBA{R: 200, G: 40, B: 30, A: 255}) {
+				t.Fatalf("a pixel outside the mask changed: %+v", got)
+			}
+		})
 	}
 }
