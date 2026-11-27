@@ -103,7 +103,7 @@ func TestOpenAIImageToImagePostsDeclaredMultipartEdit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			png := opaqueFixturePNG(1)
-			var model, prompt, size, quality, outputFormat string
+			var model, prompt, size, quality, outputFormat, background string
 			var imageBody, maskBody []byte
 			var imageType, imageName, maskType string
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +123,7 @@ func TestOpenAIImageToImagePostsDeclaredMultipartEdit(t *testing.T) {
 				size = r.FormValue("size")
 				quality = r.FormValue("quality")
 				outputFormat = r.FormValue("output_format")
+				background = r.FormValue("background")
 				if r.FormValue("future_param") != "7" {
 					t.Errorf("schema-added multipart field dropped: %q", r.FormValue("future_param"))
 				}
@@ -172,8 +173,11 @@ func TestOpenAIImageToImagePostsDeclaredMultipartEdit(t *testing.T) {
 			if len(obs.Artifacts) != 1 {
 				t.Fatalf("claims=%#v", obs.Artifacts)
 			}
-			if model != "gpt-image-2.6-sunburst" || prompt != "edit" || size != "1536x1024" || quality != tc.quality || outputFormat != "png" {
-				t.Errorf("form fields: model=%q prompt=%q size=%q quality=%q format=%q", model, prompt, size, quality, outputFormat)
+			// #687: a masked edit goes out with background=opaque (forced_when) and
+			// the prompt framed on the masked area (provider_options.prompt_wraps).
+			const framed = "Edit only the masked area: edit. Keep everything outside the masked area exactly unchanged."
+			if model != "gpt-image-2.6-sunburst" || prompt != framed || size != "1536x1024" || quality != tc.quality || outputFormat != "png" || background != "opaque" {
+				t.Errorf("form fields: model=%q prompt=%q size=%q quality=%q format=%q background=%q", model, prompt, size, quality, outputFormat, background)
 			}
 			if !bytes.Equal(imageBody, png) || imageType != "image/png" || imageName == "" {
 				t.Errorf("image part: type=%q name=%q bytes=%d", imageType, imageName, len(imageBody))

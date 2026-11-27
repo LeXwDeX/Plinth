@@ -230,3 +230,17 @@ it('says the mask belongs to the whole canvas and names its editable area', () =
   const html = renderDialog([sizedOffering(['2048x2048'])], 'model-a', { width: 3840, height: 2160 });
   expect(html).toContain('蒙版属于整张画布（3840×2160）');
 });
+
+// #687: what the model receives is shown before submitting. The board picture is laid over the Schema colour
+// that matches the Offering's alpha_flatten background, with a Schema label.
+it('shows the picture that will be sent over the Schema preview colour', () => {
+  const html = renderDialog([offeringWire({ model_id: 'model-a' })], 'model-a');
+  const label = catalogMessages?.['ui.canvas.inpaint.reference_preview_label'];
+  expect(label).toBeTruthy();
+  expect(html).toContain('data-testid="inpaint-reference-preview"');
+  expect(html).toContain(label);
+  const background = (defaultCatalog.application as { canvas: { frontend: { mask: { reference_preview_background: string } } } })
+    .canvas.frontend.mask.reference_preview_background;
+  expect(background).toMatch(/^#[0-9a-f]{6}$/i);
+  expect(html).toContain(`background-color:${background}`);
+});

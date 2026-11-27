@@ -327,6 +327,7 @@ export function InpaintDialog({
   const [pending, setPending] = useState<PendingDirectTask | null>(null);
   const [hashes, setHashes] = useState<InpaintFingerprints | null>(null);
   const [maskPreviewUrl, setMaskPreviewUrl] = useState<string | null>(null);
+  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
   // This dialog instance, its request and its model are the submission's identity. A cancel, unmount,
   // session switch or model change after an await stops every further write (and its UI callbacks).
   // A new identity object is issued on every change (never reissued on A-B-A), and the captured session
@@ -367,6 +368,17 @@ export function InpaintDialog({
     setMaskPreviewUrl(url);
     return () => { URL.revokeObjectURL(url); };
   }, [request.mask]);
+  // #687: the picture the model receives. A masked edit's reference is flattened upstream over the Offering's
+  // alpha_flatten colour, so the preview lays the same board bytes over the Schema's matching colour.
+  useEffect(() => {
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return;
+    const url = (() => {
+      try { return URL.createObjectURL(request.source); } catch { return null; }
+    })();
+    if (!url) return;
+    setReferencePreviewUrl(url);
+    return () => { URL.revokeObjectURL(url); };
+  }, [request.source]);
   const offering = useMemo(
     () =>
       (offerings ?? []).find(
@@ -553,6 +565,21 @@ export function InpaintDialog({
                     : schemaMessage(schema, 'ui.canvas.inpaint.output_size_unconfirmed', { size: canvasLabel })} />
               )}
               <div className="flex gap-2 rounded-md bg-muted/40 p-2">
+                <figure className="m-0 flex shrink-0 flex-col gap-1" data-testid="inpaint-reference-preview">
+                  <div
+                    className="h-20 w-28 overflow-hidden rounded border border-border"
+                    style={{ backgroundColor: schema.canvas.frontend.mask.reference_preview_background }}
+                  >
+                    {referencePreviewUrl ? (
+                      <img
+                        src={referencePreviewUrl}
+                        alt={text('ui.canvas.inpaint.reference_preview_alt')}
+                        className="size-full object-contain"
+                      />
+                    ) : null}
+                  </div>
+                  <figcaption className="text-[11px] leading-4 text-muted-foreground">{text('ui.canvas.inpaint.reference_preview_label')}</figcaption>
+                </figure>
                 {maskPreviewUrl ? (
                   <img
                     src={maskPreviewUrl}

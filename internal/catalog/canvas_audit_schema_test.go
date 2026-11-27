@@ -253,6 +253,7 @@ func TestCanvasPhotoshopKeysPanelsAndSelectionAreSchemaDeclaredAndValidated(t *t
 		"mask tint not a token":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintColorToken = "#38bdf8" },
 		"mask tint fully clear":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintOpacity = 0 },
 		"mask tint over one":     func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.TintOpacity = 1.5 },
+		"no preview background":  func(a *ApplicationSchema) { a.Canvas.Frontend.Mask.ReferencePreviewBackground = "white" },
 		"two tools on one key":   func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.LassoToolKey = "M" },
 		"swap key on a tool key": func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.SwapColorsKey = "b" },
 		"empty zoom tool key":    func(a *ApplicationSchema) { a.Canvas.Frontend.Keyboard.ZoomToolKey = "" },

@@ -4580,6 +4580,8 @@
         "ui.canvas.inpaint.output_size_unconfirmed": "无法确认这个模型的输出尺寸与画布 {size} 一致，不能提交局部重绘。请选择支持该尺寸的模型。",
         "ui.canvas.inpaint.mask_scope": "蒙版属于整张画布（{canvas}）；不透明区域保留，透明区域重绘。",
         "ui.canvas.inpaint.mask_preview_alt": "蒙版预览：不透明处保留，透明处重绘",
+        "ui.canvas.inpaint.reference_preview_label": "将发送的参考图",
+        "ui.canvas.inpaint.reference_preview_alt": "将发送给模型的参考图：画布内容铺在白底上",
         "ui.canvas.inpaint.layer_size_mismatch": "重绘图片尺寸 {actual} 与画布和蒙版要求的 {expected} 不一致，未放到画板；原始结果可在任务中心查看。",
         "ui.canvas.bgremoval.title": "去除背景",
         "ui.canvas.bgremoval.confirm": "将把所选图片发送到抠图服务，预计消耗 {credits} 积分。是否继续？",
@@ -12915,7 +12917,8 @@
         },
         "mask": {
           "tint_color_token": "--info",
-          "tint_opacity": 0.75
+          "tint_opacity": 0.75,
+          "reference_preview_background": "#ffffff"
         },
         "snap": {
           "default_enabled": true,
@@ -19434,6 +19437,8 @@
             "ui.canvas.inpaint.output_size_unconfirmed": "The output size of this model cannot be confirmed to match the canvas ({size}), so this inpaint cannot be submitted. Choose a model that supports this size.",
             "ui.canvas.inpaint.mask_scope": "The mask belongs to the whole canvas ({canvas}); opaque areas are kept and transparent areas are redrawn.",
             "ui.canvas.inpaint.mask_preview_alt": "Mask preview: opaque areas are kept, transparent areas are redrawn",
+            "ui.canvas.inpaint.reference_preview_label": "Picture that will be sent",
+            "ui.canvas.inpaint.reference_preview_alt": "The picture sent to the model: the canvas laid over white",
             "ui.canvas.inpaint.layer_size_mismatch": "The inpaint image is {actual}, not the required canvas and mask size {expected}. It was not added to the board; the original result is still in the task center.",
             "ui.canvas.bgremoval.title": "Remove background",
             "ui.canvas.bgremoval.confirm": "The selected image will be sent to the background removal service, with an estimated cost of {credits} credits. Continue?",
@@ -25897,7 +25902,16 @@
             "surface": "provider",
             "control": "select"
           },
-          "default": "auto"
+          "default": "auto",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "mask",
+                "operator": "present"
+              },
+              "value": "opaque"
+            }
+          ]
         },
         {
           "name": "moderation",
@@ -25956,6 +25970,15 @@
         "request_template": {
           "model": "$model"
         },
+        "prompt_wraps": [
+          {
+            "when": {
+              "parameter": "mask",
+              "operator": "present"
+            },
+            "template": "Edit only the masked area: {prompt}. Keep everything outside the masked area exactly unchanged."
+          }
+        ],
         "response": {
           "images_path": "data.*",
           "base64_field": "b64_json",

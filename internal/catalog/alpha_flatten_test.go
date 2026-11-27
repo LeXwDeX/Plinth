@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/schema"
@@ -131,4 +132,28 @@ func TestCanvasArtboardBackgroundIsTransparentAndValidated(t *testing.T) {
 	if err := ValidateApplicationSchema(application); err != nil {
 		t.Fatalf("an opaque artboard background may use any media type: %v", err)
 	}
+}
+
+// #687: the inpaint dialog previews the picture the model receives. A masked edit is sent with
+// background=opaque, so its reference is flattened over alpha_flatten.background_color; the preview colour
+// must be that same colour.
+func TestInpaintReferencePreviewMatchesTheMaskedOfferingFlatten(t *testing.T) {
+	taskCatalog, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := taskCatalog.Application().Canvas.Frontend.Mask.ReferencePreviewBackground
+	offering, ok := taskCatalog.Get("openai/gpt-image-2/image-to-image")
+	if !ok {
+		t.Fatal("missing gpt-image-2 image-to-image")
+	}
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == "reference-image" {
+			if parameter.AlphaFlatten == nil || !strings.EqualFold(parameter.AlphaFlatten.BackgroundColor, preview) {
+				t.Fatalf("preview background %q, alpha_flatten %+v", preview, parameter.AlphaFlatten)
+			}
+			return
+		}
+	}
+	t.Fatal("no reference-image parameter")
 }

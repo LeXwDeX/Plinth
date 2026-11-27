@@ -755,6 +755,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", bad.code, bad.message, bad.param))
 			return
 		}
+		built.faithful = followsMask(req)
 		editor = built
 	}
 	scenario := fakeupstream.ScenarioOf(r)
@@ -875,6 +876,26 @@ type maskedEditor struct {
 	source        image.Image
 	mask          image.Image
 	width, height int
+	// faithful is false for a masked edit the real gateway was seen to spoil
+	// (#687): compose then answers the spoiled shape instead of the clean edit.
+	faithful bool
+}
+
+// followsMask says whether the real gateway follows the mask of this edit
+// (#687, real probes 2026-11-27: about 60 low-quality 1024x1024 edits with a
+// synthetic picture). It did only when background was set explicitly (opaque,
+// or transparent) and the prompt named "the masked area"; background=auto
+// (also when omitted) or a short prompt that does not name the masked area
+// spoiled the edit in almost every sample. The real result is not
+// deterministic (the mask only guides GPT Image); the fake keeps the rule
+// deterministic so the request shape is what a test checks.
+func followsMask(req request) bool {
+	switch req.form["background"] {
+	case "opaque", "transparent":
+	default:
+		return false
+	}
+	return strings.Contains(strings.ToLower(req.prompt), "masked area")
 }
 
 // sniffFormat names a picture's format from its leading bytes (never from a
@@ -944,7 +965,16 @@ func newMaskedEditor(reference, mask []byte) (*maskedEditor, *refusal) {
 // differ), so a test can compare every pixel outside the mask with the source
 // and see that the inside changed. The output keeps the reference picture's
 // dimensions.
+//
+// An edit the gateway does not follow (faithful false) answers the spoiled
+// shape the real samples showed instead: the masked pixels come back erased
+// (alpha 0, a hole where the edit should be) and every other pixel is
+// recoloured (every colour channel inverted), so nothing outside the mask
+// survives as it was sent.
 func (e *maskedEditor) compose(variant int) *image.RGBA {
+	if !e.faithful {
+		return e.spoiled()
+	}
 	bounds := e.source.Bounds()
 	out := image.NewRGBA(image.Rect(0, 0, e.width, e.height))
 	draw.Draw(out, out.Bounds(), e.source, bounds.Min, draw.Src)
@@ -963,6 +993,26 @@ func (e *maskedEditor) compose(variant int) *image.RGBA {
 				B: uint8((x + y + variant*59) % 256),
 				A: 255,
 			})
+		}
+	}
+	return out
+}
+
+// spoiled is the edit the real gateway answered when it did not follow the
+// mask (#687): a hole in the masked area and a recoloured picture around it.
+func (e *maskedEditor) spoiled() *image.RGBA {
+	bounds := e.source.Bounds()
+	maskBounds := e.mask.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, e.width, e.height))
+	for y := 0; y < e.height; y++ {
+		maskY := maskBounds.Min.Y + y*maskBounds.Dy()/e.height
+		for x := 0; x < e.width; x++ {
+			maskX := maskBounds.Min.X + x*maskBounds.Dx()/e.width
+			if _, _, _, alpha := e.mask.At(maskX, maskY).RGBA(); alpha>>8 < 128 {
+				continue // erased: alpha 0
+			}
+			source := color.NRGBAModel.Convert(e.source.At(bounds.Min.X+x, bounds.Min.Y+y)).(color.NRGBA)
+			out.Set(x, y, color.NRGBA{R: 255 - source.R, G: 255 - source.G, B: 255 - source.B, A: source.A})
 		}
 	}
 	return out

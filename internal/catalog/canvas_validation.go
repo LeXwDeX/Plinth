@@ -288,6 +288,9 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 	if !strings.HasPrefix(mask.TintColorToken, "--") || !(mask.TintOpacity > 0) || mask.TintOpacity > 1 {
 		return errors.New("frontend.mask 的色调必须是 CSS 令牌，不透明度在 (0,1]")
 	}
+	if !isHexColor(mask.ReferencePreviewBackground) {
+		return errors.New("frontend.mask.reference_preview_background 必须是十六进制颜色")
+	}
 	snap := frontend.Snap
 	if !(snap.ThresholdPixels > 0) || math.IsInf(snap.ThresholdPixels, 0) ||
 		!(snap.GuideStrokeWidth > 0) || math.IsInf(snap.GuideStrokeWidth, 0) ||
