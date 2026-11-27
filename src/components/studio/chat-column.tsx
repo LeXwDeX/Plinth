@@ -1036,7 +1036,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1084,10 +1084,12 @@ export function ChatColumn() {
         }
       }
       const otherDomainModels = Object.fromEntries(
-        Object.entries(workspace.modelByDomain).filter(
+        Object.entries({ ...workspace.modelByDomain, ...extra?.domainModels }).filter(
           (entry): entry is [string, string] => entry[0] !== domain && Boolean(entry[1]),
         ),
       );
+      // #678: a model confirmed for this one turn (转 3D without a pick) rides along as that domain's model; no lock.
+      const oneTurnModels = extra?.domainModels;
       const sessionId = activeSessionId;
       // Pictures attached now (not a replayed turn) say what they are for, each its own purpose:
       // the last choice alone would mislabel the others when they differ (#212).
@@ -1244,6 +1246,7 @@ export function ChatColumn() {
           ...(inputSource ? { inputSource } : {}),
           ...(selectionMask ? { selectionMask } : {}),
           ...(multiview ? { multiview } : {}),
+          ...(oneTurnModels ? { domainModels: oneTurnModels } : {}),
           ...(styleLockSkipped ? { styleLockSkipped: true } : {}),
         }));
         useWorkspaceStore.getState().forgetAttachmentSources(images);
@@ -1625,7 +1628,9 @@ export function ChatColumn() {
     clearTurnRequest();
     if (step === 'drop') return;
     void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
-      turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
+      turnRequest.multiview || turnRequest.models
+        ? { ...(turnRequest.multiview ? { multiview: turnRequest.multiview } : {}), ...(turnRequest.models ? { domainModels: turnRequest.models } : {}) }
+        : undefined);
   }, [turnRequest, clearTurnRequest, uploading, schema]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
@@ -1677,7 +1682,7 @@ export function ChatColumn() {
         return;
       }
       const started = startedTurnsRef.current;
-      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
+      await sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, idempotencyKey: turn.idempotencyKey ?? turn.id, queuedId: turn.id, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.domainModels ? { domainModels: turn.domainModels } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
         drainingRef.current = null;
         if (startedTurnsRef.current === started) {
           if (useChatStore.getState().activeSessionId === sessionId) {

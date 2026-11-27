@@ -409,12 +409,9 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
       onStartRemaining={() => { void startRemaining(group).then(report); }}
       onReplace={(slot, picture) => { void replace(group, slot, picture).then(report); }}
       onMultiview={() => {
-        // #691: never a model the person did not pick: without a pick it asks for one; a single-picture pick is off.
+        // #691/#678: never a model the person did not pick: without a pick the person confirms this one first
+        // (multiviewToThreeD asks); a single-picture pick is off.
         if (!model || multiviewState === 'single') return false;
-        if (multiviewState === 'none') {
-          toast.info(schemaText(schema, 'ui.studio.action.choose_3d_model'));
-          return false;
-        }
         return multiviewToThreeD(group, model);
       }}
       onView={(slot) => {

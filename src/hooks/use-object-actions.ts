@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
+import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
+import type { OfferingWire } from '@/lib/agent-offerings';
 import { boardDeliveryOf, rasteriseSessionBoard, boardPixelsFor3D } from '@/lib/canvas/board-delivery';
 import { artboardDiffersFromObject, currentObjectSource } from '@/lib/canvas/current-object';
 import { artboardContent } from '@/lib/canvas/export-canvas';
@@ -18,7 +20,10 @@ import { useChatStore } from '@/store/chat-store';
 import { sameObject } from '@/store/mask-store';
 import { captureBlockKeyOf } from '@/hooks/use-model-capture-block';
 import { useStudioStore } from '@/store/studio-store';
+import { openComposerSettings } from '@/store/composer-settings-store';
+import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
+import { defaultImageTo3DOffering, model3DCostText } from '@/lib/workspace/model3d-default';
 import { gaussianSplatTool } from '@/lib/workspace/gaussian-splat-action';
 import { groupMultiview, type MultiviewModel, type ThreeViewGroup } from '@/lib/workspace/three-view';
 
@@ -29,6 +34,34 @@ import { groupMultiview, type MultiviewModel, type ThreeViewGroup } from '@/lib/
 export function useObjectActions() {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
+  const { offeringsByCapability: model3dOfferings } = useWorkspaceOfferings(schema, 'model-3d');
+
+  /**
+   * #678: 转 3D needs a 3D model. With one picked, `run` goes ahead under the person's pick. Without one, the person is
+   * asked once: 「使用 {模型} 转 3D？」 with the recommended available model (or `offering`); 确认 runs this one
+   * conversion with that model as the turn's 3D model (no session lock, no stored preference), 换一个… opens the
+   * settings. Returns what `run` returned, or false when the person is being asked (nothing was requested yet).
+   */
+  const withModel3D = useCallback((
+    run: (models?: Record<string, string>) => boolean,
+    offering?: Pick<OfferingWire, 'model_id' | 'model_name' | 'price_mode' | 'default_native_quote' | 'credits_metered' | 'estimated_credits'> | null,
+  ): boolean => {
+    if (useWorkspaceStore.getState().modelByDomain['model-3d']) return run();
+    const choice = offering ?? defaultImageTo3DOffering(model3dOfferings);
+    if (!choice) {
+      // The models are still loading or none is available: the settings say which.
+      toast.info(schemaText(schema, 'ui.studio.action.choose_3d_model'));
+      openComposerSettings('models');
+      return false;
+    }
+    useModel3DConfirmStore.getState().ask({
+      modelId: choice.model_id,
+      modelName: choice.model_name || choice.model_id,
+      cost: model3DCostText(schema, choice),
+      run: (modelId) => { run({ 'model-3d': modelId }); },
+    });
+    return false;
+  }, [model3dOfferings, schema]);
 
   /**
    * Only objects of the session in view may take the stage. An unsent mask does not stop it: the
@@ -64,9 +97,9 @@ export function useObjectActions() {
     putOnStage(object.kind === 'image' ? { ...object, placement: 'insert' } : object), [putOnStage]);
 
   /** The turn that converts the object's own picture, addressed by its @img handle (no upload). */
-  const requestObjectTurn = useCallback((object: CurrentObject) => {
+  const requestObjectTurn = useCallback((object: CurrentObject, models?: Record<string, string>) => {
     const key = object.handle ? 'ui.studio.action.to3d_turn' : 'ui.studio.action.to3d_turn_current';
-    useStudioStore.getState().requestTurn(formatSchemaText(schemaText(schema, key), { handle: object.handle ?? '' }));
+    useStudioStore.getState().requestTurn(formatSchemaText(schemaText(schema, key), { handle: object.handle ?? '' }), undefined, undefined, models);
   }, [schema]);
 
   /**
@@ -75,11 +108,7 @@ export function useObjectActions() {
    * frame is rasterised like every other delivery (export, send to chat, inpaint), uploaded as an input asset
    * and handed to the Agent as the turn's picture, even when it holds just the current untouched picture.
    */
-  const boardToThreeD = useCallback(async (sessionId: string): Promise<boolean> => {
-    if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
-      toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
-      return false;
-    }
+  const convertBoard = useCallback(async (sessionId: string, models?: Record<string, string>): Promise<boolean> => {
     const delivery = boardDeliveryOf(sessionId);
     if (!delivery) return false;
     if (artboardContent(useCanvasStore.getState().getNodes(sessionId), delivery.artboard).length === 0) {
@@ -111,9 +140,15 @@ export function useObjectActions() {
       return false;
     }
     if (!isCurrentSessionScope(scope)) return false;
-    useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_board'), [{ kind: 'image', url }]);
+    useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_board'), [{ kind: 'image', url }], undefined, models);
     return true;
   }, [schema]);
+
+  const boardToThreeD = useCallback(async (sessionId: string): Promise<boolean> => {
+    if (useWorkspaceStore.getState().modelByDomain['model-3d']) return convertBoard(sessionId);
+    withModel3D((models) => { void convertBoard(sessionId, models); return true; });
+    return false;
+  }, [convertBoard, withModel3D]);
 
   /**
    * The Agent does the conversion, so a manual-approval session shows its usual
@@ -123,21 +158,19 @@ export function useObjectActions() {
    */
   const toThreeD = useCallback((object: CurrentObject, options: { pictureOnly?: boolean } = {}): boolean => {
     if (object.kind !== 'image') return false;
-    if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
-      toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
-      return false;
-    }
-    if (!openOnStage(object)) return false;
-    const delivery = object.sessionId && !options.pictureOnly ? boardDeliveryOf(object.sessionId) : null;
-    // #610: the board is converted only while it holds this picture's layer; otherwise the picture itself.
-    if (delivery && object.sessionId
-      && currentObjectSource(useCanvasStore.getState().getNodes(object.sessionId), delivery.artboard, object, proxyAssetUrl) === 'canvas') {
-      void boardToThreeD(object.sessionId);
+    return withModel3D((models) => {
+      if (!openOnStage(object)) return false;
+      const delivery = object.sessionId && !options.pictureOnly ? boardDeliveryOf(object.sessionId) : null;
+      // #610: the board is converted only while it holds this picture's layer; otherwise the picture itself.
+      if (delivery && object.sessionId
+        && currentObjectSource(useCanvasStore.getState().getNodes(object.sessionId), delivery.artboard, object, proxyAssetUrl) === 'canvas') {
+        void convertBoard(object.sessionId, models);
+        return true;
+      }
+      requestObjectTurn(object, models);
       return true;
-    }
-    requestObjectTurn(object);
-    return true;
-  }, [boardToThreeD, openOnStage, proxyAssetUrl, requestObjectTurn, schema]);
+    });
+  }, [convertBoard, openOnStage, proxyAssetUrl, requestObjectTurn, withModel3D]);
 
   /** An explicit image-to-Splat Agent turn. It names exactly the selected owned image and skips board rasterization. */
   const toGaussianSplat = useCallback((object: CurrentObject): boolean => {
@@ -158,13 +191,11 @@ export function useObjectActions() {
    */
   const inputPictureToThreeD = useCallback((url: string): boolean => {
     if (!url) return false;
-    if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
-      toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
-      return false;
-    }
-    useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_current'), [{ kind: 'image', url }]);
-    return true;
-  }, [schema]);
+    return withModel3D((models) => {
+      useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_current'), [{ kind: 'image', url }], undefined, models);
+      return true;
+    });
+  }, [schema, withModel3D]);
 
   /**
    * #65: 用三视图生成 3D. The turn carries the structured request (the group and the exact picture of each finished
@@ -175,9 +206,14 @@ export function useObjectActions() {
     const { slots, ready, request } = groupMultiview(group, model);
     if (!ready) return false;
     const views = slots.map((slot) => slot.label).join(schemaText(schema, 'ui.studio.three_view.view_separator'));
-    useStudioStore.getState().requestTurn(formatSchemaText(schemaText(schema, 'ui.studio.three_view.multiview_turn'), { views }), [], request);
-    return true;
-  }, [schema]);
+    // #678/#691: without a 3D model picked, the person confirms this multiview model first (it is never chosen silently).
+    const offering = Object.values(model3dOfferings ?? {}).flat().find((item) => item.available && item.model_id === model.modelId) ?? null;
+    const run = (models?: Record<string, string>) => {
+      useStudioStore.getState().requestTurn(formatSchemaText(schemaText(schema, 'ui.studio.three_view.multiview_turn'), { views }), [], request, models);
+      return true;
+    };
+    return withModel3D(run, offering ?? { model_id: model.modelId, model_name: model.modelName });
+  }, [model3dOfferings, schema, withModel3D]);
 
   const captureToTwoD = useCallback((object: CurrentObject): boolean => {
     if (object.kind !== 'model' || !object.assetId) return false;

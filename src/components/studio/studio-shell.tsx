@@ -8,6 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { ChatColumn } from '@/components/studio/chat-column';
 import { Lightbox } from '@/components/studio/lightbox';
 import { MaskDiscardDialog } from '@/components/studio/mask-discard-dialog';
+import { Model3DConfirmHost } from '@/components/studio/model3d-confirm-dialog';
 import { RightPanel } from '@/components/studio/right-panel';
 import { ShortcutPanel } from '@/components/studio/shortcut-panel';
 import { Stage } from '@/components/studio/stage';
@@ -46,6 +47,7 @@ export function StudioShell() {
         <TaskDrawer />
         <Lightbox />
         <ResultDetailHost />
+        <Model3DConfirmHost />
         <ShortcutPanel />
         <MaskDiscardDialog />
       </main>

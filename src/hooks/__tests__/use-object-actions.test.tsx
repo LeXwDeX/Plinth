@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   rasterise: vi.fn(async () => new Blob(['png'])),
   upload: vi.fn(async () => '/api/v1/assets/board-1'),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
   report: vi.fn(),
+  offerings: undefined as Record<string, unknown[]> | undefined,
 }));
 
 const messages = (defaultCatalog.application as { content: { messages: Record<string, string> } }).content.messages;
@@ -26,7 +28,8 @@ vi.mock('@/lib/canvas/board-delivery', () => ({
   boardPixelsFor3D: () => ({ width: 1024, height: 1024 }),
 }));
 vi.mock('@/lib/workspace/input-asset-upload', () => ({ uploadWorkspaceInputAsset: mocks.upload }));
-vi.mock('sonner', () => ({ toast: { error: mocks.toastError, success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: mocks.toastError, info: mocks.toastInfo, success: vi.fn() } }));
+vi.mock('@/hooks/use-workspace-offerings', () => ({ useWorkspaceOfferings: () => ({ offeringsByCapability: mocks.offerings }) }));
 vi.mock('@/lib/client-error-report', () => ({ reportClientError: mocks.report }));
 
 import { useObjectActions } from '@/hooks/use-object-actions';
@@ -34,6 +37,8 @@ import { CanvasExportError } from '@/lib/canvas/export-canvas';
 import { registerPendingEdits } from '@/lib/canvas/pending-edits';
 import { configureCanvasFrontend, useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore } from '@/store/chat-store';
+import { useComposerSettingsStore } from '@/store/composer-settings-store';
+import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
@@ -128,9 +133,67 @@ describe('转 3D on a result', () => {
 
   it('asks for a 3D model first, and does nothing for a model object', () => {
     useWorkspaceStore.setState({ modelByDomain: { ...useWorkspaceStore.getState().modelByDomain, 'model-3d': null } });
+    // #678: with no model list to offer one from, the settings open on the models tab and the toast says why.
+    mocks.offerings = undefined;
+    useComposerSettingsStore.setState({ open: false, tab: 'params' });
     expect(actions().toThreeD(object)).toBe(false);
-    expect(mocks.toastError).toHaveBeenCalledWith(messages['ui.studio.action.choose_3d_model']);
+    expect(mocks.toastInfo).toHaveBeenCalledWith(messages['ui.studio.action.choose_3d_model']);
+    expect(useComposerSettingsStore.getState()).toMatchObject({ open: true, tab: 'models' });
     expect(actions().toThreeD({ ...object, kind: 'model' })).toBe(false);
+  });
+
+  describe('#678: 转 3D without a 3D model picked', () => {
+    const offering = (model_id: string, extra: Record<string, unknown> = {}) => ({
+      id: `o-${model_id}`, model_id, model_name: model_id.toUpperCase(), capability: 'image-to-3d', available: true,
+      credits_metered: true, estimated_credits: 30, parameters: [], provider_id: 'p', provider_name: 'P', ...extra,
+    });
+    beforeEach(() => {
+      useWorkspaceStore.setState({ modelByDomain: { ...useWorkspaceStore.getState().modelByDomain, 'model-3d': null } });
+      useModel3DConfirmStore.setState({ request: null });
+      useComposerSettingsStore.setState({ open: false, tab: 'params' });
+      mocks.offerings = { 'image-to-3d': [offering('first'), offering('picked-by-schema', { recommended: true }), offering('off', { available: false, recommended: true })] };
+    });
+    afterEach(() => { mocks.offerings = undefined; });
+
+    it('asks to use the recommended available model, with its cost, and requests nothing yet', () => {
+      expect(actions().toThreeD(object)).toBe(false);
+      expect(useStudioStore.getState().turnRequest).toBeNull();
+      expect(useModel3DConfirmStore.getState().request).toMatchObject({ modelId: 'picked-by-schema', modelName: 'PICKED-BY-SCHEMA', cost: '约 30 积分' });
+      expect(useComposerSettingsStore.getState().open).toBe(false);
+    });
+
+    it('confirming converts once with that model for this turn only: no pick, no lock', () => {
+      useCanvasStore.setState({ nodesBySession: { [SESSION]: [picture({ x: 2000 })] } });
+      actions().toThreeD(object);
+      const request = useModel3DConfirmStore.getState().request!;
+      request.run(request.modelId);
+      const turn = useStudioStore.getState().turnRequest;
+      expect(turn?.text).toContain('@img3');
+      expect(turn?.models).toEqual({ 'model-3d': 'picked-by-schema' });
+      expect(useWorkspaceStore.getState().modelByDomain['model-3d']).toBeNull();
+    });
+
+    it('asks the same for an uploaded front view and for the multiview button, naming the multiview model', () => {
+      expect(actions().inputPictureToThreeD('/api/v1/assets/up-front')).toBe(false);
+      expect(useModel3DConfirmStore.getState().request?.modelId).toBe('picked-by-schema');
+      useModel3DConfirmStore.setState({ request: null });
+      const model = { modelId: 'mv', modelName: 'MV', views: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }], minimumViews: 2, mediaTypes: [] };
+      const slot = (key: string, label: string, extra: Record<string, unknown>) => ({
+        key, label, optional: false, replaced: false, status: 'succeeded' as const, attempt: 0, taskId: '', outputAssetId: '', requestId: '',
+        startable: false, retryable: false, estimatedCredits: 0, creditsMetered: false, ...extra,
+      });
+      const group = {
+        runId: 'run1', label: '三视图', sourceAssetId: '', createdAt: '', complete: false,
+        slots: [slot('front', '正面', { taskId: 't1', outputAssetId: 'x1' }), slot('left', '左侧', { taskId: 't2', outputAssetId: 'x2' })],
+        modelSource: { slot: 'front', available: true, taskId: 't1', assetId: 'x1', note: '' },
+      };
+      expect(actions().multiviewToThreeD(group, model)).toBe(false);
+      const request = useModel3DConfirmStore.getState().request!;
+      expect(request).toMatchObject({ modelId: 'mv', modelName: 'MV' });
+      request.run(request.modelId);
+      expect(useStudioStore.getState().turnRequest?.multiview?.model).toBe('mv');
+      expect(useStudioStore.getState().turnRequest?.models).toEqual({ 'model-3d': 'mv' });
+    });
   });
 });
 
@@ -353,7 +416,7 @@ describe('three-view to 3D', () => {
     useWorkspaceStore.setState({ modelByDomain: { ...useWorkspaceStore.getState().modelByDomain, 'model-3d': null } });
     expect(actions().inputPictureToThreeD('/api/v1/assets/up-front')).toBe(false);
     expect(useStudioStore.getState().turnRequest).toBeNull();
-    expect(mocks.toastError).toHaveBeenCalledWith(messages['ui.studio.action.choose_3d_model']);
+    expect(mocks.toastInfo).toHaveBeenCalledWith(messages['ui.studio.action.choose_3d_model']);
   });
 
   it('sends the group\'s finished views as the structured multiview request', () => {
