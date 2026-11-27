@@ -11,6 +11,8 @@ services:
         GOPROXY: "${GO_GOPROXY:-https://proxy.golang.org,direct}"
         GO_IMAGE_TAG: "${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}"
         GO_SOURCE_COMMIT: "${GO_SOURCE_COMMIT:?GO_SOURCE_COMMIT is required}"
+        # 可选的版本串（#676），缺省为空：界面不显示版本。release-server-steps.sh 直接以 --build-arg 传入。
+        GO_RELEASE_VERSION: "${GO_RELEASE_VERSION:-}"
     image: art-ai-go-production:${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}
     restart: unless-stopped
     read_only: true
