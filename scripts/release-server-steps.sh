@@ -52,6 +52,8 @@
 #   RELEASE_EXTRA_COMPOSE_FILE 追加在主 Compose 文件之后的服务器本地覆盖文件（例如固定
 #                            项目网络与容器地址），必须是 <remote_root>/production/ 下的普通文件；
 #                            只用于本栈服务，隔离预检不使用它
+#   RELEASE_VERSION          版本串（#676，release-env.py 给出）：经 GO_RELEASE_VERSION 构建参数链接进二进制，
+#                            顶栏与 /api/version 的 release 显示它；空值表示不显示
 #   RELEASE_BUILD_NETWORK    docker build --network（例如构建容器需用宿主源地址访问内网 Go 代理或基础镜像源）
 #   RELEASE_GOPROXY          docker build 的 GOPROXY 构建参数（缺省用 Dockerfile 默认值）
 #   RELEASE_NPM_REGISTRY     docker build 的 NPM_REGISTRY 构建参数（缺省为公共 registry.npmjs.org）
@@ -141,6 +143,13 @@ case "$UPSTREAM_SHAPE" in
     exit 1
     ;;
 esac
+# #676: release string shown next to the brand and in /api/version's release; linked in
+# with the same build-argument channel as GO_SOURCE_COMMIT. Empty builds show none.
+RELEASE_VERSION=${RELEASE_VERSION:-}
+if [ -n "$RELEASE_VERSION" ] && ! [[ "$RELEASE_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+  echo "[server] RELEASE_VERSION may only hold letters, digits, dot, underscore and hyphen; nothing was changed" >&2
+  exit 1
+fi
 COMPOSE_SERVICE=art-ai-go
 CONTAINER="${COMPOSE_PROJECT}-${COMPOSE_SERVICE}-1"
 FAKE_SERVICE=fake-upstream
@@ -521,13 +530,14 @@ elif ! release_capacity_check before-build; then
   exit 1
 fi
 
-echo "[server] build $TAG"
+echo "[server] build $TAG${RELEASE_VERSION:+ release=$RELEASE_VERSION}"
 # 构建的 --add-host、GOPROXY 与 NPM_REGISTRY 来自环境文件的 build 设置（#248、#249）；
 # 未设置时 npm 走公共 registry（#257）。
 # 测试/正式栈运行含历史迁移工具的内部镜像目标（#259）；Dockerfile 默认目标是自部署镜像。
 docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --target runtime-with-migration-tools \
   --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \
+  --build-arg GO_RELEASE_VERSION="$RELEASE_VERSION" \
   -f "$APP/Dockerfile.go-runtime" -t "art-ai-go-production:$TAG" \
   "$APP" 2>&1 | tail -1
 if [ -n "$UPSTREAM_SHAPE" ]; then

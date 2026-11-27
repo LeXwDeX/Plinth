@@ -109,6 +109,7 @@ class AgentAccountTest(unittest.TestCase):
 
         output = io.StringIO()
         with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(release_code)), \
+                mock.patch.object(release_env, "release_version", return_value="v0.0.0"), \
                 mock.patch.object(release_env, "agent_credentials", return_value=agent), \
                 mock.patch.object(release_env, "smoke", fake_smoke), \
                 mock.patch.object(release_env, "post_release_smoke", return_value=0) as post_release, \
@@ -564,6 +565,73 @@ class UpstreamShapeTest(unittest.TestCase):
                 mock.patch.object(release_env.subprocess, "run", fake_run):
             self.assertEqual(release_env.smoke(document, "dev-test", ["true"]), 0)
         self.assertEqual(seen["ART_AI_UPSTREAM_SHAPE"], "fake")
+
+
+class ReleaseVersionTest(unittest.TestCase):
+    """#676: each release links a release string into the build, next to the commit."""
+
+    def test_an_explicit_release_version_is_used_as_given(self):
+        with mock.patch.object(release_env, "run") as run:
+            self.assertEqual(release_env.release_version("v1.9.5", "a" * 40), "v1.9.5")
+        run.assert_not_called()
+
+    def test_a_release_version_must_be_a_plain_name(self):
+        for bad in ("", "v1.9.5 x", "-v1", "v1;rm", "v1/2", "v" + "1" * 64):
+            with self.subTest(bad=bad), self.assertRaisesRegex(release_env.EnvironmentError_, "--release-version"):
+                release_env.release_version(bad, None)
+
+    def test_default_is_git_describe_of_the_released_revision(self):
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args)
+            return "v1.9.4-12-gfbf5000\n" if args[1] == "describe" else ""
+
+        with mock.patch.object(release_env, "run", fake_run):
+            self.assertEqual(release_env.release_version(None, "b" * 40), "v1.9.4-12-gfbf5000")
+        self.assertEqual(calls, [("git", "describe", "--tags", "--always", "b" * 40 + "^{commit}")])
+        calls.clear()
+        # Without a promotion revision the release is origin/main, fetched first.
+        with mock.patch.object(release_env, "run", fake_run):
+            self.assertEqual(release_env.release_version(None, None), "v1.9.4-12-gfbf5000")
+        self.assertEqual(calls, [("git", "fetch", "-q", "origin"),
+                                 ("git", "describe", "--tags", "--always", "origin/main^{commit}")])
+
+    def test_the_release_string_rides_in_the_server_environment(self):
+        environment = load(BASE)["environments"]["alone"]
+        words = release_env.release_variables(environment, None, "live", "v1.9.5")["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_VERSION=v1.9.5", words)
+        words = release_env.release_variables(environment, None)["RELEASE_SERVER_ENV"]
+        self.assertNotIn("RELEASE_VERSION", words)
+
+    def test_release_passes_the_asked_or_described_version_to_the_server_steps(self):
+        document = load(BASE)
+        seen = []
+
+        class Done:
+            returncode = 1
+
+        def fake_run(command, env):
+            seen.append(env["RELEASE_SERVER_ENV"].split())
+            return Done()
+
+        for requested, expected in (("v1.9.5", "v1.9.5"), (None, "v1.9.4-3-gabcdef0")):
+            args = release_env.argparse.Namespace(revision=None, acceptance_note=None, live_upstream=False,
+                                                  release_version=requested)
+            with self.subTest(requested=requested), \
+                    mock.patch.object(release_env, "run", return_value="v1.9.4-3-gabcdef0\n"), \
+                    mock.patch.object(release_env.subprocess, "run", fake_run), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(release_env.release(document, "alone", args), 1)
+                self.assertIn(f"RELEASE_VERSION={expected}", seen[-1])
+
+    def test_main_accepts_release_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "environments.json"
+            path.write_text(json.dumps(BASE))
+            with mock.patch.object(release_env, "release", return_value=0) as release:
+                self.assertEqual(release_env.main(["--file", str(path), "release", "alone", "--release-version", "v1.9.5"]), 0)
+        self.assertEqual(release.call_args.args[2].release_version, "v1.9.5")
 
 
 class PostReleaseSmokeTest(unittest.TestCase):

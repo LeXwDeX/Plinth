@@ -223,6 +223,9 @@ type Config struct {
 	// listener (#332); nil means signed links are unavailable.
 	TaskAssetLinks TaskAssetLinkSigner
 	RuntimeVersion func() string
+	// RuntimeRelease is the release string the release script linked in
+	// (#676), shown next to the brand; empty for local and older builds.
+	RuntimeRelease func() string
 	// ArchiveTempDir 是 Range 归档物化临时文件的目录。留空时用
 	// os.TempDir()；生产装配传入运行卷目录，因为容器默认 /tmp
 	// 可能是小容量 tmpfs，装不下上百 MiB 的归档。
@@ -363,6 +366,7 @@ type Server struct {
 	assetGateway           SignedAssetGateway
 	taskAssetLinks         TaskAssetLinkSigner
 	runtimeVersion         func() string
+	runtimeRelease         func() string
 	archiveTempDir         string
 	assetVerificationStats func() (hits, misses, verifiedBytes uint64)
 	clock                  func() time.Time
@@ -467,6 +471,9 @@ func New(config Config) (*Server, error) {
 	if config.RuntimeVersion == nil {
 		version := config.Application.Content.Service.Version
 		config.RuntimeVersion = func() string { return version }
+	}
+	if config.RuntimeRelease == nil {
+		config.RuntimeRelease = func() string { return "" }
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -589,6 +596,7 @@ func New(config Config) (*Server, error) {
 		assetGateway:           config.AssetGateway,
 		taskAssetLinks:         config.TaskAssetLinks,
 		runtimeVersion:         config.RuntimeVersion,
+		runtimeRelease:         config.RuntimeRelease,
 		archiveTempDir:         strings.TrimSpace(config.ArchiveTempDir),
 		assetVerificationStats: config.AssetVerificationStats,
 		clock:                  config.Clock,
@@ -1218,8 +1226,11 @@ func (s *Server) legacyVersion(writer http.ResponseWriter, _ *http.Request) {
 		version = s.application.Content.Service.Version
 	}
 	writer.Header().Set("X-Art-AI-Runtime", "go")
+	// version stays the commit for smoke checks, error reports and debugging;
+	// release is the name the release was published under (#676).
 	writeJSON(writer, http.StatusOK, map[string]string{
 		"version": version,
+		"release": strings.TrimSpace(s.runtimeRelease()),
 	})
 }
 

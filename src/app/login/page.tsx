@@ -16,6 +16,7 @@ import {
   createAuthenticationBrowserClient,
   safeRedirectPath,
 } from '@/lib/authentication/browser-client';
+import { serviceReleaseLabel } from '@/lib/product-schema';
 
 function LoginForm() {
   const { schema } = useProductSchema();
@@ -36,7 +37,8 @@ function LoginForm() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const version = schema.content.service.version;
+  // #676: the release, never the commit; nothing on servers that report none.
+  const release = serviceReleaseLabel(schema);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,11 +147,11 @@ function LoginForm() {
           <Action type="submit" className="h-9 w-full" loading={loading}>
             {loading ? login.submitting_label : login.submit_label}
           </Action>
-          <p className="text-center text-xs text-muted-foreground/60">
-            {version
-              ? `${schema.content.brand.version_prefix}${version}`
-              : null}
-          </p>
+          {release ? (
+            <p className="text-center text-xs text-muted-foreground/60" data-testid="login-release">
+              {release}
+            </p>
+          ) : null}
         </Surface>
       </main>
     </Surface>

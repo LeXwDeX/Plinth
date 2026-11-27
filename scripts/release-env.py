@@ -8,8 +8,8 @@ secrets. deploy/environments.example.json is its template.
 
   release-env.py list
   release-env.py show <env>
-  release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--live-upstream]
-  release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--live-chat]
+  release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--release-version NAME] [--live-upstream]
+  release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--release-version NAME] [--live-chat]
   release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, AGENT_TEST_*, EXPECT_SHA, RELEASE_ENV,
                                                   # ART_AI_UPSTREAM_SHAPE set
   release-env.py compose-env <env>                # GO_* layout for manual compose and
@@ -39,6 +39,13 @@ connections of the runtime environment (a real model deciding on Plinth's tool
 table) and every generation Provider still on the fake upstream. It needs
 ART_AI_LIVE_ACK=1 for the same reason a live release does: the chat calls cost
 tokens. The two switches are exclusive.
+
+Release string (#676): every release links a release string into the binary, shown
+next to the brand and as "release" in /api/version (the "version" field stays the
+commit). --release-version names it (the formal-test release that becomes a GitHub
+Release passes the tag it will be tagged with, e.g. v1.9.5); without it the string is
+`git describe --tags --always` of the released revision (e.g. v1.9.4-12-gfbf5000).
+It travels with the commit: server steps -> GO_RELEASE_VERSION build argument -> ldflags.
 """
 import argparse
 from datetime import datetime, timezone
@@ -327,6 +334,26 @@ def promotion_revision(document, name, revision, note_id):
     return revision
 
 
+# #676: the release string is a plain name; it rides in RELEASE_SERVER_ENV and in -ldflags.
+RELEASE_VERSION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def release_version(requested, revision):
+    """The release string to link into the build: the one asked for, or git describe of the revision."""
+    if requested is not None:
+        if not RELEASE_VERSION_NAME.fullmatch(requested):
+            raise EnvironmentError_(f"--release-version {requested!r} may only hold letters, digits, dot, underscore "
+                                    "and hyphen (at most 64), e.g. v1.9.5")
+        return requested
+    if revision is None:
+        # The same origin/main release-go-testenv.sh resolves right after its own fetch.
+        run("git", "fetch", "-q", "origin")
+    described = run("git", "describe", "--tags", "--always", f"{revision or 'origin/main'}^{{commit}}").strip()
+    if not RELEASE_VERSION_NAME.fullmatch(described):
+        raise EnvironmentError_(f"git describe gave {described!r}, which is not a plain release name; pass --release-version")
+    return described
+
+
 def upstream_shape(environment, live_upstream=False, environ=None, live_chat=False):
     """The upstream shape of a release: fake for the ephemeral stack unless both live switches are set.
 
@@ -350,7 +377,7 @@ def upstream_shape(environment, live_upstream=False, environ=None, live_chat=Fal
     return "live" if live_upstream else "mixed"
 
 
-def release_variables(environment, revision, shape="live"):
+def release_variables(environment, revision, shape="live", version=None):
     variables = {"RELEASE_HOST": environment["ssh"], "RELEASE_ROOT": environment["root"]}
     if revision:
         variables["RELEASE_REF"] = revision
@@ -385,6 +412,8 @@ def release_variables(environment, revision, shape="live"):
     # The migration tools refuse to run without it (#334); the server steps
     # record it in production/compose.env for manual runs on that host.
     words.append(f"ART_AI_PROTECTED_PATHS={protected_paths(environment)}")
+    if version:
+        words.append(f"RELEASE_VERSION={version}")
     variables["RELEASE_SERVER_ENV"] = " ".join(words)
     if environment.get("source_transfer", "pipe") != "pipe":
         variables["RELEASE_SOURCE_TRANSFER"] = environment["source_transfer"]
@@ -400,9 +429,11 @@ def release(document, name, args):
         raise EnvironmentError_(f"{name} always releases the pushed origin/main; --revision is for promotions")
     shape = upstream_shape(environment, live_upstream=getattr(args, "live_upstream", False) is True,
                            live_chat=getattr(args, "live_chat", False) is True)
+    requested = getattr(args, "release_version", None)
+    version = release_version(requested if isinstance(requested, str) else None, revision)
     print(f"[release-env] {name}: {environment['base_url']}" + (f" revision={revision}" if revision else " origin/main")
-          + f" upstream={shape}")
-    environment_variables = {**os.environ, **release_variables(environment, revision, shape)}
+          + f" upstream={shape} release={version}")
+    environment_variables = {**os.environ, **release_variables(environment, revision, shape, version)}
     code = subprocess.run(["bash", str(SCRIPTS / "release-go-testenv.sh")], env=environment_variables).returncode
     if code:
         return code
@@ -614,6 +645,9 @@ def main(argv=None):
     entry.add_argument("environment")
     entry.add_argument("--revision")
     entry.add_argument("--acceptance-note", type=int)
+    entry.add_argument("--release-version",
+                       help="release string shown next to the brand (#676), e.g. v1.9.5 for the formal-test release that "
+                            "will be tagged; default: git describe --tags --always of the released revision")
     entry.add_argument("--live-upstream", action="store_true",
                        help=f"release the ephemeral dev-test stack against real upstreams (needs {LIVE_ACK}=1)")
     entry.add_argument("--live-chat", action="store_true",

@@ -577,6 +577,32 @@ describe('Go Product Schema frontend projection', () => {
     expect(projected.content.service.version).toBe('20260726(12)');
   });
 
+  // #676: /api/version's release joins the commit only in the browser projection.
+  it('merges the runtime release next to the commit and keeps it across refreshes', () => {
+    const schema = schemaFixture();
+    const projected = withRuntimeVersion(schema, '9517d748e7d0736e3d7cc23c79c37873861d9ce6', ' v1.9.5 ');
+
+    expect(projected.content.service.release).toBe('v1.9.5');
+    expect(projected.content.service.version).toBe('9517d748e7d0736e3d7cc23c79c37873861d9ce6');
+    expect(schema.content.service.release).toBeUndefined();
+
+    // A new base schema keeps the server's release until /api/version answers again.
+    const remoteBase = schemaFixture();
+    expect(projectRuntimeProductSchema(remoteBase, projected, undefined, undefined).content.service.release)
+      .toBe('v1.9.5');
+    expect(projectRuntimeProductSchema(remoteBase, projected, 'abc', 'v1.9.6').content.service.release)
+      .toBe('v1.9.6');
+  });
+
+  it('adds no release when the server reports none', () => {
+    const schema = schemaFixture();
+    for (const release of [undefined, '', '  ']) {
+      const projected = withRuntimeVersion(schema, '20260726(12)', release);
+      expect(projected.content.service).not.toHaveProperty('release');
+    }
+    expect(withRuntimeVersion(schema, '', '')).toBe(schema);
+  });
+
   it('keeps migrated shell and task history off the legacy presentation config', () => {
     for (const path of [
       '../components/layout/sidebar.tsx',

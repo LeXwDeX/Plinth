@@ -18,7 +18,7 @@ import {
 import { WorkspaceBalance } from '@/components/workspace/workspace-balance';
 import { useAuth } from '@/hooks/use-auth';
 import { createAuthenticationBrowserClient } from '@/lib/authentication/browser-client';
-import { schemaText } from '@/lib/product-schema';
+import { schemaText, serviceReleaseLabel } from '@/lib/product-schema';
 import { useSendQueueStore } from '@/store/send-queue-store';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 
@@ -104,24 +104,28 @@ interface AppTopbarProps {
  */
 export function AppTopbar({ start, leading, actions, testId = 'app-topbar' }: AppTopbarProps) {
   const { schema } = useProductSchema();
-  const version = schema.content.service.version;
+  // #676: the brand is followed by the release, never the commit.
+  const release = serviceReleaseLabel(schema);
   return (
     <header
       className="relative z-sticky flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3"
       data-testid={testId}
     >
       {start}
-      <HintTooltip name={version ? `${schema.content.brand.version_prefix}${version}` : ''} className="shrink-0">
-        <Link
-          href={schema.runtime.frontend.client_routes.home}
-          className="flex shrink-0 items-center gap-2"
-        >
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground" aria-hidden="true">
-            <Box className="size-3.5" />
-          </span>
-          <span className="hidden text-sm font-semibold tracking-tight md:inline">{schema.content.brand.title}</span>
-        </Link>
-      </HintTooltip>
+      <Link
+        href={schema.runtime.frontend.client_routes.home}
+        className="flex shrink-0 items-center gap-2"
+      >
+        <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground" aria-hidden="true">
+          <Box className="size-3.5" />
+        </span>
+        <span className="hidden items-baseline gap-1.5 md:inline-flex">
+          <span className="text-sm font-semibold tracking-tight">{schema.content.brand.title}</span>
+          {release ? (
+            <span className="text-xs text-muted-foreground" data-testid="app-topbar-release">{release}</span>
+          ) : null}
+        </span>
+      </Link>
       {leading ? (
         <>
           <span className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />

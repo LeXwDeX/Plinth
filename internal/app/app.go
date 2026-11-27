@@ -2320,6 +2320,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ArchiveTempDir:         filepath.Join(config.StorageRoot, "tmp"),
 		AssetVerificationStats: assetStore.VerificationStats,
 		RuntimeVersion:         runtimeRevision,
+		RuntimeRelease:         runtimeRelease,
 		TrustedProxies:         config.TrustedProxies,
 		Logger:                 logger,
 	})

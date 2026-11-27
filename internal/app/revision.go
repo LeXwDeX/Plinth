@@ -21,3 +21,22 @@ func runtimeRevision() string {
 	}
 	return unknownRevision
 }
+
+// releaseVersion is the release string scripts/release-env.py hands the build
+// through the same build-argument channel as sourceRevision (#676): the name
+// passed with --release-version, or `git describe --tags --always` of the
+// released revision.
+//
+//	-ldflags "-X github.com/LeXwDeX/Plinth/internal/app.releaseVersion=<release>"
+var releaseVersion string
+
+var releaseName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// runtimeRelease is the linked release string, or empty for local and
+// unstamped builds, which then show no release at all.
+func runtimeRelease() string {
+	if releaseName.MatchString(releaseVersion) {
+		return releaseVersion
+	}
+	return ""
+}

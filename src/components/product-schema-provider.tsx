@@ -29,6 +29,8 @@ interface ProductSchemaResponse {
 
 interface RuntimeVersionResponse {
   version: string;
+  /** #676: absent on older servers; then no release is shown. */
+  release?: string;
 }
 
 interface ProductSchemaContextValue {
@@ -82,8 +84,9 @@ export function ProductSchemaProvider({
         baseSchema,
         initialSchema,
         versionData?.version,
+        versionData?.release,
       ),
-    [baseSchema, initialSchema, versionData?.version],
+    [baseSchema, initialSchema, versionData?.version, versionData?.release],
   );
   // #233：浏览器错误按公开 Schema 声明的路由回传服务端日志。
   useEffect(() => {

@@ -566,7 +566,13 @@ export interface ProductSchema {
     service: {
       id: string;
       name: string;
+      /** The commit the server was built from (error reports, debugging). */
       version: string;
+      /**
+       * The release string from /api/version (#676), merged only in the
+       * browser; the Go Catalog and the public projection never carry it.
+       */
+      release?: string;
     };
     navigation: NavigationItemSchema[];
     asset_kinds: ValueLabelSchema[];
@@ -2709,9 +2715,12 @@ export function parameterConditionMatches(
 export function withRuntimeVersion(
   schema: ProductSchema,
   version: string,
+  release?: string,
 ): ProductSchema {
-  const normalized = version.trim();
-  if (!normalized || normalized === schema.content.service.version) {
+  const service = schema.content.service;
+  const nextVersion = version.trim() || service.version;
+  const nextRelease = release?.trim() || service.release;
+  if (nextVersion === service.version && nextRelease === service.release) {
     return schema;
   }
   return {
@@ -2719,17 +2728,34 @@ export function withRuntimeVersion(
     content: {
       ...schema.content,
       service: {
-        ...schema.content.service,
-        version: normalized,
+        ...service,
+        version: nextVersion,
+        ...(nextRelease ? { release: nextRelease } : {}),
       },
     },
   };
+}
+
+/**
+ * The release shown next to the brand and on the login page (#676): the
+ * version prefix plus the release, never the commit. A release that already
+ * starts with the prefix (a tag such as v1.9.5) is shown as is. Empty when the
+ * server reports no release (older servers, local builds).
+ */
+export function serviceReleaseLabel(schema: ProductSchema): string {
+  const release = schema.content.service.release?.trim();
+  if (!release) {
+    return '';
+  }
+  const prefix = schema.content.brand.version_prefix;
+  return prefix && release.startsWith(prefix) ? release : `${prefix}${release}`;
 }
 
 export function projectRuntimeProductSchema(
   baseSchema: ProductSchema,
   runtimeSchema: ProductSchema,
   refreshedVersion?: string,
+  refreshedRelease?: string,
 ): ProductSchema {
   const projected = {
     ...baseSchema,
@@ -2745,6 +2771,7 @@ export function projectRuntimeProductSchema(
   return withRuntimeVersion(
     projected,
     refreshedVersion ?? runtimeSchema.content.service.version,
+    refreshedRelease ?? runtimeSchema.content.service.release,
   );
 }
 

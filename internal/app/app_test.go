@@ -197,6 +197,26 @@ func TestRuntimeRevisionReportsLinkedCommitOrUnknown(t *testing.T) {
 	}
 }
 
+// #676: /api/version reports the release string the release script linked in,
+// and nothing for unstamped builds or a value that is not a plain name.
+func TestRuntimeReleaseReportsLinkedReleaseOrNothing(t *testing.T) {
+	original := releaseVersion
+	t.Cleanup(func() { releaseVersion = original })
+	for _, testCase := range []struct{ linked, want string }{
+		{"v1.9.5", "v1.9.5"},
+		{"v1.9.4-12-gfbf5000", "v1.9.4-12-gfbf5000"},
+		{"fbf5000", "fbf5000"},
+		{"", ""},
+		{"v1.9.5 extra", ""},
+		{"-v1.9.5", ""},
+	} {
+		releaseVersion = testCase.linked
+		if got := runtimeRelease(); got != testCase.want {
+			t.Errorf("linked %q: runtimeRelease() = %q, want %q", testCase.linked, got, testCase.want)
+		}
+	}
+}
+
 func TestApplicationSessionCookieNameRuntimeOverride(t *testing.T) {
 	names := []string{"art_ai_stage_session", "art_ai_formal_session"}
 	for _, cookieName := range names {
