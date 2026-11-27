@@ -5846,6 +5846,10 @@ type ChatContextSchema struct {
 	// the wrong kind. Field: {handle}.
 	UnknownHandleTemplate   string `json:"unknown_handle_template"`
 	WrongHandleKindTemplate string `json:"wrong_handle_kind_template"`
+	// EmptySelectionTemplate is the refusal when the selection alias names
+	// nothing because the turn has no selected object of the wanted kind
+	// (#684). Field: {handle}. Empty keeps UnknownHandleTemplate.
+	EmptySelectionTemplate string `json:"empty_selection_template,omitempty"`
 	// ResultHandlesField is the key of the tool result that lists the handles
 	// given to the pictures and models the call produced (#25), so a later
 	// step of the same reply names them without guessing. Empty omits it.

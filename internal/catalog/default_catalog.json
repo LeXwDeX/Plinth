@@ -7469,7 +7469,8 @@
         "canvas_output_size_nearest_template": "所选模型没有画板比例 {ratio}，本次按它最接近的比例、以最高画质出图：{size}。回复用户时请说明这一点，并告诉用户可以把画板改成这个比例，或换一个支持 {ratio} 的模型。",
         "reference_output_size_template": "输出尺寸按参考图的比例设为 {size}（参考图 {reference}）。",
         "reference_output_size_nearest_template": "所选模型给不了参考图的比例（参考图 {reference}），本次改用最接近的合法尺寸 {size}。回复用户时请说明这一点；用户想要别的尺寸时，可以在参数里选择。",
-        "unknown_handle_template": "句柄 {handle} 无效：本会话里没有这个对象。请使用历史图片标签里的句柄、当前选中对象的句柄，或 list_session_models 返回的任务。",
+        "unknown_handle_template": "句柄 {handle} 无效：本会话里没有这个对象，这一步没有提交、没有扣费。请使用历史图片标签里的句柄、当前选中对象的句柄，或 list_session_models 返回的任务；最终回复里如实告诉用户这一步没有执行，不要把工具参数写进回复。",
+        "empty_selection_template": "{handle} 无效：本轮没有选中这类对象，{handle} 只在系统说明列出“当前选中对象”时可用，这一步没有提交、没有扣费。请改用历史图片标签里明确的句柄（如 @img5）；不确定用户要哪一张时，在回复里问用户。最终回复里如实说明这一步没有执行，不要把工具参数写进回复。",
         "wrong_handle_kind_template": "句柄 {handle} 指向的对象类型不适用于这个参数。图片参数只接受 @img 句柄，3D 模型来源只接受 @model 句柄。",
         "result_handles_field": "handles",
         "recent_generated_image_limit": 2,
@@ -8992,7 +8993,7 @@
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional handles (such as @img3, or @selected for the current selection) of images in this chat. Prefer handles over indices. Omit for a fresh creation."
+                "description": "Optional handles (such as @img3, or @selected for the current selection, only when the system prompt lists one) of images in this chat. Pass the picture you told the person you would use. Prefer handles over indices. Omit for a fresh creation."
               },
               "reference_purposes": {
                 "type": "object",
@@ -9088,7 +9089,7 @@
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional handles (such as @img3, or @selected for the current selection) of images in this chat. Prefer handles over indices. Give either handles or indices."
+                "description": "Optional handles (such as @img3, or @selected for the current selection, only when the system prompt lists one) of images in this chat. Pass the picture you told the person you would use. Prefer handles over indices. Give either handles or indices."
               },
               "reference_image_indices": {
                 "type": "array",
@@ -9236,7 +9237,7 @@
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional handles (such as @img3, or @selected for the current selection) of images in this chat. Prefer handles over indices. Omit for a fresh creation."
+                "description": "Optional handles (such as @img3, or @selected for the current selection, only when the system prompt lists one) of images in this chat. Pass the picture you told the person you would use. Prefer handles over indices. Omit for a fresh creation."
               },
               "reference_image_indices": {
                 "type": "array",
@@ -9451,7 +9452,7 @@
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Handles (such as @img3, or @selected for the current selection) of the one image in this chat that the service's chat_image input takes: the style or material reference. Required when list_offerings marks that input required=true. Prefer handles over indices; give at most one."
+                "description": "Handles (such as @img3, or @selected for the current selection, only when the system prompt lists one) of the one image in this chat that the service's chat_image input takes: the style or material reference. Required when list_offerings marks that input required=true. Prefer handles over indices; give at most one."
               },
               "reference_image_indices": {
                 "type": "array",

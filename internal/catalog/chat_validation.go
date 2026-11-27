@@ -1720,7 +1720,8 @@ func validateChatAttachments(schema ChatSchema) error {
 		!strings.Contains(context.SelectionCaptureTemplate, "{capture_id}") ||
 		strings.TrimSpace(context.SelectionPickedTemplate) == "" ||
 		!strings.Contains(context.UnknownHandleTemplate, "{handle}") ||
-		!strings.Contains(context.WrongHandleKindTemplate, "{handle}") {
+		!strings.Contains(context.WrongHandleKindTemplate, "{handle}") ||
+		(context.EmptySelectionTemplate != "" && !strings.Contains(context.EmptySelectionTemplate, "{handle}")) {
 		return errors.New("context 的选中对象或句柄提示模板缺少占位符")
 	}
 	if context.MaximumAttachmentsPerMessage <= 0 || context.MaximumSelection <= 0 {

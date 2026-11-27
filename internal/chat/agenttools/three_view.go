@@ -1110,15 +1110,12 @@ func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, toke
 	if len(tokens) > 0 && len(command.Options.ReferenceImageIndices) == 0 {
 		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 		if err != nil || len(resolved) == 0 {
-			handle, template := tokens[0], e.context.UnknownHandleTemplate
+			handle, reason := tokens[0], "unknown"
 			var unknown *chat.UnknownHandleError
 			if errors.As(err, &unknown) {
-				handle = unknown.Handle
-				if unknown.Reason == "kind" {
-					template = e.context.WrongHandleKindTemplate
-				}
+				handle, reason = unknown.Handle, unknown.Reason
 			}
-			return nil, strings.ReplaceAll(template, "{handle}", handle)
+			return nil, strings.ReplaceAll(chat.HandleRefusalTemplate(e.context, handle, reason), "{handle}", handle)
 		}
 		urls := make([]string, 0, len(resolved))
 		for _, item := range resolved {

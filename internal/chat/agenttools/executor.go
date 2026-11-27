@@ -782,10 +782,7 @@ func (e *Executor) findHistoryImages(command chat.ToolCommand) chat.ToolResult {
 	if err != nil {
 		var unknown *chat.UnknownHandleError
 		if errors.As(err, &unknown) {
-			template := e.context.UnknownHandleTemplate
-			if unknown.Reason == "kind" {
-				template = e.context.WrongHandleKindTemplate
-			}
+			template := chat.HandleRefusalTemplate(e.context, unknown.Handle, unknown.Reason)
 			return chat.ToolResult{Error: strings.ReplaceAll(template, "{handle}", unknown.Handle)}
 		}
 		return chat.ToolResult{Error: "invalid arguments"}
