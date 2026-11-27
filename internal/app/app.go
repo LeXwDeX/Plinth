@@ -875,6 +875,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return string(unstored[0]), nil
 		},
+		// #702: the auto and budget modes ask a person once every window of
+		// approved steps of the session.
+		SessionPaidSteps: repository.SessionApprovedGrants,
 	}
 	// #410: collect the plans that finished while nothing settled — a
 	// deployment that was stopped when the last step succeeded, or a plan whose
@@ -2852,7 +2855,8 @@ func approvalPolicyFromSchema(application catalog.ApplicationSchema) approvalpol
 		known = append(known, string(capability.ID))
 	}
 	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known).
-		WithCreditsThreshold(declared.ManualCreditsThreshold)
+		WithCreditsThreshold(declared.ManualCreditsThreshold).
+		WithCheckpoints(declared.GenerationCheckpoint)
 	if application.StepPolicy != nil {
 		// The internal steps mode exists only when the Catalog declares the 3D
 		// step policy (#330). It is not an offered mode: nothing assigns it to a

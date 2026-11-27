@@ -11077,7 +11077,7 @@
         "modes": ["auto", "budget", "manual"],
         "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"],
         "manual_credits_threshold": 20,
-        "generation_checkpoint": {"auto": 100, "budget": 20, "manual": 20},
+        "generation_checkpoint": {"auto": 100, "budget": 100},
         "budget": {
           "max_credits": 20000,
           "max_steps": 12,

@@ -5,7 +5,7 @@ import "testing"
 func testPolicy() Policy {
 	return Policy{
 		DefaultMode:                ModeManual,
-		Modes:                      []string{ModeAuto, ModeManual},
+		Modes:                      []string{ModeAuto, ModeBudget, ModeManual},
 		ManualApprovalCapabilities: []string{"text-to-3d", "image-to-3d", "retexture"},
 		KnownCapabilities: []string{
 			"text-to-image", "image-to-image", "background-removal", "text-to-3d",
@@ -16,13 +16,17 @@ func testPolicy() Policy {
 
 func TestRequiresHumanMatrix(t *testing.T) {
 	policy := testPolicy()
-	manualHuman := map[string]bool{"text-to-3d": true, "image-to-3d": true, "retexture": true}
+	budgetHuman := map[string]bool{"text-to-3d": true, "image-to-3d": true, "retexture": true}
 	for _, capability := range policy.KnownCapabilities {
 		if got := RequiresHuman(policy, ModeAuto, capability); got {
 			t.Errorf("auto %s requires human", capability)
 		}
-		if got := RequiresHuman(policy, ModeManual, capability); got != manualHuman[capability] {
-			t.Errorf("manual %s = %v, want %v", capability, got, manualHuman[capability])
+		// #702: strict asks for every step, 2D included.
+		if !RequiresHuman(policy, ModeManual, capability) {
+			t.Errorf("manual %s did not require a human", capability)
+		}
+		if got := RequiresHuman(policy, ModeBudget, capability); got != budgetHuman[capability] {
+			t.Errorf("budget %s = %v, want %v", capability, got, budgetHuman[capability])
 		}
 	}
 }
@@ -33,9 +37,9 @@ func TestRequiresHumanFailsClosed(t *testing.T) {
 		if !RequiresHuman(policy, mode, "image-to-3d") {
 			t.Errorf("unknown mode %q auto-approved a 3D step", mode)
 		}
-		// Unknown mode behaves as manual, so a 2D step is still automatic.
-		if RequiresHuman(policy, mode, "text-to-image") {
-			t.Errorf("unknown mode %q blocked a 2D step", mode)
+		// Unknown mode behaves as manual, which asks for a 2D step too (#702).
+		if !RequiresHuman(policy, mode, "text-to-image") {
+			t.Errorf("unknown mode %q auto-approved a 2D step", mode)
 		}
 	}
 	for _, capability := range []string{"", "unknown", "text-to-video"} {
@@ -72,5 +76,26 @@ func TestRequiresHumanForExtraCredits(t *testing.T) {
 	policy.Modes = []string{ModeManual}
 	if !RequiresHumanForExtraCredits(policy, ModeAuto, 5) {
 		t.Error("auto accepted although the Schema does not offer it")
+	}
+}
+
+// #702: auto and budget ask a person once whenever the session's approved
+// steps reach a multiple of the mode's window; strict and steps never do.
+func TestCheckpointDue(t *testing.T) {
+	policy := testPolicy().WithCheckpoints(map[string]int{ModeAuto: 100, ModeBudget: 100})
+	for _, mode := range []string{ModeAuto, ModeBudget} {
+		for approved, want := range map[int]bool{0: false, 1: false, 99: false, 100: true, 101: false, 199: false, 200: true} {
+			if got := policy.CheckpointDue(mode, approved); got != want {
+				t.Errorf("%s CheckpointDue(%d) = %v, want %v", mode, approved, got, want)
+			}
+		}
+	}
+	for _, mode := range []string{ModeManual, ModeSteps, "yolo"} {
+		if policy.CheckpointDue(mode, 100) {
+			t.Errorf("%s reached a checkpoint", mode)
+		}
+	}
+	if testPolicy().CheckpointDue(ModeAuto, 100) {
+		t.Error("a policy without windows reached a checkpoint")
 	}
 }

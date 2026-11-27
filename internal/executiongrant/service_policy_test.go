@@ -10,7 +10,7 @@ import (
 )
 
 func TestMultiviewAgentNativeExtraApprovalPreservesTwoDimensionalPolicy(t *testing.T) {
-	policy := approvalpolicy.New("manual", []string{"auto", "manual"}, []string{"text-to-3d", "image-to-3d", "image-to-splat", "retexture"}, []string{"image-to-multiview", "edit-multiview"})
+	policy := approvalpolicy.New("budget", []string{"auto", "budget", "budget"}, []string{"text-to-3d", "image-to-3d", "image-to-splat", "retexture"}, []string{"image-to-multiview", "edit-multiview"})
 	for _, tc := range []struct {
 		capability string
 		quote      *schema.NativeQuote
@@ -20,13 +20,13 @@ func TestMultiviewAgentNativeExtraApprovalPreservesTwoDimensionalPolicy(t *testi
 		{"edit-multiview", &schema.NativeQuote{Version: 1, Unit: "tripo.credit", UnitLabel: "Tripo credits", BaseAmount: "0", ExtraAmount: "5", TotalAmount: "5", Components: []schema.NativeCharge{{ID: "front", Label: "Front", Amount: "5"}}}, true},
 	} {
 		t.Run(tc.capability, func(t *testing.T) {
-			for _, mode := range []string{"manual", "auto"} {
+			for _, mode := range []string{"budget", "auto"} {
 				store := policyFixture(tc.capability)
 				store.grant.Source = AgentPending
 				store.snapshot.NativeQuote = tc.quote
 				service := Service{Grants: store, Prepared: store, Policy: policy}
 				got, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", mode)
-				if mode == "manual" && tc.manualWait {
+				if mode == "budget" && tc.manualWait {
 					if !errors.Is(err, ErrHumanRequired) || store.grant.Status != Pending {
 						t.Fatalf("manual extra edit was approved: %+v %v", got, err)
 					}
@@ -98,7 +98,7 @@ func policyFixture(capability string) *fakeGrantStore {
 }
 
 func policyService(store *fakeGrantStore, modes SessionModeReader) Service {
-	policy := approvalpolicy.New("manual", []string{"auto", "manual"},
+	policy := approvalpolicy.New("manual", []string{"auto", "budget", "manual"},
 		[]string{"text-to-3d", "image-to-3d", "retexture"}, []string{"text-to-image", "image-to-3d"})
 	return Service{Grants: store, Prepared: store, Policy: policy, Modes: modes}
 }
@@ -152,11 +152,12 @@ func TestApproveByPolicyUsesFrozenCapabilityAndIdentity(t *testing.T) {
 	if store.approved != 0 {
 		t.Fatalf("approved despite identity mismatch")
 	}
-	// The matching case approves once and records the policy actor.
+	// The matching case approves once and records the policy actor. Strict
+	// asks for a 2D step too (#702); the budget mode approves it.
 	store = policyFixture("text-to-image")
-	got, err := policyService(store, &modeReader{mode: "manual"}).ApplyPolicy(context.Background(), store.grant)
-	if err != nil || got.Status != Approved || got.DecidedBy != "policy:manual" || !got.ApprovedByPolicy() || store.approved != 1 {
-		t.Fatalf("manual text-to-image: %+v err=%v approvals=%d", got, err, store.approved)
+	got, err := policyService(store, &modeReader{mode: "budget"}).ApplyPolicy(context.Background(), store.grant)
+	if err != nil || got.Status != Approved || got.DecidedBy != "policy:budget" || !got.ApprovedByPolicy() || store.approved != 1 {
+		t.Fatalf("budget text-to-image: %+v err=%v approvals=%d", got, err, store.approved)
 	}
 }
 
@@ -167,9 +168,9 @@ func TestFrozenCreditsCardAStepTheCapabilityListLeavesAutomatic(t *testing.T) {
 	// 50 credits on an unlisted, otherwise automatic capability: a person decides.
 	store := policyFixture("text-to-image")
 	store.snapshot.EstimatedCredits = 50
-	service := policyService(store, &modeReader{mode: "manual"})
+	service := policyService(store, &modeReader{mode: "budget"})
 	service.Policy = service.Policy.WithCreditsThreshold(20)
-	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "budget"); !errors.Is(err, ErrHumanRequired) {
 		t.Fatalf("manual 50-credit step: %v", err)
 	}
 	if store.approved != 0 || store.grant.Status != Pending {
@@ -183,8 +184,8 @@ func TestFrozenCreditsCardAStepTheCapabilityListLeavesAutomatic(t *testing.T) {
 		mode     string
 		approved bool
 	}{
-		{"manual under the threshold", 19, "manual", true},
-		{"manual at the threshold", 20, "manual", false},
+		{"manual under the threshold", 19, "budget", true},
+		{"manual at the threshold", 20, "budget", false},
 		{"auto over the threshold", 500, "auto", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -219,13 +220,14 @@ func TestExtraCreditsOfAnAgentStepNeedAHumanInManualModeOnly(t *testing.T) {
 		return store
 	}
 	store := agent()
-	if _, err := policyService(store, &modeReader{mode: "manual"}).ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+	if _, err := policyService(store, &modeReader{mode: "budget"}).ApproveByPolicy(context.Background(), "owner-a", "request-a", "budget"); !errors.Is(err, ErrHumanRequired) {
 		t.Fatalf("manual agent step with extra credits: %v", err)
 	}
 	if store.approved != 0 || store.grant.Status != Pending {
 		t.Fatalf("grant changed: %+v", store.grant)
 	}
 	store = agent()
+	store.snapshot.ExtraCredits = 0
 	if _, err := policyService(store, &modeReader{mode: "bogus"}).ApproveByPolicy(context.Background(), "owner-a", "request-a", "bogus"); !errors.Is(err, ErrHumanRequired) {
 		t.Fatalf("unknown mode must behave as manual: %v", err)
 	}
@@ -237,14 +239,14 @@ func TestExtraCreditsOfAnAgentStepNeedAHumanInManualModeOnly(t *testing.T) {
 	// No extra credits: the capability decides, as before.
 	store = agent()
 	store.snapshot.ExtraCredits = 0
-	got, err = policyService(store, &modeReader{mode: "manual"}).ApplyPolicy(context.Background(), store.grant)
+	got, err = policyService(store, &modeReader{mode: "budget"}).ApplyPolicy(context.Background(), store.grant)
 	if err != nil || got.Status != Approved || store.approved != 1 {
 		t.Fatalf("manual agent step without extra credits: %+v err=%v", got, err)
 	}
 	// A grant of the panel is not an Agent step.
 	store = policyFixture("text-to-image")
 	store.snapshot.ExtraCredits = 10
-	got, err = policyService(store, &modeReader{mode: "manual"}).ApplyPolicy(context.Background(), store.grant)
+	got, err = policyService(store, &modeReader{mode: "budget"}).ApplyPolicy(context.Background(), store.grant)
 	if err != nil || got.Status != Approved {
 		t.Fatalf("panel grant: %+v err=%v", got, err)
 	}

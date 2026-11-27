@@ -133,10 +133,11 @@ func policyHarnessWithTasks(t *testing.T, modes executiongrant.SessionModeReader
 	return executor, command, gateway, repo
 }
 
-func TestAgentToolManualModeImageStepSubmitsWithoutSuspending(t *testing.T) {
-	result, gateway, observed := runPolicyCase(t, "manual", "refine_image", "text-to-image")
+// #702: the budget ("approve") mode asks only for the 3D steps; a 2D step runs.
+func TestAgentToolBudgetModeImageStepSubmitsWithoutSuspending(t *testing.T) {
+	result, gateway, observed := runPolicyCase(t, "budget", "refine_image", "text-to-image")
 	if result.Suspend || gateway.submitCount != 1 {
-		t.Fatalf("manual image step waited: %+v submits=%d", result, gateway.submitCount)
+		t.Fatalf("budget image step waited: %+v submits=%d", result, gateway.submitCount)
 	}
 	if len(observed) == 0 || observed[0].ApprovalSource != "policy" || observed[0].EstimatedCredits != 7 {
 		t.Fatalf("observation = %+v", observed)
@@ -147,6 +148,14 @@ func TestAgentToolManualModeImageStepSubmitsWithoutSuspending(t *testing.T) {
 	}
 	if content["estimated_credits"] != float64(7) || content["approval"] != "policy" {
 		t.Fatalf("result fields = %v", content)
+	}
+}
+
+// #702: strict asks for every step, a 2D one included.
+func TestAgentToolManualModeImageStepEndsTheTurnAtTheApprovalCard(t *testing.T) {
+	result, gateway, observed := runPolicyCase(t, "manual", "refine_image", "text-to-image")
+	if result.Suspend || !result.NoSubmission || gateway.submitCount != 0 || len(observed) != 0 {
+		t.Fatalf("strict 2D step must wait for a person: %+v submits=%d observed=%d", result, gateway.submitCount, len(observed))
 	}
 }
 
@@ -232,12 +241,12 @@ func TestRefusedInputReachesTheAgentAsAToolFailure(t *testing.T) {
 	}
 }
 
-// #490: manual mode cards a step by its frozen credit estimate even when the
-// capability is not listed. The harness offering estimates 7 credits, so a
+// #490: the budget ("approve") mode cards a step by its frozen credit estimate
+// even when the capability is not listed (#702: strict asks for every step). The harness offering estimates 7 credits, so a
 // threshold above that leaves the step to the capability list, and a threshold at
 // it sends the step to a person.
-func TestAgentToolManualModeCardsAStepByItsCredits(t *testing.T) {
-	executor, command, gateway, _ := policyHarnessConfigured(t, sessionMode{mode: "manual"},
+func TestAgentToolBudgetModeCardsAStepByItsCredits(t *testing.T) {
+	executor, command, gateway, _ := policyHarnessConfigured(t, sessionMode{mode: "budget"},
 		"refine_image", "text-to-image", func(service *executiongrant.Service) {
 			service.Policy = service.Policy.WithCreditsThreshold(10)
 		})
@@ -245,7 +254,7 @@ func TestAgentToolManualModeCardsAStepByItsCredits(t *testing.T) {
 	if err != nil || result.Suspend || gateway.submitCount != 1 {
 		t.Fatalf("manual step under the threshold: %+v submits=%d err=%v", result, gateway.submitCount, err)
 	}
-	executor, command, gateway, _ = policyHarnessConfigured(t, sessionMode{mode: "manual"},
+	executor, command, gateway, _ = policyHarnessConfigured(t, sessionMode{mode: "budget"},
 		"refine_image", "text-to-image", func(service *executiongrant.Service) {
 			service.Policy = service.Policy.WithCreditsThreshold(7)
 		})

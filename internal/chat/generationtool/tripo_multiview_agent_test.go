@@ -44,7 +44,7 @@ func TestImageGroupAgentUsesSchemaGrantAndFrozenGroupSource(t *testing.T) {
 	for _, name := range []string{"create_multiview_images", "edit_multiview_images"} {
 		modes := []string{"auto"}
 		if name == "create_multiview_images" {
-			modes = append(modes, "manual")
+			modes = append(modes, "budget")
 		}
 		for _, mode := range modes {
 			t.Run(name+"/"+mode, func(t *testing.T) {

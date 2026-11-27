@@ -4,20 +4,23 @@
 // approves anything by itself.
 package approvalpolicy
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 const (
 	// ModeAuto approves every paid step without waiting for a human.
 	ModeAuto = "auto"
-	// ModeManual asks a human only for the capabilities the policy lists.
+	// ModeManual (strict) asks a human for every paid step (#702).
 	ModeManual = "manual"
-	// ModeBudget approves an Agent step inside an approved production plan and
-	// its total credit budget (#103). The budget decision needs the plan, the
-	// step estimate and the reservation, so executiongrant resolves this mode
-	// before calling RequiresHuman. A step that is not budget eligible (one
-	// the browser itself started, and every step when no plan is active) is
-	// judged exactly as in manual mode; RequiresHuman therefore treats budget
-	// as manual here.
+	// ModeBudget is the mode the UI calls "approve" (#702): a person decides
+	// every step of a capability the policy lists (the 3D steps) and every
+	// step the Schema does not know, and the rest is approved by itself up to
+	// the session's checkpoint window. An approved production plan (#103) may
+	// still approve its Agent steps; the plan decision needs the plan, the
+	// step estimate and the reservation, so executiongrant resolves it before
+	// calling RequiresHuman.
 	ModeBudget = "budget"
 )
 
@@ -27,13 +30,20 @@ const (
 type Policy struct {
 	DefaultMode                string
 	Modes                      []string
+	// ManualApprovalCapabilities are the capabilities the budget ("approve")
+	// mode always asks a person for. The strict mode asks for every step.
 	ManualApprovalCapabilities []string
 	KnownCapabilities          []string
-	// ManualCreditsThreshold is the per-step credit estimate from which manual
-	// mode asks a person whatever the capability is (0 disables the rule: the
-	// capability list alone then decides, which is how a policy built without
-	// WithCreditsThreshold behaves).
+	// ManualCreditsThreshold is the per-step credit estimate from which the
+	// budget mode asks a person whatever the capability is (0 disables the
+	// rule: the capability list alone then decides, which is how a policy
+	// built without WithCreditsThreshold behaves).
 	ManualCreditsThreshold int
+	// Checkpoints is application.chat.approval_policy.generation_checkpoint
+	// (#702): per mode, after how many approved steps of a session the next
+	// one asks a person once (CheckpointDue). A mode without a positive value
+	// has no checkpoint.
+	Checkpoints map[string]int
 	// Steps is set by WithSteps when application.step_policy is declared. It
 	// enables the internal steps mode (ModeSteps), which is deliberately not in
 	// Modes: only the server derives it for a session (#330).
@@ -68,22 +78,26 @@ func (p Policy) Allows(mode string) bool {
 // RequiresHuman reports whether a human must decide this step.
 //
 //   - auto: never.
-//   - manual: for capabilities the policy lists, and for any capability the
-//     Schema does not know (including an empty one).
-//   - budget: like manual here. The budget branch of executiongrant decides
-//     Agent steps first; only a step it leaves to a person (no plan, off plan,
-//     over budget) or a step the browser started reaches this function, and
-//     all of them keep manual's rules.
+//   - manual (strict): always, whatever the capability (#702).
+//   - budget ("approve"): for capabilities the policy lists, and for any
+//     capability the Schema does not know (including an empty one). The plan
+//     branch of executiongrant decides Agent steps of an approved plan first;
+//     only a step it leaves to a person (no plan, off plan, over budget) or a
+//     step the browser started reaches this function.
 //   - steps: never. The 3D step cap is decided by executiongrant against the
 //     owner's setting, and a step over the cap is refused, not sent to a
 //     person (#330).
 //   - any other mode is treated as manual.
 //
-// This is the capability rule alone. RequiresHumanForCredits adds the cost rule
+// The session's checkpoint window (CheckpointDue) is decided by executiongrant,
+// which counts the approved steps. This is the capability rule alone. RequiresHumanForCredits adds the cost rule
 // of manual mode and is what the runtime decides a real step with.
 func RequiresHuman(policy Policy, mode, capability string) bool {
-	if normalized := policy.NormalizeMode(mode); normalized == ModeAuto || normalized == ModeSteps {
+	switch policy.NormalizeMode(mode) {
+	case ModeAuto, ModeSteps:
 		return false
+	case ModeManual:
+		return true
 	}
 	if capability == "" || !slices.Contains(policy.KnownCapabilities, capability) {
 		return true
@@ -92,9 +106,9 @@ func RequiresHuman(policy Policy, mode, capability string) bool {
 }
 
 // RequiresHumanForCredits reports whether a human must decide a step that costs
-// the given credits: the capability rule of RequiresHuman, and in manual mode
+// the given credits: the capability rule of RequiresHuman, and in budget mode
 // also every step whose own estimate reaches the policy's
-// ManualCreditsThreshold (#490).
+// ManualCreditsThreshold (#490). The strict mode already asks for every step.
 //
 // The cost rule is deliberately not part of RequiresHuman: the capability list
 // stays the answer to "which capabilities does this deployment card", and the
@@ -105,8 +119,8 @@ func RequiresHuman(policy Policy, mode, capability string) bool {
 //
 //   - auto and steps: never, whatever the step costs. Auto already approved
 //     every paid step, and money is not the constraint of the 3D step mode.
-//   - manual (or any mode treated as manual, budget included): the capability
-//     rule, then the threshold. credits is the step's total estimate (base plus
+//   - manual (or any mode treated as manual): always, by the capability rule.
+//   - budget: the capability rule, then the threshold. credits is the step's total estimate (base plus
 //     extra), the number the approval card shows; a non-positive estimate never
 //     reaches a positive threshold.
 //
@@ -125,6 +139,28 @@ func RequiresHumanForCredits(policy Policy, mode, capability string, credits int
 		return false
 	}
 	return credits >= policy.ManualCreditsThreshold
+}
+
+// WithCheckpoints returns the policy with the checkpoint window of each mode
+// (application.chat.approval_policy.generation_checkpoint, #702).
+func (p Policy) WithCheckpoints(checkpoints map[string]int) Policy {
+	p.Checkpoints = maps.Clone(checkpoints)
+	return p
+}
+
+// CheckpointDue reports whether the next step of a session whose approved
+// steps number approved must ask a person once (#702): in auto and budget
+// mode, when approved is a positive multiple of the mode's window. A person's
+// approval moves the count past it, so the window starts again; a denial
+// leaves it in place, so the next step asks again. Other modes, and a mode
+// without a window, never reach a checkpoint.
+func (p Policy) CheckpointDue(mode string, approved int) bool {
+	normalized := p.NormalizeMode(mode)
+	if normalized != ModeAuto && normalized != ModeBudget {
+		return false
+	}
+	window := p.Checkpoints[normalized]
+	return window > 0 && approved > 0 && approved%window == 0
 }
 
 // WithCreditsThreshold returns the policy with the manual cost rule of
