@@ -106,18 +106,16 @@ func TestBoundedContinuationRedrawsUntilTheCheckpoint(t *testing.T) {
 	}
 }
 
-// #693, #694: the continuation counts every view it submits on the call that
-// started the group, and the turn stops at the auto mode's checkpoint instead
-// of submitting past it, also after a restart lost the in-process count.
-func TestThreeViewContinuationCountsTowardTheCheckpoint(t *testing.T) {
+// #693: the continuation counts every view it submits on the call that
+// started the group, and stops at the turn's max_generation_calls_per_turn
+// instead of submitting past it, also after a restart lost the in-process
+// count.
+func TestThreeViewContinuationCountsTowardTheTurnBound(t *testing.T) {
 	f := newContinuationFixtureWithMode(t, false, "auto")
 	f.toolConfig = func(config *agenttools.Config) {
-		config.MaxGenerationCallsPerTurn = 20
-		config.GenerationCheckpoint = map[string]int{"auto": 2}
-		config.ConsentLimitContent = "checkpoint reached"
+		config.MaxGenerationCallsPerTurn = 2
 	}
 	executor, command := f.toolFor(t, `{"subject_type":"humanoid"}`)
-	command.ApprovalMode = "auto"
 	ctx := context.Background()
 	observe := func(chat.ToolObservation) error { return nil }
 	result, err := executor.Execute(ctx, command, observe)
@@ -134,15 +132,15 @@ func TestThreeViewContinuationCountsTowardTheCheckpoint(t *testing.T) {
 	f.finish(t, command.BoundTaskID, "asset-count-1")
 	submits := f.gateway.submits
 	result, err = executor.Execute(ctx, command, observe)
-	if err != nil || result.AwaitTask || result.GenerationCheckpoint != 2 || !result.NoSubmission ||
-		result.AgentContent != "checkpoint reached" || f.gateway.submits != submits {
+	// The views left stay on the card; the group pauses without a submission.
+	if err != nil || result.AwaitTask || result.TaskID != "" || result.AgentContent == "" || f.gateway.submits != submits {
 		t.Fatalf("back past the checkpoint: %+v err=%v submits %d->%d", result, err, submits, f.gateway.submits)
 	}
 	// A restarted process rebuilds the call's own units from the checkpoint.
 	restarted, _ := f.toolFor(t, `{"subject_type":"humanoid"}`)
 	command.OwnGenerationUnits = 2
 	result, err = restarted.Execute(ctx, command, observe)
-	if err != nil || result.GenerationCheckpoint != 2 || f.gateway.submits != submits {
+	if err != nil || result.AwaitTask || f.gateway.submits != submits {
 		t.Fatalf("after restart: %+v err=%v submits %d->%d", result, err, submits, f.gateway.submits)
 	}
 }

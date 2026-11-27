@@ -44,10 +44,13 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 		seen++
 		require("tool "+tool.Name, tool.Description,
 			// #665: the modes go by the names the person sees in the top bar.
-			"approval mode (Auto, Budget or Strict",
-			"In the Strict mode the capabilities the policy lists",
+			"approval mode (Auto, Approve or Strict",
+			// #702: strict asks for every step; the budget ("approve") mode
+			// keeps the capability list and the cost threshold.
+			"In the Strict mode every step waits for the person",
+			"In the Approve mode the capabilities the policy lists",
 			"any step whose own credit estimate reaches the server's threshold",
-			"In the Budget mode a step the approved plan covers runs within its remaining budget without a card",
+			"In the Approve mode a step the approved plan covers runs within its remaining budget without a card",
 			"unrelated to the Agent scope", "Never tell the person to switch the Agent scope or the approval mode")
 		// #521: only an Agent's own step is held for its extra credits alone
 		// (RequiresHumanForExtraSpend on AgentPending grants); a plan step is

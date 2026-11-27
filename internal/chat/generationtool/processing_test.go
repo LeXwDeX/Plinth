@@ -489,7 +489,7 @@ func TestRetextureAcceptsAForeignModelOnlyThroughItsSavedFile(t *testing.T) {
 }
 
 func TestAnimationNeedsARiggingSource(t *testing.T) {
-	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
+	h := newProcessingHarness(t, "budget", meshyCatalogTasks)
 	result, _ := h.run("process_model", `{"step":"animation","source_task_id":"model-1","action_id":3}`)
 	// #326: each service's reason, and that rigging can run on this model first
 	// (the 加工 panel brings that step in).
@@ -497,7 +497,7 @@ func TestAnimationNeedsARiggingSource(t *testing.T) {
 	h.expectRejected(result, "rigging can run on model-1 first")
 
 	// The rigging task itself is a valid animation source and, being neither
-	// text/image-to-3D nor retexture, is approved by policy even in manual mode.
+	// text/image-to-3D nor retexture, is approved by policy in budget mode.
 	result, _ = h.run("process_model", `{"step":"animation","source_task_id":"rig-1","action_id":3}`)
 	if result.Suspend || h.gateway.submitCount != 1 {
 		t.Fatalf("animation on a rigging task did not run: %+v submits=%d", result, h.gateway.submitCount)
@@ -512,8 +512,8 @@ func TestAnimationNeedsARiggingSource(t *testing.T) {
 	}
 }
 
-func TestRiggingAndRemeshAreAutoApprovedInManualMode(t *testing.T) {
-	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
+func TestRiggingAndRemeshAreAutoApprovedInBudgetMode(t *testing.T) {
+	h := newProcessingHarness(t, "budget", meshyCatalogTasks)
 	result, _ := h.run("process_model", `{"step":"rigging","source_task_id":"model-1","height_meters":1.8}`)
 	if result.Suspend || h.gateway.submitCount != 1 || h.gateway.frozen[0].Capability != "rigging" {
 		t.Fatalf("rigging: %+v submits=%d", result, h.gateway.submitCount)
@@ -527,8 +527,8 @@ func TestRiggingAndRemeshAreAutoApprovedInManualMode(t *testing.T) {
 	}
 }
 
-func TestFormatConversionWithoutExtraCreditsIsAutoApprovedInManualMode(t *testing.T) {
-	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
+func TestFormatConversionWithoutExtraCreditsIsAutoApprovedInBudgetMode(t *testing.T) {
+	h := newProcessingHarness(t, "budget", meshyCatalogTasks)
 	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX"}`)
 	if result.Suspend || h.gateway.submitCount != 1 {
 		t.Fatalf("plain conversion: %+v", result)

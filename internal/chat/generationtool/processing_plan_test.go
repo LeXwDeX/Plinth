@@ -127,7 +127,7 @@ func newAgentPlanHarness(t *testing.T, mode string, requireHuman bool) *agentPla
 		manual = append(append([]string(nil), manual...), "remesh", "rigging", "animation")
 	}
 	grants := &executiongrant.Service{Grants: h.gateway.repo, Prepared: h.gateway.repo,
-		Policy: approvalpolicy.New("manual", []string{"manual", "auto"}, manual, h.known), Modes: sessionMode{mode: mode}}
+		Policy: approvalpolicy.New("manual", []string{"manual", "budget", "auto"}, manual, h.known), Modes: sessionMode{mode: mode}}
 	c := agentPlanCatalog{h.gateway.product}
 	store := &agentPlanSweepStore{Store: h.gateway.repo}
 	plans, err := processing.New(store, c, gateway, nil)
@@ -294,13 +294,13 @@ func TestAgentPlanSourceHandleKeepsTheSelectedAsset(t *testing.T) {
 	}
 }
 
-func TestAgentPlanPreservesShippedManualApprovalPolicy(t *testing.T) {
-	h := newAgentPlanHarness(t, "manual", false)
+func TestAgentPlanPreservesShippedBudgetApprovalPolicy(t *testing.T) {
+	h := newAgentPlanHarness(t, "budget", false)
 	_, plan := h.propose(agentPlanArguments)
 	h.tick()
 	plan = h.get(plan.ID)
-	if plan.State != processing.Running || len(h.gateway.commands) != 1 || h.gateway.policyActors[0] != "policy:manual" {
-		t.Fatalf("shipped manual policy must still auto-approve remesh: plan=%+v actors=%v", plan, h.gateway.policyActors)
+	if plan.State != processing.Running || len(h.gateway.commands) != 1 || h.gateway.policyActors[0] != "policy:budget" {
+		t.Fatalf("shipped budget policy must still auto-approve remesh: plan=%+v actors=%v", plan, h.gateway.policyActors)
 	}
 }
 

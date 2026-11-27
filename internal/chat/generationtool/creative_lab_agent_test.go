@@ -160,7 +160,7 @@ func (c creativeLabCase) run(t *testing.T) chat.ToolResult {
 }
 
 func TestCreativeLabDesignToolPreparesTheNamedTemplate(t *testing.T) {
-	c := newCreativeLabCase(t, "manual", "create_creative_lab_design",
+	c := newCreativeLabCase(t, "budget", "create_creative_lab_design",
 		`{"template":"creative-lab-vinyl-figure-prototype"}`)
 	result := c.run(t)
 	if result.Error != "" || len(c.gateway.prepared) != 1 {
@@ -170,7 +170,7 @@ func TestCreativeLabDesignToolPreparesTheNamedTemplate(t *testing.T) {
 	if prepared.OfferingID != "meshy/creative-lab/vinyl-figure/prototype" || prepared.Capability != "creative-lab-prototype" {
 		t.Fatalf("prepared %s/%s", prepared.Capability, prepared.OfferingID)
 	}
-	// A 2D design step is approved by the manual policy without a card.
+	// A 2D design step is approved by the budget ("approve") policy without a card.
 	if c.gateway.submitCount != 1 {
 		t.Fatalf("design step submissions = %d", c.gateway.submitCount)
 	}
@@ -216,7 +216,7 @@ func TestCreativeLabBuildToolFollowsTheSessionApprovalPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	manualListsBuild := slices.Contains(product.Application().Chat.ApprovalPolicy.ManualApprovalCapabilities, "creative-lab-build")
-	for mode, waits := range map[string]bool{"auto": false, "manual": manualListsBuild} {
+	for mode, waits := range map[string]bool{"auto": false, "budget": manualListsBuild, "manual": true} {
 		t.Run(mode, func(t *testing.T) {
 			c := newCreativeLabCase(t, mode, "build_creative_lab_item", `{"source_task":"task-figure"}`)
 			result := c.run(t)

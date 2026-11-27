@@ -55,13 +55,9 @@ func fillThreeViewMessageFallbacks(application *ApplicationSchema) {
 	fallback(&messages.Denied, builtIn.Denied)
 	fallback(&messages.DuplicateRun, builtIn.DuplicateRun)
 	// A view the person already started, and a redraw bounded by the turn's
-	// generation checkpoint (#689, #693).
+	// generation bound (#689, #693).
 	fallback(&messages.AgentPausedStarted, builtIn.AgentPausedStarted, messages.AgentPaused)
 	fallback(&messages.ConsistencyRedraw, builtIn.ConsistencyRedraw)
-	// A group the previous turn stopped at its generation checkpoint (#689).
-	fallback(&messages.PausedRun, builtIn.PausedRun, messages.DuplicateRun)
-	fallback(&messages.CheckpointPaused, builtIn.CheckpointPaused)
-	fallback(&messages.CheckpointNote, builtIn.CheckpointNote)
 }
 
 // builtInThreeViewMessages reads the three-view texts of the built-in Catalog

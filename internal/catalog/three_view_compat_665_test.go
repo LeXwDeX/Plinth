@@ -197,19 +197,9 @@ func TestDefaultCatalogDeclaresThe665ThreeViewTexts(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := document["application"].(map[string]any)["chat"].(map[string]any)["three_view"].(map[string]any)["messages"].(map[string]any)
-	for _, key := range []string{"turn_stopped", "model_unavailable", "image_unavailable", "arguments_invalid", "denied", "duplicate_run",
-		// #689: the checkpoint pause of a continuation and the refusal after it.
-		"paused_run", "checkpoint_paused", "checkpoint_note"} {
+	for _, key := range []string{"turn_stopped", "model_unavailable", "image_unavailable", "arguments_invalid", "denied", "duplicate_run"} {
 		if text, _ := messages[key].(string); strings.TrimSpace(text) == "" {
 			t.Errorf("default_catalog.json three_view.messages.%s is not declared", key)
-		}
-	}
-	for key, fields := range map[string][]string{"paused_run": {"{run}"},
-		"checkpoint_paused": {"{run}", "{view}"}, "checkpoint_note": {"{count}"}} {
-		for _, field := range fields {
-			if text, _ := messages[key].(string); !strings.Contains(text, field) {
-				t.Errorf("three_view.messages.%s lacks %s", key, field)
-			}
 		}
 	}
 }

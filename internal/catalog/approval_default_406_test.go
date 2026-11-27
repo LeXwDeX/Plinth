@@ -89,12 +89,14 @@ func TestPlanCardWordingDoesNotAssumeTheBudgetDefault_406(t *testing.T) {
 	if planTool.Name == "" {
 		t.Fatal("propose_production_plan is not declared")
 	}
-	const only = "Use this tool only when the session's approval mode is the Budget mode"
-	if !strings.Contains(planTool.Description, only) {
-		t.Errorf("the plan tool does not say it belongs to the budget mode: %s", planTool.Description)
+	// #702: no approval mode needs a plan; the Agent never proposes one by
+	// itself, and the tool belongs to the budget ("approve") mode only.
+	const first = "Do not propose a production plan on your own"
+	if !strings.HasPrefix(planTool.Description, first) {
+		t.Errorf("the plan tool does not start by forbidding unasked plans: %s", planTool.Description)
 	}
-	if !strings.HasPrefix(planTool.Description, only) {
-		t.Errorf("the budget-mode condition is not the first thing the plan tool says")
+	if !strings.Contains(planTool.Description, "Use this tool only when the person explicitly asks for a production plan") {
+		t.Errorf("the plan tool does not say when it may be used: %s", planTool.Description)
 	}
 
 	// The automatic mode text is what the Agent reads in a default session: it
@@ -106,17 +108,18 @@ func TestPlanCardWordingDoesNotAssumeTheBudgetDefault_406(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡",
-		"自动方式下不需要制作计划，也不要提交制作计划",
+		"自动方式下，付费步骤由系统按会话批准方式自动批准，不出批准卡",
+		"本会话每批准满 100 步，下一步会出一张批准卡",
+		"不需要制作计划，也不要提交制作计划",
 	} {
 		if !strings.Contains(auto, want) {
 			t.Errorf("the automatic mode text lacks %q: %s", want, auto)
 		}
 	}
-	// The budget text still describes the plan: that mode did not change.
+	// #702: the budget ("approve") text no longer asks for a plan.
 	for _, mode := range chat.ApprovalPolicy.Prompt.Modes {
-		if mode.ID == "budget" && !strings.Contains(mode.Description, "propose_production_plan") {
-			t.Errorf("the budget mode text lost its plan instructions: %s", mode.Description)
+		if mode.ID == "budget" && !strings.Contains(mode.Description, "不要主动提议或提交制作计划") {
+			t.Errorf("the budget mode text still invites a plan: %s", mode.Description)
 		}
 	}
 }

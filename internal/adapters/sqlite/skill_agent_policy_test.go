@@ -74,10 +74,11 @@ func (m sessionModes) SessionApprovalMode(ctx context.Context, owner, session st
 	return sessionApprovalModeOrManual(s.ApprovalMode), nil
 }
 
-func TestSkillRunManualModeImageStepIsApprovedByPolicy(t *testing.T) {
-	result, gateway, observed := runThreeViewUnderPolicy(t, "manual", generation.ImageToImage)
+// #702: the budget ("approve") mode approves a 2D step by policy; strict asks.
+func TestSkillRunBudgetModeImageStepIsApprovedByPolicy(t *testing.T) {
+	result, gateway, observed := runThreeViewUnderPolicy(t, "budget", generation.ImageToImage)
 	if result.Suspend || gateway.submits != 1 {
-		t.Fatalf("manual image step waited: %+v submits=%d", result, gateway.submits)
+		t.Fatalf("budget image step waited: %+v submits=%d", result, gateway.submits)
 	}
 	if len(observed) == 0 || observed[0].ApprovalSource != "policy" {
 		t.Fatalf("approval source missing from observation: %+v", observed)
@@ -132,9 +133,19 @@ func TestSkillRunRequestGrantManualModeThreeDWaitsForHuman(t *testing.T) {
 	}
 }
 
-func TestSkillRunRequestGrantManualModeImageStepIsApprovedByPolicy(t *testing.T) {
+// #702: strict asks for every step the Agent starts; a view the person starts
+// on the card is their own 2D click, so it runs on it without a second card.
+// The budget ("approve") mode approves the 2D step by policy too.
+func TestSkillRunRequestGrantManualModeImageStepRunsOnThePersonsClick(t *testing.T) {
 	grant := requestSkillGrant(t, "manual", generation.ImageToImage)
 	if grant.Status != executiongrant.Approved || grant.DecidedBy != "policy:manual" {
+		t.Fatalf("strict image step the person started was not approved on the click: %+v", grant)
+	}
+}
+
+func TestSkillRunRequestGrantBudgetModeImageStepIsApprovedByPolicy(t *testing.T) {
+	grant := requestSkillGrant(t, "budget", generation.ImageToImage)
+	if grant.Status != executiongrant.Approved || grant.DecidedBy != "policy:budget" {
 		t.Fatalf("image step not approved by policy: %+v", grant)
 	}
 }

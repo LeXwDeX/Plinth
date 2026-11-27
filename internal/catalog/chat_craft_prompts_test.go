@@ -198,9 +198,10 @@ func TestApprovalPromptKeepsTheBudgetFieldsAndDropsTheAgentScope(t *testing.T) {
 			budget = mode.Description
 		}
 	}
+	// #702: the budget mode is "approve": 3D asks every step, the rest once
+	// every 100 approved steps, and the Agent proposes no plan.
 	for _, want := range []string{
-		"propose_production_plan", "title", "steps", "capability", "purpose", "model",
-		"estimated_credits", "budgets", "legacy.credits", "correction_capabilities", "重新估算", "从不相加",
+		"3D 步骤每一步都先出批准卡", "满 100 步", "不要主动提议或提交制作计划",
 	} {
 		if !strings.Contains(budget, want) {
 			t.Errorf("budget description omits %q", want)

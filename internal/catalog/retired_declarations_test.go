@@ -106,7 +106,9 @@ func TestBudgetCopyMatchesWhatTheServerDoes(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"propose_production_plan.description", "budget.auto_approval_note", "modes[budget].description"} {
+	// #702: the budget ("approve") mode description no longer explains plans;
+	// the plan texts still do.
+	for _, name := range []string{"propose_production_plan.description", "budget.auto_approval_note"} {
 		if !strings.Contains(texts[name], "correction_capabilities") {
 			t.Errorf("%s does not tell the Agent how a zero-credit report step avoids a card", name)
 		}
@@ -130,7 +132,7 @@ func TestBudgetCopyMatchesWhatTheServerDoes(t *testing.T) {
 	if strings.Contains(analyze, "approval mode has nothing to decide") {
 		t.Error("analyze_model still claims the approval mode never decides a report step")
 	}
-	if !strings.Contains(analyze, "Budget mode") || !strings.Contains(analyze, "correction_capabilities") {
+	if !strings.Contains(analyze, "Approve mode") || !strings.Contains(analyze, "correction_capabilities") {
 		t.Error("analyze_model does not say a report step outside the plan cards in budget mode")
 	}
 }

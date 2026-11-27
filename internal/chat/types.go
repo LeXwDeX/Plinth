@@ -225,14 +225,6 @@ type Turn struct {
 	// (#665). Repository.StartTurn writes it with the turn; no read of a turn
 	// returns it.
 	Key *TurnKey
-	// generationCheckpoint is set by a round whose call was refused at the
-	// turn's generation checkpoint (#694); the reply ends after that round.
-	// It is never stored.
-	generationCheckpoint int
-	// generationCheckpointNote is the checkpoint call's own ending note
-	// (ToolResult.GenerationCheckpointNote, #689); empty uses the Schema's
-	// generation_checkpoint_reached. It is never stored.
-	generationCheckpointNote string
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.

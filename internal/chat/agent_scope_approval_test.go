@@ -80,7 +80,7 @@ func TestPlanToolDescriptionKeepsScopeAndApprovalApart(t *testing.T) {
 			continue
 		}
 		found = true
-		for _, want := range []string{"In the Budget mode a step the approved plan covers runs within its remaining budget without a card",
+		for _, want := range []string{"In the Approve mode a step the approved plan covers runs within its remaining budget without a card",
 			"unrelated to the Agent scope"} {
 			if !strings.Contains(tool.Description, want) {
 				t.Errorf("plan_model_processing omits %q", want)

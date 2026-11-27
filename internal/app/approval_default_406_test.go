@@ -97,10 +97,10 @@ func TestAssembledAppKeepsStoredSessionModesAndCreatesAutoSessions_406(t *testin
 // What each mode asks a person about, for every capability the shipped Schema
 // declares. The default is auto, so this is the list of paid steps that run
 // with nobody confirming them in a new session: every capability, extra
-// credits included. Strict mode (and budget without an approved plan, which
-// follows strict's rules) asks about four capabilities and about extra
-// credits. The policy did not change with the default; this keeps the list
-// that docs/product.md §6.1 states in step with the Schema.
+// credits included. Strict mode asks about every step (#702); budget
+// ("approve") without an approved plan asks about four capabilities and about
+// extra credits. This keeps the list that docs/product.md §6.1 states in step
+// with the Schema.
 func TestApprovalPolicyScopeByModeForTheShippedSchema_406(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -119,10 +119,12 @@ func TestApprovalPolicyScopeByModeForTheShippedSchema_406(t *testing.T) {
 			t.Errorf("auto asks a person about %s", id)
 		}
 		inStrict := slices.Contains(strict, id)
-		for _, mode := range []string{approvalpolicy.ModeManual, approvalpolicy.ModeBudget} {
-			if got := approvalpolicy.RequiresHuman(policy, mode, id); got != inStrict {
-				t.Errorf("%s asks a person about %s = %v, want %v", mode, id, got, inStrict)
-			}
+		// #702: strict asks for every step; budget ("approve") for the 3D list.
+		if !approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeManual, id) {
+			t.Errorf("manual does not ask a person about %s", id)
+		}
+		if got := approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeBudget, id); got != inStrict {
+			t.Errorf("budget asks a person about %s = %v, want %v", id, got, inStrict)
 		}
 		if inStrict {
 			askedInStrict = append(askedInStrict, id)

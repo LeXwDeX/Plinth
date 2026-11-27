@@ -112,7 +112,9 @@ func testTaskRecoveryHTTPFlow(t *testing.T, manual bool) {
 			query string
 			args  []any
 		}{
-			{`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at) VALUES ('recovery-session','owner-a','Owner','Recovery',?,?)`, []any{stamp, stamp}},
+			// #702: strict asks for every step; the budget ("approve") mode keeps
+			// the capability list this test is about.
+			{`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at,approval_mode) VALUES ('recovery-session','owner-a','Owner','Recovery',?,?,'budget')`, []any{stamp, stamp}},
 			{`INSERT INTO generation_tasks(id,owner_id,session_id,capability,offering_json,input_json,request_hash,state,current_attempt_id,version,created_at,updated_at,finished_at) VALUES ('recovery-source','owner-a','recovery-session','text-to-3d',?,'{}','old','FAILED','recovery-attempt',1,?,?,?)`, []any{string(frozen), stamp, stamp, stamp}},
 			{`INSERT INTO generation_attempts(id,task_id,ordinal,offering_json,state,submission_key,upstream_provider_id,upstream_job_id,opaque_json,started_at,updated_at,finished_at) VALUES ('recovery-attempt','recovery-source',1,?,'FAILED','old','tripo','private-remote','{"private":"checkpoint"}',?,?,?)`, []any{string(frozen), stamp, stamp, stamp}},
 		} {

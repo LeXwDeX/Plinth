@@ -15,9 +15,9 @@ func TestAgentPlanStepExtraSpendNeedsAPersonInManualMode(t *testing.T) {
 	store.grant.BudgetEligible = true // HumanBrowser + eligible: an Agent plan step
 	store.snapshot.ExtraCredits = 5
 	store.snapshot.EstimatedCredits = 10
-	service := policyService(store, &modeReader{mode: "manual"})
+	service := policyService(store, &modeReader{mode: "budget"})
 	service.Policy = service.Policy.WithCreditsThreshold(20)
-	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "budget"); !errors.Is(err, ErrHumanRequired) {
 		t.Fatalf("manual Agent plan step with extra credits: %v", err)
 	}
 	if store.approved != 0 || store.grant.Status != Pending {
@@ -27,7 +27,7 @@ func TestAgentPlanStepExtraSpendNeedsAPersonInManualMode(t *testing.T) {
 	store = policyFixture("text-to-image")
 	store.snapshot.ExtraCredits = 5
 	store.snapshot.EstimatedCredits = 10
-	service = policyService(store, &modeReader{mode: "manual"})
+	service = policyService(store, &modeReader{mode: "budget"})
 	service.Policy = service.Policy.WithCreditsThreshold(20)
 	if got, err := service.ApplyPolicy(context.Background(), store.grant); err != nil || got.Status != Approved {
 		t.Fatalf("panel step: %+v err=%v", got, err)
@@ -45,9 +45,9 @@ func TestUnpricedMeteredAgentStepIsNotFreeUnderTheManualThreshold(t *testing.T) 
 		return store
 	}
 	store := unpriced()
-	service := policyService(store, &modeReader{mode: "manual"})
+	service := policyService(store, &modeReader{mode: "budget"})
 	service.Policy = service.Policy.WithCreditsThreshold(20)
-	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "budget"); !errors.Is(err, ErrHumanRequired) {
 		t.Fatalf("manual unpriced metered step: %v", err)
 	}
 	store = unpriced()
@@ -59,7 +59,7 @@ func TestUnpricedMeteredAgentStepIsNotFreeUnderTheManualThreshold(t *testing.T) 
 	// A priced step under the threshold is still automatic in manual mode.
 	store = unpriced()
 	store.snapshot.EstimatedCredits = 5
-	service = policyService(store, &modeReader{mode: "manual"})
+	service = policyService(store, &modeReader{mode: "budget"})
 	service.Policy = service.Policy.WithCreditsThreshold(20)
 	if got, err := service.ApplyPolicy(context.Background(), store.grant); err != nil || got.Status != Approved {
 		t.Fatalf("manual priced step: %+v err=%v", got, err)

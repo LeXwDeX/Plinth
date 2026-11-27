@@ -4405,23 +4405,7 @@ type ChatThreeViewMessages struct {
 	// an earlier group of the session still waits on its card or runs
 	// (#665): nothing new is created, submitted or charged. Fields: {run}.
 	// Optional: a Catalog without it takes the built-in Catalog's.
-	DuplicateRun string `json:"duplicate_run,omitempty"`
-	// PausedRun refuses a new group of the same source picture right after
-	// the previous turn stopped that picture's group with required views
-	// left (at its generation checkpoint, #689): a new group would draw and
-	// charge the front view again. Nothing is created, submitted or charged;
-	// the views left continue on the card. Fields: {run}. Optional: a Catalog
-	// without it takes the built-in Catalog's.
-	PausedRun string `json:"paused_run,omitempty"`
-	// CheckpointPaused is the Agent's receipt when the continuation stops at
-	// the turn's generation checkpoint (#689, #693): the views left are not
-	// submitted and continue on the card. Fields: {run}, {view}. Optional.
-	CheckpointPaused string `json:"checkpoint_paused,omitempty"`
-	// CheckpointNote ends a reply whose three-view continuation stopped at the
-	// generation checkpoint, in place of
-	// presentation.messages.generation_checkpoint_reached: the views left
-	// continue on the card, not by replying (#689). Field: {count}. Optional.
-	CheckpointNote    string `json:"checkpoint_note,omitempty"`
+	DuplicateRun      string `json:"duplicate_run,omitempty"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
@@ -4558,11 +4542,10 @@ type ChatApprovalPolicySchema struct {
 	// that does not declare the field (every one written before #490) reads as 0.
 	// Server-only: the browser cannot price a step before it is frozen.
 	ManualCreditsThreshold int `json:"manual_credits_threshold"`
-	// GenerationCheckpoint is, per approval mode, how many paid generations
-	// one reply runs before it stops at a checkpoint (#694): the reply ends
-	// with presentation.messages.generation_checkpoint_reached and the
-	// person's next message starts a fresh count. A mode it does not name
-	// keeps agent.max_generation_calls_per_turn. Server-only.
+	// GenerationCheckpoint is, per approval mode, the checkpoint window of a
+	// session (#702): after every that many approved steps of the session,
+	// the next step asks a person once on its approval card. Only auto and
+	// budget have one; strict asks for every step. Server-only.
 	GenerationCheckpoint map[string]int `json:"generation_checkpoint,omitempty"`
 	// Budget is the production-plan budget of budget mode. Server-only.
 	Budget ChatApprovalBudgetSchema `json:"budget"`
@@ -6883,10 +6866,6 @@ type ChatMessageTexts struct {
 	// chat.agent.max_tool_rounds_per_turn (#665); {limit} is that bound.
 	// Optional: without it the reply ends without a note.
 	ToolRoundsCapped string `json:"tool_rounds_capped,omitempty"`
-	// GenerationCheckpointReached ends a reply stopped at its approval mode's
-	// generation checkpoint (#694); {count} is that checkpoint. Required when
-	// approval_policy.generation_checkpoint is declared.
-	GenerationCheckpointReached string `json:"generation_checkpoint_reached,omitempty"`
 	// ToolResultTruncated is the note on a tool result shortened to
 	// chat.agent.max_tool_result_characters (#665): {tool} is the tool name,
 	// {size} the original length and {limit} the bound, both in characters,

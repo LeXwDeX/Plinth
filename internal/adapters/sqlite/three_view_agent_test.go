@@ -32,6 +32,11 @@ func TestAgentStartedFrontViewIsTheFirstSlotOfTheGroup(t *testing.T) {
 	ctx := context.Background()
 	repo, _, _ := skillFixture(t)
 	insertGrantTurn(t, repo, "turn-a", "owner-a", "session-a")
+	// #702: strict asks for every step; the budget ("approve") mode approves
+	// the 2D views these tests submit.
+	if _, err := repo.db.Exec(`UPDATE go_chat_sessions SET approval_mode='budget' WHERE id='session-a'`); err != nil {
+		t.Fatal(err)
+	}
 	gateway := &skillRecoveryGateway{repo: repo}
 	recipe := skillrun.Recipe{ID: "image-three-view", Revision: "r1", Steps: []skillrun.StepSpec{{
 		Key: "front", Label: "Front", Capability: generation.ImageToImage, OfferingID: "offering-i2i", OfferingRevision: "r7",
@@ -115,6 +120,11 @@ func TestModelSourceOfAnOlderGroupIsStillItsFrontView(t *testing.T) {
 	ctx := context.Background()
 	repo, _, _ := skillFixture(t)
 	insertGrantTurn(t, repo, "turn-a", "owner-a", "session-a")
+	// #702: strict asks for every step; the budget ("approve") mode approves
+	// the 2D views these tests submit.
+	if _, err := repo.db.Exec(`UPDATE go_chat_sessions SET approval_mode='budget' WHERE id='session-a'`); err != nil {
+		t.Fatal(err)
+	}
 	gateway := &skillRecoveryGateway{repo: repo}
 	recipe := skillrun.Recipe{ID: "image-three-view", Revision: "r1", Steps: []skillrun.StepSpec{{
 		Key: "front", Label: "Front", Capability: generation.ImageToImage, OfferingID: "offering-i2i", OfferingRevision: "r7",
