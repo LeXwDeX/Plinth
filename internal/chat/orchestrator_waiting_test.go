@@ -2,6 +2,7 @@ package chat_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -40,6 +41,9 @@ type waitingExecutor struct {
 	accepted             chan string
 	observationFailsOnce bool
 	omitBoundDeadline    bool
+	// boundSummary is the summary the paid call's result carries once its
+	// bound Task is terminal (#611).
+	boundSummary json.RawMessage
 }
 
 func newWaitingExecutor() *waitingExecutor {
@@ -79,7 +83,7 @@ func (e *waitingExecutor) Execute(_ context.Context, command chat.ToolCommand, o
 		}
 		return chat.ToolResult{TaskID: command.BoundTaskID, AwaitTask: true, WaitUntil: command.TaskWaitDeadline}, nil
 	}
-	return chat.ToolResult{TaskID: command.BoundTaskID, AgentContent: string(state)}, nil
+	return chat.ToolResult{TaskID: command.BoundTaskID, AgentContent: string(state), Summary: e.boundSummary}, nil
 }
 
 func TestWaitingScannerHonorsDeadlineWhenTaskCannotBeRead(t *testing.T) {
