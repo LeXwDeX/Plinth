@@ -10,7 +10,6 @@ import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { unavailableLabel } from '@/lib/unavailable';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { schemaText } from '@/lib/product-schema';
-import { handleLabel } from '@/lib/workspace/object-handle';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
 
@@ -69,7 +68,7 @@ function StageImageModal() {
       <header className="flex h-11 shrink-0 items-center gap-2 px-3 text-white" onPointerDown={(event) => { if (event.target === event.currentTarget) close(); }}>
         <h2 className="min-w-0 truncate text-sm font-medium" data-testid="stage-image-label">{image.label}</h2>
         {image.handle ? (
-          <span className="shrink-0 rounded-sm bg-black/60 px-1.5 py-0.5 font-mono text-[11px] leading-none text-white ring-1 ring-white/20" data-testid="stage-image-handle">{handleLabel(image.handle)}</span>
+          <span className="shrink-0 rounded-sm bg-black/60 px-1.5 py-0.5 font-mono text-[11px] leading-none text-white ring-1 ring-white/20" data-testid="stage-image-handle">{image.handle}</span>
         ) : null}
         <span className="flex-1" />
         <HintTooltip name={closeLabel}>

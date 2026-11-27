@@ -27,6 +27,8 @@ export interface QueuedTurn {
   selectionMask?: { maskAssetId: string };
   /** #65: the structured multiview request the turn was queued with. */
   multiview?: MultiviewTurnRequest;
+  /** #678: the 3D model the person confirmed for this one turn (by workspace domain); no lock was written. */
+  domainModels?: Record<string, string>;
   /** #154: the one-turn style-lock exemption the turn was queued with. */
   styleLockSkipped?: boolean;
   /**

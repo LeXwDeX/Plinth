@@ -88,7 +88,7 @@ describe('mask and merge wiring', () => {
   it('offers the free merge when the dashed frame holds more than the object picture, and runs it on the board', () => {
     expect(header).toContain('artboardDiffersFromObject(boardNodes, artboard, object');
     expect(header).toContain("requestImageCommand('send-board')");
-    expect(header).toMatch(/merge: mergeable \? \{ run: \(\) => requestImageCommand\('merge-version'\)/);
+    expect(header).toMatch(/: mergeable \? \{ run: \(\) => requestImageCommand\('merge-version'\)/);
     expect(actionsModule).toContain("merge: 'stage-merge'");
     expect(stageActions.find((action) => action.id === 'merge')).toMatchObject({ label_key: 'ui.studio.merge.action', group: 'produce', kinds: ['board', 'image'] });
     expect(board).toContain("imageCommand.kind === 'merge-version'");
@@ -124,7 +124,7 @@ describe('mask and merge wiring', () => {
     expect(board.match(/toast\.error\(ui\.exportFailed\)/g)).toHaveLength(1);
     expect(board).toContain('currentObjectLayer(nodes, selection, sessionID, proxyAssetUrl)');
     // The toolbar button follows the same rule as the press: off only while the frame is empty, with that reason.
-    expect(header).toMatch(/inpaint: object\s*\? \{\s*run: \(\) => requestImageCommand\('inpaint'\),\s*disabled: !boardHasContent,\s*reason: text\('ui\.studio\.stage\.action\.inpaint_board_empty'\),/);
+    expect(header).toMatch(/inpaint: object\s*\? \{\s*run: \(\) => requestImageCommand\('inpaint'\),\s*disabled: offBoard \|\| !boardHasContent,\s*reason: offBoard \? offBoardReason : text\('ui\.studio\.stage\.action\.inpaint_board_empty'\),/);
     expect(header).toContain('const objectLayer = currentObjectLayer(boardNodes, object, sessionId, proxyAssetUrl);');
     expect(messages['ui.studio.stage.action.inpaint_board_empty']).toBeTruthy();
     expect(messages['ui.studio.stage.action.remove_background_no_layer']).toBeTruthy();
@@ -136,7 +136,7 @@ describe('mask and merge wiring', () => {
     // The Schema lets the board kind carry the action; the header binds it, the image state keeps its own rule.
     expect(stageActions.find((action) => action.id === 'remove_background')).toMatchObject({ group: 'produce', kinds: ['image', 'board'] });
     expect(header).toContain('const boardPicture = selectedImageLayer(boardNodes, selectedNodeIds);');
-    expect(header).toMatch(/remove_background: object\s*\? \{\s*run: \(\) => requestImageCommand\('remove-background'\),\s*disabled: boardPicture === null && objectLayer === undefined,\s*reason: text\('ui\.studio\.stage\.action\.remove_background_no_layer'\),\s*\}\s*: \{\s*run: \(\) => requestImageCommand\('remove-background'\),\s*disabled: boardPicture === null,/);
+    expect(header).toMatch(/remove_background: object\s*\? \{\s*run: \(\) => requestImageCommand\('remove-background'\),\s*disabled: boardPicture === null && objectLayer === undefined,\s*reason: offBoard \? offBoardReason : text\('ui\.studio\.stage\.action\.remove_background_no_layer'\),\s*\}\s*: \{\s*run: \(\) => requestImageCommand\('remove-background'\),\s*disabled: boardPicture === null,/);
     expect(header).toContain("reason: text('ui.studio.stage.action.remove_background_board_reason')");
     expect(header).toContain("target: text('ui.studio.stage.action.remove_background_board_target')");
     expect(messages['ui.studio.stage.action.remove_background_board_reason']).toBe('先在画板上选中一张图');
@@ -265,14 +265,23 @@ describe('stage toolbar structure', () => {
     expect(header.indexOf('<KindBadge kind={object.kind} />')).toBeLessThan(header.lastIndexOf('{actions}'));
   });
 
+  it('#681: keeps the board actions off, with how to put the picture there, while the picture on the stage is not on the board', () => {
+    const messages = (defaultCatalog.application as unknown as { content: { messages: Record<string, string> } }).content.messages;
+    expect(header).toContain("const offBoard = object?.kind === 'image' && boardNodes !== undefined && objectLayer === undefined;");
+    expect(header).toContain("const offBoardReason = schemaText(schema, 'ui.studio.stage.action.not_on_board');");
+    expect(header).toMatch(/merge: offBoard \? \{ run: \(\) => undefined, variant: 'outline', disabled: true, reason: offBoardReason \}/);
+    expect(messages['ui.studio.stage.action.not_on_board']).toContain('放入画板');
+  });
+
   it('shows the board without a version as 画板 with the 2D badge, and offers merge, send and export on its content', () => {
     expect(header).toContain('data-kind="board"');
     expect(header).toContain('<KindBadge kind="image" />');
     expect(header).toContain("text('ui.studio.stage.board')");
     expect(header).toMatch(/const mergeable = object === null\s*\?\s*boardHasContent/);
-    expect(header).toContain("send_chat: object || boardHasContent ? { run: () => requestImageCommand('send-board') } : null");
+    // #677: offered whenever a picture is on the stage, greyed with its reason while the frame holds nothing.
+    expect(header).toMatch(/send_chat: object \|\| boardHasContent\s*\? \{\s*run: \(\) => requestImageCommand\('send-board'\),\s*disabled: !boardHasContent,\s*reason: text\('ui\.studio\.stage\.action\.send_chat_empty'\),\s*\}\s*: null,/);
     // Export stays in the toolbar while the frame is empty, greyed with its reason in the hover hint.
-    expect(header).toMatch(/export_board: \{ run: \(\) => requestImageCommand\('export-board'\), disabled: !boardHasContent, reason: text\('ui.studio.stage.action.export_board_empty'\) \}/);
+    expect(header).toMatch(/export_board: \{\s*run: \(\) => requestImageCommand\('export-board'\),\s*disabled: offBoard \|\| !boardHasContent,\s*reason: offBoard \? offBoardReason : text\('ui.studio.stage.action.export_board_empty'\),\s*\}/);
     for (const id of ['merge', 'send_chat', 'export_board']) {
       expect(stageActions.find((action) => action.id === id)?.kinds, id).toContain('board');
     }

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import catalog from '../../../internal/catalog/default_catalog.json';
 
 function source(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -43,5 +44,18 @@ describe('the board is the turn input only on a canvas turn', () => {
     expect(board).not.toContain("reportSnapshotFailure(schema, 'board-to-chat'");
     expect(chat).toContain('if (!boardModeRequest || boardModeRequest !== activeSessionId) return;');
     expect(chat).toContain('setBoardModeChosen(true);');
+  });
+
+  it('#677: answers every press of 「发送到对话」: lights the toggle, opens and focuses the composer, and says so', () => {
+    const effect = chat.slice(chat.indexOf('if (!boardModeRequest || boardModeRequest !== activeSessionId) return;'), chat.indexOf('const mentions = useMemo('));
+    expect(effect).toContain("if (boardTurnOnRef.current) toast.info(schemaText(schema, 'ui.studio.stage.action.send_chat_already_on'));");
+    expect(effect).toContain("toast.success(schemaText(schema, 'ui.studio.stage.action.send_chat_done'));");
+    expect(effect).toContain('if (useStudioStore.getState().chatCollapsed) setCollapsed(false);');
+    expect(effect).toContain("focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer'))");
+    const messages = (catalog.application as unknown as { content: { messages: Record<string, string> } }).content.messages;
+    // The hint says what the button really does now: no attachment, the next message is a canvas turn.
+    expect(messages['ui.studio.stage.action.send_chat_hint']).toContain('以画板为主');
+    expect(messages['ui.studio.stage.action.send_chat_hint']).not.toContain('附件');
+    for (const key of ['send_chat_done', 'send_chat_already_on', 'send_chat_empty']) expect(messages[`ui.studio.stage.action.${key}`], key).toBeTruthy();
   });
 });

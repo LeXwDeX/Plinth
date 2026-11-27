@@ -20,6 +20,7 @@ import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/mode
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { useModelCaptureBlock } from '@/hooks/use-model-capture-block';
+import { useModel3DConfirmStore } from '@/store/model3d-confirm-store';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useAuth } from '@/hooks/use-auth';
 import { writeSessionAgentParams } from '@/hooks/use-session-agent-params';
@@ -371,7 +372,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             <Action type="button" variant="outline" size="sm" onClick={() => void regenerate()} data-testid="result-detail-regenerate"><RotateCw />{text('ui.result.detail.regenerate')}</Action>
           ) : null}
           {actions.sendTo3D && object ? (
-            <Action type="button" variant="outline" size="sm" onClick={() => run(() => toThreeD(object))} data-testid="result-detail-to3d"><Box />{text('ui.studio.result.to_3d')}</Action>
+            <Action type="button" variant="outline" size="sm" onClick={() => run(() => toThreeD(object) || useModel3DConfirmStore.getState().request !== null)} data-testid="result-detail-to3d"><Box />{text('ui.studio.result.to_3d')}</Action>
           ) : null}
           {splatTool && displayTarget.kind === 'image' && actions.sendTo3D && object ? (
             <HintTooltip name={text('ui.studio.action.to_splat')} reason={splatOfferingsLoading ? text('ui.workspace.models.loading')

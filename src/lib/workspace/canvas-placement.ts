@@ -8,9 +8,10 @@ import type { CurrentObject } from '@/store/workspace-store';
  *   重渲染、自动保存、SSE 更新都不会把它放回来。
  * - 打开会话时恢复的当前对象（`restored`）只决定舞台显示什么，不往画布上放东西，
  *   所以刷新后用户删掉的图不会复活。
- * - 用户再次明确选择同一结果（选用）会产生新的当前对象，可以再次放置（即“重新加入”）。
- * - #559：只查看（`placement: 'view'`，版本条点击）不放置，画布完全为空时只放这一张；
- *   显式插入（`placement: 'insert'`，「插入到画布」）只放这一张，回执由调用方写入。
+ * - #559/#681：只查看（`placement: 'view'`：版本条单击、结果卡单击、选用等一切单击）永不放置，
+ *   画板为空时也不放；显式插入（`placement: 'insert'`：双击、「插入到画布」「放入画板」）只放这一张，
+ *   回执由调用方写入。
+ * - 没有 `placement` 的当前对象只剩 Agent 新结果的一次性自动加入（#239/#262），按整组放置。
  */
 export function imagesToPlace(
   selection: CurrentObject | null,
@@ -18,7 +19,6 @@ export function imagesToPlace(
   placed: WeakSet<CurrentObject>,
   suppressedTaskIds?: ReadonlySet<string>,
   placedResults?: readonly string[] | null,
-  boardEmpty = false,
 ): string[] {
   if (!selection || !sessionId || selection.kind !== 'image' || selection.restored) return [];
   if (selection.taskId.startsWith('canvas:') || selection.sessionId !== sessionId) return [];
@@ -35,8 +35,8 @@ export function imagesToPlace(
   }
   if (placed.has(selection)) return [];
   placed.add(selection);
-  // A view is spent here too: the board emptying later does not bring this picture back.
-  if (selection.placement === 'view') return boardEmpty ? [selection.url] : [];
+  // #681: a click never changes the board, an empty one included.
+  if (selection.placement === 'view') return [];
   if (selection.placement === 'insert') return [selection.url];
   return selection.imageUrls ?? [selection.url];
 }

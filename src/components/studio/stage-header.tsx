@@ -94,6 +94,10 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   const boardPicture = selectedImageLayer(boardNodes, selectedNodeIds);
   // The version's own layer; the person may have deleted it while other layers stay (#278).
   const objectLayer = currentObjectLayer(boardNodes, object, sessionId, proxyAssetUrl);
+  // #681: a click selects a picture without putting it on the board, so the picture on the stage may not be on the
+  // board at all. The board actions would then act on other content: they stay off and say how to put it there.
+  const offBoard = object?.kind === 'image' && boardNodes !== undefined && objectLayer === undefined;
+  const offBoardReason = schemaText(schema, 'ui.studio.stage.action.not_on_board');
   const showProcess = useStudioStore((state) => state.showProcess);
   const processing = useModelProcessingCapabilities().available;
   const requestImageCommand = useStudioStore((state) => state.requestImageCommand);
@@ -134,7 +138,8 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   // One entry per action id the code can handle (the type makes a missing id a compile error). null: not
   // offered in the current state. The Schema's stage_actions decide which of these are drawn, and where.
   const bindings: Record<StageActionId, ActionBinding | null> = {
-    merge: mergeable ? { run: () => requestImageCommand('merge-version'), variant: 'outline' } : null,
+    merge: offBoard ? { run: () => undefined, variant: 'outline', disabled: true, reason: offBoardReason }
+      : mergeable ? { run: () => requestImageCommand('merge-version'), variant: 'outline' } : null,
     continue_from: object && older
       ? {
         run: () => {
@@ -149,18 +154,19 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
     inpaint: object
       ? {
         run: () => requestImageCommand('inpaint'),
-        disabled: !boardHasContent,
-        reason: text('ui.studio.stage.action.inpaint_board_empty'),
+        disabled: offBoard || !boardHasContent,
+        reason: offBoard ? offBoardReason : text('ui.studio.stage.action.inpaint_board_empty'),
       }
       : null,
     // With a picture on the stage it acts on the selected layer, else on that picture (the workspace board decides, see
     // removeBackgroundTarget); once that picture's layer is deleted, only a selected picture layer is left to act on.
-    // On a board without a version it needs exactly one picture layer selected.
+    // On a board without a version it needs exactly one picture layer selected. #681: a picture layer the person
+    // selected on the board is explicit; without one, a picture that is not on the board says how to put it there.
     remove_background: object
       ? {
         run: () => requestImageCommand('remove-background'),
         disabled: boardPicture === null && objectLayer === undefined,
-        reason: text('ui.studio.stage.action.remove_background_no_layer'),
+        reason: offBoard ? offBoardReason : text('ui.studio.stage.action.remove_background_no_layer'),
       }
       : {
         run: () => requestImageCommand('remove-background'),
@@ -188,9 +194,20 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
     capture_2d: object
       ? { run: () => captureToTwoD(object), disabled: !object.assetId || captureBlock !== null, reason: text(captureBlock ?? CAPTURE_BLOCK_TEXT.notReady) }
       : null,
-    // A picture can always be sent; with only the board, there must be something in the frame to send.
-    send_chat: object || boardHasContent ? { run: () => requestImageCommand('send-board') } : null,
-    export_board: { run: () => requestImageCommand('export-board'), disabled: !boardHasContent, reason: text('ui.studio.stage.action.export_board_empty') },
+    // 发送到对话 makes the next message a canvas turn (#644): with a picture on the stage it is always offered, but
+    // #677: greyed with its reason while there is no dashed frame or nothing in it, so a press never does nothing.
+    send_chat: object || boardHasContent
+      ? {
+        run: () => requestImageCommand('send-board'),
+        disabled: !boardHasContent,
+        reason: text('ui.studio.stage.action.send_chat_empty'),
+      }
+      : null,
+    export_board: {
+      run: () => requestImageCommand('export-board'),
+      disabled: offBoard || !boardHasContent,
+      reason: offBoard ? offBoardReason : text('ui.studio.stage.action.export_board_empty'),
+    },
     // Pictures and models both compare (models turn side by side); only a picture has a large view.
     compare: object ? { run: () => (comparing ? endCompare() : startCompare()), pressed: comparing } : null,
     enlarge: object ? { run: () => openStageLightbox() } : null,

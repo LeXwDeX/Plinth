@@ -63,42 +63,32 @@ describe('imagesToPlace (#239)', () => {
   });
 });
 
-describe('looking at a version and inserting it (#559)', () => {
+describe('looking at a version and inserting it (#559, #681)', () => {
   const view = (extra: Partial<CurrentObject> = {}) => result({ placement: 'view', assetId: 'asset_a', ...extra });
 
   it('does not put a looked-at picture on the board, so a deleted layer does not come back', () => {
     const placed = new WeakSet<CurrentObject>();
     // The person deleted the layer earlier; the board still holds other content.
-    expect(imagesToPlace(view(), 's1', placed, undefined, ['since:x', 'task_a#asset_a'], false)).toEqual([]);
+    expect(imagesToPlace(view(), 's1', placed, undefined, ['since:x', 'task_a#asset_a'])).toEqual([]);
     // Looking again is a new object, still not placed.
-    expect(imagesToPlace(view(), 's1', placed, undefined, ['since:x', 'task_a#asset_a'], false)).toEqual([]);
+    expect(imagesToPlace(view(), 's1', placed, undefined, ['since:x', 'task_a#asset_a'])).toEqual([]);
   });
 
-  it('shows the one looked-at picture when the board is empty, never a whole candidate group', () => {
-    const selection = view({ imageUrls: ['/a.png', '/b.png'] });
-    const placed = new WeakSet<CurrentObject>();
-    expect(imagesToPlace(selection, 's1', placed, undefined, null, true)).toEqual(['/a.png']);
-    // The event is spent: the board emptying again later does not bring it back.
-    expect(imagesToPlace(selection, 's1', placed, undefined, null, true)).toEqual([]);
-  });
-
-  it('spends a looked-at picture on a busy board, so the board emptying later does not place it', () => {
-    const selection = view();
-    const placed = new WeakSet<CurrentObject>();
-    expect(imagesToPlace(selection, 's1', placed, undefined, null, false)).toEqual([]);
-    expect(imagesToPlace(selection, 's1', placed, undefined, null, true)).toEqual([]);
+  it('#681: a click never puts anything on the board, an empty one included, and never a whole candidate group', () => {
+    expect(imagesToPlace(view({ imageUrls: ['/a.png', '/b.png'] }), 's1', new WeakSet(), undefined, null)).toEqual([]);
+    expect(imagesToPlace(view(), 's1', new WeakSet())).toEqual([]);
   });
 
   it('inserts exactly the chosen picture when the person asks for it, even after it was deleted', () => {
     const insert = result({ placement: 'insert', assetId: 'asset_a', imageUrls: ['/a.png', '/b.png'] });
-    expect(imagesToPlace(insert, 's1', new WeakSet(), undefined, ['since:x', 'task_a#asset_a'], false)).toEqual(['/a.png']);
+    expect(imagesToPlace(insert, 's1', new WeakSet(), undefined, ['since:x', 'task_a#asset_a'])).toEqual(['/a.png']);
   });
 
-  it('keeps the earlier rules for a choice (选用) and for models', () => {
-    expect(imagesToPlace(result({ imageUrls: ['/a.png', '/b.png'] }), 's1', new WeakSet(), undefined, null, false)).toEqual(['/a.png', '/b.png']);
+  it('keeps the group join for an Agent result (no placement) and ignores models', () => {
+    expect(imagesToPlace(result({ imageUrls: ['/a.png', '/b.png'] }), 's1', new WeakSet(), undefined, null)).toEqual(['/a.png', '/b.png']);
     expect(imagesToPlace(result({ kind: 'model', placement: 'insert' }), 's1', new WeakSet())).toEqual([]);
-    expect(imagesToPlace(result({ kind: 'model', placement: 'view' }), 's1', new WeakSet(), undefined, null, true)).toEqual([]);
-    expect(imagesToPlace(view({ restored: true }), 's1', new WeakSet(), undefined, null, true)).toEqual([]);
+    expect(imagesToPlace(result({ kind: 'model', placement: 'view' }), 's1', new WeakSet(), undefined, null)).toEqual([]);
+    expect(imagesToPlace(view({ restored: true }), 's1', new WeakSet(), undefined, null)).toEqual([]);
   });
 });
 
