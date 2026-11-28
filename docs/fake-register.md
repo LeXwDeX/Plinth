@@ -18,7 +18,7 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 27 | 23 | 2 | 52 | 2026-11-25 |
+| `tripo/v3` | 27 | 24 | 2 | 53 | 2026-11-25 |
 | `openai/v1` | 5 | 15 | 0 | 20 | 2026-11-25 |
 | `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 4 | 2 | 8 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 5 | 0 | 7 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 84 | 102 | 5 | 191 | 2026-11-25 |
+| 合计 | 84 | 103 | 5 | 192 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -202,6 +202,14 @@
 - 依据：dev-test 真实运行观测（文生与图生）（#294，2026-11-12）
 - 核对日期：2026-11-12
 - 没有真实样本的原因：真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；multiview-to-model 未观测，按同系列推定
+
+#### `tripo-v3/generation-texture-off-glb` · artifact-shape · constructed
+
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /models/convert`
+- 行为：生成请求 texture=false（且未开 pbr）时，生成任务及其模型转换（如 GLTF 导出）交付的 GLB 都是无贴图夹具：0 个 texture、0 个 image、1 个 material（untextured.go）；texture 为 true 或缺省时仍交付原有带贴图 GLB（1 张贴图，真实为 3 张）。image-to-model、multiview-to-model 按文生推定；pbr=true 且 texture=false 按 Plinth 计价视为有纹理；无贴图源的 FBX/OBJ/USDZ/3MF 转换、绑骨与减面仍是带贴图夹具。
+- 依据：v1.9.6 发布后正式测试环境真实回归的 Plinth 侧观测（tripo/tripo-v3.1-full/text-to-3d，texture 关与默认各一次）（#704，2026-11-28，revision f5bc5e10；计数与报价入库为 internal/testutil/fakeupstream/tripo/v3/testdata/observation-704-texture-off.json）
+- 核对日期：2026-11-28
+- 没有真实样本的原因：只有 Plinth 侧观测（冻结输入、native_quote、交付 GLB 的 texture/image/material 计数）入库；原始 HTTP 请求与响应未作为脱敏 wire 样本录制，GLB 字节未入库，无法按登记表规则引用 candidate 样本标 real；image-to-model、multiview-to-model 与 pbr 组合未观测
 
 #### `tripo-v3/image-to-model-h-shape` · response-shape · real
 

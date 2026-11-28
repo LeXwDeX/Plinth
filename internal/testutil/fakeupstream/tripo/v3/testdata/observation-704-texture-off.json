@@ -1,0 +1,38 @@
+{
+  "issue": 704,
+  "observed_at": "2026-11-28",
+  "app_revision": "f5bc5e10",
+  "environment": "v1.9.6 发布后的正式测试环境真实回归，Agent 专用账号，经用户同意的付费调用",
+  "offering": "tripo/tripo-v3.1-full/text-to-3d",
+  "upstream_model": "v3.1-20260211",
+  "evidence": "Plinth 侧观测：公开任务的冻结输入、native_quote 与交付 GLB 的解析结果；原始 HTTP 请求与响应未录制，GLB 字节未入库。不含任务 ID、资产 ID、URL、用户信息与密钥。",
+  "runs": [
+    {
+      "name": "texture-off",
+      "frozen_input": {"texture": false, "pbr": false, "texture_quality": "extreme"},
+      "native_quote": {
+        "unit": "tripo.credit",
+        "base_amount": "10",
+        "extra_amount": "50",
+        "total_amount": "60",
+        "components": {"detailed_geometry": "20", "format_conversions": "30"}
+      },
+      "task_status": "SUCCEEDED",
+      "glb": {"textures": 0, "images": 0, "materials": 1}
+    },
+    {
+      "name": "texture-on-default",
+      "frozen_input": {"texture": true, "pbr": true, "texture_quality": "extreme"},
+      "native_quote": {
+        "unit": "tripo.credit",
+        "base_amount": "10",
+        "extra_amount": "80",
+        "total_amount": "90",
+        "components": {"detailed_geometry": "20", "extreme_texture": "20", "format_conversions": "30", "standard_texture": "10"}
+      },
+      "task_status": "SUCCEEDED",
+      "glb": {"textures": 3, "images": 3, "materials": 1}
+    }
+  ],
+  "note": "两个任务的必需产物槽位齐全，glb→gltf 的本地格式转换也成功。texture_quality=extreme 留在 texture-off 的冻结输入里，不影响报价与产物。"
+}

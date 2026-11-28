@@ -18,7 +18,9 @@ import (
 // "fbx:animation" variants that carry a skin and keyframes): "glb", "gltf", "fbx", "obj" (an OBJ ZIP with
 // its material library and texture), "stl", "usdz" and "3mf" (and "3mf:tripo", the package Tripo's
 // conversion writes, tripo3mf.go), plus the texture "png". The mesh and the format writers are Mock
-// generation's (internal/providers/mock/modelfiles); only the texture is drawn here. The fixture lives
+// generation's (internal/providers/mock/modelfiles); only the texture is drawn here. "glb:untextured" is
+// the same mesh with one material and no texture or image, the model a Tripo generation with texture
+// off delivers (#704). The fixture lives
 // in testutil, not in the Mock adapter, so no production package carries a test-only export.
 func smallModelFiles() (map[string]File, error) {
 	seed := sha256.Sum256([]byte("fixture\x00"))
@@ -36,6 +38,10 @@ func smallModelFiles() (map[string]File, error) {
 		return nil, err
 	}
 	glbAnimation, err := modelfiles.BuildGLB(mesh, texture, "Fixture", "animation")
+	if err != nil {
+		return nil, err
+	}
+	glbUntextured, err := buildGLB(mesh, nil, glbExtras{})
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +74,12 @@ func smallModelFiles() (map[string]File, error) {
 		return nil, err
 	}
 	return map[string]File{
-		"glb":           {"model/gltf-binary", glb},
-		"glb:skeleton":  {"model/gltf-binary", glbSkeleton},
-		"glb:animation": {"model/gltf-binary", glbAnimation},
-		"fbx:skeleton":  {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "skeleton")},
-		"fbx:animation": {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "animation")},
+		"glb":            {"model/gltf-binary", glb},
+		"glb:skeleton":   {"model/gltf-binary", glbSkeleton},
+		"glb:animation":  {"model/gltf-binary", glbAnimation},
+		"glb:untextured": {"model/gltf-binary", glbUntextured},
+		"fbx:skeleton":   {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "skeleton")},
+		"fbx:animation":  {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "animation")},
 		// A conversion of a textured model carries the texture in the format the
 		// request asked for (the official default is JPEG), embedded in the FBX.
 		"fbx:texture-png":  {"model/fbx", modelfiles.BuildTexturedFBX(mesh, "FIXTURE", "texture.png", texture)},

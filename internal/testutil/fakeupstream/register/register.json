@@ -506,6 +506,28 @@
       "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；multiview-to-model 未观测，按同系列推定"
     },
     {
+      "id": "tripo-v3/generation-texture-off-glb",
+      "provider": "tripo",
+      "api": "v3",
+      "endpoints": [
+        "POST /generation/text-to-model",
+        "POST /generation/image-to-model",
+        "POST /generation/multiview-to-model",
+        "POST /models/convert"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "生成请求 texture=false（且未开 pbr）时，生成任务及其模型转换（如 GLTF 导出）交付的 GLB 都是无贴图夹具：0 个 texture、0 个 image、1 个 material（untextured.go）；texture 为 true 或缺省时仍交付原有带贴图 GLB（1 张贴图，真实为 3 张）。image-to-model、multiview-to-model 按文生推定；pbr=true 且 texture=false 按 Plinth 计价视为有纹理；无贴图源的 FBX/OBJ/USDZ/3MF 转换、绑骨与减面仍是带贴图夹具。",
+      "basis": [
+        {
+          "source": "v1.9.6 发布后正式测试环境真实回归的 Plinth 侧观测（tripo/tripo-v3.1-full/text-to-3d，texture 关与默认各一次）",
+          "section": "#704，2026-11-28，revision f5bc5e10；计数与报价入库为 internal/testutil/fakeupstream/tripo/v3/testdata/observation-704-texture-off.json"
+        }
+      ],
+      "checked_at": "2026-11-28",
+      "why_not_real": "只有 Plinth 侧观测（冻结输入、native_quote、交付 GLB 的 texture/image/material 计数）入库；原始 HTTP 请求与响应未作为脱敏 wire 样本录制，GLB 字节未入库，无法按登记表规则引用 candidate 样本标 real；image-to-model、multiview-to-model 与 pbr 组合未观测"
+    },
+    {
       "id": "tripo-v3/image-to-model-h-shape",
       "provider": "tripo",
       "api": "v3",
