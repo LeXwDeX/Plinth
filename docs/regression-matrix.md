@@ -42,6 +42,7 @@
 | G5 | 本表与脚本不脱节 | #705 | unit | `python3 -m unittest scripts.tests.test_regression_matrix` | 表里路径都存在、状态合法、`GAP` 有备注、必跑脚本在主表、`AGENTS.md` 引用本表 | OK | — | | 随 G1 的「scripts tests」运行 |
 | G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免） | #707 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
 | G7 | 发布前过发布门禁 | #707 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选>` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `formal-test` 前对候选 revision 运行；回执格式见 `docs/release-gate.md` |
+| G9 | 画风迁移真实验收脚本的离线判定（场景表、闸门拒绝、合成图为 RGB PNG、判定函数） | #723 | unit | `python3 -m unittest scripts.tests.test_style_transfer_live` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
 
 ### 发布后自动冒烟（dev-test fake 形态发布后 `release-env.py` 自动跑）
 
@@ -118,7 +119,7 @@
 | R-699a | 比例选择卡显示 Agent 写的整句问题（≤300 字符原样，不传显示默认问题） | #699 | unit | `internal/chat/choice_question_699_test.go`、`internal/transport/httpapi/chat_choices_test.go` | `go test` 通过 | OK | f5bc5e10 2026-11-28 | E2 | v1.9.6 在 dev-test 浏览器上看过 299/300 字符；超过 300 字符整张卡不出现（已知，#705） |
 | R-699b | 画风迁移的纠正模板 | #699 | unit | `internal/chat/restyle_card_699_test.go` | `go test` 通过 | OK | — | | |
 | R-699c | 透明底显示棋盘格（结果卡、版本条、全部产出、详情、看大图、舞台、附件缩略图） | #699 | unit | `src/components/studio/transparency-checker-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 浏览器侧由入库前的临时脚本看过，未入库 |
-| R-699d | 真实对话模型加真实 2D 的画风迁移（风格图无全身时先出比例卡，答完只提交一次生成） | #699 | PROD-paid | — | 先出选择卡、答完只提交一次生成；风格图有全身时不出卡 | GAP | — | | 只有临时验证与结论（记在 #699），没有入库脚本；要补一个 live-only 脚本 |
+| R-699d | 真实对话模型加真实 2D 的画风迁移（风格图无全身时先出比例卡，答完只提交一次生成） | #699 | dev-test-live-chat | `python3 scripts/regression/style-transfer-live.py --live` | 先出选择卡、答完只提交一次生成；风格图有全身时不出卡 | GAP | — | | 脚本见 #723，跑过后回写证据 |
 | R-688a | 图只在画板上：非画板轮 Agent 先查看并指向画板路径；画板轮发起三视图并停在批准卡 | #688 | dev-test-live-chat | `python3 scripts/smoke/smoke-live-chat-three-view-route.py --live` | 第一轮四条断言通过；第二轮正面停在批准卡并被拒绝 | OK | f5bc5e10 2026-11-28 | E2 | 第二轮在严格方式下等不到最终回复而超时（脚本缺陷：三视图的卡不在待批准列表里），待修 |
 | R-688b | 画板识别的五个说法（含画板轮对照） | #688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景「注意到画板」PASS | OK | de701fb8 2026-11-28 | E7 | 真实模型回答会波动，结论以多次运行为准；#709 起该脚本的判定改为 R-709-4；S1–S5 各 3 次全部通过 |
 | R-709-1 | `view_canvas` 只读画板图层：空画板、图层清单（`added_after_last_turn`、`in_frame`、`transformed`、`in_conversation`，`preview` 为 null 并带 `preview_reason`）、多图层或有标注时给「以画板为主继续」、截断统计、画板轮/有素材/同一回复重复调用由服务端拒绝 | #709 | unit | `go test ./internal/chat/agenttools/ -run 709` | 单测通过 | OK | — | | |
