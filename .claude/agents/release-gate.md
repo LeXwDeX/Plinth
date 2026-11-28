@@ -27,6 +27,7 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 只用只读命令：`git log`/`git show`/`git diff`、`gh issue view <N> --repo LeXwDeX/Plinth --comments`、`gh api repos/LeXwDeX/Plinth/issues/comments/<id>`、`gh pr view`。不用 `gh` 做任何写操作。
 
 - 回归表里本次修改点涉及的每一行，`证据` 链接能打开，记录的是该行「最后验证」所写 revision 上的结果（不是更旧的版本、不是另一个分支）；该 revision 对候选是否仍有效（候选本身，或此后没有运行产物变化的祖先）由脚本判定。`unit` 行证据写 `CI` 的，`host-ci/gates` 状态由脚本核对，没有链接可开。`--phase promote` 时 `prod-` 层（`prod-readonly`、`prod-paid`）的行留给打 tag 前那次核对。
+- 发布覆盖清单（`docs/release-gate.md` ①b，脚本输出 `coverage_areas`）：`2D（fake）`、`3D（fake）`、`真实补漏` 每个覆盖面的行都在候选上有有效证据（证据链接能打开、对应该行「最后验证」revision）。「真实补漏」这一面不能只有 fake 证据：`dev-test-live-chat` 行的证据必须来自 live 形态（真实对话模型）的运行记录，`prod-paid`/`prod-readonly` 行的证据必须来自 `prod` 或 `--live-upstream` 形态的运行记录；只有 fake 证据、或证据看不出运行形态，记 `FAIL`。
 - DEV → TEST → 回归过程中发现的真实与 fake 差异：在关联 Issue/PR 评论里找出来，逐条确认已回灌进 fake 并合并进候选 revision（`git merge-base --is-ancestor <回灌提交> <head>`），或在回归表「Fake 与真实的已知差异」里登记为 `ACCEPTED` 且有用户同意日期。停在未合并分支里的回灌不算。
 - 候选 revision 在 `dev-test` 的机器冒烟报告 L0/L1/L1 Agent 三层 pass（0 skip、0 soft-fail），以 #2 或关联 Issue 里引用该报告的评论为准；你不登录任何主机。
 - #2 里有该候选 revision 的 `dev-test` 验收证据评论（L0、L1、L1_agent、related），revision 为候选完整 SHA。
@@ -37,12 +38,12 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 
 ## 输出格式
 
-1. 逐项列出，每项一行 `PASS` 或 `FAIL` 加原因：脚本 ①、脚本 ②、证据链接、fake 回灌已合并、冒烟报告、#2 验收证据、晋级前回归、晋级后回归（仅「打 tag 前」）、豁免。
+1. 逐项列出，每项一行 `PASS` 或 `FAIL` 加原因：脚本 ①、脚本 ①b（发布覆盖清单，按覆盖面各一行）、脚本 ②、证据链接、真实补漏的证据形态、fake 回灌已合并、冒烟报告、#2 验收证据、晋级前回归、晋级后回归（仅「打 tag 前」）、豁免。
 2. 一段结论：最终 `PASS` 或 `FAIL`；`FAIL` 时列出要补的具体事项。任一项 `FAIL` 结论就是 `FAIL`，没有「基本通过」「有条件通过」。
 3. 仅当结论为 `PASS` 时，输出一个回执 JSON 块（`rules_version` 是候选 revision 中 `docs/release-gate.md`「变更记录」表的行数，`changed_issues` 取脚本输出的 `changed_issues`，`checked_at` 为 UTC 日期）：
 
 ```json
-{"release_gate": 1, "revision": "<完整 40 位 SHA>", "status": "pass", "rules_version": 4, "base": "<上一个 tag>", "changed_issues": [704, 705], "checked_at": "2026-11-28"}
+{"release_gate": 1, "revision": "<完整 40 位 SHA>", "status": "pass", "rules_version": 5, "base": "<上一个 tag>", "changed_issues": [704, 705], "checked_at": "2026-11-28"}
 ```
 
 这个块由人或主会话贴到 #2 的评论里，晋级时 `release-env.py` 会读取它。

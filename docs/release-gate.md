@@ -4,7 +4,7 @@
 
 门禁由两部分组成：
 
-- `scripts/release-gate.py`：读本地 git 做确定性检查（下面的 ① 和 ②），输出 `PASS`/`FAIL` 与原因，退出码 0/1，用法错误 2。git 之外它只读一样东西：单元行以 `CI` 为证据时，该行 revision 的提交状态 `host-ci/gates`（只读 `gh api`，见 ①）。
+- `scripts/release-gate.py`：读本地 git 做确定性检查（下面的 ①、①b 和 ②），输出 `PASS`/`FAIL` 与原因，退出码 0/1，用法错误 2。git 之外它只读一样东西：单元行以 `CI` 为证据时，该行 revision 的提交状态 `host-ci/gates`（只读 `gh api`，见 ①）。
 - 门禁 Agent（`.claude/agents/release-gate.md`）：先读本文件，再跑脚本，然后用只读的 `gh` 核对脚本判断不了的证据（③），给出逐项结论；通过时输出回执 JSON。
 
 任一项不通过，整次门禁就是 `FAIL`，没有「基本通过」。
@@ -13,8 +13,8 @@
 
 | 时机 | 运行者 | 范围 |
 |---|---|---|
-| 晋级 `prod` 前：AGENTS.md 五阶段的阶段 3 收尾、进入阶段 4 之前（`dev-test` 发布、L0/L1/L1 Agent 与本次相关回归都做完之后） | 主会话调用门禁 Agent，`--phase promote` | ①②③（① 中 `prod-` 层的行与 ③ 中「晋级后回归」除外） |
-| 打 tag、发 GitHub Release 前：阶段 5 打 tag 之前（`prod` 人工 Review 与晋级后回归做完之后） | 主会话再次调用门禁 Agent，`--phase tag` | ①②③ 全部 |
+| 晋级 `prod` 前：AGENTS.md 五阶段的阶段 3 收尾、进入阶段 4 之前（`dev-test` 发布、L0/L1/L1 Agent 与本次相关回归都做完之后） | 主会话调用门禁 Agent，`--phase promote` | ①①b②③（①、①b 中 `prod-` 层的行与 ③ 中「晋级后回归」除外） |
+| 打 tag、发 GitHub Release 前：阶段 5 打 tag 之前（`prod` 人工 Review 与晋级后回归做完之后） | 主会话再次调用门禁 Agent，`--phase tag` | ①①b②③ 全部 |
 
 两次都对同一个候选 revision、以上一个 tag 为 `--base` 运行，只是阶段不同（不写 `--phase` 时按 `tag`，即全部要求）：
 
@@ -58,6 +58,26 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 
 **跑 dev-test 的 fake 行**：`python3 scripts/regression/run-fake-rows.py`（`--dry-run` 只列出要跑的行与命令，`--only <ID,...>` 只跑其中几行）依次运行主表里 `dev-test-fake` 层、状态为 `OK`/`MANUAL`、命令是单条 `python3`/`bash`/`node` 命令的行，逐行打印 `PASS`/`FAIL` 与耗时，输出带本地 `HEAD` 与日期，用来贴证据评论；它不改回归表。
 
+## ①b 发布覆盖清单（每次发布都核对）
+
+① 只核对本次改动涉及的行；①b 是对它的补强：正式发布到 `prod`、打 tag、发 GitHub Release 之前，2D、3D 的 fake 回归与真实补漏都要测到位，**不论本次改了哪些 Issue**（#738）。
+
+回归表「2.1 发布覆盖清单（门禁硬检查）」一节（列：`覆盖面`｜`行`｜`说明`）固定三个覆盖面，`行` 列写主表行 ID（`、` 或 `,` 分隔）：
+
+| 覆盖面 | 含义 |
+|---|---|
+| `2D（fake）` | `dev-test` fake 形态下 2D 生成与对话 / Agent 流程的回归行 |
+| `3D（fake）` | `dev-test` fake 形态下 3D（文生、图生、多视图、加工、转换、三视图转 3D 等）的回归行 |
+| `真实补漏` | 为补 fake 缺口而做的真实上游或真实对话模型回归行：`dev-test-live-chat` 的真实对话、真实 2D、`prod-paid` 的真实 3D，以及升级演练这类只能在真实环境做的行 |
+
+通过标准（脚本判断）：
+
+1. 回归表有这一节；三个覆盖面都在且每个至少一行；不能出现这三个以外的覆盖面。
+2. 清单里的每一行都在主表里，并且和 ① 第 3 条对修改点行的要求完全相同：`状态` 为 `OK` 或 `MANUAL`（`GAP`、`OBSOLETE` 不通过），`最后验证` 对候选有效，`证据` 非空（`unit` 行可写 `CI`，同样核对 `host-ci/gates`）。
+3. `--phase promote` 时，`prod-` 前缀（不区分大小写）的行按 ① 的推迟规则留到 `--phase tag`；推迟的行仍要存在、状态仍要是 `OK`/`MANUAL`。`--phase tag` 全部要求。
+
+脚本按覆盖面汇总（每个覆盖面几行、通过几行、推迟几行、未通过的行及原因），`--json` 输出里是 `coverage_areas`。清单只放有命令、本次发布能实际跑到的行，不放 `GAP` 行；某个覆盖面暂时没有可用行时，不硬凑，在关联 Issue 里记为缺口（这时门禁判 `FAIL`，直到补上可用的行）。
+
 ## ② fake 缺陷全程补齐并有文档记录
 
 通过标准（脚本判断）：
@@ -80,6 +100,7 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 2. #2 里有该候选 revision 的 `dev-test` 验收证据评论（L0、L1、L1_agent、related），评论里的 revision 是候选完整 SHA，链接真实指向本仓库对应评论。
 3. 晋级前回归证据（`dev-test` 上本次相关回归）存在且对应候选 revision；打 tag 前的第二次运行还要求晋级后回归证据（`prod` 上的回归）存在且对应候选 revision。
 4. 回归表里每一行的 `证据` 链接能打开，且记录的是该行「最后验证」revision 上的结果，而该 revision 已由脚本判定对候选有效（①）；抽查不够：本次修改点涉及的行逐条核对。`unit` 行的 `CI` 证据由脚本核对提交状态，不需要链接。
+5. 发布覆盖清单（①b）每个覆盖面的行，证据都对应其「最后验证」revision 且对候选有效；「真实补漏」这一面不能只有 fake 证据：`dev-test-live-chat` 行的证据必须来自 live 形态（真实对话模型）的运行记录，`prod-paid`/`prod-readonly` 行的证据必须来自 `prod` 或 `--live-upstream` 形态的运行记录。
 
 ## 回执
 
@@ -113,3 +134,4 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 | 2026-11-28 | ①的主表明确为「3. 主表」下的全部表，脚本逐表读取所有行 | 脚本原来只读到第一张表（门禁 5 行），其余小节的行没有被核对（#707） | 修正（收紧），无需放宽同意 |
 | 2026-11-28 | 环境名 `formal-test` 改为 `prod`，验收报告键 `formal_promotion` 改为 `prod_promotion`（格式号不变，不保留旧键） | 统一环境命名（#716） | 改名，检查项与标准不变，无需放宽同意 |
 | 2026-11-28 | ①放宽「最后验证必须正好是候选」：候选的祖先且此后没有运行产物变化（口径同豁免清单）也有效；新增 `unit` 行证据写 `CI` 时核对 `host-ci/gates` 为 success；回归表新增「5. 已知缺陷（不进门禁）」，缺陷由 Issue 跟踪、不拦发布；脚本加 `--phase promote|tag`，`promote` 不要求 `prod-` 层行的当前验证；新增 fake 行入口 `scripts/regression/run-fake-rows.py`。其余检查（fake 差异表、豁免清单、`Issue:` trailer、状态合法性、`GAP` 要有备注）不变 | 回归表在候选里，写不出候选自己的 SHA；单元行没有认 CI 的办法；没修的缺陷当成 GAP 行拦发布；PROD 层的行只能在晋级后验证（#718） | 放宽的只有「最后验证必须正好是候选」一条，维护者 2026-11-28 在对话中同意（#718）；其余为补充 |
+| 2026-11-28 | 新增①b 发布覆盖清单：回归表「2.1 发布覆盖清单（门禁硬检查）」固定 `2D（fake）`、`3D（fake）`、`真实补漏` 三个覆盖面，每个至少一行；清单里的行不论本次改了哪些 Issue 都按①第 3 条核对（`--phase promote` 推迟 `prod-` 行）；门禁 Agent 另核对「真实补漏」的证据来自真实形态 | 维护者在对话中要求「正式发布前让上线门禁过一遍，2D、3D fake、真实补漏都测到位」（#738） | 只收紧，无需放宽同意 |
