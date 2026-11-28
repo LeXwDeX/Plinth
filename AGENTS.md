@@ -50,11 +50,25 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 
 ## 开发与发布流程
 
-通用发布流程（自建 CI → GitHub Runner → 人工 Review → tag + GitHub Release）见用户全局提示词；本节只记录本项目特有的要求。
+按五个阶段连续推进，无需用户逐步催办；只有 `prod` 的预准备与重启须用户确认。细则与尚未实现的差距见 `docs/deployment.md`「五阶段发布流程」，门禁见「验收要求」，环境见「环境与运维」，流水线以 `.github/` 下 workflow 为准。
 
-- 门禁见「验收要求」。
-- 本项目各阶段的落地步骤见「实施流程」，`dev-test` 与 `prod` 的环境规则见「环境与运维」。
-- 流水线细节以 `.github/` 下 workflow 配置为准。
+### 实施流程
+
+1. **需求与方案**：用户与主 agent 确认需求大致方向后，主会话自动派发 `issue-researcher`（只取证不判断：查重，列相关旧 Issue、PR、提交与被取代的旧决策，标出与旧 Issue 要求的冲突），再派发 `requirements-analyst`（分析对系统与产品体验的影响，给完整方案，必含「不做或最小改动」，按奥卡姆剃刀选最小方案并写明每个新增项保护什么；用户方案不是最优解时明说分歧，不悄悄替换）。主会话把输出写成同一 Issue 的评论（标题行「Issue 调研」「需求分析」），审阅后开发。小修（文案、小 UX、纯文档订正）豁免；新增限制仍守「少限制用户」。
+2. **自测开发**：每个 Issue 单独开发、单独 PR，按依赖顺序提，PR 正文写完整并关闭对应 Issue。改行为前写清预期、边界和验证路径（Schema/共享接口与跨 Provider 链的检查面见部署文档）；TDD，按 `dev_test.md` §2 跑本机门禁与主机 CI，纯文档走轻量通道（#714）。PR 转 ready 时 GitHub 的 Codex 应用自动审核（或评论 `@codex review`）。**合并条件**：`host-ci/gates` 成功，且 Codex 对当前 head 的审核已完成、无未解决发现；有发现则修复推送，必要时再请求审核。
+3. **`dev-test` 全量回归**：全部 Issue 合并后用 `release-env.py release dev-test` 发布 `origin/main`（全新数据），核对 revision。第一轮 fake：自动 L0、L1、L1 Agent（判定见下节）加 `docs/regression-matrix.md` 本次相关行；fake 有遗漏才进第二轮真实 2D，用真实数据留记录，补全 fake 后复跑 fake 回归；3D 只补 fake，真实 3D 须当次同意。对话模型不通时按部署文档探测兜底，全部不通退回 fake 并在报告标明「真实 2D 回归本次未覆盖」。收尾对精确 `main` revision 跑一次 GitHub Runner 完整 CI（掉线时按 `dev_test.md` §2 手动触发），再派发 `release-gate`，回执贴 #2，通过才进入阶段 4。
+4. **构建与 `prod` 预准备**：在 `dev-test` 主机构建全部内容（镜像与配置），记录镜像 digest 与 revision，测哪个发哪个；`prod` 禁止开发与构建。镜像与配置送到 `prod` 预检，不动运行中的服务。
+5. **用户确认后重启更新**：出确认卡（版本、revision、镜像 digest、风险、预计停机、回退方案），同意后依次：配置备份（最多一份）与命名清楚的临时回退副本（验收后即删）、重启、`prod` 冒烟（L0 免费；L1 会调用真实对话模型，须当次同意，可在确认卡里一并取得）、验收、`release-gate` 再过一次、tag 与 GitHub Release。失败按部署协议回滚；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
+
+纯文档或规则修改且不影响运行产物时只走阶段 1–2。脚本自身的失败回滚见 `docs/deployment.md` §5 与 `dev_ops.md`「Agent 全自动发布协议」。
+
+| 子 agent | 触发点 |
+|---|---|
+| `issue-researcher` | 阶段 1，需求方向确认后自动 |
+| `requirements-analyst` | 阶段 1，调研完成后自动 |
+| `release-gate` | 阶段 3 收尾进入阶段 4 前；阶段 5 打 tag 前再一次；只有它硬拦截，缺调研或分析记录只警告 |
+
+子 agent 都只读，不替主会话做决定；触发条件同写在各自定义文件的 description 里，主会话据此自动委派。门禁以 `.claude/agents/release-gate.md` 与 `docs/release-gate.md` 为准。阶段 4、5 入口尚未实现：现行 `release-env.py release prod` 在目标主机构建并一步重启。
 
 ### 发布后冒烟判定与晋级校验
 
@@ -64,7 +78,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 - **skip 与 soft-fail 不算通过**：脚本的 `SKIP:`、`SOFT-FAIL:`（例如 L1 的「没有可用文生 3D 模型」「未取到待批准同意」）都让该层成为 `fail`；退出码非 0（含 `PAID-TASK-ALERT`）同样。缺汇总行也是 `fail`：脚本没跑完不能当成通过。任何一层 skip 或 soft-fail 都不得记成 PASS，也不得只跑其中一两层就晋级。
 - **失败处置**：这三层不在发布脚本的自动回滚范围内（发布本身已成功）。先在关联 Issue 记录证据与失败层，按部署协议恢复上一个已验证版本，再修复并重跑受影响检查与发布验收；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
 - **真实形态不自动跑**：`prod` 与带 `--live-upstream` 的 `dev-test` 发布不自动跑这三层，因为 L1 会调用真实对话模型，须按「上游接口与 Fake」每次取得当次同意；按 `docs/deployment.md` §6 手动执行并留证。
-- **晋级 `prod` 的四项检查**：`L0`、`L1`、`L1_agent`、`related` 各须 `status` 为 `pass`、`failed=0`、`passed>0`、`skipped=0`、`soft_failed=0`，并附本仓 Issue comment 的完整 URL。前三项由 `release-env.py` 读源环境发布根下的机器报告核对（报告存在即核对，缺失时回退到只核对 Issue comment）；`related` 只由 Issue comment 给出，脚本无法判断「本次相关」的范围。
+- **晋级 `prod` 的四项检查**（现行脚本口径，阶段 4、5 入口落地前照此执行）：`L0`、`L1`、`L1_agent`、`related` 各须 `status` 为 `pass`、`failed=0`、`passed>0`、`skipped=0`、`soft_failed=0`，并附本仓 Issue comment 的完整 URL。前三项由 `release-env.py` 读源环境发布根下的机器报告核对（报告存在即核对，缺失时回退到只核对 Issue comment）；`related` 只由 Issue comment 给出，脚本无法判断「本次相关」的范围。
 
 ## 开发流程
 
@@ -93,23 +107,6 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - **TDD 与 CI 只用 fake**：单测、集成测试与门禁不得依赖真实上游或真实密钥；新增或修改 Adapter 的测试基于 fake 与 testkit 编写，不手写 stub。
 - **先对齐 fake，再改实现**：接口与 fake 不一致时，先核对官方接口与文档，检查 fake 是否与官方契约对齐；fake 有偏差时先修复 fake，再改项目实现。不得绕过 fake 直接以便利方式改项目或加 stub。
 - **线上问题同时补 fake**：线上日志出现接口问题时，同时修复 fake 与项目实现，保持 fake 作为该类问题的回归基线。
-
-### 实施流程
-
-功能实现或修复按以下顺序连续完成，无需用户逐步催办或再次确认：
-
-1. **写清预期**：修改行为前写清预期、边界和验证路径。Schema/共享接口变更须检查 Catalog 校验、公开投影、扩展 discovery、兼容 API、前端消费者、fixture/快照与运行时可用性；跨 Provider 链需测成功、失败、跨用户、同/异 Provider、格式不兼容及重试/同意路径。代码保持语义明确、可维护。
-2. **本机门禁与自建 CI**：按 `dev_test.md` §2 运行本机门禁，再跑自建 CI 复现同一套门禁（见「验收要求」）。
-3. **Git 交付**：提交、推送、创建 PR 并在门禁通过后正常合并到 `main`（见「Git 与协作」）。
-4. **发布到 `dev-test`**：用 `scripts/release-env.py release dev-test` 发布已推送的 `origin/main`，发布后核对镜像 revision 与目标完整 SHA 一致。CI 只执行自动化门禁，不承担发布。
-5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及上游的验收使用 fake 场景。L2、L5 等真实模型或付费验收不再每次发布必跑，只在用户当次同意后执行（见「上游接口与 Fake」），结果回灌 fake。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent 并写机器报告，判定口径见「发布后冒烟判定与晋级校验」；真实形态仍按 `docs/deployment.md` §6 手动执行。
-6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
-7. **最终 GitHub Runner 验证**：本轮所有问题在自建 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub Runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。GitHub Runner 指 `.github/workflows/ci.yml` 的三个作业：推送 `main` 时由自托管 runner 运行；自托管 runner 掉线时，按 `dev_test.md` §2「自托管 runner」手动触发该工作流，由 GitHub 托管 runner 完成，两者都算。
-8. **过发布门禁**：晋级前按 `docs/release-gate.md` 调用门禁 Agent（`.claude/agents/release-gate.md`，内含 `scripts/release-gate.py`）核对回归覆盖、fake 回灌与验收证据；门禁不通过不得晋级，通过的回执贴到 #2，打 tag 前再过一次。
-9. **晋级到 `prod` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到 `prod`，交由人工 Review。`prod` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；前三项由 `release-env.py` 读 `dev-test` 发布根下的机器报告核对，验收报告以本仓库原生 Issue comment 记录，脚本同时核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
-10. **Tag 与 GitHub Release**：人工 Review 确认 `prod` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；Review 未通过时修复后从第 1 步重走。
-
-纯文档或 AGENTS 规则修改且不影响运行产物时，只做第 1–3 步并校验文档，不必重建运行镜像或发布。
 
 ## 验收要求
 
@@ -148,7 +145,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - **公开前检查**：每个提交推送后立即公开，推送前须通过 `python3 scripts/make-public-snapshot.py check --worktree`。
 - **计划与状态只写 GitHub 原生记录**：Milestone 用作可选目标容器，Issue 是工作范围、进度、阻塞和验收状态的唯一真源，PR 关联实现与验证记录。仓库只保留产品架构设计、接口/操作规范和静态历史证据；不维护本地开发计划、工作包或当前状态台账。历史报告不得当作当前状态来源。
 - **GitHub 记录用中文**：Issue、PR 的标题、正文与评论都用中文书写（与 `docs/specgit-project.yaml` 的 `language: zh` 一致）；标题保留 Conventional Commits 前缀（如 `fix:`、`ci:`），代码标识符与命令原样保留。
-- **Git 交付常设授权**：为完成功能交付与 `dev-test` 回归，Agent 可自动提交本次任务的改动、推送、创建 PR，并将已验收改动正常合并到发布源 `main`，无需逐次询问。只暂存本次任务涉及的改动，不带入无关或他人尚未交付的改动；不得强推、改写历史、跳过 hooks 或撤销他人改动。遇到门禁、权限或环境阻塞时报告具体原因。
+- **Git 交付常设授权**：为完成功能交付与 `dev-test` 回归，Agent 可自动提交本次任务的改动、推送、创建 PR，并将已验收改动正常合并到发布源 `main`，无需逐次询问；合并前须满足阶段 2 的合并条件。`prod` 的预准备与重启不在常设授权内，须用户确认（阶段 5）。只暂存本次任务涉及的改动，不带入无关或他人尚未交付的改动；不得强推、改写历史、跳过 hooks 或撤销他人改动。遇到门禁、权限或环境阻塞时报告具体原因。
 - **SpecGit**：SpecGit 是维护者的内部流程工具，项目级集成，共用 CLI；公开仓库与新克隆里没有它的 Skill、`.specgit.yaml` 与 Git guard，下方受管区块指向的路径因此不存在。外部贡献者不需要安装 SpecGit，可以忽略受管区块，按本文件其余规约开发、在 PR 里关联 Issue（#334）。维护者的要求：
   - 涉及 SpecGit 任务时读取 `.agents/skills/specgit-native/SKILL.md`；该 Skill 由各工作树的 `specgit init`/`specgit setup` 在本地生成，不纳入 Git，缺失时按 `docs/specgit-project-integration.md` 在本工作树生成。`.specgit.yaml` 保持本地。项目设置、初始化/升级、验证与交付边界见该文档。
   - 所有分支与工作树都须初始化 SpecGit：Git guard 只在有 `.specgit.yaml` 的工作树执行 checkpoint，未初始化的工作树会被静默放行。新工作树执行 `specgit init --cwd <工作树> --config-file <工作树>/docs/specgit-project.yaml --manual-observe`；报 `ownership_conflict` 时先把分支变基到 `origin/main`。共享 hooks 的项目自有区块由 `scripts/install-specgit-required-hooks.py` 显式安装（默认只预览，合并不会激活），先 warn 后 enforce（#242）。
@@ -161,7 +158,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - `docs/product.md`：产品规则（平台、付费批准、Skill、3D 交付）与产品现状。
 - `docs/architecture.md`：前后端职责、Provider 插槽、Schema 控制与文档真源的统一架构入口。
 - `docs/design/README.md`：工作台设计原则与 UI 契约索引。
-- `docs/deployment.md`：内部环境部署入口、晋级规则与运行配置。
+- `docs/deployment.md`：内部环境部署入口、「五阶段发布流程」细则与差距、晋级规则与运行配置。
 - `dev_test.md`：门禁（含 CI 与 `scripts/host-ci/run.py` 干净复现）、Safari 表单注意事项和部署后验收。
 - `dev_ops.md`、`README-go.md`：运行与发布协议、测试拓扑；实际状态须在目标环境只读核验。
 - `scripts/smoke/README.md`：L0–L5 冒烟分层与真实模型验收协议。
