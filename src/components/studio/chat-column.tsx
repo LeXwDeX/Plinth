@@ -157,7 +157,7 @@ import { useSessionContextStore } from '@/store/session-context-store';
 import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
-import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
+import { buildMultiviewRequest, chosenViewLabels, multiviewEntryOffered, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { sameData } from '@/lib/core/keep-unchanged';
@@ -564,11 +564,14 @@ export function ChatColumn() {
   // T2.5 image to 3D take one), say so before sending, whenever the session's Agent scope allows 3D (the Agent may
   // make a 3D model from any stage). The note says it is about 3D; the pictures stay attached, nothing is blocked
   // and the model is not switched.
-  // #86: while the 是不是多个视角 panel is offered for these pictures, the note says both ways: a plain send cuts,
+  // #86: while the multiview way is offered for these pictures, the note says both ways: a plain send cuts,
   // confirming the views makes the model from all of them with the multiview model.
-  const [multiviewDismissedFor, setMultiviewDismissedFor] = useState<string | null>(null);
-  const multiviewOffered = Boolean(multiviewTarget) && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing
-    && multiviewDismissedFor !== attachedImages.join('\n');
+  // #721: the offer is the 用作多视角 entry beside the attachments, not a question above the box. The views panel opens
+  // only after the person presses it, for the pictures attached then; other pictures close it again.
+  const multiviewOffered = multiviewEntryOffered(multiviewTarget, attachedImages.length, Boolean(editing));
+  const [multiviewOpenFor, setMultiviewOpenFor] = useState<string | null>(null);
+  const multiviewSignature = attachedImages.join('\n');
+  const multiviewOpen = multiviewOffered && multiviewOpenFor === multiviewSignature;
   const composerReferenceLimit = modelGeneration.allowed
     ? referenceLimit(
       modelGeneration.nextTurn.offering,
@@ -2774,10 +2777,10 @@ export function ChatColumn() {
           </div>
           </div>
 
-          {multiviewTarget && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing ? (
+          {multiviewTarget && multiviewOpen ? (
             <MultiviewUploadPanel
               images={attachedImages} target={multiviewTarget} lockNote={multiviewNote} disabled={uploading || preparing || isStreaming}
-              onDismiss={() => setMultiviewDismissedFor(attachedImages.join('\n'))}
+              onDismiss={() => setMultiviewOpenFor(null)}
               onConfirm={(choices) => {
                 const picked = attachedImages.flatMap((url, index) => (choices[index] ? [url] : []));
                 const views = choices.filter((view) => view !== '');
@@ -2805,6 +2808,11 @@ export function ChatColumn() {
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}
             chip={objectDeselected ? null : composerChip}
             boardMode={composerBoardMode}
+            multiview={multiviewOffered && multiviewTarget ? {
+              model: multiviewTarget.offering.model_name,
+              open: multiviewOpen,
+              onToggle: () => setMultiviewOpenFor(multiviewOpen ? null : multiviewSignature),
+            } : null}
             onDeselectChip={() => {
               if (sessionSelection) setDeselectedObject(objectKey(sessionSelection));
             }}

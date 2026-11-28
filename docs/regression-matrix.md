@@ -128,13 +128,15 @@
 | R-705-1 | 批准卡「预计消耗」显示「/」、余额读不到；抠图批准卡类型显示「3D」 | #705 | dev-test-fake | — | 卡上的预计消耗与余额与结果卡一致；抠图显示为 2D | GAP | — | | 未修；要补 fake 复现与界面断言 |
 | R-705-2 | `ResizeObserver` 良性事件不再当 ERROR 上报（真实 Error 仍上报） | #705 | unit | `src/lib/client-error-report.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
 | R-705-3 | 图生图后版本条多出「上传」节点、血缘不直接指向来源版本 | #705 | dev-test-fake | — | 不多出上传节点，血缘指向来源版本 | GAP | — | | 未修；要补 fake 复现 |
-| R-705-4 | 附 2 张图时弹「多个视角」询问条 | #705 | dev-test-fake | — | 待产品决定是否降级为不打断 | GAP | — | | 产品决定未出 |
+| R-705-4 | 附 2 张图时弹「多个视角」询问条 | #705、#721 | dev-test-fake | — | 按 #721 降级为不打断：附件旁「用作多视角」入口 | GAP | — | | 已由 #721 修复，覆盖改见 R-721-1（单测）与 R-721-2（浏览器，待补） |
 | R-705-5 | 1000px 顶栏项目名不被压住；全部产出按 Esc 先清勾选再关面板 | #705 | unit | `src/components/studio/project-switcher.test.tsx`、`src/lib/workspace/output-groups.test.ts`、`src/components/studio/stage-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 1000px 时项目名收缩到 0 宽（已知小问题） |
 | R-705-6 | 蒙版里不按 Shift 画新选框时保留之前的画笔笔画 | #705 | unit | `src/store/mask-store.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
 | R-705-7 | 画板上选中图片后合并/导出/局部重绘不置灰 | #705、#681 | unit | `src/lib/canvas/inpaint-entry.test.ts`、`src/components/studio/stage-header-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
 | R-705-8 | 用户点「停止」取消不再弹红色失败 toast | #705 | unit | `src/lib/workspace/completion-notice.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 被取消的任务在对话里仍是红色错误卡（已知） |
 | R-705-9 | 文档措辞（批准窗口、切到预算方式、右侧栏收起） | #705 | unit | `docs/product.md`、`scripts/smoke/README.md` | 文档与实际行为一致 | MANUAL | — | | 文档项，人工核对 |
 | R-705-10 | 升级演练：迁移在存量库副本上执行、读回检查 | #435、#705 | PROD-readonly | `python3 scripts/upgrade-drill.py --image <候选镜像> --database <备份副本>`；单测 `scripts/tests/test_upgrade_drill.py` | v1.9.6：迁移 116→117，24 项检查 23 项通过 | MANUAL | f5bc5e10 2026-11-28 | E2 | 已知三处缺陷待修（#705）：`integrity_check` 需改用应用引擎做；root 运行时没有 chown 副本库；空 `web` 目录只读挂载盖住镜像前端。唯一失败项是源库自带的索引问题 |
+| R-721-1 | 附 2–4 张图时输入区上方不弹「多个视角」询问条；附件卡片旁出「用作多视角」按钮（原生按钮、键盘可达、`aria-label` 与中英文案来自 Schema），点开多视图面板，确认后与原来答「是」一样发带 `multiviewViews` 的回合；单图、无附图或没有多视图模型时没有入口；不点时普通发送不带多视角声明 | #721、#705 | unit | `src/components/studio/composer-multiview-entry-721.test.tsx`、`src/lib/workspace/multiview-upload.test.ts`、`src/components/studio/multiview-upload-panel.test.tsx` | 单测通过 | OK | — | | 尚未发布 |
+| R-721-2 | 浏览器：附 2 张图发普通消息无打断、请求不带多视角声明；点「用作多视角」→ 标视角 → 确认后出多视图 3D 任务 | #721 | dev-test-fake | — | 与 R-721-1 一致，在部署后的页面上成立 | GAP | — | | 待集成后在 dev-test fake 形态做浏览器验收，并补入库脚本断言 |
 
 ### 正式测试环境（PROD）发布后回归
 

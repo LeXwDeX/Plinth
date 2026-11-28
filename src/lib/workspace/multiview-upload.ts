@@ -35,6 +35,14 @@ export function multiviewOffering(offerings: readonly OfferingWire[], preferredM
   return found.find((item) => preferredModelId && item.offering.model_id === preferredModelId) ?? found[0] ?? null;
 }
 
+/**
+ * #721: whether the composer shows its 用作多视角 entry beside the attachments: 2–4 attached pictures, a multiview
+ * model to make them with, and no sent message being edited. The entry asks nothing and changes nothing until pressed.
+ */
+export function multiviewEntryOffered(target: MultiviewOffering | null, pictures: number, editing: boolean): boolean {
+  return Boolean(target) && pictures >= DEFAULT_MIN_PICTURES && pictures <= DEFAULT_MAX_PICTURES && !editing;
+}
+
 /** The two models a panel names when it makes a model other than the one picked for 3D (#373). */
 export interface MultiviewLockNote {
   /** The 3D model the person picked, which cannot make a model from several views right now. */
