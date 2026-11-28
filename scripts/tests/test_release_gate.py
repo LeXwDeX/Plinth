@@ -258,7 +258,7 @@ class ParsingTests(unittest.TestCase):
                 "| 1 | 合并前 | G1 | `scripts/x.sh` |\n\n## 3. 主表\n\n### 门禁\n\n" + header + row.format("G1", "#86", HEAD8)
                 + "\n### 按功能的行为\n\n" + header + row.format("R-1", "#704、#705", HEAD8)
                 + row.format("R-2", "#699, #691", HEAD8)
-                + "\n### 正式测试环境\n\n" + header + row.format("P1", "#2", HEAD8)
+                + "\n### prod 发布后回归\n\n" + header + row.format("P1", "#2", HEAD8)
                 + "\n## 4. Fake 与真实的已知差异\n\n| 差异 | 状态 | Issue | 记录日期 | 备注 |\n|---|---|---|---|---|\n"
                 + "| 差异甲 | FIXED | #704 | 2026-11-28 | 已回灌 |\n")
         parsed = gate.parse_matrix(text)

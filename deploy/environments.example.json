@@ -28,16 +28,16 @@
         "GO_LEGACY_INPUT_ASSETS_DIR": "<legacy-root>/storage/assets"
       }
     },
-    "formal-test": {
-      "description": "正式测试环境（测试版本中的稳定版）：只接收 dev-test 已稳定通过全部验收的精确 revision；layout 里的 MCP_PUBLIC_BIND_IP 与 MCP_PUBLIC_HOST_PORT 是可选键，只在要对局域网开放外部 MCP 监听时才写（见 docs/deployment.md）",
-      "ssh": "root@<formal-test-host>",
-      "root": "<formal-test-release-root>",
-      "base_url": "http://<formal-test-host>:<port>",
-      "compose_project": "<formal-test-compose-project>",
+    "prod": {
+      "description": "prod：只接收 dev-test 已稳定通过全部验收的精确 revision；全量备份只保留 1 份；日志按大小滚动加按天数清理、保留 14 天，须在该环境的运行环境文件 production/runtime.env 里设 LOG_RETENTION_DAYS=14（layout 只收主机路径与端口，不能传它）；layout 里的 MCP_PUBLIC_BIND_IP 与 MCP_PUBLIC_HOST_PORT 是可选键，只在要对局域网开放外部 MCP 监听时才写（见 docs/deployment.md）",
+      "ssh": "root@<prod-host>",
+      "root": "<prod-release-root>",
+      "base_url": "http://<prod-host>:<port>",
+      "compose_project": "<prod-compose-project>",
       "protected_paths": [],
       "promote_from": "dev-test",
-      "backup": {"scope": "full", "keep": 2},
-      "extra_compose_file": "<formal-test-release-root>/production/compose.network.yml",
+      "backup": {"scope": "full", "keep": 1},
+      "extra_compose_file": "<prod-release-root>/production/compose.network.yml",
       "source_transfer": "scp",
       "build": {
         "network": "host",
@@ -50,18 +50,18 @@
         "allow_bootstrap": true
       },
       "layout": {
-        "GO_WEB_BIND_IP": "<formal-test-host>",
+        "GO_WEB_BIND_IP": "<prod-host>",
         "GO_WEB_HOST_PORT": "<port>",
-        "MCP_PUBLIC_BIND_IP": "<formal-test-host>",
+        "MCP_PUBLIC_BIND_IP": "<prod-host>",
         "MCP_PUBLIC_HOST_PORT": "<mcp-port>",
-        "GO_PROD_DB_DIR": "<formal-test-release-root>/production/data",
-        "GO_PROD_STORAGE_DIR": "<formal-test-release-root>/production/storage-go",
-        "GO_PROD_WEB_DATA_DIR": "<formal-test-release-root>/production/web-data",
-        "GO_PROD_LOG_DIR": "<formal-test-release-root>/production/logs",
-        "GO_LEGACY_GENERATED_IMAGES_DIR": "<formal-test-release-root>/production/legacy-generated",
-        "GO_LEGACY_ASSET_CACHE_DIR": "<formal-test-release-root>/production/legacy-cache",
-        "GO_LEGACY_THUMBNAIL_CACHE_DIR": "<formal-test-release-root>/production/legacy-thumbnails",
-        "GO_LEGACY_INPUT_ASSETS_DIR": "<formal-test-release-root>/production/legacy-assets"
+        "GO_PROD_DB_DIR": "<prod-release-root>/production/data",
+        "GO_PROD_STORAGE_DIR": "<prod-release-root>/production/storage-go",
+        "GO_PROD_WEB_DATA_DIR": "<prod-release-root>/production/web-data",
+        "GO_PROD_LOG_DIR": "<prod-release-root>/production/logs",
+        "GO_LEGACY_GENERATED_IMAGES_DIR": "<prod-release-root>/production/legacy-generated",
+        "GO_LEGACY_ASSET_CACHE_DIR": "<prod-release-root>/production/legacy-cache",
+        "GO_LEGACY_THUMBNAIL_CACHE_DIR": "<prod-release-root>/production/legacy-thumbnails",
+        "GO_LEGACY_INPUT_ASSETS_DIR": "<prod-release-root>/production/legacy-assets"
       }
     }
   }

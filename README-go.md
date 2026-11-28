@@ -203,11 +203,11 @@ GO_IMAGE_TAG=替换为镜像标签 scripts/deploy-go-candidate.sh
 
 ## dev-test 测试环境全量迁移演练
 
-`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；`legacy-formal` 已下线，不是可部署环境（存档 #74）。各内部环境按环境名部署，入口 `docs/deployment.md`；正式测试环境 `formal-test`（#270）只晋级 `dev-test` 已全部验收的 revision。
+`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；`legacy-formal` 已下线，不是可部署环境（存档 #74）。各内部环境按环境名部署，入口 `docs/deployment.md`；`prod`（#270）只晋级 `dev-test` 已全部验收的 revision。
 Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
-`<TEST_API_KEY>`（仅适用测试链路；正式生产密钥只存正式生产自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-max`（2026-11-16 起，`formal-test` 相同，#309；网关当前解析为 qwen4-max，普通文本加图片多模态，Agent 不发送音频或视频）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（网关自 2026-11-19 起解析为 gpt-6.2-astra，此前记为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high；网关上它在 chat/completions 不能带函数工具，所以走 Responses 协议，Agent 回合可用，见下）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`，profile 声明 `wire_api: responses` 的模型（`gpt-astra`）走 `responses`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-max` 命中通用 `qwen` profile（`enable_thinking=true`，思考档位只有 `xhigh` 一档；未声明上下文窗口，自动压缩按消息条数阈值触发），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`；另声明 `omit_temperature` 与 `wire_api: responses`，#401）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
+`<TEST_API_KEY>`（仅适用测试链路；`prod` 密钥只存 `prod` 自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-max`（2026-11-16 起，`formal-test` 相同，#309；网关当前解析为 qwen4-max，普通文本加图片多模态，Agent 不发送音频或视频）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（网关自 2026-11-19 起解析为 gpt-6.2-astra，此前记为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high；网关上它在 chat/completions 不能带函数工具，所以走 Responses 协议，Agent 回合可用，见下）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`，profile 声明 `wire_api: responses` 的模型（`gpt-astra`）走 `responses`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-max` 命中通用 `qwen` profile（`enable_thinking=true`，思考档位只有 `xhigh` 一档；未声明上下文窗口，自动压缩按消息条数阈值触发），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`；另声明 `omit_temperature` 与 `wire_api: responses`，#401）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
 服务，不操作同机其他业务或代理测试实例。接口目录可达不能替代真实
 生成、资产落盘和页面回归。
 
@@ -215,7 +215,7 @@ llms 正式服务器；后者不限制客户端与模型）。测试链路上游
 
 Go 已接管 `dev-test` 的入口（端口见本地环境文件）。当前生产同构测试容器（`release-env.py show dev-test` 的 `container`）的镜像标签与源码 SHA 以容器 OCI 标签为准；发布验收必须确认 `org.opencontainers.image.revision` 等于已推送的 `origin/main` 完整 SHA。
 
-`dev-test` 测试数据的全量迁移已经完成，针对该测试栈的普通发布禁止再次运行 ETL。正式生产尚未迁移，不能复用本节的账号、数据、对账数字或批准清单；正式流程见 `docs/production-migration-runbook.md`。
+`dev-test` 测试数据的全量迁移已经完成，针对该测试栈的普通发布禁止再次运行 ETL。`prod` 尚未迁移，不能复用本节的账号、数据、对账数字或批准清单；正式流程见 `docs/production-migration-runbook.md`。
 
 迁移结果快照、对账数字与证据位置见 `docs/history.md` §5.4。迁移规格与状态见原生 Milestone #4。
 
@@ -223,13 +223,13 @@ Go 已接管 `dev-test` 的入口（端口见本地环境文件）。当前生�
 
 `Dockerfile.go-runtime` 缺省从公共 npm registry（`https://registry.npmjs.org/`，构建参数 `NPM_REGISTRY`）安装 pnpm 与前端依赖，Go 模块走 `GOPROXY`（默认 `https://proxy.golang.org,direct`）；`pnpm-lock.yaml` 只记完整性校验值、不写死任何源，因此外部网络可直接 `docker build -f Dockerfile.go-runtime .`。仓库不写死内部源：内部环境由 `scripts/release-env.py` 把环境文件中的 npm 源（`build.npm_registry`）、Go 代理（`build.goproxy`）与 `--add-host`（`build.add_hosts`）传给 `scripts/release-server-steps.sh`（对应 `RELEASE_NPM_REGISTRY`、`RELEASE_GOPROXY`、`RELEASE_BUILD_ADD_HOSTS`），指向各环境的包缓存。构建阶段与 CI 同用 `golang:1.27`。
 
-镜像目标（#259）：默认目标 `runtime` 是自部署镜像，含 `art-ai`、`art-ai-storage`、`art-ai-retention`；`runtime-with-migration-tools` 在其上追加历史迁移与有界维护命令 `art-ai-etl`、`art-ai-recover-assets`、`art-ai-complete-conversion-delivery` 与 `/app/legacy-*` 挂载点，供内部环境（`dev-test` 与 `formal-test`）使用。`scripts/release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建，`docker-compose.go-production.yml` 与 `docker-compose.go-candidate.yml` 的 `build.target` 相同，内部运维与候选构建因此使用同一目标并包含同一组维护命令。
+镜像目标（#259）：默认目标 `runtime` 是自部署镜像，含 `art-ai`、`art-ai-storage`、`art-ai-retention`；`runtime-with-migration-tools` 在其上追加历史迁移与有界维护命令 `art-ai-etl`、`art-ai-recover-assets`、`art-ai-complete-conversion-delivery` 与 `/app/legacy-*` 挂载点，供内部环境（`dev-test` 与 `prod`）使用。`scripts/release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建，`docker-compose.go-production.yml` 与 `docker-compose.go-candidate.yml` 的 `build.target` 相同，内部运维与候选构建因此使用同一目标并包含同一组维护命令。
 
 ### dev-test 后续普通发布（不重跑 ETL）
 
-`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。`legacy-formal` 已下线，不是可部署环境（存档 #74）；正式测试环境 `formal-test` 的晋级入口与来源验收报告格式见 `docs/deployment.md`。
+`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。`legacy-formal` 已下线，不是可部署环境（存档 #74）；`prod` 的晋级入口与来源验收报告格式见 `docs/deployment.md`。
 
-各栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（50 MiB 滚动、保留 30 天），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
+各栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（按 50 MiB 大小滚动加按天数清理，默认保留 30 天，`prod` 保留 14 天，见 `LOG_RETENTION_DAYS`），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
 
 普通发布必须来自已推送且工作区干净的 `main`。镜像标签用于人类识别，
 完整提交 SHA 另写入 OCI revision 并由预检脚本校验：
@@ -286,11 +286,11 @@ Go 原生表的结构升级只允许使用
 migration。需要数据回填或重写时，先在生产快照副本演练并对账，再在停机
 备份后随同一 `main` 镜像执行；失败恢复备份。`cmd/art-ai-etl` 和
 `scripts/finalize-go-production.sh` 只属于一次性 Next → Go 全量迁移；
-`dev-test` 普通发布严禁调用，也不得改写 `migration-ready.txt`。这段只约束原 Next → Go 全量迁移；`formal-test` 不导入数据，按 `docs/deployment.md` 的晋级规则接收版本。
+`dev-test` 普通发布严禁调用，也不得改写 `migration-ready.txt`。这段只约束原 Next → Go 全量迁移；`prod` 不导入数据，按 `docs/deployment.md` 的晋级规则接收版本。
 
 以下内容保留为首次迁移的可审计执行设计，不是每次发布都要重跑的步骤。
 
-正式生产切换不沿用“先启动空库 Go、再在线灌数据”的顺序。唯一受支持的
+`prod` 切换不沿用“先启动空库 Go、再在线灌数据”的顺序。唯一受支持的
 入口是 `scripts/finalize-go-production.sh`，它要求传入 `main` 的完整提交
 SHA，并校验镜像的 OCI revision 标签；还要求现场提供主机名、Docker daemon ID、
 来源快照基线、容器/Compose 身份、IP 与 Go/preflight 端口。正式参数与拒绝条件以
@@ -342,4 +342,4 @@ R9 真实体量演练确认有 38 个历史 Task 的 40 个必需输出在旧 st
 
 镜像内的 `art-ai-retention` 提供独立离线任务保留命令；`art-ai-retention prepare --help` 仅显示参数，不打开数据库或生成清单。默认策略禁用，准备需要显式私有 Schema 与 cutoff，apply 和恢复 cleanup 每次都要求真实人类在控制终端批准精确 manifest；不得由 Agent 代答，也不由服务自动运行。#59 仅允许实现与隔离验收，live purge 仍须另行批准。完整备份、恢复与部分失败合同见 [任务保留](docs/storage-maintenance.md#独立的任务保留命令)。
 
-镜像内的 `art-ai-recover-assets` 用于受信运维人员验证已有产物包并附加恢复回执，协议见 [已有产物恢复](docs/architecture.md#已有产物恢复协议207)。必须提供 `--database`、`--owner`、`--source-task`、`--source-attempt`、`--package`、`--expected-package-sha256` 和 `--offering`；默认只读预演，在私有临时 CAS 验证全部字节。只有显式 `--apply --storage-root <已有资产根>` 才写入已验证字节和不可变回执，且部署必须已完成 0054；它不提交 Task、不改写原失败记录。运行自定义 Product Schema 时同时传入 `--catalog <该部署使用的Schema文件>`。首次实际 `--apply` 前须按现行 Plinth 发布协议完成一致性备份并明确回滚范围；CLI 没有独立撤回模式，不能直接删除共享 CAS 或用旧库覆盖备份后的用户写入。包摘要必须来自独立审定记录，不能把临时计算的新摘要当作原始证据；正式生产操作仍须独立授权。
+镜像内的 `art-ai-recover-assets` 用于受信运维人员验证已有产物包并附加恢复回执，协议见 [已有产物恢复](docs/architecture.md#已有产物恢复协议207)。必须提供 `--database`、`--owner`、`--source-task`、`--source-attempt`、`--package`、`--expected-package-sha256` 和 `--offering`；默认只读预演，在私有临时 CAS 验证全部字节。只有显式 `--apply --storage-root <已有资产根>` 才写入已验证字节和不可变回执，且部署必须已完成 0054；它不提交 Task、不改写原失败记录。运行自定义 Product Schema 时同时传入 `--catalog <该部署使用的Schema文件>`。首次实际 `--apply` 前须按现行 Plinth 发布协议完成一致性备份并明确回滚范围；CLI 没有独立撤回模式，不能直接删除共享 CAS 或用旧库覆盖备份后的用户写入。包摘要必须来自独立审定记录，不能把临时计算的新摘要当作原始证据；`prod` 操作仍须独立授权。

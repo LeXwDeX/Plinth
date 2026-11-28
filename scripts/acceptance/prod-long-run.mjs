@@ -190,7 +190,7 @@ function summaryOf(file) {
 }
 function writeReport() {
   const entries = readLog();
-  const lines = ['# PROD 长程验收报告（自动骨架）', '',
+  const lines = ['# prod 长程验收报告（自动骨架）', '',
     `- 生成时间：${new Date().toISOString()}`, `- 目标：${state.base || base || '（未记录）'}，revision ${state.revision || process.env.EXPECT_SHA || '?'}，形态 ${state.shape || shape}`,
     `- 会话：${Object.entries(state.sessions || {}).map(([name, sid]) => `${name}=${sid}`).join('，') || '（无）'}`, '',
     '## A. 冒烟', '', '```', 'L1:', summaryOf('l1-free.log'), 'L1 Agent:', summaryOf('l1-agent.log'), '```', '',

@@ -32,8 +32,8 @@ inventory_usage() {
   printf '%s\n' \
     '用法:' \
     '  collect-production-migration-inventory.sh' \
-    '    --legacy-root <正式生产旧 Next 项目根>' \
-    '    --legacy-container <正式生产旧 Next 容器全名>' \
+    '    --legacy-root <prod 旧 Next 项目根>' \
+    '    --legacy-container <prod 旧 Next 容器全名>' \
     '    --output <全新脱敏报告文件>' \
     '    [--temp-root <SQLite 快照临时目录>]' \
     '' \
@@ -42,7 +42,7 @@ inventory_usage() {
 }
 
 inventory_fail() {
-  printf '正式生产只读盘点失败：%s\n' "$1" >&2
+  printf 'prod 只读盘点失败：%s\n' "$1" >&2
   exit 1
 }
 
@@ -414,5 +414,5 @@ mv "$inventory_report_partial" "$inventory_output"
 [[ "$(inventory_file_mode "$inventory_output")" == "600" ]] ||
   inventory_fail "报告权限不是 0600"
 
-printf '正式生产只读盘点完成：%s\n' "$inventory_output"
+printf 'prod 只读盘点完成：%s\n' "$inventory_output"
 printf '报告未读取 .env、容器环境变量或业务行内容；请将该报告返回用于生成迁移配置。\n'

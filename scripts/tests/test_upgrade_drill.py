@@ -160,7 +160,7 @@ class GuardTests(unittest.TestCase):
     def test_environments_roots_reads_every_root(self):
         self.write_environments(self.root / "one")
         document = json.loads(self.environments.read_text(encoding="utf-8"))
-        document["environments"]["formal-test"] = {"root": str(self.root / "two")}
+        document["environments"]["prod"] = {"root": str(self.root / "two")}
         self.environments.write_text(json.dumps(document), encoding="utf-8")
         roots = self.drill.environments_roots(self.environments)
         self.assertEqual([Path(root).name for root in roots], ["one", "two"])

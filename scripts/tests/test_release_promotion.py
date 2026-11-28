@@ -1,7 +1,7 @@
 """Offline tests of the promotion rules in scripts/release-promotion.py (#74).
 
 These are the checks release-env.py applies before an environment with promote_from
-(formal-test) receives a revision: exact revision, native acceptance report, manifest.
+(prod) receives a revision: exact revision, native acceptance report, manifest.
 """
 import importlib.util
 import json
@@ -22,7 +22,7 @@ COMMENT_ISSUE = "https://api.forge.example.invalid/repos/owner/project/issues/63
 
 
 def acceptance():
-    return {"formal_promotion": 1, "revision": SHA, "image_tag": TAG,
+    return {"prod_promotion": 1, "revision": SHA, "image_tag": TAG,
             "checks": {name: {"status": "pass", "failed": 0, "passed": 1,
                               "evidence": EVIDENCE} for name in ("L0", "L1", "L1_agent", "related")}}
 
@@ -93,7 +93,7 @@ GATE_EVIDENCE = FORGE + "/issues/2#issuecomment-456"
 
 def gated_acceptance():
     report = acceptance()
-    report["formal_promotion"] = 2
+    report["prod_promotion"] = 2
     report["release_gate"] = {"status": "pass", "evidence": GATE_EVIDENCE}
     return report
 
@@ -128,9 +128,9 @@ class ReleaseGateReferenceTests(unittest.TestCase):
         for evidence in (None, "", "https://example.com/issues/2#issuecomment-1", FORGE + "/issues/2",
                          FORGE + "/pull/2#issuecomment-1", FORGE + "/issues/2#issuecomment-1 extra"):
             report = gated_acceptance(); report["release_gate"]["evidence"] = evidence; cases.append(report)
-        report = gated_acceptance(); report["formal_promotion"] = 3; cases.append(report)
+        report = gated_acceptance(); report["prod_promotion"] = 3; cases.append(report)
         for report in cases:
-            with self.subTest(report=report.get("release_gate"), version=report["formal_promotion"]):
+            with self.subTest(report=report.get("release_gate"), version=report["prod_promotion"]):
                 with self.assertRaises(promotion.ReleaseError):
                     promotion.acceptance_from_note(note(report), SHA, FORGE)
                 with self.assertRaises(promotion.ReleaseError):

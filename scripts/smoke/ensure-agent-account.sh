@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Makes sure the Agent's own account exists and logs in (#215). `release-env.py release <env>` runs it after
 # every successful release: dev-test data is fresh each time, so the account is recreated; an environment
-# that keeps its data (formal-test) answers 409 and the login is only checked. Manual run:
+# that keeps its data (prod) answers 409 and the login is only checked. Manual run:
 #   python3 scripts/release-env.py smoke <env> -- bash scripts/smoke/ensure-agent-account.sh
 # The wrapper sets BASE and ADMIN_* from the stack's runtime env and AGENT_TEST_USERNAME /
 # AGENT_TEST_PASSWORD from `<release root>/production/agent-test.env` on the host (mode 0600, never in Git).
