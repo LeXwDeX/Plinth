@@ -2,8 +2,10 @@
 
 The main table (section 3) points at scripts and tests by repository path; every such path must exist, every
 status must be one of OK, MANUAL, GAP, OBSOLETE, a GAP row must say what is missing, and the "every release"
-list (section 2) may only name rows and scripts the main table carries. AGENTS.md must point at the table so
-a new session finds it. The fake gate of scripts/regression/lib.py is checked offline here too.
+list (section 2) may only name rows and scripts the main table carries. Known defects sit in their own section
+(5, outside the release gate, #718): header 缺陷 | Issue | 记录日期 | 备注, a note on every row, Issue cells made
+of #N references only, and no defect still in the main table. AGENTS.md must point at the table so a new session
+finds it. The fake gate of scripts/regression/lib.py is checked offline here too.
 """
 import importlib.util
 import os
@@ -17,6 +19,11 @@ STATUSES = {"OK", "MANUAL", "GAP", "OBSOLETE"}
 COLUMNS = ["ID", "功能 / 行为", "来源 Issue", "验证层", "命令或脚本", "期望", "状态", "最后验证", "证据", "备注"]
 PATH = re.compile(r"(?<![\w/.-])(?:\./)?((?:scripts|docs|internal|src|web|\.github)/[\w./-]*[\w-])")
 VERIFIED = re.compile(r"^(—|[0-9a-f]{8} \d{4}-\d{2}-\d{2})$")
+DEFECT_HEADING = "5. 已知缺陷（不进门禁）"
+DEFECT_COLUMNS = ["缺陷", "Issue", "记录日期", "备注"]
+ISSUES = re.compile(r"^#\d+(\s*[、,]\s*#\d+)*$")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+ROW_ID = re.compile(r"^`?([A-Z]-?[A-Za-z0-9-]*\d[A-Za-z0-9]*)(?![\w-])", re.A)
 
 
 def section(text, start, end):
@@ -81,6 +88,7 @@ def problems(text, root):
                 if not (root / path).exists():
                     found.append(f"{rid}: {path} does not exist")
         main_paths.update(code_paths(entry["命令或脚本"]))
+    found.extend(defect_problems(text, ids))
     for header, row in table_rows(must):
         entry = dict(zip(header, row))
         for rid in re.findall(r"\b[A-Z]-?[\w-]*\d\b", entry.get("行", "")):
@@ -89,6 +97,34 @@ def problems(text, root):
         for path in code_paths(entry.get("命令", "")):
             if path not in main_paths:
                 found.append(f"every-release script {path} is not a command in the main table")
+    return found
+
+
+def defect_problems(text, main_ids):
+    """The known-defect section (#718): it exists, has the fixed header, and every row is well formed."""
+    if not re.search(rf"^## {re.escape(DEFECT_HEADING)}\s*$", text, re.M):
+        return [f"no section '## {DEFECT_HEADING}'"]
+    found = []
+    for header, row in table_rows(section(text, "5.", "6.")):
+        if header != DEFECT_COLUMNS:
+            found.append(f"defect table header {header}, want {DEFECT_COLUMNS}")
+            continue
+        if len(row) != len(DEFECT_COLUMNS):
+            found.append(f"defect {row[0]!r}: {len(row)} cells, want {len(DEFECT_COLUMNS)}")
+            continue
+        entry = dict(zip(DEFECT_COLUMNS, row))
+        name = entry["缺陷"][:24] or "(empty)"
+        if not entry["缺陷"]:
+            found.append("defect row without a description")
+        if not ISSUES.match(entry["Issue"]):
+            found.append(f"defect {name}: Issue {entry['Issue']!r} is not '#N' references")
+        if not DATE.match(entry["记录日期"]):
+            found.append(f"defect {name}: date {entry['记录日期']!r} is not YYYY-MM-DD")
+        if not entry["备注"] or entry["备注"] == "—":
+            found.append(f"defect {name}: no note")
+        rid = ROW_ID.match(entry["缺陷"])
+        if rid and rid.group(1) in main_ids:
+            found.append(f"defect {rid.group(1)} is still a main table row")
     return found
 
 
@@ -112,8 +148,23 @@ class RegressionMatrixTests(unittest.TestCase):
         found = "\n".join(problems(bad, ROOT))
         for needle in ("scripts/no-such-script.py does not exist", "status 'DONE'", "last verified 'yesterday'",
                        "A2: GAP row without a note", "A2: 9 cells", "every-release row Z9",
-                       "every-release script scripts/regression/lib.py"):
+                       "every-release script scripts/regression/lib.py", f"no section '## {DEFECT_HEADING}'"):
             self.assertIn(needle, found)
+
+    def test_the_defect_section_is_checked(self):
+        self.assertIn(f"## {DEFECT_HEADING}", self.text)
+        defects = [row for header, row in table_rows(section(self.text, "5.", "6.")) if header == DEFECT_COLUMNS]
+        self.assertEqual([ROW_ID.match(row[0]).group(1) for row in defects],
+                         ["R-705-1", "R-705-3", "R-705-4", "R-704g"])
+        bad = (f"## {DEFECT_HEADING}\n\n| 缺陷 | Issue | 日期 | 备注 |\n|---|---|---|---|\n| x | #1 | 2026-11-28 | n |\n\n"
+               "| 缺陷 | Issue | 记录日期 | 备注 |\n|---|---|---|---|\n"
+               "| R-1 甲 | 见 Issue | 2026-11-28 | n |\n| R-2 乙 | #1、#2 | 昨天 | |\n| R-3 丙 | #3 | 2026-11-28 | n |\n"
+               "\n## 6. 维护规则\n")
+        found = "\n".join(defect_problems(bad, {"R-3"}))
+        for needle in ("defect table header", "Issue '见 Issue'", "date '昨天'", "defect R-2 乙: no note",
+                       "defect R-3 is still a main table row"):
+            self.assertIn(needle, found)
+        self.assertNotIn("R-2 乙: Issue", found)
 
 
 class FakeGateTests(unittest.TestCase):

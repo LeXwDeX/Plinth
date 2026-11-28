@@ -1,12 +1,12 @@
 # 回归测试表
 
 本表记录每个已交付行为由哪一层、哪个命令覆盖，以及最后一次在哪个 revision 上验证过。有了这张表，发布前后不用把所有行为重新遍历一遍。
-表里的脚本路径由 `scripts/tests/test_regression_matrix.py` 校验（随「scripts tests」门禁运行）：路径必须存在，状态只能取四个值，`GAP` 行必须写备注。
+表里的脚本路径由 `scripts/tests/test_regression_matrix.py` 校验（随「scripts tests」门禁运行）：路径必须存在，状态只能取四个值，`GAP` 行必须写备注。没修的已知缺陷不是回归行，放在第 5 节，由各自的 Issue 跟踪，不进发布门禁（#718）。
 
 ## 1. 用途与用法
 
 1. 发布前、发布后先读这张表。只跑「每次发布必跑」，以及主表里与本次改动相关的行（按「来源 Issue」和「功能 / 行为」对照最终 diff 与影响链），不重新遍历全部行。
-2. 跑完一行，把它的「最后验证」改成被测 revision 的前 8 位加日期（如 `f5bc5e10 2026-11-28`），并在「证据」里放 Issue 评论链接（验收结果仍按 AGENTS.md 写进 Issue 评论，本表只放指针）。没跑的行不改；不能把别的 revision 的结果写进来，也不能只凭源码或单测推断线上结果。
+2. 跑完一行，把它的「最后验证」改成被测 revision 的前 8 位加日期（如 `f5bc5e10 2026-11-28`），并在「证据」里放 Issue 评论链接（验收结果仍按 AGENTS.md 写进 Issue 评论，本表只放指针）。没跑的行不改；不能把别的 revision 的结果写进来，也不能只凭源码或单测推断线上结果。被测 revision 可以早于发布候选：只要它是候选的祖先、此后只改了 `docs/`、`scripts/`、`.github/`、`.claude/` 或根目录 `*.md`（没改运行产物），这次验证对候选仍然有效（`docs/release-gate.md` ①）。`unit` 层的行可以在「证据」里写 `CI`，表示该 revision 的提交状态 `host-ci/gates` 为 success，门禁会去核对。
 3. 改变行为的 PR 必须在同一改动里新增或更新对应的行。没有对应脚本或测试的行标 `GAP`，在「备注」里写要补什么，并开 Issue 跟踪。
 
 **验证层**：`unit`（本机与 CI 的单测：`pnpm test`、`go test`、`scripts/tests`）、`fake-stack`（本机 fake 整栈 `scripts/smoke/smoke-fake-stack.py`）、`dev-test-fake`（dev-test 的 fake 上游形态发布）、`dev-test-live-chat`（dev-test 的 `--live-chat` 形态：对话模型真实、生成走 fake，只耗对话 token）、`PROD-readonly`（正式测试环境 `formal-test`，只读、免费）、`PROD-paid`（`formal-test` 或 `--live-upstream` 的 dev-test 上的真实付费调用，每次先取得用户当次同意）。
@@ -40,8 +40,9 @@
 | G3 | 工作流重放 | #86 | unit | `python3 scripts/host-ci/run.py <sha> --workflows` | 提交状态 `host-ci/workflows` success | OK | — | | GitHub Actions 不可用时使用 |
 | G4 | GitHub Runner 完整 CI | #257 | unit | `.github/workflows/ci.yml`（GitHub Actions） | `frontend`、`go check`、`go test race` 三个作业通过 | OK | — | | 晋级前对精确 revision 跑，不按 diff 缩减 |
 | G5 | 本表与脚本不脱节 | #705 | unit | `python3 -m unittest scripts.tests.test_regression_matrix` | 表里路径都存在、状态合法、`GAP` 有备注、必跑脚本在主表、`AGENTS.md` 引用本表 | OK | — | | 随 G1 的「scripts tests」运行 |
-| G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免） | #707 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
-| G7 | 发布前过发布门禁 | #707 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选>` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `formal-test` 前对候选 revision 运行；回执格式见 `docs/release-gate.md` |
+| G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免、祖先 revision 与运行产物、单元行认 CI、`--phase`） | #707、#718 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
+| G7 | 发布前过发布门禁 | #707、#718 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选> --phase promote` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `formal-test` 前用 `--phase promote`，打 tag 前再用 `--phase tag` 跑一次；回执格式见 `docs/release-gate.md` |
+| G8 | dev-test fake 行的统一入口（选行、dry-run、逐行 PASS/FAIL 与失败汇总） | #718 | unit | `python3 -m unittest scripts.tests.test_run_fake_rows` | 单测通过 | OK | — | | 入口脚本 `scripts/regression/run-fake-rows.py`，不写回本表 |
 
 ### 发布后自动冒烟（dev-test fake 形态发布后 `release-env.py` 自动跑）
 
@@ -74,7 +75,7 @@
 | B2 | 失败通知只提醒一次、三视图卡片标题 | #651、#633、#655 | dev-test-fake | `node scripts/acceptance/release-1-9-2-notices.mjs` | 7/0 | OK | f5bc5e10 2026-11-28 | E2 | |
 | B3 | 自动方式下三视图、四视图同一回合出完 | #663 | dev-test-fake | `node scripts/acceptance/release-1-9-3-three-view-auto.mjs` | 6/0 | OK | f5bc5e10 2026-11-28 | E2 | WebKit 同 B1 |
 | B4 | v1.9.0 全套（N5 对话栏宽度、#559/N2/#587 点击规则、#611 标记、项目组 P1–P4 等） | #586、#559、#587、#611、#695 | dev-test-fake | `node scripts/acceptance/release-1-9-0-browser.mjs` | v1.9.6：125 通过、3 失败，3 条均为 P4 对话框初始聚焦竞态（隔离重跑约 8 次出现 2 次） | OK | f5bc5e10 2026-11-28 | E2 | P4 偶发失败为已知，不挡发布；其余项须全过 |
-| B5 | 浏览器矩阵子集 I18N-03/04、CNV-02..08、SKL-02/03（含 #681 画板动作护栏） | #548、#681、#705 | dev-test-fake | `bash scripts/acceptance/browser_matrix/run.sh dev-test`（`B3_ITEMS=I18N-03,I18N-04,CNV-02,CNV-03,CNV-04,CNV-05,CNV-06,CNV-07,CNV-08,SKL-02,SKL-03`） | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E2 | SKL-02/03 已按 #548 新弹窗重写 |
+| B5 | 浏览器矩阵子集 I18N-03/04、CNV-02..08、SKL-02/03（含 #681 画板动作护栏） | #548、#681、#705 | dev-test-fake | `B3_ITEMS=I18N-03,I18N-04,CNV-02,CNV-03,CNV-04,CNV-05,CNV-06,CNV-07,CNV-08,SKL-02,SKL-03 bash scripts/acceptance/browser_matrix/run.sh dev-test` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E2 | SKL-02/03 已按 #548 新弹窗重写 |
 | B6 | 详情弹窗几何 | #224 | dev-test-fake | `node scripts/smoke/result-detail-geometry.mjs` | 22/0 | OK | f5bc5e10 2026-11-28 | E2 | |
 | B7 | 弹层滚动锁几何 | #74、#705 | dev-test-fake | `node scripts/smoke/overlay-scroll-lock-geometry.mjs` | 三个视口下滚动锁与几何检查通过 | MANUAL | — | | 依赖一个有内容的会话（#705-10），全新数据上要先人工造数 |
 | B8 | 旧 Studio 场景脚本 | #705 | dev-test-fake | `scripts/acceptance/studio-scenarios.mjs` | — | OBSOLETE | — | | 起步卡等入口早已不存在，历史上 0/43，不属于验收 |
@@ -111,11 +112,10 @@
 | R-704i | 「生成纹理」开关的 fake 全 Offering 回归 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 Offering 的任务全部 PASS | OK | f5bc5e10 2026-11-28 | E6 | v1.9.6 当时（入库前的临时脚本）9 个 Offering、27 个任务全部通过，逐项结果见 E6；入库后的脚本尚未运行 |
 | R-704e | 真实：Tripo 文生 3D texture=false 报价 60、GLB 无贴图；默认报价 90、GLB 3 张贴图 | #704 | PROD-paid | `python3 scripts/regression/texture-live-tripo.py --live` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E4、E5 | 付费，每次先取得同意；不自动回答选择卡；E5 记的是入库前的同内容临时版本 |
 | R-704f | 真实：开关存成会话参数（Tripo 文生、Tripo 图生、Meshy 7.1 图生） | #704 | PROD-paid | `python3 scripts/regression/texture-live-session-param.py --live` | 三个场景冻结开关为 false、报价无纹理组件、GLB 无贴图 | OK | f5bc5e10 2026-11-28 | E5 | 三个场景全部通过（15/0）：Tripo 文生报价 60、Tripo 图生报价 70，均无纹理组件；Meshy 无 native_quote；三者 GLB 均为 0 texture、0 image、1 material。E5 记的是入库前的同内容临时版本，只在 2D 起始图那一步回答选择卡 |
-| R-704g | 设置面板的「默认估算」随开关联动 | #704、#705 | dev-test-fake | — | 关纹理后面板估算与实际报价一致 | GAP | — | | 产品尚未实现（面板固定显示默认估算 90），已定放到后面的版本；实现时补浏览器断言 |
 | R-699a | 比例选择卡显示 Agent 写的整句问题（≤300 字符原样，不传显示默认问题） | #699 | unit | `internal/chat/choice_question_699_test.go`、`internal/transport/httpapi/chat_choices_test.go` | `go test` 通过 | OK | f5bc5e10 2026-11-28 | E2 | v1.9.6 在 dev-test 浏览器上看过 299/300 字符；超过 300 字符整张卡不出现（已知，#705） |
 | R-699b | 画风迁移的纠正模板 | #699 | unit | `internal/chat/restyle_card_699_test.go` | `go test` 通过 | OK | — | | |
 | R-699c | 透明底显示棋盘格（结果卡、版本条、全部产出、详情、看大图、舞台、附件缩略图） | #699 | unit | `src/components/studio/transparency-checker-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 浏览器侧由入库前的临时脚本看过，未入库 |
-| R-699d | 真实对话模型加真实 2D 的画风迁移（风格图无全身时先出比例卡，答完只提交一次生成） | #699 | PROD-paid | — | 先出选择卡、答完只提交一次生成；风格图有全身时不出卡 | GAP | — | | 只有临时验证与结论（记在 #699），没有入库脚本；要补一个 live-only 脚本 |
+| R-699d | 真实对话模型加真实 2D 的画风迁移（风格图无全身时先出比例卡，答完只提交一次生成） | #699、#723 | PROD-paid | — | 先出选择卡、答完只提交一次生成；风格图有全身时不出卡 | GAP | — | | 脚本见 #723，待入库后改为 dev-test-live-chat 并回写证据 |
 | R-688a | 图只在画板上：非画板轮 Agent 先查看并指向画板路径；画板轮发起三视图并停在批准卡 | #688 | dev-test-live-chat | `python3 scripts/smoke/smoke-live-chat-three-view-route.py --live` | 第一轮四条断言通过；第二轮正面停在批准卡并被拒绝 | OK | f5bc5e10 2026-11-28 | E2 | 第二轮在严格方式下等不到最终回复而超时（脚本缺陷：三视图的卡不在待批准列表里），待修 |
 | R-688b | 画板识别的五个说法（含画板轮对照） | #688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景「注意到画板」PASS | OK | de701fb8 2026-11-28 | E7 | 真实模型回答会波动，结论以多次运行为准；#709 起该脚本的判定改为 R-709-4；S1–S5 各 3 次全部通过 |
 | R-709-1 | `view_canvas` 只读画板图层：空画板、图层清单（`added_after_last_turn`、`in_frame`、`transformed`、`in_conversation`，`preview` 为 null 并带 `preview_reason`）、多图层或有标注时给「以画板为主继续」、截断统计、画板轮/有素材/同一回复重复调用由服务端拒绝 | #709 | unit | `go test ./internal/chat/agenttools/ -run 709` | 单测通过 | OK | — | | |
@@ -125,10 +125,7 @@
 | R-709-4 | 兜底行为：图只在画板上时 S1 先看画板再出选择卡，S2–S4 直接用画板的图发起生成（严格方式停在批准卡），S5 画板轮对照不变 | #709、#688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景 PASS（S1–S8，每个场景 3 次） | OK | de701fb8 2026-11-28 | E7 | 真实模型回答会波动，结论以多次运行为准；脚本改走画布保存接口，并增加 S6（对话里已有图、画板新放一张）、S7（多图层加标注，选择卡带「以画板为主继续」）、S8（本轮带附图不看画板）；24 轮全部通过，S1 里模型会重复调用 `ask_choice`（3–4 次），未收紧 |
 | R-709-7 | 选择卡动作「以画板为主继续」（`continue_on_canvas`）：点选后把上一条原话作为画板轮重发一次（`input_source` 为画板来源、带快照、关卡）；没有画框时卡片说明原因不发送；找不到原话时打开「以画板为主」、卡片保留 | #709 | dev-test-fake | `src/components/workspace/harness-choice-action.test.ts`；界面人工核对 | 单测通过；点选后对话出现上一条原话且为画板轮、卡片已答、只发一次 | MANUAL | — | | Agent 何时给出该选项依赖对话模型；单测另见 `src/lib/chat/choice-actions.test.ts`、`internal/catalog/continue_on_canvas_709_test.go` |
 | R-709-6 | 非画板轮发送前等画板保存（拖入文件上传、画笔位图、防抖节点保存），上限 `canvas.frontend.send_save_wait_milliseconds`，超时或失败照常发送，不带画板内容；画板轮与没有画板时不等待 | #709 | unit | `src/lib/canvas/pending-edits.test.ts` | 单测通过 | OK | — | | 接线见 `src/components/studio/chat-column-wiring.test.ts` |
-| R-705-1 | 批准卡「预计消耗」显示「/」、余额读不到；抠图批准卡类型显示「3D」 | #705 | dev-test-fake | — | 卡上的预计消耗与余额与结果卡一致；抠图显示为 2D | GAP | — | | 未修；要补 fake 复现与界面断言 |
 | R-705-2 | `ResizeObserver` 良性事件不再当 ERROR 上报（真实 Error 仍上报） | #705 | unit | `src/lib/client-error-report.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
-| R-705-3 | 图生图后版本条多出「上传」节点、血缘不直接指向来源版本 | #705 | dev-test-fake | — | 不多出上传节点，血缘指向来源版本 | GAP | — | | 未修；要补 fake 复现 |
-| R-705-4 | 附 2 张图时弹「多个视角」询问条 | #705 | dev-test-fake | — | 待产品决定是否降级为不打断 | GAP | — | | 产品决定未出 |
 | R-705-5 | 1000px 顶栏项目名不被压住；全部产出按 Esc 先清勾选再关面板 | #705 | unit | `src/components/studio/project-switcher.test.tsx`、`src/lib/workspace/output-groups.test.ts`、`src/components/studio/stage-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 1000px 时项目名收缩到 0 宽（已知小问题） |
 | R-705-6 | 蒙版里不按 Shift 画新选框时保留之前的画笔笔画 | #705 | unit | `src/store/mask-store.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
 | R-705-7 | 画板上选中图片后合并/导出/局部重绘不置灰 | #705、#681 | unit | `src/lib/canvas/inpaint-entry.test.ts`、`src/components/studio/stage-header-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
@@ -166,10 +163,23 @@
 
 （暂无）
 
-## 5. 维护规则
+## 5. 已知缺陷（不进门禁）
+
+没修的缺陷、待产品决定的问题不是「待回归的行为」，不放主表。它们由各自的 Issue 跟踪，不拦发布，发布门禁也不读本节（`docs/release-gate.md` ①）。缺陷修好时，在同一改动里把它写回主表成为回归行（补命令或脚本、期望与状态），并从本节删除。
+
+| 缺陷 | Issue | 记录日期 | 备注 |
+|---|---|---|---|
+| R-705-1 批准卡「预计消耗」显示「/」、余额读不到；抠图批准卡类型显示「3D」（应为：卡上的预计消耗与余额与结果卡一致；抠图显示为 2D） | #719 | 2026-11-28 | 来源 #705（原主表行 R-705-1，dev-test-fake）；未修；要补 fake 复现与界面断言 |
+| R-705-3 图生图后版本条多出「上传」节点、血缘不直接指向来源版本（应为：不多出上传节点，血缘指向来源版本） | #720 | 2026-11-28 | 来源 #705（原主表行 R-705-3，dev-test-fake）；未修；要补 fake 复现 |
+| R-705-4 附 2 张图时弹「多个视角」询问条（待产品决定是否降级为不打断） | #721 | 2026-11-28 | 来源 #705（原主表行 R-705-4，dev-test-fake）；产品决定未出 |
+| R-704g 设置面板的「默认估算」不随「生成纹理」开关联动（应为：关纹理后面板估算与实际报价一致） | #722 | 2026-11-28 | 来源 #704、#705（原主表行 R-704g，dev-test-fake）；产品尚未实现（面板固定显示默认估算 90），已定放到后面的版本；实现时补浏览器断言 |
+
+## 6. 维护规则
 
 - **改行为的 PR**：同一改动里新增或更新对应的行（ID、期望与命令写准确，命令里的路径必须存在）；没有脚本的写 `GAP`、写备注并开 Issue。`scripts/tests/test_regression_matrix.py` 在门禁里检查路径与状态。
 - **发布的人**：发布前读第 2 节与相关行；跑完一行就把「最后验证」改成被测 revision 前 8 位加日期，证据链接指向写了结果的 Issue 评论。没跑的行保持原值，失败的行不改日期，在 Issue 里记失败与处置。
 - **真实调用回灌 fake 之后**：更新第 4 节，并把对应行的命令换成 fake 能复现的版本（AGENTS.md「真实结果回灌 fake」）。
 - **脚本过期**：改成 `OBSOLETE` 并写原因，不删行，直到替代脚本入表。
+- **已知缺陷**：没修的缺陷写在第 5 节并开 Issue，不写成主表的 `GAP` 行；修好后写回主表。
+- **dev-test fake 行**：`python3 scripts/regression/run-fake-rows.py`（`--dry-run` 先看选中的行）依次运行主表里 `dev-test-fake` 层、命令是单条 `python3`/`bash`/`node` 命令的行，输出贴进证据评论；它不改本表，「最后验证」与「证据」仍由人回写。
 - 本表只放状态指针，不复制证据正文；不写主机、地址、端口、目录、任务或资产 ID、账号口令。
