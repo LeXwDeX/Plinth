@@ -15,7 +15,7 @@
 
 **命令与环境**：对已部署环境的脚本一律经 `scripts/release-env.py smoke <环境>` 注入 `BASE` 与账号，表里为简洁只写脚本本身；fake 专用脚本在目标不是 fake 形态时拒绝运行，真实上游脚本要 `--live` 加 `ART_AI_LIVE_ACK=1`（`scripts/regression/README.md`）。
 
-证据链接：E1 = [#2 评论：dev-test L0/L1/L1 Agent](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077479)，E2 = [#2 评论：dev-test 相关验收](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077876)，E3 = [#2 评论：dev-test 验收报告](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228078324)，E4 = [#705 评论：正式测试环境发布后回归](https://github.com/LeXwDeX/Plinth/issues/705#issuecomment-7232418886)。
+证据链接：E1 = [#2 评论：dev-test L0/L1/L1 Agent](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077479)，E2 = [#2 评论：dev-test 相关验收](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077876)，E3 = [#2 评论：dev-test 验收报告](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228078324)，E4 = [#705 评论：正式测试环境发布后回归](https://github.com/LeXwDeX/Plinth/issues/705#issuecomment-7232418886)，E5 = [#2 评论：正式测试环境生成纹理开关全量真实验证](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783)。
 
 ## 2. 每次发布必跑
 
@@ -40,6 +40,8 @@
 | G3 | 工作流重放 | #86 | unit | `python3 scripts/host-ci/run.py <sha> --workflows` | 提交状态 `host-ci/workflows` success | OK | — | | GitHub Actions 不可用时使用 |
 | G4 | GitHub Runner 完整 CI | #257 | unit | `.github/workflows/ci.yml`（GitHub Actions） | `frontend`、`go check`、`go test race` 三个作业通过 | OK | — | | 晋级前对精确 revision 跑，不按 diff 缩减 |
 | G5 | 本表与脚本不脱节 | #705 | unit | `python3 -m unittest scripts.tests.test_regression_matrix` | 表里路径都存在、状态合法、`GAP` 有备注、必跑脚本在主表、`AGENTS.md` 引用本表 | OK | — | | 随 G1 的「scripts tests」运行 |
+| G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免） | #707 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
+| G7 | 发布前过发布门禁 | #707 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选>` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `formal-test` 前对候选 revision 运行；回执格式见 `docs/release-gate.md` |
 
 ### 发布后自动冒烟（dev-test fake 形态发布后 `release-env.py` 自动跑）
 
@@ -98,14 +100,17 @@
 | R-702a | 批准方式：自动第 101 次出卡、批准后再计 100（第 201 次再问）；审批方式 3D 每步问、2D 自动；严格方式 Agent 的 2D 也问、用户自己点的 2D 不再问、用户的 3D 仍要批准 | #702 | dev-test-fake | `python3 scripts/regression/approval-modes.py` | 全部 PASS（window、agent、budget、manual、chain 五段） | OK | — | | 临时脚本在 v1.9.5 轮跑过，合并后未整段运行 |
 | R-702b | 批准默认值与策略单测 | #702、#406 | unit | `internal/app/approval_default_406_test.go`、`internal/app/approval_policy_default_schema_test.go` | `go test` 通过 | OK | — | | fake 栈一侧见 F4 |
 | R-693a | 三视图续跑：跨过窗口点不打断、续跑只计数；严格方式下用户点「继续生成」不再出卡 | #689、#693 | dev-test-fake | `python3 scripts/regression/three-view-continuation.py --only window,strict` | 全部 PASS | OK | — | | `strict` 段由旧片段重组，首次运行以实际输出为准；单测 `internal/adapters/sqlite/three_view_continuation_693_test.go` |
+| R-691 | 三视图缩略图不裁切（`object-contain`） | #691 | unit | `src/components/studio/three-view-card-691.test.tsx` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 浏览器侧只做了样式验证，非方图不裁切没有单独断言 |
 | R-693b | 「稍后自动生成」只在 auto 且回合在跑时出现、不与手动按钮同现；审批方式手动续跑不出卡 | #693 | dev-test-fake | `node scripts/regression/three-view-card.mjs`；单测 `src/components/studio/three-view-card-691.test.tsx` | 全部 PASS | OK | — | | |
 | R-611 | 手选 Skill 的标记（3 种批准方式 × 三视图/四视图） | #611 | dev-test-fake | `python3 scripts/regression/three-view-continuation.py --only marks`；`node scripts/acceptance/release-1-9-0-browser.mjs`（#611 各项） | used_skills 含该 Skill 且 source=user；B4 的 #611 项全过 | OK | f5bc5e10 2026-11-28 | E2 | 日期来自 B4 的 #611 项；`marks` 段合并后未整段运行 |
 | R-704a | 「生成纹理」是用户可编辑参数；关闭时纹理质量、纹理版本、导出贴图格式与尺寸隐藏，PBR 强制 false；其他 advised 参数仍 400 | #704 | unit | `internal/catalog/texture_toggle_704_test.go` | `go test` 通过 | OK | — | | |
-| R-704b | 所有带开关的 3D Offering：Schema 层、保存会话参数路径、消息参数路径、冻结输入、报价无纹理组件、交付字节 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 PASS；GLB 贴图数只记 INFO | OK | f5bc5e10 2026-11-28 | E2 | v1.9.6 用入库前的临时脚本验证了 Tripo H3 v3.1 与 Meshy 7.1；全 Offering 版本未整段运行 |
+| R-704b | 所有带开关的 3D Offering：Schema 层、保存会话参数路径、消息参数路径、冻结输入、报价无纹理组件、交付字节 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 PASS；GLB 贴图数只记 INFO | OK | f5bc5e10 2026-11-28 | E2 | E2 记的是入库前的临时脚本验证 Tripo H3 v3.1 与 Meshy 7.1；全 Offering 运行见 R-704i |
 | R-704c | Tripo texture=false 的报价组件（60，无纹理项）与默认报价（90） | #704 | unit | `internal/catalog/tripo_texture_off_quote_704_test.go` | `go test` 通过 | OK | — | | 来自 a5176f3a 的回灌，尚未发布 |
 | R-704d | fake 的 Tripo texture=false 交付无贴图 GLB（0 texture、0 image、1 material） | #704 | unit | `internal/testutil/fakeupstream/tripo/v3/untextured_704_test.go`、`internal/providers/tripo/texture_off_704_test.go` | `go test` 通过 | OK | — | | 登记 constructed，见第 4 节；尚未发布 |
-| R-704e | 真实：Tripo 文生 3D texture=false 报价 60、GLB 无贴图；默认报价 90、GLB 3 张贴图 | #704 | PROD-paid | `python3 scripts/regression/texture-live-tripo.py --live` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E4 | 付费，每次先取得同意；不自动回答选择卡 |
-| R-704f | 真实：开关存成会话参数（Tripo 文生、Tripo 图生、Meshy 7.1 图生） | #704 | PROD-paid | `python3 scripts/regression/texture-live-session-param.py --live` | 三个场景冻结开关为 false、报价无纹理组件、GLB 无贴图 | OK | f5bc5e10 2026-11-28 | E4 | 只跑完场景 A（报价 60、GLB 0 贴图）；B、C 尚无结论 |
+| R-704h | fake 的 Meshy `should_texture=false` 交付无贴图 GLB（0 texture、0 image、1 material；图生与多视图），true 或缺省仍有贴图；Adapter 发 `should_texture=false` 且不带 `enable_pbr` | #704 | unit | `internal/testutil/fakeupstream/meshy/openapi-v1/untextured_704_test.go`、`internal/providers/meshy/texture_off_704_test.go` | `go test` 通过 | OK | — | | 登记 constructed（`meshy-openapi-v1/image-to-3d-texture-off-glb`），见第 4 节；尚未发布 |
+| R-704i | 「生成纹理」开关的 fake 全 Offering 回归 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 Offering 的任务全部 PASS | OK | — | | v1.9.6 当时（f5bc5e10，2026-11-28）跑过：9 个 Offering、27 个任务全部通过；没有记录结果的 Issue 评论，所以不填最后验证 |
+| R-704e | 真实：Tripo 文生 3D texture=false 报价 60、GLB 无贴图；默认报价 90、GLB 3 张贴图 | #704 | PROD-paid | `python3 scripts/regression/texture-live-tripo.py --live` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E4、E5 | 付费，每次先取得同意；不自动回答选择卡；E5 记的是入库前的同内容临时版本 |
+| R-704f | 真实：开关存成会话参数（Tripo 文生、Tripo 图生、Meshy 7.1 图生） | #704 | PROD-paid | `python3 scripts/regression/texture-live-session-param.py --live` | 三个场景冻结开关为 false、报价无纹理组件、GLB 无贴图 | OK | f5bc5e10 2026-11-28 | E5 | 三个场景全部通过（15/0）：Tripo 文生报价 60、Tripo 图生报价 70，均无纹理组件；Meshy 无 native_quote；三者 GLB 均为 0 texture、0 image、1 material。E5 记的是入库前的同内容临时版本，只在 2D 起始图那一步回答选择卡 |
 | R-704g | 设置面板的「默认估算」随开关联动 | #704、#705 | dev-test-fake | — | 关纹理后面板估算与实际报价一致 | GAP | — | | 产品尚未实现（面板固定显示默认估算 90），已定放到后面的版本；实现时补浏览器断言 |
 | R-699a | 比例选择卡显示 Agent 写的整句问题（≤300 字符原样，不传显示默认问题） | #699 | unit | `internal/chat/choice_question_699_test.go`、`internal/transport/httpapi/chat_choices_test.go` | `go test` 通过 | OK | f5bc5e10 2026-11-28 | E2 | v1.9.6 在 dev-test 浏览器上看过 299/300 字符；超过 300 字符整张卡不出现（已知，#705） |
 | R-699b | 画风迁移的纠正模板 | #699 | unit | `internal/chat/restyle_card_699_test.go` | `go test` 通过 | OK | — | | |
