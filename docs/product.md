@@ -49,13 +49,13 @@
 
 生成参数面板继续同时展示所选 2D、3D 模型，并区分默认、Agent 建议和用户选择。后端行为、Schema 和冻结输入合同见 `docs/architecture.md`「Offering 会话参数隔离」及 `docs/provider-schema-architecture.md`。#213 的前端集成、部署和真实验收状态以关联 Issue/MR 为准，源码合同不代表线上通过。
 
-## 1.2 测试与正式环境
+## 1.2 开发测试与生产环境
 
 - **开发测试环境 `dev-test`**：接收每次已推送的 `main`，承担全部开发测试（包括 Agent 测试）。
-- **正式测试环境 `formal-test`**（测试版本中的稳定版）：只运行一个在开发测试环境（包括 Agent 测试）全部稳定通过的版本，不做付费生成；运行配置整份沿用开发测试环境，仅中转 Key 与对外地址按本环境设置（#270）。`legacy-formal` 不是可部署环境（存档 #74）。
+- **`prod`**（生产环境）：只运行一个在开发测试环境（包括 Agent 测试）全部稳定通过的版本；真实付费生成须当次取得用户同意；运行配置整份沿用开发测试环境，仅中转 Key 与对外地址按本环境设置（#270）。`legacy-formal` 不是可部署环境（存档 #74）。
 - 环境的具体地址只在未纳入 Git 的本地部署文件中，见 `docs/deployment.md`；环境沿革见 `docs/history.md`。
 
-正式环境的产品规则（`formal-test` 的运行配置例外按上条执行）：正式晋级仅接受测试已验收并在原生 Issue comment 留证的精确 `main` revision 和与 manifest/OCI revision 匹配的镜像；正式环境从空库开始，账户、会话、任务、资产与运行凭据不从测试环境复制；未配置 Provider Key 时，远程 Offering 明示不可用，不静默切换模型，可用的本地转换能力不因此关闭；正式环境的付费生成、写入 Provider Key、数据导入及域名切换须用户另行决定。源码实现不等于部署验收，实际状态以对应 Issue 为准。
+`prod` 的产品规则（运行配置例外按上条执行）：晋级 `prod` 仅接受测试已验收并在原生 Issue comment 留证的精确 `main` revision 和与 manifest/OCI revision 匹配的镜像；`prod` 首次部署从空库开始，账户、会话、任务、资产与运行凭据不从测试环境复制；未配置 Provider Key 时，远程 Offering 明示不可用，不静默切换模型，可用的本地转换能力不因此关闭；`prod` 的付费生成、写入 Provider Key、数据导入及域名切换须用户另行决定。源码实现不等于部署验收，实际状态以对应 Issue 为准。
 
 ## 2. 用户与额度
 

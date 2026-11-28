@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Promotion rules shared by release-env.py: which source revision may reach a promoted environment.
 
-An environment with "promote_from" (formal-test) only receives an exact origin/main revision that
+An environment with "promote_from" (prod) only receives an exact origin/main revision that
 its source environment (dev-test) released successfully AND that has a passing acceptance report
 in a native GitHub Issue comment. This module holds the pure checks; release-env.py drives them.
 
-The acceptance comment must contain exactly one JSON fenced report with "formal_promotion", the
+The acceptance comment must contain exactly one JSON fenced report with "prod_promotion", the
 full revision, the source image tag and four passing checks (L0, L1, L1_agent, related), each
 with evidence under the project URL. Skipped or soft-failed checks never count.
 
-Since #707 a new promotion needs "formal_promotion": 2 with a "release_gate" record: status pass
+Since #707 a new promotion needs "prod_promotion": 2 with a "release_gate" record: status pass
 and the URL of an Issue comment of this project that holds exactly one release gate receipt
 (written by the release-gate Agent, docs/release-gate.md) for the same full revision.
 
@@ -32,8 +32,9 @@ SMOKE_VERSION = 1
 # The layers release-env.py runs after a successful release; "related" is not among them.
 SMOKE_CHECKS = ("L0", "L1", "L1_agent")
 CHECK_NAMES = ("L0", "L1", "L1_agent", "related")
-# #707: format 2 adds a "release_gate" reference to a passing gate receipt. Format 1 notes written
-# before it still parse, but release-env.py requires format 2 for every new promotion.
+# #707: format 2 adds a "release_gate" reference to a passing gate receipt. release-env.py requires
+# format 2 for every new promotion. Notes written before the key was renamed from "formal_promotion"
+# (#716) do not parse any more; they are history and never feed a new promotion.
 PROMOTION_FORMATS = (1, 2)
 GATED_FORMAT = 2
 GATE_RECEIPT_FORMAT = 1
@@ -99,15 +100,15 @@ def acceptance_from_note(body, revision, forge):
             report = json.loads(block)
         except ValueError:
             raise ReleaseError("native acceptance JSON is invalid") from None
-        if isinstance(report, dict) and "formal_promotion" in report:
+        if isinstance(report, dict) and "prod_promotion" in report:
             candidates.append(report)
     if len(candidates) != 1:
-        raise ReleaseError("one native formal_promotion acceptance report is required")
+        raise ReleaseError("one native prod_promotion acceptance report is required")
     report = candidates[0]
-    if (type(report.get("formal_promotion")) is not int or report["formal_promotion"] not in PROMOTION_FORMATS
+    if (type(report.get("prod_promotion")) is not int or report["prod_promotion"] not in PROMOTION_FORMATS
             or report.get("revision") != revision):
         raise ReleaseError("acceptance revision does not match the promotion")
-    if report["formal_promotion"] >= GATED_FORMAT:
+    if report["prod_promotion"] >= GATED_FORMAT:
         gate_reference(report, forge)
     validate_tag(report.get("image_tag"))
     checks = report.get("checks", {})
@@ -126,9 +127,9 @@ def acceptance_from_note(body, revision, forge):
 def gate_reference(report, forge):
     """The (issue, comment id) of the release gate receipt a format-2 acceptance report points at (#707)."""
     gate = report.get("release_gate") if isinstance(report, dict) else None
-    if (type(report.get("formal_promotion")) is not int or report["formal_promotion"] != GATED_FORMAT
+    if (type(report.get("prod_promotion")) is not int or report["prod_promotion"] != GATED_FORMAT
             or not isinstance(gate, dict)):
-        raise ReleaseError("a formal_promotion 2 report with a release_gate record is required")
+        raise ReleaseError("a prod_promotion 2 report with a release_gate record is required")
     if gate.get("status") != "pass":
         raise ReleaseError("the release_gate record is not a pass")
     evidence = gate.get("evidence")
@@ -149,7 +150,7 @@ def gate_receipt_from_note(body, revision):
         except ValueError:
             raise ReleaseError("release gate receipt JSON is invalid") from None
         # A format-2 acceptance report also names release_gate; it is not a receipt.
-        if isinstance(receipt, dict) and "release_gate" in receipt and "formal_promotion" not in receipt:
+        if isinstance(receipt, dict) and "release_gate" in receipt and "prod_promotion" not in receipt:
             candidates.append(receipt)
     if len(candidates) != 1:
         raise ReleaseError("one release_gate receipt is required in the gate comment")

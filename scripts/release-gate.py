@@ -16,7 +16,7 @@ Provider / Catalog areas touched), then checks:
      change or a "无新增差异（核对于 <rev> <date>）" line, and no fake/real difference is OPEN.
 
 The matrix and the rules are read from the head revision unless --matrix / --rules name a file.
-The evidence checks (smoke report, #2 receipt, PROD regression links) need GitHub and are left to
+The evidence checks (smoke report, #2 receipt, prod regression links) need GitHub and are left to
 the release-gate Agent (.claude/agents/release-gate.md). Exit 0 = PASS, 1 = FAIL, 2 = usage error.
 """
 import argparse
@@ -50,7 +50,7 @@ NO_NEW_DIFF = re.compile(r"无新增差异[（(]\s*核对于\s*`?([0-9a-f]{8})`?
 AGENT_CHECKS = (
     "候选 revision 在 dev-test 的机器冒烟报告 L0/L1/L1_agent 三层 pass（0 skip、0 soft-fail）",
     "#2 里有该候选 revision 的 dev-test 验收证据评论（L0/L1/L1_agent/related），链接真实指向该 revision",
-    "晋级前（dev-test 回归）与晋级后（formal-test 回归，打 tag 前复核）的回归证据链接存在且对应候选 revision",
+    "晋级前（dev-test 回归）与晋级后（prod 回归，打 tag 前复核）的回归证据链接存在且对应候选 revision",
 )
 
 

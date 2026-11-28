@@ -939,7 +939,7 @@ func TestSameProtocolConnectionsIsolateLegacyOfferingRoutes(t *testing.T) {
 }
 
 // #468: a Provider connection's declared pool limit comes from its environment
-// variable when set (dev-test 3, formal-test 2), else the declared default (5).
+// variable when set (dev-test 3, prod 2), else the declared default (5).
 func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {

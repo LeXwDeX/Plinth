@@ -70,7 +70,7 @@ func TestUpstreamRecorderRefusesHalfSetAndProductionLikeConfig(t *testing.T) {
 		"ack without dir": {wirefixture.EnvUpstreamRecordAck: "1"},
 		"ack not 1":       {wirefixture.EnvUpstreamRecordDir: dir, wirefixture.EnvUpstreamRecordAck: "yes"},
 		"production":      {wirefixture.EnvUpstreamRecordDir: dir, wirefixture.EnvUpstreamRecordAck: "1", wirefixture.EnvUpstreamRecordEnvironment: "production"},
-		"formal-test":     {wirefixture.EnvUpstreamRecordDir: dir, wirefixture.EnvUpstreamRecordAck: "1", wirefixture.EnvUpstreamRecordEnvironment: "formal-test"},
+		"prod":            {wirefixture.EnvUpstreamRecordDir: dir, wirefixture.EnvUpstreamRecordAck: "1", wirefixture.EnvUpstreamRecordEnvironment: "prod"},
 		"relative dir":    {wirefixture.EnvUpstreamRecordDir: "records", wirefixture.EnvUpstreamRecordAck: "1"},
 		"dir in worktree": {wirefixture.EnvUpstreamRecordDir: filepath.Join(root, "internal"), wirefixture.EnvUpstreamRecordAck: "1"},
 	}

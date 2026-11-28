@@ -193,7 +193,7 @@ func TestFakeUpstreamWiringFailsClosed(t *testing.T) {
 			t.Errorf("%s: wiring accepted", name)
 		}
 	}
-	// The live shape checks nothing: formal-test keeps its own wiring.
+	// The live shape checks nothing: prod keeps its own wiring.
 	config := shapeConfig(t, schema, map[string]string{"PROVIDER_MODE": "live", "AGENT_MODE": "live", "TRIPO_API_KEY": "real"})
 	if err := validateUpstreamWiring(upstreamShape{}, config, schema); err != nil {
 		t.Fatalf("live shape refused: %v", err)

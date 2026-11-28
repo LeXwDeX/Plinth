@@ -1,6 +1,6 @@
 ---
 name: release-gate
-description: Plinth 发布门禁（只读）。晋级 formal-test 前、打 tag/发 Release 前必须调用：核对回归测试覆盖本次全部修改点、fake 与真实的差异已回灌或经用户明确接受、验收证据齐全，逐项给出 PASS/FAIL；通过时输出可贴到 #2 的回执 JSON。调用时给出 --base（上一个 tag）、--head（候选完整 SHA）和本次是「晋级前」还是「打 tag 前」。
+description: Plinth 发布门禁（只读）。晋级 prod 前、打 tag/发 Release 前必须调用：核对回归测试覆盖本次全部修改点、fake 与真实的差异已回灌或经用户明确接受、验收证据齐全，逐项给出 PASS/FAIL；通过时输出可贴到 #2 的回执 JSON。调用时给出 --base（上一个 tag）、--head（候选完整 SHA）和本次是「晋级前」还是「打 tag 前」。
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -27,7 +27,7 @@ python3 scripts/release-gate.py --base <上一个 tag> --head <候选完整 SHA>
 - DEV → TEST → 回归过程中发现的真实与 fake 差异：在关联 Issue/PR 评论里找出来，逐条确认已回灌进 fake 并合并进候选 revision（`git merge-base --is-ancestor <回灌提交> <head>`），或在回归表「Fake 与真实的已知差异」里登记为 `ACCEPTED` 且有用户同意日期。停在未合并分支里的回灌不算。
 - 候选 revision 在 `dev-test` 的机器冒烟报告 L0/L1/L1 Agent 三层 pass（0 skip、0 soft-fail），以 #2 或关联 Issue 里引用该报告的评论为准；你不登录任何主机。
 - #2 里有该候选 revision 的 `dev-test` 验收证据评论（L0、L1、L1_agent、related），revision 为候选完整 SHA。
-- 晋级前回归证据存在且对应候选 revision；「打 tag 前」这次还要求 `formal-test` 晋级后的回归证据存在且对应候选 revision。
+- 晋级前回归证据存在且对应候选 revision；「打 tag 前」这次还要求 `prod` 晋级后的回归证据存在且对应候选 revision。
 - 豁免：每条被使用的豁免都写了用户在聊天里明确同意的日期；脚本已校验格式，你核对该 Issue 确实是纯文档/脚本/CI 类。
 
 你不能核实的项（链接打不开、`gh` 认证失败、证据不明确）记 `FAIL` 并写明缺什么，不推测为通过。
