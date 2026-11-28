@@ -38,6 +38,7 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 | `board-agent.py` | dev-test-live-chat | 只耗对话 token（5 轮），生成卡全部拒绝 | #688 图只在画板上时 Agent 是否注意到画板 |
 | `style-transfer-live.py` | dev-test-live-chat（`--real-2d` 时要求 `--live-upstream` 形态） | 每个场景两到三轮对话加一次 2D 生成（mixed 形态下 2D 是 fake，live 形态下是真实 2D）；只批准 2D 批准卡，3D 等其余一律拒绝 | #699/#723 画风迁移：风格图无全身先出比例卡、答完只提交一次 2D 生成；有全身不出卡、直接提交 |
 | `post-release-readonly.py` | prod-readonly | 免费，不调上游 | 发布后只读冒烟：版本、健康、Schema、CSP、登录、跨站拒绝、会话与批准接口 |
+| `run-fake-rows.py` | dev-test-fake 入口 | 免费（只跑 fake 行） | #718 依次运行回归表主表里 `dev-test-fake` 层、状态 `OK`/`MANUAL`、命令是单条 `python3`/`bash`/`node` 命令的行（命令前可带 `NAME=value` 环境变量），逐行 `PASS`/`FAIL` 加耗时与汇总，有失败时退出码 1；输出带本地 `HEAD` 与 UTC 日期；同一命令只跑一次；不写回回归表 |
 
 `lib.py`、`lib.mjs` 是共用的登录、会话、批准、任务、三视图与 PNG/GLB 小工具；fake 闸门函数 `fake_refusal()` /
 `fakeRefusal()` 不连网，可离线自检。
@@ -49,6 +50,9 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 python3 scripts/release-env.py smoke dev-test -- node scripts/regression/click-matrix.mjs
 python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/approval-modes.py --only window,agent
 python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/texture-switch-fake.py --offering tripo/tripo-v3.1-full/text-to-3d
+# 回归表里全部 dev-test fake 行（先 --dry-run 看选中哪些；--only B1,R-681a 只跑几行）
+python3 scripts/regression/run-fake-rows.py --dry-run
+python3 scripts/regression/run-fake-rows.py
 
 # 发布后只读（任何环境）
 python3 scripts/release-env.py smoke prod -- python3 scripts/regression/post-release-readonly.py
@@ -60,7 +64,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scrip
 ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke prod -- python3 scripts/regression/texture-live-tripo.py --live
 ```
 
-每个脚本最后一行是 `=== <名字>: PASS=n FAIL=n ===`（l5_common 系另带 `SKIP=n`），有 FAIL 时退出码 1，环境或闸门不满足时退出码 2。
+每个脚本最后一行是 `=== <名字>: PASS=n FAIL=n ===`（l5_common 系另带 `SKIP=n`），有 FAIL 时退出码 1，环境或闸门不满足时退出码 2。`run-fake-rows.py` 自己不经 `release-env.py smoke` 启动：它对每一行调用 `python3 scripts/release-env.py smoke dev-test -- <命令>`，不加 `--live`、不设 `ART_AI_LIVE_ACK`。
 
 ## 已知限制
 

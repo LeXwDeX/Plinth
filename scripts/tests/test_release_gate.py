@@ -7,11 +7,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import re
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("release_gate", ROOT / "scripts/release-gate.py")
@@ -44,15 +46,17 @@ def v196_changes(extra_files=()):
             "pr_commits": {706: [item["sha"] for item in commits[:6]]}, "files": files}
 
 
-def matrix(rows, diffs="| 无新增差异（核对于 {head8} 2026-11-28） | — | — | 2026-11-28 | — |", head8=HEAD8):
+def matrix(rows, diffs="| 无新增差异（核对于 {head8} 2026-11-28） | — | — | 2026-11-28 | — |", head8=HEAD8,
+           defects=""):
+    """A sample matrix; a row is (id, issues, state, last, evidence[, layer]) with layer L1 by default."""
     header = ("| ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 |\n"
               "|---|---|---|---|---|---|---|---|---|\n")
-    body = "".join(f"| {row_id} | 行为 | {issues} | L1 | `scripts/x.sh` | 通过 | {state} | {last} | {evidence} |\n"
-                   for row_id, issues, state, last, evidence in rows)
+    body = "".join(f"| {row[0]} | 行为 | {row[1]} | {row[5] if len(row) > 5 else 'L1'} | `scripts/x.sh` | 通过 "
+                   f"| {row[2]} | {row[3]} | {row[4]} |\n" for row in rows)
     return ("# 回归测试表\n\n## 主表\n\n" + header + body
             + "\n## 每次发布必跑\n\n- R-001\n\n## Fake 与真实的已知差异\n\n"
             + "| 差异 | 状态 | Issue | 记录日期 | 备注 |\n|---|---|---|---|---|\n"
-            + diffs.format(head8=head8) + "\n")
+            + diffs.format(head8=head8) + "\n" + defects)
 
 
 RULES = """# 发布门禁
@@ -93,7 +97,7 @@ class V196TrialTests(unittest.TestCase):
         reasons = "\n".join(result["reasons"])
         for number in (691, 699, 704, 705):
             self.assertIn(f"#{number}：", reasons)
-        self.assertIn(f"最后验证于 {OLD8}，不是候选 {HEAD8}", reasons)
+        self.assertIn(f"最后验证于 {OLD8}，无法解析为本仓库的提交", reasons)
         self.assertIn("已知差异仍是 OPEN：Tripo texture=false", reasons)
         self.assertIn("fake 登记表没有修改", reasons)
 
@@ -282,6 +286,152 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(gate.parse_rules(text)["exemptions"][0]["issue"], 1)
 
 
+OLD = OLD8 + "0" * 32
+
+
+def revision(ancestor=True, runtime=(), sha=OLD, error=None):
+    return {"sha": sha, "ancestor": ancestor, "runtime": list(runtime), "error": error}
+
+
+class RevisionValidityTests(unittest.TestCase):
+    """#718: a row verified at an ancestor stays current while only docs, scripts and CI changed since."""
+
+    def evaluate(self, revisions, rows=None):
+        rows = rows or passing_rows(last=f"{OLD8} 2026-11-27")
+        return gate.evaluate(v196_changes([gate.MATRIX_PATH]), matrix(rows), rules(), revisions=revisions)
+
+    def test_an_ancestor_with_only_docs_and_scripts_changes_since_is_current(self):
+        result = self.evaluate({OLD8: revision()})
+        self.assertEqual(result["status"], "pass", result["reasons"])
+
+    def test_an_ancestor_with_runtime_changes_since_is_stale(self):
+        result = self.evaluate({OLD8: revision(runtime=["src/components/studio/card.tsx"])})
+        self.assertEqual(result["status"], "fail")
+        self.assertIn(f"R-003 最后验证于 {OLD8}，此后到候选 {HEAD8} 改了运行产物：src/components/studio/card.tsx",
+                      "\n".join(result["reasons"]))
+
+    def test_a_revision_that_is_not_an_ancestor_or_does_not_resolve_is_stale(self):
+        result = self.evaluate({OLD8: revision(ancestor=False)})
+        self.assertIn(f"最后验证于 {OLD8}，不是候选 {HEAD8} 的祖先", "\n".join(result["reasons"]))
+        result = self.evaluate({OLD8: revision(sha=None, ancestor=False, error="ambiguous or unknown")})
+        self.assertIn(f"最后验证于 {OLD8}，无法解析为本仓库的提交：ambiguous or unknown", "\n".join(result["reasons"]))
+        self.assertEqual(self.evaluate({})["status"], "fail")
+
+    def test_the_candidate_itself_needs_no_lookup(self):
+        self.assertEqual(self.evaluate({}, rows=passing_rows())["status"], "pass")
+
+    def test_runtime_files_is_the_exemption_rule(self):
+        files = ["docs/a.md", "README.md", "scripts/x.py", ".github/w.yml", ".claude/a.md", "src/a.ts",
+                 "internal/x/README.md", "go.mod"]
+        self.assertEqual(gate.runtime_files(files), ["go.mod", "internal/x/README.md", "src/a.ts"])
+
+
+class UnitCITests(unittest.TestCase):
+    """#718: a unit row may cite CI; the host-ci/gates status of its revision must then be success."""
+
+    def evaluate(self, ci, last=f"{HEAD8} 2026-11-28", revisions=None, layer="unit"):
+        rows = passing_rows()[:2] + [("R-003", "#691", "OK", last, "CI", layer)]
+        return gate.evaluate(v196_changes([gate.MATRIX_PATH]), matrix(rows), rules(), revisions=revisions, ci=ci)
+
+    def test_ci_evidence_passes_on_a_successful_gates_status(self):
+        self.assertEqual(self.evaluate({HEAD: {"state": "success", "error": None}})["status"], "pass")
+        result = self.evaluate({OLD: {"state": "success", "error": None}}, last=f"{OLD8} 2026-11-27",
+                               revisions={OLD8: revision()})
+        self.assertEqual(result["status"], "pass", result["reasons"])
+
+    def test_ci_evidence_fails_on_a_failed_missing_or_unreadable_status(self):
+        cases = {"host-ci/gates 是 failure": {HEAD: {"state": "failure", "error": None}},
+                 "没有 host-ci/gates 状态": {HEAD: {"state": None, "error": None}},
+                 "gh 不可用": {HEAD: {"state": None, "error": "gh 不可用"}},
+                 "未查询": {}}
+        for expected, ci in cases.items():
+            with self.subTest(expected=expected):
+                result = self.evaluate(ci)
+                self.assertEqual(result["status"], "fail")
+                self.assertIn(f"R-003 的证据是 CI，但 {HEAD8}", "\n".join(result["reasons"]))
+                self.assertIn(expected, "\n".join(result["reasons"]))
+
+    def test_ci_rows_name_the_revisions_to_query(self):
+        rows = passing_rows()[:2] + [("R-003", "#691", "OK", f"{OLD8} 2026-11-27", "CI", "unit"),
+                                     ("R-004", "#691", "OK", f"{OLD8} 2026-11-27", "CI", "unit"),
+                                     ("R-005", "#691", "OK", f"{HEAD8} 2026-11-27", "CI", "L1")]
+        parsed = gate.parse_matrix(matrix(rows))
+        self.assertEqual(gate.ci_revisions(parsed, HEAD, {OLD8: revision()}), [OLD])
+        self.assertEqual(gate.revision_refs(parsed, HEAD), [OLD8])
+
+    def test_the_status_file_replaces_the_network_and_each_revision_is_read_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "statuses.json")
+            path.write_text(json.dumps({HEAD: "success", OLD8: "failure"}), encoding="utf-8")
+            states = gate.ci_states([HEAD, OLD, "c" * 40], {"RELEASE_GATE_STATUS_FILE": str(path)})
+        self.assertEqual(states[HEAD], {"state": "success", "error": None})
+        self.assertEqual(states[OLD], {"state": "failure", "error": None})
+        self.assertEqual(states["c" * 40], {"state": None, "error": None})
+        calls = []
+        states = gate.ci_states([HEAD, HEAD, OLD], {}, fetch=lambda sha: calls.append(sha) or "success")
+        self.assertEqual(calls, [HEAD, OLD])
+        self.assertEqual(states[OLD]["state"], "success")
+
+    def test_without_a_status_file_and_without_gh_the_state_is_an_error(self):
+        with mock.patch.object(gate.shutil, "which", return_value=None):
+            states = gate.ci_states([HEAD], {})
+        self.assertIsNone(states[HEAD]["state"])
+        self.assertIn("gh 不可用", states[HEAD]["error"])
+
+    def test_the_latest_gates_status_is_taken_from_the_statuses_list(self):
+        listing = [{"context": "host-ci/workflows", "state": "success"},
+                   {"context": "host-ci/gates", "state": "failure"},
+                   {"context": "host-ci/gates", "state": "success"}]
+        self.assertEqual(gate.latest_gates_state(listing), "failure")
+        self.assertIsNone(gate.latest_gates_state([]))
+        self.assertEqual(gate.repository_slug("https://github.com/LeXwDeX/Plinth.git"), "LeXwDeX/Plinth")
+        self.assertEqual(gate.repository_slug("git@github.com:owner/name.git"), "owner/name")
+
+
+class PhaseTests(unittest.TestCase):
+    """#718: before promotion the PROD rows are not yet verifiable; before the tag they are."""
+
+    def evaluate(self, phase, state="OK", layer="prod-paid"):
+        rows = passing_rows() + [("P-1", "#704", state, "—", "", layer)]
+        return gate.evaluate(v196_changes([gate.MATRIX_PATH]), matrix(rows), rules(), phase=phase)
+
+    def test_the_prod_prefix_is_matched_case_insensitively(self):
+        for layer in ("prod-readonly", "PROD-paid", "Prod-readonly"):
+            with self.subTest(layer=layer):
+                self.assertEqual(self.evaluate("promote", layer=layer)["status"], "pass")
+        self.assertEqual(self.evaluate("promote", layer="dev-test-fake")["status"], "fail")
+
+    def test_promote_does_not_require_current_prod_rows_but_tag_does(self):
+        result = self.evaluate("promote")
+        self.assertEqual(result["status"], "pass", result["reasons"])
+        self.assertEqual(result["phase"], "promote")
+        self.assertEqual(next(item for item in result["coverage"] if item["issue"] == 704)["deferred"], ["P-1"])
+        result = self.evaluate("tag")
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["phase"], "tag")
+        self.assertIn("P-1 的「最后验证」不是", "\n".join(result["reasons"]))
+        self.assertEqual(gate.evaluate(v196_changes([gate.MATRIX_PATH]), matrix(passing_rows()), rules())["phase"], "tag")
+
+    def test_promote_still_rejects_a_gap_prod_row(self):
+        result = self.evaluate("promote", state="GAP")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("P-1 状态是 GAP", "\n".join(result["reasons"]))
+
+
+class DefectSectionTests(unittest.TestCase):
+    """#718: known defects live in their own section and never reach the gate."""
+
+    def test_rows_of_the_defect_section_are_not_main_rows(self):
+        defects = ("\n## 5. 已知缺陷（不进门禁）\n\n| 缺陷 | Issue | 记录日期 | 备注 |\n|---|---|---|---|\n"
+                   "| R-705-1 批准卡预计消耗 | #719 | 2026-11-28 | 来源 #705 第 1 条 |\n\n"
+                   "| ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 |\n"
+                   "|---|---|---|---|---|---|---|---|---|\n"
+                   "| R-X | 行为 | #691 | L1 | — | — | GAP | — | |\n")
+        text = matrix(passing_rows(), defects=defects)
+        self.assertEqual([row["id"] for row in gate.parse_matrix(text)["rows"]], ["R-001", "R-002", "R-003"])
+        self.assertEqual(gate.evaluate(v196_changes([gate.MATRIX_PATH]), text, rules())["status"], "pass")
+
+
 class GitCollectionTests(unittest.TestCase):
     """collect() on a throwaway repository: trailers, a merged pull request and the diff."""
 
@@ -325,6 +475,40 @@ class GitCollectionTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(gate.main(["--repo", repo, "--base", "nope", "--head", head]), 2)
                 self.assertEqual(gate.main(["--repo", repo, "--base", head, "--head", "v0"]), 2)
+
+    def test_a_row_verified_before_a_docs_only_commit_passes_end_to_end(self):
+        """#718: the matrix cannot name its own revision; it names the code revision before it."""
+        with tempfile.TemporaryDirectory() as repo:
+            self.git(repo, "init", "-q", "-b", "main")
+            self.write(repo, "README.md", "x\n")
+            self.git(repo, "commit", "-q", "-m", "init")
+            self.git(repo, "tag", "v0")
+            self.write(repo, "src/a.ts", "export {}\n")
+            self.git(repo, "commit", "-q", "-m", "feat: a\n\nIssue: #12")
+            code = self.git(repo, "rev-parse", "HEAD")
+            row = ("CI", "unit")
+            self.write(repo, gate.MATRIX_PATH, matrix([("R-12", "#12", "OK", f"{code[:8]} 2026-11-28", *row)]))
+            self.write(repo, gate.RULES_PATH, rules())
+            self.git(repo, "commit", "-q", "-m", "docs: 回归表\n\nIssue: #12")
+            head = self.git(repo, "rev-parse", "HEAD")
+            infos = gate.inspect_revisions(repo, head, [code[:8], "0123abcd"])
+            self.assertEqual(infos[code[:8]], {"sha": code, "ancestor": True, "runtime": [], "error": None})
+            self.assertIsNone(infos["0123abcd"]["sha"])
+            self.assertTrue(infos["0123abcd"]["error"])
+            status = Path(repo, "statuses.json")
+            for state, expected in (("success", 0), ("failure", 1)):
+                status.write_text(json.dumps({code: state}), encoding="utf-8")
+                output = io.StringIO()
+                with mock.patch.dict(os.environ, {"RELEASE_GATE_STATUS_FILE": str(status)}), \
+                        contextlib.redirect_stdout(output):
+                    result = gate.main(["--repo", repo, "--base", "v0", "--head", head, "--phase", "promote", "--json"])
+                self.assertEqual(result, expected, output.getvalue())
+                self.assertEqual(json.loads(output.getvalue())["phase"], "promote")
+            # A later runtime change makes the same row stale.
+            self.write(repo, "src/a.ts", "export const a = 1\n")
+            self.git(repo, "commit", "-q", "-m", "fix: a\n\nIssue: #12")
+            later = self.git(repo, "rev-parse", "HEAD")
+            self.assertEqual(gate.inspect_revisions(repo, later, [code[:8]])[code[:8]]["runtime"], ["src/a.ts"])
 
 
 if __name__ == "__main__":

@@ -3210,7 +3210,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 
 **晋级规则（#270、存档 #60）。**
 
-- 晋级规则由工具强制：目标 revision 必须是 `origin/main` 祖先、在源环境成功清单中，且 GitHub 原生 Issue comment 中有 L0、L1、L1 Agent、related 全部 PASS 的验收报告。报告与清单校验位于 `release-promotion.py`，`release-env.py` 复用。#707 起新的晋级要求报告为格式 2（`"prod_promotion": 2`），其 `release_gate.evidence` 指向本仓库一条 Issue comment，该 comment 中恰有一个 `revision` 与候选完整一致、`status` 为 `pass` 的发布门禁回执（门禁规则 `docs/release-gate.md`，确定性部分 `scripts/release-gate.py` 只读本地 git）；格式 1 只作历史回执解析，`release-env.py` 不再接受。源码与本机测试（`test_release_promotion.py`、`test_release_env.py`、`test_release_gate.py`）覆盖，尚未用于真实晋级。
+- 晋级规则由工具强制：目标 revision 必须是 `origin/main` 祖先、在源环境成功清单中，且 GitHub 原生 Issue comment 中有 L0、L1、L1 Agent、related 全部 PASS 的验收报告。报告与清单校验位于 `release-promotion.py`，`release-env.py` 复用。#707 起新的晋级要求报告为格式 2（`"prod_promotion": 2`），其 `release_gate.evidence` 指向本仓库一条 Issue comment，该 comment 中恰有一个 `revision` 与候选完整一致、`status` 为 `pass` 的发布门禁回执（门禁规则 `docs/release-gate.md`，确定性部分 `scripts/release-gate.py` 读本地 git，#718 起另以只读 `gh api` 核对单元行 `CI` 证据的 `host-ci/gates` 状态，并按 `--phase promote|tag` 区分晋级前后）；格式 1 只作历史回执解析，`release-env.py` 不再接受。源码与本机测试（`test_release_promotion.py`、`test_release_env.py`、`test_release_gate.py`）覆盖，尚未用于真实晋级。
 - 验收报告读取：本地环境文件 `acceptance` 使用 `forge_repo`（`owner/repo`）与 `issue`（`prod`）；`read_acceptance_comment`（位于 `release-promotion.py`）用 `gh api repos/<repo>/issues/comments/<id>` 读取，拒绝属于其他 Issue 的 comment。报告格式与四项检查规则固定。
 
 **保留的边界。**

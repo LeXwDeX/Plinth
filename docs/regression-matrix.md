@@ -1,12 +1,12 @@
 # 回归测试表
 
 本表记录每个已交付行为由哪一层、哪个命令覆盖，以及最后一次在哪个 revision 上验证过。有了这张表，发布前后不用把所有行为重新遍历一遍。
-表里的脚本路径由 `scripts/tests/test_regression_matrix.py` 校验（随「scripts tests」门禁运行）：路径必须存在，状态只能取四个值，`GAP` 行必须写备注。
+表里的脚本路径由 `scripts/tests/test_regression_matrix.py` 校验（随「scripts tests」门禁运行）：路径必须存在，状态只能取四个值，`GAP` 行必须写备注。没修的已知缺陷不是回归行，放在第 5 节，由各自的 Issue 跟踪，不进发布门禁（#718）。
 
 ## 1. 用途与用法
 
 1. 发布前、发布后先读这张表。只跑「每次发布必跑」，以及主表里与本次改动相关的行（按「来源 Issue」和「功能 / 行为」对照最终 diff 与影响链），不重新遍历全部行。
-2. 跑完一行，把它的「最后验证」改成被测 revision 的前 8 位加日期（如 `f5bc5e10 2026-11-28`），并在「证据」里放 Issue 评论链接（验收结果仍按 AGENTS.md 写进 Issue 评论，本表只放指针）。没跑的行不改；不能把别的 revision 的结果写进来，也不能只凭源码或单测推断线上结果。
+2. 跑完一行，把它的「最后验证」改成被测 revision 的前 8 位加日期（如 `f5bc5e10 2026-11-28`），并在「证据」里放 Issue 评论链接（验收结果仍按 AGENTS.md 写进 Issue 评论，本表只放指针）。没跑的行不改；不能把别的 revision 的结果写进来，也不能只凭源码或单测推断线上结果。被测 revision 可以早于发布候选：只要它是候选的祖先、此后只改了 `docs/`、`scripts/`、`.github/`、`.claude/` 或根目录 `*.md`（没改运行产物），这次验证对候选仍然有效（`docs/release-gate.md` ①）。`unit` 层的行可以在「证据」里写 `CI`，表示该 revision 的提交状态 `host-ci/gates` 为 success，门禁会去核对。
 3. 改变行为的 PR 必须在同一改动里新增或更新对应的行。没有对应脚本或测试的行标 `GAP`，在「备注」里写要补什么，并开 Issue 跟踪。
 
 **验证层**：`unit`（本机与 CI 的单测：`pnpm test`、`go test`、`scripts/tests`）、`fake-stack`（本机 fake 整栈 `scripts/smoke/smoke-fake-stack.py`）、`dev-test-fake`（dev-test 的 fake 上游形态发布）、`dev-test-live-chat`（dev-test 的 `--live-chat` 形态：对话模型真实、生成走 fake，只耗对话 token）、`prod-readonly`（`prod`，只读、免费）、`prod-paid`（`prod` 或 `--live-upstream` 的 dev-test 上的真实付费调用，每次先取得用户当次同意）。
@@ -40,8 +40,9 @@
 | G3 | 工作流重放 | #86 | unit | `python3 scripts/host-ci/run.py <sha> --workflows` | 提交状态 `host-ci/workflows` success | OK | — | | GitHub Actions 不可用时使用 |
 | G4 | GitHub Runner 完整 CI | #257 | unit | `.github/workflows/ci.yml`（GitHub Actions） | `frontend`、`go check`、`go test race` 三个作业通过 | OK | — | | 晋级前对精确 revision 跑，不按 diff 缩减 |
 | G5 | 本表与脚本不脱节 | #705 | unit | `python3 -m unittest scripts.tests.test_regression_matrix` | 表里路径都存在、状态合法、`GAP` 有备注、必跑脚本在主表、`AGENTS.md` 引用本表 | OK | — | | 随 G1 的「scripts tests」运行 |
-| G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免） | #707 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
-| G7 | 发布前过发布门禁 | #707 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选>` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `prod` 前对候选 revision 运行；回执格式见 `docs/release-gate.md` |
+| G6 | 发布门禁脚本的判定（修改点、主表全部小节、fake 差异表、豁免、祖先 revision 与运行产物、单元行认 CI、`--phase`） | #707、#718 | unit | `python3 -m unittest scripts.tests.test_release_gate` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
+| G7 | 发布前过发布门禁 | #707、#718 | unit | `python3 scripts/release-gate.py --base <上一个 tag> --head <候选> --phase promote` | 门禁 Agent 运行脚本并按 `docs/release-gate.md` 核对脚本判断不了的证据，结论 PASS | MANUAL | — | | 晋级 `formal-test` 前用 `--phase promote`，打 tag 前再用 `--phase tag` 跑一次；回执格式见 `docs/release-gate.md` |
+| G8 | dev-test fake 行的统一入口（选行、dry-run、逐行 PASS/FAIL 与失败汇总） | #718 | unit | `python3 -m unittest scripts.tests.test_run_fake_rows` | 单测通过 | OK | — | | 入口脚本 `scripts/regression/run-fake-rows.py`，不写回本表 |
 | G9 | 画风迁移真实验收脚本的离线判定（场景表、闸门拒绝、合成图为 RGB PNG、判定函数） | #723 | unit | `python3 -m unittest scripts.tests.test_style_transfer_live` | 单测通过 | OK | — | | 随 G1 的「scripts tests」运行 |
 
 ### 发布后自动冒烟（dev-test fake 形态发布后 `release-env.py` 自动跑）
@@ -75,7 +76,7 @@
 | B2 | 失败通知只提醒一次、三视图卡片标题 | #651、#633、#655 | dev-test-fake | `node scripts/acceptance/release-1-9-2-notices.mjs` | 7/0 | OK | f5bc5e10 2026-11-28 | E2 | |
 | B3 | 自动方式下三视图、四视图同一回合出完 | #663 | dev-test-fake | `node scripts/acceptance/release-1-9-3-three-view-auto.mjs` | 6/0 | OK | f5bc5e10 2026-11-28 | E2 | WebKit 同 B1 |
 | B4 | v1.9.0 全套（N5 对话栏宽度、#559/N2/#587 点击规则、#611 标记、项目组 P1–P4 等） | #586、#559、#587、#611、#695 | dev-test-fake | `node scripts/acceptance/release-1-9-0-browser.mjs` | v1.9.6：125 通过、3 失败，3 条均为 P4 对话框初始聚焦竞态（隔离重跑约 8 次出现 2 次） | OK | f5bc5e10 2026-11-28 | E2 | P4 偶发失败为已知，不挡发布；其余项须全过 |
-| B5 | 浏览器矩阵子集 I18N-03/04、CNV-02..08、SKL-02/03（含 #681 画板动作护栏） | #548、#681、#705 | dev-test-fake | `bash scripts/acceptance/browser_matrix/run.sh dev-test`（`B3_ITEMS=I18N-03,I18N-04,CNV-02,CNV-03,CNV-04,CNV-05,CNV-06,CNV-07,CNV-08,SKL-02,SKL-03`） | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E2 | SKL-02/03 已按 #548 新弹窗重写 |
+| B5 | 浏览器矩阵子集 I18N-03/04、CNV-02..08、SKL-02/03（含 #681 画板动作护栏） | #548、#681、#705 | dev-test-fake | `B3_ITEMS=I18N-03,I18N-04,CNV-02,CNV-03,CNV-04,CNV-05,CNV-06,CNV-07,CNV-08,SKL-02,SKL-03 bash scripts/acceptance/browser_matrix/run.sh dev-test` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E2 | SKL-02/03 已按 #548 新弹窗重写 |
 | B6 | 详情弹窗几何 | #224 | dev-test-fake | `node scripts/smoke/result-detail-geometry.mjs` | 22/0 | OK | f5bc5e10 2026-11-28 | E2 | |
 | B7 | 弹层滚动锁几何 | #74、#705 | dev-test-fake | `node scripts/smoke/overlay-scroll-lock-geometry.mjs` | 三个视口下滚动锁与几何检查通过 | MANUAL | — | | 依赖一个有内容的会话（#705-10），全新数据上要先人工造数 |
 | B8 | 旧 Studio 场景脚本 | #705 | dev-test-fake | `scripts/acceptance/studio-scenarios.mjs` | — | OBSOLETE | — | | 起步卡等入口早已不存在，历史上 0/43，不属于验收 |
@@ -152,7 +153,7 @@
 | ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 | 备注 |
 |---|---|---|---|---|---|---|---|---|---|
 | P1 | 版本与健康、L1 子集（Schema、CSP、登录、跨站拒绝、会话与批准接口） | #2 | prod-readonly | `python3 scripts/regression/post-release-readonly.py` | 全部 PASS | OK | f5bc5e10 2026-11-28 | E4 | v1.9.6 跑的是入库前的 11 项版本（全过，结果在运行日志里）；版本检查是入库时新增的 |
-| P2 | L0 浏览器启动检查 | #2 | prod-readonly | `scripts/smoke/smoke-l0-browser-boot.sh` | `PASS=16 FAIL=0 SKIP=0` | OK | f5bc5e10 2026-11-28 | E4 | 经 `release-env.py smoke formal-test` 运行；结果在该轮的运行日志里，评论未单列 |
+| P2 | L0 浏览器启动检查 | #2 | prod-readonly | `scripts/smoke/smoke-l0-browser-boot.sh` | `PASS=16 FAIL=0 SKIP=0` | OK | f5bc5e10 2026-11-28 | E4 | 经 `release-env.py smoke prod` 运行；结果在该轮的运行日志里，评论未单列 |
 | P3 | L1、L1 Agent 全量 | #2 | prod-paid | `scripts/smoke/smoke-l1-free.sh`、`scripts/smoke/smoke-l1-agent-mode.sh` | 同 S2、S3 | MANUAL | — | | 真实形态会调用真实对话模型，每次先取得同意；平时以 P1 代替 |
 | P4 | 迁移后的旧会话能打开、旧卡片正常显示 | #2 | prod-readonly | 人工：打开发布前的会话 | 旧会话、旧选择卡、旧 2D 结果正常显示 | MANUAL | — | | |
 | P5 | 界面抽查（顶栏版本、设置面板生成参数、本次新功能） | #2 | prod-readonly | 人工抽查 | 与 dev-test 验收一致 | MANUAL | — | | |
@@ -177,10 +178,21 @@
 
 （暂无）
 
-## 5. 维护规则
+## 5. 已知缺陷（不进门禁）
+
+没修的缺陷、待产品决定的问题不是「待回归的行为」，不放主表。它们由各自的 Issue 跟踪，不拦发布，发布门禁也不读本节（`docs/release-gate.md` ①）。缺陷修好时，在同一改动里把它写回主表成为回归行（补命令或脚本、期望与状态），并从本节删除。
+
+| 缺陷 | Issue | 记录日期 | 备注 |
+|---|---|---|---|
+
+当前没有登记的已知缺陷（原 R-705-1、R-705-3、R-705-4、R-704g 已由 #719–#722 修复或处理，见主表）。
+
+## 6. 维护规则
 
 - **改行为的 PR**：同一改动里新增或更新对应的行（ID、期望与命令写准确，命令里的路径必须存在）；没有脚本的写 `GAP`、写备注并开 Issue。`scripts/tests/test_regression_matrix.py` 在门禁里检查路径与状态。
 - **发布的人**：发布前读第 2 节与相关行；跑完一行就把「最后验证」改成被测 revision 前 8 位加日期，证据链接指向写了结果的 Issue 评论。没跑的行保持原值，失败的行不改日期，在 Issue 里记失败与处置。
 - **真实调用回灌 fake 之后**：更新第 4 节，并把对应行的命令换成 fake 能复现的版本（AGENTS.md「真实结果回灌 fake」）。
 - **脚本过期**：改成 `OBSOLETE` 并写原因，不删行，直到替代脚本入表。
+- **已知缺陷**：没修的缺陷写在第 5 节并开 Issue，不写成主表的 `GAP` 行；修好后写回主表。
+- **dev-test fake 行**：`python3 scripts/regression/run-fake-rows.py`（`--dry-run` 先看选中的行）依次运行主表里 `dev-test-fake` 层、命令是单条 `python3`/`bash`/`node` 命令的行，输出贴进证据评论；它不改本表，「最后验证」与「证据」仍由人回写。
 - 本表只放状态指针，不复制证据正文；不写主机、地址、端口、目录、任务或资产 ID、账号口令。
