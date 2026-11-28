@@ -196,5 +196,10 @@ func (t *task) artifact(name string) (fakeupstream.File, error) {
 			return fakeupstream.ConvertedFBXFile(spec)
 		}
 	}
+	// A generation with PBR on, and a plain conversion of its model, deliver the
+	// GLB with the three PBR textures (untextured.go).
+	if t.deliversPBRGLB() && path.Ext(name) == ".glb" {
+		return fakeupstream.ModelFile("glb:pbr")
+	}
 	return artifactFile(name, t.fidelity(), t.convertTexture())
 }

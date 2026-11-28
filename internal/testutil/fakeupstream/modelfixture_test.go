@@ -2,6 +2,8 @@ package fakeupstream
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +21,7 @@ func TestSmallModelFilesPassDeliveryChecksAndAreDeterministic(t *testing.T) {
 		"glb":           {"model", "glb", "model/gltf-binary"},
 		"glb:skeleton":  {"model", "glb", "model/gltf-binary"},
 		"glb:animation": {"model", "glb", "model/gltf-binary"},
+		"glb:pbr":       {"model", "glb", "model/gltf-binary"},
 		"gltf":          {"converted_model", "converted.gltf", "model/gltf+json"},
 		"fbx":           {"converted_model", "fbx", "model/fbx"},
 		"fbx:skeleton":  {"converted_model", "fbx", "model/fbx"},
@@ -72,6 +75,77 @@ func TestTexturedFBXFixturesEmbedTheirTextureFormat(t *testing.T) {
 		if bytes.Contains(data, want.absent) {
 			t.Errorf("%s embeds an image of the other format", name)
 		}
+	}
+}
+
+// "glb:pbr" is the PBR pack a Tripo generation with texture and PBR on delivers
+// (#704: three textures, three images, one material). Each slot has its own
+// picture, the base color is the plain fixture's atlas, and Plinth's model
+// reader finds all three slots; the file stays small.
+func TestPBRFixtureCarriesThreeDistinctTextures(t *testing.T) {
+	files, err := smallModelFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := files["glb:pbr"].Data
+	if len(data) < 20 || len(data) > 64<<10 {
+		t.Fatalf("glb:pbr is %d bytes", len(data))
+	}
+	size := int(binary.LittleEndian.Uint32(data[12:16]))
+	var document struct {
+		Textures, Images, Materials []json.RawMessage
+	}
+	if err := json.Unmarshal(data[20:20+size], &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Textures) != 3 || len(document.Images) != 3 || len(document.Materials) != 1 {
+		t.Fatalf("glb:pbr declares %d textures, %d images, %d materials, want 3, 3, 1",
+			len(document.Textures), len(document.Images), len(document.Materials))
+	}
+	report := inspectGLB(t, data)
+	if report.TextureCount != 3 {
+		t.Errorf("the reader finds %d textures, want 3", report.TextureCount)
+	}
+	slots := slotEdges(report)
+	for _, slot := range []string{"base_color", "metallic_roughness", "normal"} {
+		if slots[slot] == 0 {
+			t.Errorf("slot %s is missing (all %v)", slot, slots)
+		}
+	}
+	atlas, err := fixtureTexture(64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, atlas) {
+		t.Error("the base color is not the fixture atlas")
+	}
+	seen := map[string]bool{}
+	for _, png := range pngsIn(data) {
+		if seen[string(png)] {
+			t.Error("two slots carry the same picture")
+		}
+		seen[string(png)] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("glb:pbr embeds %d pictures, want 3", len(seen))
+	}
+}
+
+// pngsIn cuts every PNG out of a buffer: from its signature to its IEND chunk.
+func pngsIn(data []byte) [][]byte {
+	signature, end := []byte("\x89PNG\r\n\x1a\n"), []byte("IEND\xaeB`\x82")
+	var out [][]byte
+	for {
+		start := bytes.Index(data, signature)
+		if start < 0 {
+			return out
+		}
+		stop := bytes.Index(data[start:], end)
+		if stop < 0 {
+			return out
+		}
+		out = append(out, data[start:start+stop+len(end)])
+		data = data[start+stop+len(end):]
 	}
 }
 

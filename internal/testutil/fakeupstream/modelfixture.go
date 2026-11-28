@@ -20,7 +20,9 @@ import (
 // conversion writes, tripo3mf.go), plus the texture "png". The mesh and the format writers are Mock
 // generation's (internal/providers/mock/modelfiles); only the texture is drawn here. "glb:untextured" is
 // the same mesh with one material and no texture or image, the model a Tripo generation with texture
-// off delivers (#704). The fixture lives
+// off delivers (#704), and "glb:pbr" the same mesh with the PBR pack (base color atlas, metallic-roughness
+// and normal: three textures, three images, one material), the model a Tripo generation with texture and
+// PBR on delivers (#704). The fixture lives
 // in testutil, not in the Mock adapter, so no production package carries a test-only export.
 func smallModelFiles() (map[string]File, error) {
 	seed := sha256.Sum256([]byte("fixture\x00"))
@@ -42,6 +44,10 @@ func smallModelFiles() (map[string]File, error) {
 		return nil, err
 	}
 	glbUntextured, err := buildGLB(mesh, nil, glbExtras{})
+	if err != nil {
+		return nil, err
+	}
+	glbPBR, err := buildGLB(mesh, [][]byte{texture, sizedTexturePNG(textureMetallicRoughness, 64), sizedTexturePNG(textureNormal, 64)}, glbExtras{})
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +84,7 @@ func smallModelFiles() (map[string]File, error) {
 		"glb:skeleton":   {"model/gltf-binary", glbSkeleton},
 		"glb:animation":  {"model/gltf-binary", glbAnimation},
 		"glb:untextured": {"model/gltf-binary", glbUntextured},
+		"glb:pbr":        {"model/gltf-binary", glbPBR},
 		"fbx:skeleton":   {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "skeleton")},
 		"fbx:animation":  {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "animation")},
 		// A conversion of a textured model carries the texture in the format the
