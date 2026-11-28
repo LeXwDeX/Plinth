@@ -111,8 +111,8 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
 - L2 覆盖两部分。第一部分：2D 审批方式（`budget`）= 策略批准——一张小额文生图，不出现待批准同意，任务 SUCCEEDED，批准来源为 `policy`，显示本步和会话累计积分；脚本能读到 SQLite（`ART_AI_DB`，服务器上缺省 `$ART_AI_SERVER_ROOT/production/data/art-ai.db`）时再核对 `grant.decided_by = policy:budget`，读不到打印 SKIP（严格方式下 2D 也出卡，#702）。第二部分：3D 手工（严格）方式 = 人工批准——A/B 双会话分别触发确切的 3D 生成待批准执行、不冻结 C；拒绝 B 并断言零任务；A 默认停止本轮并断言零任务，只有设了 `L2_APPROVE_3D=1` 才批准 A（一次真实 3D 生成，约 25 积分）并断言 SUCCEEDED。从 GET 读取对应 request ID 后才发送决策，未读到当前 request ID 时不发送。
 - 测试数据按协议**保留**在 `dev-test`，不清理；发布备份快照是另一类数据，按 #364 的保留规则处理。
 - L4 在 `dev-test` 主机的 Plinth 测试栈运行：先从 `<root>/production/runtime.env` 导出管理员登录环境变量，再以 `ART_AI_LIVE_ACK=1 python3 scripts/smoke/smoke-l4-3d-isolation.py --live` 执行（#219：双重开关，目标须为真实形态；原 `ART_AI_LIVE_3D_ACK` 不再使用）。脚本作为测试操作员批准处于 `pending` 的冻结任务（会话批准方式已批准的授权不再重复决定），等待公开 Task 成功，核对 Meshy 六格式与 Tripo 六格式的本地 URL、两次下载字节、大小和 SHA-256；不会输出密钥或原始上游响应。`ART_AI_3D_SESSION_ID` 可让第一个 3D 任务接在已有 2D 生成会话中，用于工作区往返验收。它不代替真实浏览器网络检查与离线依赖检查。
-- **2D 成品图的抽样口径见 `dev_test.md` §11.3**（每轮随机 1–5 张、不超过 5 张；
-  满 5 张仍无问题就暂停先分析，不要继续加图）。本目录不另定标准。
+- **2D 成品图的抽样口径见 `dev_test.md` §11.3**（每轮随机抽样、2D 不限量；
+  一批图仍无问题时别靠加量，先分析公共路径）。本目录不另定标准。
 - 单元/集成/竞态门禁由本地门禁与 CI 覆盖（各项在哪里执行见 `dev_test.md` §2），不属于本目录职责。
 
 ## L5 真实能力回归
