@@ -1167,6 +1167,10 @@ func artifactFile(name string, t *task) (fakeupstream.File, error) {
 	}
 	switch path.Ext(name) {
 	case ".glb":
+		if fidelity == "" && t.generatesUntextured() {
+			// should_texture=false delivers a GLB without textures (untextured.go).
+			return fakeupstream.ModelFile("glb:untextured")
+		}
 		return model("glb")
 	case ".fbx":
 		return model("fbx")

@@ -3297,6 +3297,26 @@
       ]
     },
     {
+      "id": "meshy-openapi-v1/image-to-3d-texture-off-glb",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-3d",
+        "POST /multi-image-to-3d"
+      ],
+      "category": "artifact-shape",
+      "status": "constructed",
+      "behavior": "image-to-3d、multi-image-to-3d 请求 should_texture=false 时，生成任务交付的 GLB 是无贴图夹具：0 个 texture、0 个 image、1 个 material（core/untextured.go）；should_texture 为 true 或缺省时仍交付原有带贴图 GLB。multi-image-to-3d（含 enable_pbr=true）按单图推定；无贴图任务的 FBX/USDZ/3MF 以及对它的 remesh、convert、绑骨与 retexture 仍是带贴图夹具。",
+      "basis": [
+        {
+          "source": "v1.9.6 发布后正式测试环境真实回归的 Plinth 侧观测（meshy/meshy-7.1/image-to-3d，界面保存的会话参数 should_texture=false、enable_pbr=false，交付 GLB 计数 textures 0 / images 0 / materials 1）",
+          "section": "#704，2026-11-28，revision f5bc5e10，https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783；计数入库为 internal/testutil/fakeupstream/meshy/openapi-v1/testdata/observation-704-texture-off.json"
+        }
+      ],
+      "checked_at": "2026-11-28",
+      "why_not_real": "只有 Plinth 侧观测（冻结输入与交付 GLB 的 texture/image/material 计数）入库；原始 HTTP 请求与响应未作为脱敏 wire 样本录制，GLB 字节未入库，无法按登记表规则引用 candidate 样本标 real；multi-image-to-3d 与 Meshy 默认开纹理的对照未观测"
+    },
+    {
       "id": "meshy-openapi-v2/text-to-3d-shape",
       "provider": "meshy",
       "api": "openapi-v2",

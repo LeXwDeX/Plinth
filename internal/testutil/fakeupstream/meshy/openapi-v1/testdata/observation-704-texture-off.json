@@ -1,0 +1,18 @@
+{
+  "issue": 704,
+  "observed_at": "2026-11-28",
+  "app_revision": "f5bc5e10",
+  "environment": "v1.9.6 发布后的正式测试环境真实回归，Agent 专用账号，经用户同意的付费调用",
+  "offering": "meshy/meshy-7.1/image-to-3d",
+  "evidence": "Plinth 侧观测：公开任务的冻结输入与交付 GLB 的解析结果；原始 HTTP 请求与响应未录制，GLB 字节未入库。不含任务 ID、资产 ID、URL、用户信息与密钥。",
+  "runs": [
+    {
+      "name": "texture-off",
+      "parameter_source": "界面保存的会话参数",
+      "frozen_input": {"should_texture": false, "enable_pbr": false},
+      "task_status": "SUCCEEDED",
+      "glb": {"textures": 0, "images": 0, "materials": 1}
+    }
+  ],
+  "note": "该轮没有跑 Meshy 默认开纹理的对照；必需产物槽位、字节与鉴权下载均已核对。Meshy 不给 native_quote。"
+}

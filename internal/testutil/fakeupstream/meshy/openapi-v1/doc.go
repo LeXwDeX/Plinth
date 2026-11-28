@@ -49,7 +49,11 @@
 //     requested from the real API.
 //   - PENDING, CANCELED and non-rigging FAILED poll bodies follow the field
 //     documentation of each task object; texture_urls and PBR maps follow the
-//     request's should_texture/enable_pbr options.
+//     request's should_texture/enable_pbr options. An image-to-3d or
+//     multi-image-to-3d with should_texture=false delivers a GLB with one
+//     material and no texture or image, like the real Meshy 7.1 Image to 3D
+//     task of 2026-11-28 (#704, core/untextured.go); only that endpoint was
+//     observed, and only from Plinth's side.
 //
 //   - The create requests of text-to-image, image-to-image, image-to-3d,
 //     multi-image-to-3d, retexture, animations and text-to-motion are checked
