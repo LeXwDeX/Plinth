@@ -4398,6 +4398,12 @@ type ChatThreeViewMessages struct {
 	// {approval}, {credits} and {task}.
 	AgentStarted           string `json:"agent_started"`
 	AgentStartedContinuing string `json:"agent_started_continuing,omitempty"`
+	// AgentStartedUnmetered and AgentStartedContinuingUnmetered are the same
+	// receipts for an Offering that does not bill in credits (#719): they take
+	// {run}, {view}, {approval} and {task} but no {credits}, so the Agent is not
+	// told an internal estimate as credits. Empty falls back to the receipts above.
+	AgentStartedUnmetered           string `json:"agent_started_unmetered,omitempty"`
+	AgentStartedContinuingUnmetered string `json:"agent_started_continuing_unmetered,omitempty"`
 	// The texts the three-view tool answers with when it submits nothing
 	// (#665): the turn was stopped, the session's model has no image-to-image
 	// Offering for the recipe, the chosen picture cannot be used, the

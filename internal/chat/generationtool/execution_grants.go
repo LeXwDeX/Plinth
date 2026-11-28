@@ -555,7 +555,7 @@ func (executor *Executor) resumeAgentOperation(
 	if observe != nil {
 		if err := observe(chat.ToolObservation{Registered: true, TaskID: string(task.ID),
 			Capability: string(task.Capability), AIModel: task.Offering.ModelID,
-			NativeQuote: task.NativeQuote, EstimatedCredits: taskCredits(task), ApprovalSource: approvalSource(grant)}); err != nil {
+			NativeQuote: task.NativeQuote, EstimatedCredits: statedTaskCredits(task), ApprovalSource: approvalSource(grant)}); err != nil {
 			return executor.awaitTask(command, task.ID, executor.taskWaitDeadline(command, task.Offering), err)
 		}
 	}

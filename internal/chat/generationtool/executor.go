@@ -904,7 +904,7 @@ func (executor *Executor) execute(
 			Capability:       string(capability),
 			Prompt:           prompt,
 			AIModel:          offering.ModelID,
-			EstimatedCredits: offering.EstimateTotalCredits(input),
+			EstimatedCredits: statedCredits(offering.CreditsMetered, offering.EstimateTotalCredits(input)),
 		}); err != nil {
 			return executor.awaitTask(command, accepted.TaskID, executor.taskWaitDeadline(command, offering), err)
 		}
@@ -1034,6 +1034,22 @@ func taskCredits(task generation.Task) int {
 	return task.Offering.EstimateTotalCredits(task.Input)
 }
 
+// statedCredits is the estimate the chat states as credits (#719): the result
+// card's 本步消耗 and the Agent's receipt follow the Offering's credits_metered
+// like the approval card; an Offering that does not bill in credits states none.
+// Approval still weighs the full estimate.
+func statedCredits(metered bool, credits int) int {
+	if !metered {
+		return 0
+	}
+	return credits
+}
+
+// statedTaskCredits is statedCredits for an accepted task.
+func statedTaskCredits(task generation.Task) int {
+	return statedCredits(task.Offering.CreditsMetered, taskCredits(task))
+}
+
 // taskStep is what the Agent learns about an accepted task's price: the
 // estimate and the extra-credit part of it.
 func taskStep(task generation.Task, approval string) stepInfo {
@@ -1082,7 +1098,7 @@ func (executor *Executor) observeBoundTask(
 			TaskID:      command.BoundTaskID,
 			Capability:  string(task.Capability),
 			AIModel:     task.Offering.ModelID,
-			NativeQuote: task.NativeQuote, EstimatedCredits: taskCredits(task),
+			NativeQuote: task.NativeQuote, EstimatedCredits: statedTaskCredits(task),
 		}); err != nil {
 			return executor.awaitTask(command, task.ID, executor.taskWaitDeadline(command, task.Offering), err)
 		}
@@ -2252,11 +2268,13 @@ func (executor *Executor) success(
 	if info.NativeQuote != nil {
 		result["native_quote"] = info.NativeQuote
 	}
+	// #719: only an Offering that bills in credits states them; another keeps its
+	// estimate for approval only, as the approval card does.
 	if key := tool.ResultFields.EstimatedCredits; info.NativeQuote == nil && key != "" &&
-		(info.Credits > 0 || (info.CreditsMetered && info.Credits == 0)) {
+		info.CreditsMetered && info.Credits >= 0 {
 		result[key] = info.Credits
 	}
-	if key := tool.ResultFields.ExtraCredits; info.NativeQuote == nil && key != "" && info.ExtraCredits > 0 {
+	if key := tool.ResultFields.ExtraCredits; info.NativeQuote == nil && key != "" && info.CreditsMetered && info.ExtraCredits > 0 {
 		result[key] = info.ExtraCredits
 	}
 	if key := tool.ResultFields.Approval; key != "" && info.Approval != "" {
