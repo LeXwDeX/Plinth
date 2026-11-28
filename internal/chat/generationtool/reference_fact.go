@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -429,6 +430,50 @@ func (executor *Executor) operationReferenceNote(command chat.ToolCommand, op Op
 // stepReferenceNote is the step's reference note: the views a multiview step
 // was made from (#65), else the source or limit note.
 func (executor *Executor) stepReferenceNote(command chat.ToolCommand, offering generation.Offering,
+	fact *ReferenceSourceFact, counts referenceUse, input json.RawMessage) string {
+	note := executor.referenceNoteBody(command, offering, fact, counts, input)
+	// #709: references taken from board layers are named by the server, so the
+	// approval card and the finished step say the material came from the board.
+	if board := executor.canvasSourceNote(command); board != "" {
+		if note == "" {
+			return board
+		}
+		return note + " " + board
+	}
+	return note
+}
+
+// canvasSourceNote names the @canvasN references of this call that resolve in
+// the turn's board snapshot (#709), in the Schema's words; "" when none does.
+func (executor *Executor) canvasSourceNote(command chat.ToolCommand) string {
+	schema := executor.chat.CanvasLayers
+	if !schema.Enabled() || command.Options.CanvasContext == nil || len(command.Call.Arguments) == 0 {
+		return ""
+	}
+	var arguments map[string]json.RawMessage
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil {
+		return ""
+	}
+	tokens, err := executor.handleTokens(command, arguments, executor.chat.Context.ReferenceHandlesArgument)
+	if err != nil {
+		return ""
+	}
+	var handles []string
+	for _, token := range tokens {
+		if !chat.IsCanvasHandle(schema, token) {
+			continue
+		}
+		if layer := command.Options.CanvasContext.LayerByHandle(token); layer != nil && !slices.Contains(handles, layer.Handle) {
+			handles = append(handles, layer.Handle)
+		}
+	}
+	if len(handles) == 0 {
+		return ""
+	}
+	return strings.ReplaceAll(executor.localized(command, schema.SourceNoteTemplate), "{handles}", strings.Join(handles, ", "))
+}
+
+func (executor *Executor) referenceNoteBody(command chat.ToolCommand, offering generation.Offering,
 	fact *ReferenceSourceFact, counts referenceUse, input json.RawMessage) string {
 	if (counts.DroppedTurnCount > 0 || counts.DroppedStyleCount > 0) &&
 		counts.IdentityUsed+counts.StyleUsed > 0 &&

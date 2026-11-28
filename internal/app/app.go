@@ -511,6 +511,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
 		Preferences:                applicationSchema.Chat.Preferences,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
+		// #709: the board snapshot a turn that is not a canvas turn freezes.
+		CanvasLayers: applicationSchema.Chat.CanvasLayers,
+		Canvas:       canvasBoardSource{repository: repository},
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
@@ -1121,11 +1124,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		agentReadScope.ProjectReference = repository.ProjectRepository().RegisteredReference
 	}
 	imageReview, err := imagereview.New(imagereview.Config{
-		Context: applicationSchema.Chat.Context,
-		Review:  applicationSchema.Chat.ImageReview,
-		Inputs:  inputAssetService,
-		Tasks:   module,
-		Scope:   agentReadScope,
+		Context:      applicationSchema.Chat.Context,
+		CanvasLayers: applicationSchema.Chat.CanvasLayers,
+		Review:       applicationSchema.Chat.ImageReview,
+		Inputs:       inputAssetService,
+		Tasks:        module,
+		Scope:        agentReadScope,
 		// #282/#284/#287: the delivery checklist judges a picture against the
 		// session's 2D purpose, and names the Offerings that can reach its
 		// minimum resolution from the Catalog.
@@ -1279,6 +1283,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Context:               applicationSchema.Chat.Context,
 		Skills:                applicationSchema.Chat.Skills,
 		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
+		CanvasLayers:          applicationSchema.Chat.CanvasLayers,
 		Params:                paramsStore,
 		Generate:              toolExecutor,
 		ReadTask:              newSessionAgentTaskReader(module, agentReadScope, applicationSchema.Chat, applicationSchema.Content.Messages, texts),

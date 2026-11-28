@@ -90,6 +90,8 @@ func (context *ProjectContext) ProjectAssetByHandle(handle string) *ProjectAsset
 func copyFrozenProject(options *TurnOptions, stored TurnOptions) {
 	options.ProjectID = stored.ProjectID
 	options.ProjectContext = cloneProjectContext(stored.ProjectContext)
+	// The board snapshot is frozen the same way (#709).
+	copyFrozenCanvas(options, stored)
 }
 
 // copyFrozenAssetListTurn copies the production-list marks the service froze

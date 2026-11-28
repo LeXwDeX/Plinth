@@ -836,6 +836,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateImageCrop(schema, runtime); err != nil {
 		return err
 	}
+	if err := validateCanvasLayers(schema); err != nil {
+		return err
+	}
 	if err := validateWorkLedger(schema); err != nil {
 		return err
 	}
@@ -1081,6 +1084,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"list_project_assets":     {"project.list", "READ", []string{"image", "model-3d"}},
+		"list_canvas_layers":      {"canvas.layers", "READ", []string{"image", "model-3d"}},
 		"propose_asset_list":      {"assetlist.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"submit_asset_list_item":  {"assetlist.submit_item", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"get_asset_list":          {"assetlist.read", "READ", []string{"image", "model-3d"}},

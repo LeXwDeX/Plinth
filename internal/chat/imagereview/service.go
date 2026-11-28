@@ -34,9 +34,12 @@ type TaskAssetReader interface {
 
 type Config struct {
 	Context catalog.ChatContextSchema
-	Review  catalog.ChatImageReviewSchema
-	Inputs  InputAssetReader
-	Tasks   TaskAssetReader
+	// CanvasLayers lets inspect_image read an @canvasN board handle from the
+	// board snapshot frozen with the turn (#709). Zero reads no board handle.
+	CanvasLayers catalog.ChatCanvasLayersSchema
+	Review       catalog.ChatImageReviewSchema
+	Inputs       InputAssetReader
+	Tasks        TaskAssetReader
 	// Usage and Brief locate the session's 2D purpose: Usage declares the
 	// purposes (application.chat.image2d_usage) and Brief the production brief
 	// field that names one. Without Review.Usage they are unused and the
@@ -53,6 +56,7 @@ type Config struct {
 
 type Service struct {
 	context    catalog.ChatContextSchema
+	canvas     catalog.ChatCanvasLayersSchema
 	review     catalog.ChatImageReviewSchema
 	inputs     InputAssetReader
 	tasks      TaskAssetReader
@@ -67,7 +71,7 @@ func New(config Config) (*Service, error) {
 		return nil, errors.New("image review: no asset reader")
 	}
 	return &Service{
-		context: config.Context, review: config.Review, inputs: config.Inputs, tasks: config.Tasks,
+		context: config.Context, canvas: config.CanvasLayers, review: config.Review, inputs: config.Inputs, tasks: config.Tasks,
 		usage: config.Usage, imageField: config.Brief.FieldNameOfType("image_profile"), offerings: config.Offerings,
 		scope: config.Scope,
 	}, nil
@@ -131,8 +135,18 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 			"{maximum}", fmt.Sprint(service.review.MaxRounds)), NoSubmission: true}, nil
 	}
 	policy := chat.NewHandlePolicy(service.context)
-	resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
-		[]string{arguments.Image}, chat.AttachmentKindImage)
+	var resolved []chat.ResolvedAttachment
+	// #709: a board handle names a picture layer of the frozen board snapshot.
+	canvasPicture, canvasToken, err := chat.ResolveCanvasHandle(service.canvas, command.Options, arguments.Image)
+	if canvasToken {
+		if err != nil {
+			return chat.ToolResult{Error: err.Error(), NoSubmission: true}, nil
+		}
+		resolved = []chat.ResolvedAttachment{canvasPicture}
+	} else {
+		resolved, err = policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
+			[]string{arguments.Image}, chat.AttachmentKindImage)
+	}
 	if err != nil {
 		var unknown *chat.UnknownHandleError
 		if errors.As(err, &unknown) {

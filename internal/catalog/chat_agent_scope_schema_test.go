@@ -52,6 +52,7 @@ var shippedToolScopes = map[string]string{
 	"list_offerings":             "utility",
 	"get_task":                   "utility",
 	"list_project_assets":        "utility",
+	"list_canvas_layers":         "utility",
 	"propose_asset_list":         "utility",
 	"submit_asset_list_item":     "utility",
 	"get_asset_list":             "utility",

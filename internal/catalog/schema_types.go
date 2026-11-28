@@ -3333,6 +3333,10 @@ type ChatSchema struct {
 	// normalized-region crop service's Agent-facing refusal copy. Server side
 	// only; the crop limits join application.asset_list.decompose in #331b.
 	ImageCrop ChatImageCropSchema `json:"image_crop"`
+	// CanvasLayers declares the read-only board reading of #709: the
+	// list_canvas_layers tool, the @canvasN handles of the frozen board
+	// snapshot and the one board context line. Server side only.
+	CanvasLayers ChatCanvasLayersSchema `json:"canvas_layers,omitempty"`
 	// WorkLedger declares the session production ledger (#248): the read-only
 	// projection of the session's public Tasks, the summary it adds to the
 	// system prompt, the get_production_step tool's texts and the style anchor

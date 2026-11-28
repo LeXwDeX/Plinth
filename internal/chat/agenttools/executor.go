@@ -200,6 +200,10 @@ type Config struct {
 	// Project is application.project (#240): the list_project_assets copy,
 	// handle prefix and list bound. Nil leaves the tool unavailable.
 	Project *catalog.ProjectSchema
+	// CanvasLayers is chat.canvas_layers (#709): the list_canvas_layers copy
+	// and the @canvasN prefix create_three_view reads. Zero leaves the tool
+	// unavailable.
+	CanvasLayers catalog.ChatCanvasLayersSchema
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
 	// names one by id and supplies options only for a kind whose option source
 	// is agent (#239).
@@ -287,6 +291,7 @@ type Executor struct {
 	assetListUnavailable   string
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	project                *catalog.ProjectSchema
+	canvasLayers           catalog.ChatCanvasLayersSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	choiceOptionInvalid    string
 	choiceOpenInReply      string
@@ -464,6 +469,7 @@ func New(config Config) (*Executor, error) {
 		assetListUnavailable:   config.AssetListUnavailable,
 		writeVisualAnchor:      config.WriteVisualAnchor,
 		project:                config.Project,
+		canvasLayers:           config.CanvasLayers,
 		taskObservationTimeout: config.TaskObservationTimeout,
 		usage:                  map[string]generationUsage{},
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
@@ -540,6 +546,8 @@ func (e *Executor) execute(
 		return e.writeVisualAnchor(ctx, command)
 	case ToolListProjectAssets:
 		return e.listProjectAssets(ctx, command), nil
+	case ToolListCanvasLayers:
+		return e.listCanvasLayers(ctx, command), nil
 	case ToolProposeProductionPlan:
 		if e.proposePlan == nil {
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil

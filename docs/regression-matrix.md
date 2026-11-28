@@ -117,7 +117,11 @@
 | R-699c | 透明底显示棋盘格（结果卡、版本条、全部产出、详情、看大图、舞台、附件缩略图） | #699 | unit | `src/components/studio/transparency-checker-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 浏览器侧由入库前的临时脚本看过，未入库 |
 | R-699d | 真实对话模型加真实 2D 的画风迁移（风格图无全身时先出比例卡，答完只提交一次生成） | #699 | PROD-paid | — | 先出选择卡、答完只提交一次生成；风格图有全身时不出卡 | GAP | — | | 只有临时验证与结论（记在 #699），没有入库脚本；要补一个 live-only 脚本 |
 | R-688a | 图只在画板上：非画板轮 Agent 先查看并指向画板路径；画板轮发起三视图并停在批准卡 | #688 | dev-test-live-chat | `python3 scripts/smoke/smoke-live-chat-three-view-route.py --live` | 第一轮四条断言通过；第二轮正面停在批准卡并被拒绝 | OK | f5bc5e10 2026-11-28 | E2 | 第二轮在严格方式下等不到最终回复而超时（脚本缺陷：三视图的卡不在待批准列表里），待修 |
-| R-688b | 画板识别的五个说法（含画板轮对照） | #688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景「注意到画板」PASS | OK | — | | 真实模型回答会波动，结论以多次运行为准 |
+| R-688b | 画板识别的五个说法（含画板轮对照） | #688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景「注意到画板」PASS | OK | — | | 真实模型回答会波动，结论以多次运行为准；#709 起该脚本的判定改为 R-709-4 |
+| R-709-1 | `list_canvas_layers` 只读画板图层：空画板、图层清单、截断统计、画板轮/有素材/同一回复重复调用由服务端拒绝 | #709 | unit | `go test ./internal/chat/agenttools/ -run 709` | 单测通过 | OK | — | | |
+| R-709-2 | 画板快照随非画板轮冻结：每张图片图层过 `VerifyAttachment`、外链与 data 地址不给句柄、按所有者取数、条数与文字上限；画板一行只在非画板轮且有图层时出现 | #709 | unit | `go test ./internal/chat/ -run 709` | 单测通过 | OK | — | | |
+| R-709-3 | `@canvasN` 作普通参考图（生成工具、三视图、`inspect_image`），批准卡参考说明标明来自画板 | #709 | unit | `go test ./internal/chat/generationtool/ ./internal/chat/agenttools/ -run 709` | 单测通过 | OK | — | | 版本条血缘未标画板（第一步未做） |
+| R-709-4 | 兜底行为：图只在画板上时 S1 先看画板再出选择卡，S2–S4 直接用画板的图发起生成（严格方式停在批准卡），S5 画板轮对照不变 | #709、#688 | dev-test-live-chat | `python3 scripts/regression/board-agent.py --live` | 每个场景 PASS | OK | — | | 真实模型回答会波动，结论以多次运行为准；脚本改走画布保存接口，尚未运行 |
 | R-705-1 | 批准卡「预计消耗」显示「/」、余额读不到；抠图批准卡类型显示「3D」 | #705 | dev-test-fake | — | 卡上的预计消耗与余额与结果卡一致；抠图显示为 2D | GAP | — | | 未修；要补 fake 复现与界面断言 |
 | R-705-2 | `ResizeObserver` 良性事件不再当 ERROR 上报（真实 Error 仍上报） | #705 | unit | `src/lib/client-error-report.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
 | R-705-3 | 图生图后版本条多出「上传」节点、血缘不直接指向来源版本 | #705 | dev-test-fake | — | 不多出上传节点，血缘指向来源版本 | GAP | — | | 未修；要补 fake 复现 |

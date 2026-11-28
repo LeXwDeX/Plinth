@@ -21,10 +21,11 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	// #251's revise_processing_plan, #240's list_project_assets,
 	// #327's propose_asset_list, #328's submit_asset_list_item, #331's
 	// crop_image_regions and #329f's get_asset_list, less #491's
-	// observe_task and request_consent, plus #548's use_skill.
+	// observe_task and request_consent, plus #548's use_skill and #709's
+	// list_canvas_layers.
 	// 17 generation tools: the shipped 15 plus #242's create_concept_sketch and
 	// #493's analyze_model (the zero-credit report steps split off process_model).
-	if len(app.Chat.Tools) != 17 || len(app.Chat.AgentTools) != 28 {
+	if len(app.Chat.Tools) != 17 || len(app.Chat.AgentTools) != 29 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
