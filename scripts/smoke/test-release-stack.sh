@@ -126,15 +126,15 @@ cat >"$ART_AI_ENVIRONMENTS_FILE" <<EOF
   "dev-test": {"ssh": "$DEFAULT_HOST", "root": "$DEFAULT_ROOT", "base_url": "http://dev.example.invalid:13333",
                "compose_project": "dev_project", "protect_projects": ["candidate_project", "other_project"],
                "protected_paths": ["/srv/legacy-app"], "backup": {"scope": "database", "keep": 2}},
-  "formal-test": {"ssh": "root@formal.example.invalid", "root": "/srv/formal", "base_url": "http://formal.example.invalid:13333",
-                  "compose_project": "formal-project", "promote_from": "dev-test", "protected_paths": [],
-                  "extra_compose_file": "/srv/formal/production/compose.network.yml", "source_transfer": "scp",
+  "prod": {"ssh": "root@prod.example.invalid", "root": "/srv/prod", "base_url": "http://prod.example.invalid:13333",
+                  "compose_project": "prod-project", "promote_from": "dev-test", "protected_paths": [],
+                  "extra_compose_file": "/srv/prod/production/compose.network.yml", "source_transfer": "scp",
                   "build": {"network": "host", "goproxy": "https://proxy.example.invalid/go/",
                             "add_hosts": ["npm.example.invalid:10.0.0.5", "proxy.example.invalid:10.0.0.6"]},
                   "single_stack": {"image_keep": 1, "keep_source_snapshots": 1, "allow_bootstrap": true},
                   "layout": {"GO_WEB_BIND_IP": "10.0.0.9", "GO_WEB_HOST_PORT": "13333",
-                             "GO_PROD_DB_DIR": "/srv/formal/production/data",
-                             "GO_LEGACY_INPUT_ASSETS_DIR": "/srv/formal/production/legacy-assets"}}}}
+                             "GO_PROD_DB_DIR": "/srv/prod/production/data",
+                             "GO_LEGACY_INPUT_ASSETS_DIR": "/srv/prod/production/legacy-assets"}}}}
 EOF
 note() { # $1=revision $2=image tag $3=L1_agent status [$4=report format] [$5=gate revision] [$6=gate status]
   python3 - "$1" "$2" "$3" "$FORGE" "${4:-2}" "${5:-$1}" "${6:-pass}" "$MOCK_GATE" >"$MOCK_NOTE" <<'PY'
@@ -142,9 +142,9 @@ import json, sys
 revision, tag, agent, forge, version, gate_revision, gate_status, gate_file = sys.argv[1:]
 check = lambda status: {"status": status, "failed": 0, "passed": 3, "skipped": 0, "soft_failed": 0,
                         "evidence": forge + "/issues/7#issuecomment-1"}
-report = {"formal_promotion": int(version), "revision": revision, "image_tag": tag,
+report = {"prod_promotion": int(version), "revision": revision, "image_tag": tag,
           "checks": {"L0": check("pass"), "L1": check("pass"), "L1_agent": check(agent), "related": check("pass")}}
-if report["formal_promotion"] == 2:
+if report["prod_promotion"] == 2:
     report["release_gate"] = {"status": "pass", "evidence": forge + "/issues/7#issuecomment-99"}
 issue = "https://api.forge.example.invalid/repos/owner/project/issues/7"
 receipt = {"release_gate": 1, "revision": gate_revision, "status": gate_status, "rules_version": 1,
@@ -175,10 +175,10 @@ if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test --revi
 fi
 echo "PASS env/dev-test-equals-plain-entry"
 
-# 1d. formal-test: accepted running revision is promoted with the stack layout.
+# 1d. prod: accepted running revision is promoted with the stack layout.
 note "$SECOND" "$TAG2" pass
 : >"$MOCK_TRACE"
-(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test --acceptance-note 11) >"$WORK/formal.log"
+(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release prod --acceptance-note 11) >"$WORK/prod.log"
 PROMOTED_VERSION=$(git -C "$WORK/repo" describe --tags --always "$SECOND")
 cat >"$WORK/expected" <<EOF
 ssh $DEFAULT_HOST docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' dev_project-art-ai-go-1
@@ -186,37 +186,37 @@ gh api repos/owner/project/issues/comments/11
 gh api repos/owner/project/issues/comments/99
 ssh $DEFAULT_HOST cat $DEFAULT_ROOT/releases/manifest.txt
 ssh $DEFAULT_HOST test -f $DEFAULT_ROOT/production/reports/smoke-$SECOND.json
-ssh root@formal.example.invalid mv /srv/formal/app /srv/formal/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p /srv/formal/app /srv/formal/releases
-scp -q archive:$ARCHIVE_SHA root@formal.example.invalid:/srv/formal/releases/source-$SHORT-20261020T010203Z.tar
-ssh root@formal.example.invalid tar -x -C /srv/formal/app -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar && rm -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar
-ssh root@formal.example.invalid mkdir -p /srv/formal/tmp && chmod 0711 /srv/formal/tmp
-scp -q $SCRIPTS/release-server-steps.sh root@formal.example.invalid:/srv/formal/tmp/art-ai-release-steps.sh
-scp -q $SCRIPTS/retain-art-ai-images.py root@formal.example.invalid:/srv/formal/tmp/art-ai-retain-images.py
-ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RELEASE_VERSION=$PROMOTED_VERSION RETENTION_SCRIPT=/srv/formal/tmp/art-ai-retain-images.py bash /srv/formal/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
-ssh root@formal.example.invalid cd /srv/formal && ls -1d app.prev-[0-9]*T[0-9]*Z 2>/dev/null | sort | head -n -1 | xargs -r rm -rf --
+ssh root@prod.example.invalid mv /srv/prod/app /srv/prod/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p /srv/prod/app /srv/prod/releases
+scp -q archive:$ARCHIVE_SHA root@prod.example.invalid:/srv/prod/releases/source-$SHORT-20261020T010203Z.tar
+ssh root@prod.example.invalid tar -x -C /srv/prod/app -f /srv/prod/releases/source-$SHORT-20261020T010203Z.tar && rm -f /srv/prod/releases/source-$SHORT-20261020T010203Z.tar
+ssh root@prod.example.invalid mkdir -p /srv/prod/tmp && chmod 0711 /srv/prod/tmp
+scp -q $SCRIPTS/release-server-steps.sh root@prod.example.invalid:/srv/prod/tmp/art-ai-release-steps.sh
+scp -q $SCRIPTS/retain-art-ai-images.py root@prod.example.invalid:/srv/prod/tmp/art-ai-retain-images.py
+ssh root@prod.example.invalid RELEASE_COMPOSE_PROJECT=prod-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/prod/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/prod/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/prod/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/prod RELEASE_VERSION=$PROMOTED_VERSION RETENTION_SCRIPT=/srv/prod/tmp/art-ai-retain-images.py bash /srv/prod/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/prod'
+ssh root@prod.example.invalid cd /srv/prod && ls -1d app.prev-[0-9]*T[0-9]*Z 2>/dev/null | sort | head -n -1 | xargs -r rm -rf --
 EOF
-diff -u "$WORK/expected" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "formal-test release commands differ"
+diff -u "$WORK/expected" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "prod release commands differ"
 [ -z "$(ls -A "$WORK/tmp")" ] || fail "local source archive left behind"
-echo "PASS env/formal-test-promotes-accepted-revision"
+echo "PASS env/prod-promotes-accepted-revision"
 
 # 1e. An earlier accepted revision may be named; the archive is that commit.
 note "$FIRST" "${FIRST:0:7}-20261018T000000Z" pass
 export MOCK_MANIFEST="${FIRST:0:7}-20261018T000000Z $FIRST 2026-10-18T00:00:00Z
 $TAG2 $SECOND 2026-10-19T00:00:00Z"
 : >"$MOCK_TRACE"
-(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test --revision "$FIRST" --acceptance-note 12) >/dev/null
+(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release prod --revision "$FIRST" --acceptance-note 12) >/dev/null
 grep -q "$(git -C "$WORK/repo" archive "$FIRST" | shasum -a 256 | cut -d' ' -f1)" "$MOCK_TRACE" || fail "named revision not archived"
 grep -q "'${FIRST:0:7}-20261020T010203Z' '$FIRST'" "$MOCK_TRACE" || fail "named revision tag/sha not passed"
-echo "PASS env/formal-test-named-earlier-revision"
+echo "PASS env/prod-named-earlier-revision"
 
-# 1f. Promotion refusals never contact the formal-test host.
+# 1f. Promotion refusals never contact the prod host.
 refuse() { # $1=label, $2=expected refusal text, rest=release-env arguments
   local label=$1 expected=$2; shift 2
   : >"$MOCK_TRACE"
-  if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test "$@") >"$WORK/refuse.log" 2>&1; then
-    fail "formal-test accepted: $label"
+  if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release prod "$@") >"$WORK/refuse.log" 2>&1; then
+    fail "prod accepted: $label"
   fi
-  ! grep -q formal.example.invalid "$MOCK_TRACE" || fail "formal-test contacted for: $label"
+  ! grep -q prod.example.invalid "$MOCK_TRACE" || fail "prod contacted for: $label"
   grep -q "refused: .*$expected" "$WORK/refuse.log" || { cat "$WORK/refuse.log" >&2; fail "wrong refusal for: $label"; }
 }
 export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
@@ -237,7 +237,7 @@ refuse "malformed revision" "40-character" --revision abc --acceptance-note 13
 export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 # #707: a new promotion needs a format-2 report whose release gate receipt passes for the revision.
 note "$SECOND" "$TAG2" pass 1
-refuse "format-1 report without a release gate" "formal_promotion 2" --acceptance-note 13
+refuse "format-1 report without a release gate" "prod_promotion 2" --acceptance-note 13
 note "$SECOND" "$TAG2" pass 2 "$FIRST"
 refuse "release gate receipt for another revision" "release gate refused: .*another revision" --acceptance-note 13
 note "$SECOND" "$TAG2" pass 2 "$SECOND" fail
@@ -246,21 +246,21 @@ export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 note "$SECOND" "$TAG2" pass
 export MOCK_SERVER_FAIL=1
 : >"$MOCK_TRACE"
-if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test --acceptance-note 14) >/dev/null 2>&1; then
-  fail "formal-test reported success after a server failure"
+if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release prod --acceptance-note 14) >/dev/null 2>&1; then
+  fail "prod reported success after a server failure"
 fi
 ! grep -q 'xargs -r rm' "$MOCK_TRACE" || fail "snapshots pruned after a failed release"
 unset MOCK_SERVER_FAIL
 echo "PASS env/promotion-refusals"
 
 # 1g. Smoke wrapper exports BASE, admin login, EXPECT_SHA and container only.
-(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" smoke formal-test -- \
+(cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" smoke prod -- \
   python3 -c 'import os,json;print(json.dumps({k:os.environ.get(k) for k in ("BASE","ADMIN_USERNAME","ADMIN_PASSWORD","EXPECT_SHA","RELEASE_CONTAINER")}))') >"$WORK/smoke.json"
 python3 - "$WORK/smoke.json" "$SECOND" <<'PY'
 import json, sys
 values = json.load(open(sys.argv[1]))
-assert values == {"BASE": "http://formal.example.invalid:13333", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
-                  "EXPECT_SHA": sys.argv[2], "RELEASE_CONTAINER": "formal-project-art-ai-go-1"}, values
+assert values == {"BASE": "http://prod.example.invalid:13333", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
+                  "EXPECT_SHA": sys.argv[2], "RELEASE_CONTAINER": "prod-project-art-ai-go-1"}, values
 PY
 echo "PASS env/smoke-wrapper"
 
@@ -449,7 +449,7 @@ run_locked_steps() { # $1=root, rest=env assignments; runs under the inherited r
   set -e
 }
 export S_TRACE="$WORK/server-trace" S_STATE="$WORK/server-state"
-STABLE=(RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1)
+STABLE=(RELEASE_COMPOSE_PROJECT=prod-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1)
 SHARED=(RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project)
 mode_of() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
 
@@ -461,9 +461,9 @@ run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" $(layout "$root") \
 [ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "bootstrap did not succeed"; }
 grep -qx 'capacity - bootstrap scope=database' "$S_TRACE" || fail "bootstrap capacity phase missing"
 grep -q "^preflight db=$root/production/data legacy=$root/production/legacy-generated" "$S_TRACE" || fail "preflight did not get the layout"
-grep -q -- "-p formal-project -f $root/app/docker-compose.go-production.yml up -d --no-deps art-ai-go | bind=127.0.0.9 port=13333 db=$root/production/data legacy=$root/production/legacy-assets" "$S_TRACE" || fail "compose did not get project/layout"
+grep -q -- "-p prod-project -f $root/app/docker-compose.go-production.yml up -d --no-deps art-ai-go | bind=127.0.0.9 port=13333 db=$root/production/data legacy=$root/production/legacy-assets" "$S_TRACE" || fail "compose did not get project/layout"
 grep -qx 'curl http://127.0.0.9:13333/readyz' "$S_TRACE" || fail "health did not use the bind address"
-grep -qx 'preflight-project formal-project' "$S_TRACE" || fail "preflight did not get the Compose project"
+grep -qx 'preflight-project prod-project' "$S_TRACE" || fail "preflight did not get the Compose project"
 ! grep -q '^retention\|^tar\|stop\|^backup-retention' "$S_TRACE" || fail "bootstrap ran retention, backup or stop"
 grep -q "^candidate $SECOND " "$root/releases/manifest.txt" || fail "bootstrap manifest missing"
 for name in generated cache thumbnails assets; do
@@ -497,7 +497,7 @@ echo "PASS server/bootstrap-refuses-existing-database"
 # 2d. Without RELEASE_ALLOW_BOOTSTRAP a missing instance still aborts.
 root=$(new_root no-bootstrap); echo none >"$S_STATE"
 # shellcheck disable=SC2046
-run_steps "$root" S_CONTAINERS=0 RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 $(layout "$root")
+run_steps "$root" S_CONTAINERS=0 RELEASE_COMPOSE_PROJECT=prod-project RELEASE_SINGLE_STACK=1 $(layout "$root")
 [ "$RESULT" = 1 ] && ! grep -q ' up ' "$S_TRACE" || fail "missing instance was created without bootstrap"
 echo "PASS server/no-bootstrap-without-permission"
 
@@ -512,12 +512,12 @@ run_steps "$root" S_CONTAINERS=1 "${STABLE[@]}" $(layout "$root") \
   RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 \
   "ART_AI_PROTECTED_PATHS=$root:/srv/legacy-app"
 [ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "single-stack update failed"; }
-grep -q -- "-p formal-project -f $root/app/docker-compose.go-production.yml -f $root/production/compose.network.yml up -d" "$S_TRACE" || fail "extra compose file not applied"
+grep -q -- "-p prod-project -f $root/app/docker-compose.go-production.yml -f $root/production/compose.network.yml up -d" "$S_TRACE" || fail "extra compose file not applied"
 grep -q -- "^build build --network host --build-arg GOPROXY=https://proxy.example.invalid/go/ --add-host npm.example.invalid:10.0.0.5 --add-host proxy.example.invalid:10.0.0.6 --target runtime-with-migration-tools" "$S_TRACE" || fail "build options missing"
 grep -qx "ART_AI_PROTECTED_PATHS=$root:/srv/legacy-app" "$root/production/compose.env" || fail "compose.env lacks protected paths"
-grep -qx 'capacity formal-project-art-ai-go-1 before-build' "$S_TRACE" || fail "update capacity container"
+grep -qx 'capacity prod-project-art-ai-go-1 before-build' "$S_TRACE" || fail "update capacity container"
 [ -f "$root/backups/release-candidate/data.tar" ] || fail "update backup missing"
-grep -qx "retention --apply --rollback-image art-ai-go-production:previous --root $root --project formal-project --keep 1" "$S_TRACE" || fail "single-stack retention arguments"
+grep -qx "retention --apply --rollback-image art-ai-go-production:previous --root $root --project prod-project --keep 1" "$S_TRACE" || fail "single-stack retention arguments"
 ! grep -q '^backup-retention' "$S_TRACE" || fail "full-scope release ran backup retention"
 [ -f "$root/production/compose.env" ] || fail "update compose.env missing"
 echo "PASS server/single-stack-update-retention"

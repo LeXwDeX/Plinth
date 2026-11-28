@@ -104,8 +104,11 @@ def defect_problems(text, main_ids):
     """The known-defect section (#718): it exists, has the fixed header, and every row is well formed."""
     if not re.search(rf"^## {re.escape(DEFECT_HEADING)}\s*$", text, re.M):
         return [f"no section '## {DEFECT_HEADING}'"]
+    block = section(text, "5.", "6.")
     found = []
-    for header, row in table_rows(section(text, "5.", "6.")):
+    if not re.search(r"^\| " + r" \| ".join(map(re.escape, DEFECT_COLUMNS)) + r" \|$", block, re.M):
+        found.append(f"defect section has no table with header {DEFECT_COLUMNS}")
+    for header, row in table_rows(block):
         if header != DEFECT_COLUMNS:
             found.append(f"defect table header {header}, want {DEFECT_COLUMNS}")
             continue
@@ -152,10 +155,21 @@ class RegressionMatrixTests(unittest.TestCase):
             self.assertIn(needle, found)
 
     def test_the_defect_section_is_checked(self):
+        # #725 fixed the four defects first recorded here; an empty table is valid.
+        block = section(self.text, "5.", "6.")
         self.assertIn(f"## {DEFECT_HEADING}", self.text)
-        defects = [row for header, row in table_rows(section(self.text, "5.", "6.")) if header == DEFECT_COLUMNS]
-        self.assertEqual([ROW_ID.match(row[0]).group(1) for row in defects],
-                         ["R-705-1", "R-705-3", "R-705-4", "R-704g"])
+        self.assertEqual(table_rows(block), [])
+        self.assertIn("当前没有登记的已知缺陷", block)
+        self.assertEqual(defect_problems(self.text, set()), [])
+        good = (f"## {DEFECT_HEADING}\n\n| 缺陷 | Issue | 记录日期 | 备注 |\n|---|---|---|---|\n"
+                "| R-9a 甲缺陷 | #9 | 2026-11-28 | 来源 #8 |\n| 乙缺陷 | #10、#11 | 2026-11-29 | 待产品决定 |\n"
+                "\n## 6. 维护规则\n")
+        rows = [row for header, row in table_rows(section(good, "5.", "6.")) if header == DEFECT_COLUMNS]
+        self.assertEqual([row[1] for row in rows], ["#9", "#10、#11"])
+        self.assertEqual(defect_problems(good, {"R-1"}), [])
+        self.assertIn("defect R-9a is still a main table row", "\n".join(defect_problems(good, {"R-9a"})))
+        no_table = f"## {DEFECT_HEADING}\n\n（空）\n\n## 6. 维护规则\n"
+        self.assertIn("has no table with header", "\n".join(defect_problems(no_table, set())))
         bad = (f"## {DEFECT_HEADING}\n\n| 缺陷 | Issue | 日期 | 备注 |\n|---|---|---|---|\n| x | #1 | 2026-11-28 | n |\n\n"
                "| 缺陷 | Issue | 记录日期 | 备注 |\n|---|---|---|---|\n"
                "| R-1 甲 | 见 Issue | 2026-11-28 | n |\n| R-2 乙 | #1、#2 | 昨天 | |\n| R-3 丙 | #3 | 2026-11-28 | n |\n"

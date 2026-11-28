@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """#704 「生成纹理」开关的真实上游验证：开关存成会话参数（与面板相同），消息不带 parameters（付费，live-only）。
 
-层：PROD-paid（正式测试环境或 --live-upstream 的 dev-test）。三个场景：
+层：prod-paid（prod 或 --live-upstream 的 dev-test）。三个场景：
   A  Tripo H3 v3.1 文生 3D，texture=false 经 PUT /api/v1/agent/params 保存；
   B  Tripo H3 v3.1 图生 3D（先出一张 2D 源图），texture=false 同样保存；
   C  Meshy 7.1 图生 3D（先出一张 2D 源图），should_texture=false 同样保存。

@@ -22,7 +22,7 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 缺 `--live` 或 `ART_AI_LIVE_ACK=1` 时退出码 2，形态不符（`live-only` 要求 `live`，`chat-live` 要求 `mixed` 或 `live`）也拒绝；
 它们把 `AGENT_TEST_*` 交给 l5_common 当登录账号。每次真实运行前须在当前对话取得用户同意（AGENTS.md「上游接口与 Fake」）；
 例外是 `dev-test` 上的 2D 真实调用（真实对话模型 token、真实 2D 生图），按该节不需逐次同意，开跑前后在回复里写明目的与大致用量，
-两个开关照旧要给；3D、`formal-test`、正式生产与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。
+两个开关照旧要给；3D、`prod` 与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。
 
 ## 脚本
 
@@ -33,10 +33,11 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 | `three-view-continuation.py` | dev-test-fake，API | 免费 | #689/#693 续跑跨窗口点不打断、只计数；#611 手选 Skill 标记（3 种方式 × 三视图/四视图）；严格下用户点「继续生成」不再出卡 |
 | `three-view-card.mjs` | dev-test-fake，浏览器 | 免费 | #693 卡片：「稍后自动生成」只在 auto 且回合在跑时出现、不与手动按钮同现；审批方式下手动续跑 |
 | `texture-switch-fake.py` | dev-test-fake，API | 免费 | #704 所有带「生成纹理」开关的 3D Offering：Schema 层、消息参数与会话参数两条路径、冻结输入、报价、交付 |
-| `texture-live-tripo.py` | PROD-paid | 付费：两次 Tripo 文生 3D（v1.9.6 实测 60 与 90 Tripo 积分） | #704 真实：关纹理报价 60、GLB 无贴图；默认 90、GLB 有贴图 |
-| `texture-live-session-param.py` | PROD-paid | 付费：Tripo 文生、Tripo 图生、Meshy 7.1 图生各一次与两张 2D 源图 | #704 真实：开关存成会话参数时三种 Offering 的冻结输入、报价与 GLB |
+| `texture-live-tripo.py` | prod-paid | 付费：两次 Tripo 文生 3D（v1.9.6 实测 60 与 90 Tripo 积分） | #704 真实：关纹理报价 60、GLB 无贴图；默认 90、GLB 有贴图 |
+| `texture-live-session-param.py` | prod-paid | 付费：Tripo 文生、Tripo 图生、Meshy 7.1 图生各一次与两张 2D 源图 | #704 真实：开关存成会话参数时三种 Offering 的冻结输入、报价与 GLB |
 | `board-agent.py` | dev-test-live-chat | 只耗对话 token（5 轮），生成卡全部拒绝 | #688 图只在画板上时 Agent 是否注意到画板 |
-| `post-release-readonly.py` | PROD-readonly | 免费，不调上游 | 发布后只读冒烟：版本、健康、Schema、CSP、登录、跨站拒绝、会话与批准接口 |
+| `style-transfer-live.py` | dev-test-live-chat（`--real-2d` 时要求 `--live-upstream` 形态） | 每个场景两到三轮对话加一次 2D 生成（mixed 形态下 2D 是 fake，live 形态下是真实 2D）；只批准 2D 批准卡，3D 等其余一律拒绝 | #699/#723 画风迁移：风格图无全身先出比例卡、答完只提交一次 2D 生成；有全身不出卡、直接提交 |
+| `post-release-readonly.py` | prod-readonly | 免费，不调上游 | 发布后只读冒烟：版本、健康、Schema、CSP、登录、跨站拒绝、会话与批准接口 |
 | `run-fake-rows.py` | dev-test-fake 入口 | 免费（只跑 fake 行） | #718 依次运行回归表主表里 `dev-test-fake` 层、状态 `OK`/`MANUAL`、命令是单条 `python3`/`bash`/`node` 命令的行（命令前可带 `NAME=value` 环境变量），逐行 `PASS`/`FAIL` 加耗时与汇总，有失败时退出码 1；输出带本地 `HEAD` 与 UTC 日期；同一命令只跑一次；不写回回归表 |
 
 `lib.py`、`lib.mjs` 是共用的登录、会话、批准、任务、三视图与 PNG/GLB 小工具；fake 闸门函数 `fake_refusal()` /
@@ -54,10 +55,13 @@ python3 scripts/regression/run-fake-rows.py --dry-run
 python3 scripts/regression/run-fake-rows.py
 
 # 发布后只读（任何环境）
-python3 scripts/release-env.py smoke formal-test -- python3 scripts/regression/post-release-readonly.py
+python3 scripts/release-env.py smoke prod -- python3 scripts/regression/post-release-readonly.py
+
+# dev-test 的 --live-chat 混合形态（真实对话、fake 生成；--real-2d 要求 --live-upstream 形态）
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/style-transfer-live.py --live --repeat 3
 
 # 真实上游：先在对话里取得当次同意
-ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke formal-test -- python3 scripts/regression/texture-live-tripo.py --live
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke prod -- python3 scripts/regression/texture-live-tripo.py --live
 ```
 
 每个脚本最后一行是 `=== <名字>: PASS=n FAIL=n ===`（l5_common 系另带 `SKIP=n`），有 FAIL 时退出码 1，环境或闸门不满足时退出码 2。`run-fake-rows.py` 自己不经 `release-env.py smoke` 启动：它对每一行调用 `python3 scripts/release-env.py smoke dev-test -- <命令>`，不加 `--live`、不设 `ART_AI_LIVE_ACK`。

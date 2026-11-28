@@ -83,8 +83,8 @@ class EnvironmentLookup(unittest.TestCase):
 
     def test_release_roots_on_another_host_do_not_block_the_directory(self):
         _, directory, _ = self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'host_ci': {'dir': '/srv/plinth/ci'}},
-                                     'formal-test': {'ssh': 'root@other.example', 'root': '/srv/plinth',
-                                                     'protected_paths': ['/srv/plinth/ci']}})
+                                     'prod': {'ssh': 'root@other.example', 'root': '/srv/plinth',
+                                              'protected_paths': ['/srv/plinth/ci']}})
         self.assertEqual(directory, '/srv/plinth/ci')
 
     def test_the_ci_directory_inside_the_own_release_root_is_allowed(self):
@@ -551,6 +551,252 @@ class WorkflowReplay(unittest.TestCase):
             run.write_status(Path('.'), 'f' * 40, {'verdict': 'fail', 'attempts': [{'entry': {'gates': []}}]})
         self.assertIn('context=host-ci/gates', calls[-1])
         self.assertIn('state=failure', calls[-1])
+
+
+REAL_RUN = subprocess.run
+GIT_ENV = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.invalid',
+           'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.invalid'}
+
+
+class DocsFastPath(unittest.TestCase):
+    """Docs-only commits (#714): local snapshot scan and git diff --check, same host-ci/gates status, else full gates."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, GIT_ENV)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        base = tempfile.TemporaryDirectory()
+        self.addCleanup(base.cleanup)
+        self.repo = Path(base.name) / 'repo'
+        self.out = Path(base.name) / 'out'
+        self.repo.mkdir()
+        self.git('init', '-q')
+        self.git('remote', 'add', 'origin', 'https://github.com/o/r.git')
+        self.base = self.commit({'README.md': 'Plinth\n', 'main.go': 'package main\n', 'docs/fake-register.md': '# register\n'})
+        self.git('update-ref', run.DOCS_BASE_REF, self.base)
+
+    def git(self, *args):
+        return REAL_RUN(['git', '-C', str(self.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self, files, parent=None):
+        """Commit on top of parent (default HEAD); a None content deletes the file."""
+        if parent:
+            self.git('checkout', '-q', '--detach', parent)
+        for path, content in files.items():
+            target = self.repo / path
+            if content is None:
+                self.git('rm', '-q', path)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            self.git('add', path)
+        self.git('commit', '-q', '-m', 'change')
+        return self.git('rev-parse', 'HEAD')
+
+    def main(self, sha, *extra, snapshot_code=0):
+        """run.main against the temp repo: git is real, the snapshot scan and gh are stubbed, the host is never reached."""
+        calls = {'snapshot': [], 'gh': []}
+
+        def fake_run(command, **kwargs):
+            if command[0] == 'git':
+                return REAL_RUN(command, **kwargs)
+            if command[0] == 'gh':
+                calls['gh'].append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+            if str(command[1]).endswith('make-public-snapshot.py'):
+                calls['snapshot'].append(command)
+                return subprocess.CompletedProcess(command, snapshot_code, stdout='', stderr='' if snapshot_code == 0 else '[snapshot] 1 forbidden match(es)')
+            raise AssertionError(f'unexpected command {command}')
+
+        full = mock.Mock(side_effect=run.UsageError('full gates reached'))
+        with mock.patch.object(run.subprocess, 'run', fake_run), mock.patch.object(run, 'toolchain_inputs', return_value=[]), \
+                mock.patch.object(run, 'load_environment', full), \
+                mock.patch.object(run.sys, 'stdout', io.StringIO()), mock.patch.object(run.sys, 'stderr', io.StringIO()):
+            code = run.main([sha, '--repo', str(self.repo), '--out', str(self.out), *extra])
+        return code, calls, full.called
+
+    def status_fields(self, command):
+        return dict(part.split('=', 1) for part in command if '=' in part and not part.startswith('repos/'))
+
+    def results(self):
+        (run_dir,) = self.out.iterdir()
+        return json.loads((run_dir / 'result.json').read_text())
+
+    def test_only_a_non_empty_set_of_markdown_files_other_than_the_fake_register_is_docs_only(self):
+        self.assertTrue(run.is_docs_only(['guide.md', 'docs/a.md', 'notes/howto.md']))
+        for excluded in run.DOCS_FAST_PATH_EXCLUDED:
+            with self.subTest(excluded):
+                self.assertFalse(run.is_docs_only([excluded]))
+                self.assertFalse(run.is_docs_only(['docs/a.md', excluded]))
+        for paths in ([], ['guide.md', 'main.go'], ['docs/fake-register.md'], ['docs/fake-register.md', 'README.md'],
+                      ['notes.md.bak'], ['docs/a.md', '.github/workflows/ci.yml'], ['docs/image.png'], ['docs/A.MD']):
+            with self.subTest(paths):
+                self.assertFalse(run.is_docs_only(paths))
+
+    def test_the_change_set_is_taken_from_the_merge_base_with_origin_main(self):
+        self.commit({'docs/a.md': 'a\n'})
+        main_ahead = self.commit({'main.go': 'package main // newer\n'}, parent=self.base)
+        self.git('update-ref', run.DOCS_BASE_REF, main_ahead)  # main moved on with code: not part of the change
+        docs = self.commit({'docs/b.md': 'b\n'}, parent=self.base)
+        self.assertEqual(run.docs_change_set(self.repo, docs), (self.base, ['docs/b.md']))
+
+    def test_renames_and_deletions_of_code_are_not_docs_only(self):
+        self.git('mv', 'main.go', 'main.md')
+        self.git('commit', '-q', '-m', 'rename')
+        base, paths = run.docs_change_set(self.repo, self.git('rev-parse', 'HEAD'))
+        self.assertEqual(sorted(paths), ['main.go', 'main.md'])
+        self.assertFalse(run.is_docs_only(paths))
+        deleted = self.commit({'main.go': None, 'docs/a.md': 'a\n'}, parent=self.base)
+        self.assertFalse(run.is_docs_only(run.docs_change_set(self.repo, deleted)[1]))
+
+    def test_a_missing_origin_main_or_merge_base_tells_nothing(self):
+        docs = self.commit({'docs/a.md': 'a\n'})
+        self.git('checkout', '-q', '--orphan', 'unrelated')
+        self.git('rm', '-rq', '--cached', '.')
+        orphan = self.commit({'other.md': 'x\n'})
+        self.assertEqual(run.docs_change_set(self.repo, orphan), (None, None))
+        self.git('update-ref', '-d', run.DOCS_BASE_REF)
+        self.git('branch', 'origin/main', self.base)  # a local branch of that name must not stand in for the remote ref
+        self.assertEqual(run.docs_change_set(self.repo, docs), (None, None))
+
+    def test_a_docs_only_commit_passes_without_the_environment_file_and_writes_the_gates_status(self):
+        docs = self.commit({'docs/a.md': 'a\n', 'guide.md': 'Plinth docs\n'})
+        code, calls, full = self.main(docs, '--target-url', 'https://example.invalid/issue')
+        self.assertEqual((code, full), (0, False))
+        self.assertEqual(calls['snapshot'][0][-3:], ['check', '--rev', docs])
+        (status,) = calls['gh']
+        self.assertEqual(status[4], f'repos/o/r/statuses/{docs}')
+        fields = self.status_fields(status)
+        self.assertEqual((fields['context'], fields['state'], fields['target_url']), ('host-ci/gates', 'success', 'https://example.invalid/issue'))
+        self.assertIn('纯文档轻量通道', fields['description'])
+        self.assertIn('未跑完整门禁', fields['description'])
+        result = self.results()
+        self.assertEqual((result['mode'], result['verdict'], result['sha']), ('docs', 'pass', docs))
+        self.assertEqual(result['docs_fast_path']['base'], self.base)
+        self.assertEqual(sorted(result['docs_fast_path']['files']), ['docs/a.md', 'guide.md'])
+        self.assertEqual([check['result'] for check in result['docs_fast_path']['checks']], ['pass', 'pass'])
+
+    def test_a_snapshot_finding_or_a_whitespace_error_fails_with_a_failure_status(self):
+        docs = self.commit({'docs/a.md': 'a\n'})
+        code, calls, full = self.main(docs, snapshot_code=1)
+        self.assertEqual((code, full), (1, False))
+        fields = self.status_fields(calls['gh'][0])
+        self.assertEqual((fields['context'], fields['state']), ('host-ci/gates', 'failure'))
+        self.assertTrue(fields['description'].startswith(run.DOCS_FAST_PATH_LABEL))
+        self.assertIn('check public snapshot: fail', fields['description'])
+        self.assertEqual(self.results()['reasons'], ['check public snapshot: fail'])
+        for path in self.out.iterdir():
+            (path / 'result.json').unlink()
+            path.rmdir()
+        trailing = self.commit({'docs/b.md': 'trailing space   \n'})
+        code, calls, _ = self.main(trailing)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.status_fields(calls['gh'][0])['state'], 'failure')
+        self.assertEqual(self.results()['reasons'], ['check git diff --check: fail'])
+
+    def test_no_status_skips_the_status_but_keeps_the_verdict(self):
+        docs = self.commit({'docs/a.md': 'a\n'})
+        code, calls, _ = self.main(docs, '--no-status')
+        self.assertEqual((code, calls['gh']), (0, []))
+
+    def test_everything_else_falls_back_to_the_full_gates(self):
+        docs = self.commit({'docs/a.md': 'a\n'})
+        cases = {
+            'docs and code': self.commit({'docs/b.md': 'b\n', 'main.go': 'package main // x\n'}, parent=self.base),
+            'generated fake register': self.commit({'docs/fake-register.md': '# changed\n'}, parent=self.base),
+            'doc read by tests': self.commit({'docs/a.md': 'a\n', 'README.md': 'Plinth changed\n'}, parent=self.base),
+            'empty change set': self.base,
+        }
+        for label, sha in cases.items():
+            with self.subTest(label):
+                code, calls, full = self.main(sha)
+                self.assertEqual((code, full, calls), (2, True, {'snapshot': [], 'gh': []}))
+        for label, extra in (('--no-docs-fast-path', ['--no-docs-fast-path']), ('--workflows', ['--workflows'])):
+            with self.subTest(label):
+                code, calls, full = self.main(docs, *extra)
+                self.assertEqual((code, full, calls), (2, True, {'snapshot': [], 'gh': []}))
+        self.git('update-ref', '-d', run.DOCS_BASE_REF)
+        code, calls, full = self.main(docs)
+        self.assertEqual((code, full, calls), (2, True, {'snapshot': [], 'gh': []}))
+
+    def test_the_status_text_leads_with_the_fast_path_label_and_fits(self):
+        checks = [{'name': 'public snapshot', 'result': 'pass'}, {'name': 'git diff --check', 'result': 'fail'}]
+        state, text = run.status_of({'mode': 'docs', 'verdict': 'fail', 'reasons': ['check git diff --check: fail' + ' x' * 200],
+                                     'docs_fast_path': {'checks': checks}})
+        self.assertEqual(state, 'failure')
+        self.assertTrue(text.startswith('纯文档轻量通道，未跑完整门禁: 1/2 checks passed'))
+        self.assertLessEqual(len(text), 140)
+        self.assertEqual(run.STATUS_CONTEXTS['docs'], run.STATUS_CONTEXTS['gates'])
+
+
+MD_REFERENCE = re.compile(r'(?<![A-Za-z0-9_.-])((?:\.{1,2}/|/)*(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.md)(?![A-Za-z0-9_])')
+TEST_SOURCE = re.compile(r'(internal/.+_test\.go|scripts/(?:.+/)?test_[^/]+\.py|scripts/tests/.+|src/__tests__/.+|src/.+\.test\.(?:ts|tsx|js|mjs))$')
+SKIPPED_DIRECTORY = re.compile(r'(?:^|/)(?:node_modules|build)/')
+GUARD_FILE = 'scripts/host-ci/test_host_ci.py'
+
+
+def markdown_read_by_tests(root, skip=GUARD_FILE):
+    """{tracked .md path: test files naming it}. Only literals with a path (`docs/x.md`, `../../docs/x.md`,
+    `repoRoot + "/docs/x.md"`, also as the tail of a longer path) or the bare name of a root .md (`AGENTS.md`)
+    count; an unknown name is a fixture. `skip` (this file) is not scanned: its .md literals are fixtures, it reads no doc."""
+    listed = subprocess.run(['git', '-C', str(root), 'ls-files', '-z'], check=True, capture_output=True).stdout.decode('utf-8', 'surrogateescape')
+    tracked = [path for path in listed.split('\0') if path]
+    markdown = [path for path in tracked if path.endswith('.md')]
+    roots = {path for path in markdown if '/' not in path}
+    found = {}
+    for source in tracked:
+        if source == skip or not TEST_SOURCE.match(source) or SKIPPED_DIRECTORY.search(source):
+            continue
+        path = Path(root) / source
+        if not path.is_file():
+            continue
+        for match in MD_REFERENCE.finditer(path.read_bytes().decode('utf-8', 'replace')):
+            name = re.sub(r'^(?:\.{1,2}/|/)+', '', match.group(1))
+            hits = [doc for doc in markdown if name == doc or name.endswith('/' + doc)] if '/' in name else [name] * (name in roots)
+            for doc in hits:
+                found.setdefault(doc, set()).add(source)
+    return found
+
+
+class DocsFastPathExclusions(unittest.TestCase):
+    """Guard (#714): every tracked .md that a test names stays out of the docs fast path."""
+
+    def test_every_doc_a_test_reads_is_excluded_from_the_fast_path(self):
+        self.assertEqual(Path(__file__).resolve(), (HERE.parent.parent / GUARD_FILE).resolve())  # the skipped file is this one
+        found = markdown_read_by_tests(HERE.parent.parent)
+        missing = sorted(set(found) - set(run.DOCS_FAST_PATH_EXCLUDED))
+        self.assertEqual(missing, [], 'tests read these .md files; add them to DOCS_FAST_PATH_EXCLUDED in scripts/host-ci/run.py '
+                         '(sorted): ' + '; '.join(f'{doc} (named in {", ".join(sorted(found[doc]))})' for doc in missing))
+
+    def test_the_exclusion_list_is_sorted_unique_and_names_tracked_files(self):
+        excluded = list(run.DOCS_FAST_PATH_EXCLUDED)
+        self.assertEqual(excluded, sorted(set(excluded)))
+        self.assertIn('docs/fake-register.md', excluded)  # generated from register.json, pinned by a drift test
+        tracked = set(subprocess.run(['git', '-C', str(HERE.parent.parent), 'ls-files', '-z', '--', *excluded], check=True,
+                                     capture_output=True).stdout.decode().split('\0')) - {''}
+        self.assertEqual(sorted(set(excluded) - tracked), [])
+
+    def test_the_scan_finds_path_and_root_literals_and_ignores_fixtures(self):
+        with tempfile.TemporaryDirectory() as base, mock.patch.dict(os.environ, GIT_ENV):
+            root = Path(base)
+            files = {
+                'AGENTS.md': '', 'docs/a.md': '', 'docs/b.md': '', 'docs/c.md': '', 'docs/d.md': '', 'tools/README.md': '',
+                'internal/x/x_test.go': 'os.ReadFile("../../docs/a.md") // and repoRoot + "/docs/b.md"\n',
+                'scripts/tests/test_y.py': 'read("AGENTS.md"); fixture("README.md"); fixture("handoff.md"); fixture("sub/other.md")\n',
+                'src/__tests__/z.test.ts': "read('https://example.invalid/repo/blob/main/docs/c.md')\n",
+                'src/app.ts': "read('docs/d.md')\n",  # not a test file
+                'node_modules/pkg/test_n.py': "read('docs/d.md')\n",
+                'scripts/host-ci/test_host_ci.py': "read('docs/d.md')\n",
+            }
+            for name, content in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(content)
+            REAL_RUN(['git', '-C', str(root), 'init', '-q'], check=True)
+            REAL_RUN(['git', '-C', str(root), 'add', '-f', '.'], check=True)
+            found = markdown_read_by_tests(root)
+        self.assertEqual({doc: sorted(sources) for doc, sources in found.items()}, {
+            'AGENTS.md': ['scripts/tests/test_y.py'], 'docs/a.md': ['internal/x/x_test.go'], 'docs/b.md': ['internal/x/x_test.go'],
+            'docs/c.md': ['src/__tests__/z.test.ts']})
 
 
 class MemoryPeak(unittest.TestCase):

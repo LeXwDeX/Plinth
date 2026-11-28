@@ -616,6 +616,10 @@ func (service *Service) projectWorkLedger(
 			step.EstimatedCredits = call.EstimatedCredits
 			step.RawPrompt = workPromptFromArguments(call.Arguments, service.promptArgument())
 		}
+		if !task.Offering.CreditsMetered {
+			// #719: an Offering that does not bill in credits states none, an older call's number included.
+			step.EstimatedCredits = 0
+		}
 		step.FinalPrompt, step.NegativePrompt = workFrozenPrompts(task)
 		step.Parameters, step.Inputs = workParameters(task, call, styleText, stepHandles,
 			attachmentsByAsset, attachmentsByTask, parameterStates[string(task.Offering.ID)])

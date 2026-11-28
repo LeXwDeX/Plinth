@@ -18,6 +18,13 @@ commit with a pinned nektos/act in throwaway containers on the same host, under 
 preflight and limits (not a GitHub runner; dev_test.md section 2). After a run, the verdict is written
 as a commit status (`host-ci/gates` or `host-ci/workflows`) with the local `gh` login; --no-status skips it.
 
+Docs fast path (#714): when every file changed between merge-base(origin/main, commit) and the commit ends
+in .md (generated docs and docs that tests read, DOCS_FAST_PATH_EXCLUDED, excluded), the gates mode uploads nothing and starts no container: it runs
+the public snapshot scan of that commit and `git diff --check` over that range on this machine and writes
+the same `host-ci/gates` status, described as docs fast path without the full gates (exit 0 pass, 1 fail).
+No merge-base, an empty or unreadable change set, or any other file falls back to the full gates;
+--no-docs-fast-path forces them.
+
 The gate logic is not in this tool: it is `scripts/verify-local.py` plus the image built
 from `Dockerfile.ci`. Any other runner can build that same image and run the same entry
 point (scripts/host-ci/entry.sh) against the same mounts. This tool is the local / test-host
@@ -47,7 +54,32 @@ DEFAULT_CI_DIR = '/var/lib/plinth-ci'
 ACT_VERSION = 'v0.2.89'
 ACT_SHA256 = '0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0'
 RUNNER_IMAGE = 'catthehacker/ubuntu:act-24.04@sha256:c58e2b364da03b0c804c7d660f2ecbedf2f221a382b9baa0b344b0144780ff43'
-STATUS_CONTEXTS = {'gates': 'host-ci/gates', 'workflows': 'host-ci/workflows'}
+STATUS_CONTEXTS = {'gates': 'host-ci/gates', 'workflows': 'host-ci/workflows', 'docs': 'host-ci/gates'}
+# Docs fast path (#714): a commit whose changes since merge-base(origin/main) are only Markdown skips the
+# container and runs the public snapshot scan plus `git diff --check` locally. A change to any file below
+# still runs the full gates.
+DOCS_BASE_REF = 'refs/remotes/origin/main'
+# Generated docs/fake-register.md plus every tracked .md that a test file names (Go *_test.go, scripts test_*.py
+# and scripts/tests, src/__tests__ and src *.test.*), sorted. Over-inclusion only costs a full run. Kept a
+# superset of that scan by DocsFastPathExclusions in test_host_ci.py: when it fails, add the listed paths here.
+DOCS_FAST_PATH_EXCLUDED = (
+    'AGENTS.md',
+    'README.en.md',
+    'README.md',
+    'dev_test.md',
+    'docs/architecture.md',
+    'docs/deployment.md',
+    'docs/fake-register.md',
+    'docs/image-api-parameters.md',
+    'docs/product.md',
+    'docs/provider-configuration.md',
+    'docs/provider-schema-architecture.md',
+    'docs/regression-matrix.md',
+    'docs/release-gate.md',
+    'docs/ui-kit-framework.md',
+)
+DOCS_FAST_PATH_LABEL = '纯文档轻量通道，未跑完整门禁'
+DOCS_CHECK_TIMEOUT_SECONDS = 600
 # Tunable limits. Precedence: command line, then the optional `host_ci` object of the environment
 # entry (same names), then these defaults, which host_run.DEFAULTS repeats (test_host_ci.py keeps them equal).
 # The host validates the final values again (host_run.limit_problems).
@@ -184,10 +216,74 @@ def fetch_results(target, ci_dir, run_id, destination):
     return remote.returncode == 0 and extract.returncode == 0
 
 
+def is_docs_only(paths):
+    """True only for a non-empty change set of Markdown files none of which is in DOCS_FAST_PATH_EXCLUDED (#714)."""
+    paths = list(paths)
+    return bool(paths) and all(path.endswith('.md') and path not in DOCS_FAST_PATH_EXCLUDED for path in paths)
+
+
+def docs_change_set(repo, sha):
+    """(merge-base, changed paths) of the commit against origin/main; (None, None) when either cannot be told.
+
+    --no-renames lists a renamed file under its old and its new path, so moving code to a .md name still
+    shows the code path; -z keeps unusual names unquoted.
+    """
+    try:
+        base = git(repo, 'merge-base', DOCS_BASE_REF, sha)
+        listed = git(repo, 'diff', '--name-only', '--no-renames', '-z', base, sha, data=True)
+    except UsageError:
+        return None, None
+    return base, [path for path in listed.decode('utf-8', 'surrogateescape').split('\0') if path]
+
+
+def docs_check(name, command, cwd):
+    """One fast-path check as a gate-style record; a timeout or a missing tool is a failure."""
+    started = time.monotonic()
+    try:
+        outcome = subprocess.run(command, cwd=str(cwd), capture_output=True, text=True, timeout=DOCS_CHECK_TIMEOUT_SECONDS)
+        code, output = outcome.returncode, (outcome.stdout + outcome.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as error:
+        code, output = None, f'{type(error).__name__}: {error}'
+    return {'name': name, 'command': ' '.join(command), 'result': 'pass' if code == 0 else 'fail', 'exit_code': code,
+            'seconds': round(time.monotonic() - started, 1), 'output': output[-4000:]}
+
+
+def run_docs_fast_path(repo, sha, tree, base, paths, args):
+    """Public snapshot scan of the exact commit and `git diff --check` over merge-base..commit, here, no host."""
+    started = time.monotonic()
+    run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{sha[:12]}-{os.urandom(2).hex()}"
+    out = (Path(args.out) if args.out else TOOL_DIR.parent.parent / 'build' / 'host-ci') / run_id
+    print(f'[host-ci] {run_id}: commit {sha}: {len(paths)} Markdown file(s) changed since merge-base {base[:12]}; '
+          f'{DOCS_FAST_PATH_LABEL} (docs fast path, the full gates are NOT run; --no-docs-fast-path forces them)', flush=True)
+    checks = [docs_check('public snapshot', [sys.executable, str(repo / 'scripts' / 'make-public-snapshot.py'), 'check', '--rev', sha], repo),
+              docs_check('git diff --check', ['git', '-C', str(repo), 'diff', '--check', base, sha], repo)]
+    reasons = [f"check {check['name']}: fail" for check in checks if check['result'] != 'pass']
+    result = {'mode': 'docs', 'sha': sha, 'tree': tree, 'verdict': 'fail' if reasons else 'pass', 'reasons': reasons,
+              'docs_fast_path': {'base': base, 'base_ref': DOCS_BASE_REF, 'files': paths, 'checks': checks},
+              'total_seconds': round(time.monotonic() - started, 1)}
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'result.json').write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n')
+    for check in checks:
+        if check['result'] != 'pass' and check['output']:
+            print(f"[host-ci] {check['name']} output:\n{check['output']}", file=sys.stderr)
+    print(summarize(result))
+    print(f'results: {out}')
+    if not args.no_status:
+        write_status(repo, sha, result, args.target_url)
+    return 0 if not reasons else 1
+
+
 def summarize(result):
     attempt = (result.get('attempts') or [{}])[-1]
     entry = attempt.get('entry') or {}
     lines = [f"verdict: {result.get('verdict', '?').upper()}  sha {result['sha'][:12]}  tree {result['tree'][:12]}"]
+    if result.get('mode') == 'docs':
+        report = result.get('docs_fast_path') or {}
+        lines.append(f"  {DOCS_FAST_PATH_LABEL}: {len(report.get('files') or [])} file(s) since {(report.get('base') or '?')[:12]}")
+        for check in report.get('checks') or []:
+            lines.append(f"  {check['name']:<20} {check['result']:<8} {check['seconds']:.1f}s")
+        lines.extend(f'  reason: {reason}' for reason in result.get('reasons') or [])
+        return '\n'.join(lines)
     if result.get('mode') == 'workflows':
         report = result.get('workflows') or {}
         lines.append(f"  act {report.get('act_version', '?')}  runner image {(report.get('runner_image') or '-')[:60]}")
@@ -240,6 +336,11 @@ def status_of(result):
         passed = sum(job['result'] == 'success' for job in jobs)
         scope = f" (only job {report['filter_job']})" if report.get('filter_job') else ''
         text = f"{passed}/{len(jobs)} workflow jobs passed in {len(report.get('events') or [])} events{scope}, act {report.get('act_pinned', '?')}"
+    elif result.get('mode') == 'docs':
+        # The label leads so that truncation can never drop it: this status is not a full gate run.
+        checks = (result.get('docs_fast_path') or {}).get('checks') or []
+        passed = sum(check['result'] == 'pass' for check in checks)
+        text = f'{DOCS_FAST_PATH_LABEL}: {passed}/{len(checks)} checks passed (public snapshot, git diff --check)'
     else:
         entry = (result.get('attempts') or [{}])[-1].get('entry') or {}
         gates = [gate for gate in entry.get('gates') or [] if gate['name'] != 'external links']
@@ -286,6 +387,7 @@ def main(argv=None):
     parser.add_argument('--min-mem-floor-gib', type=float, default=None, help=f"runtime guard: the container is killed when host MemAvailable falls below this many GiB (default {LIMIT_DEFAULTS['min_mem_floor_gib']})")
     parser.add_argument('--workflows', action='store_true', help='replay .github/workflows (pull_request and push) with pinned act instead of the gate image')
     parser.add_argument('--act-job', default='', help='with --workflows: only this job (diagnosis; the status says so)')
+    parser.add_argument('--no-docs-fast-path', action='store_true', help='run the full gates even when only Markdown changed since merge-base(origin/main)')
     parser.add_argument('--no-status', action='store_true', help='do not write the commit status')
     parser.add_argument('--target-url', default=None, help='target_url of the commit status (default none)')
     parser.add_argument('--print-image-tag', action='store_true', help='print plinth-ci:<hash> for the commit and exit')
@@ -294,13 +396,19 @@ def main(argv=None):
     try:
         sha = git(repo, 'rev-parse', '--verify', f'{args.ref}^{{commit}}')
         tree = git(repo, 'rev-parse', f'{sha}^{{tree}}')
-        files = toolchain_inputs(repo, sha)
-        tag = toolchain_hash(files)
         if args.print_image_tag:
-            print(f'plinth-ci:{tag}')
+            print(f'plinth-ci:{toolchain_hash(toolchain_inputs(repo, sha))}')
             return 0
         if args.ref == 'HEAD' and git(repo, 'status', '--porcelain', '--untracked-files=no'):
             print('warning: uncommitted changes are not part of HEAD and are not tested', file=sys.stderr)
+        # Decided before the environment file is read, so a docs-only commit needs neither it nor the host.
+        if not args.workflows and not args.no_docs_fast_path:
+            base, paths = docs_change_set(repo, sha)
+            if base and paths is not None and is_docs_only(paths):
+                resolve_limits(args, {})  # the limit options are still validated, though nothing uses them here
+                return run_docs_fast_path(repo, sha, tree, base, paths, args)
+        files = toolchain_inputs(repo, sha)
+        tag = toolchain_hash(files)
         target, ci_dir, host_ci = load_environment(args.env)
         limits = resolve_limits(args, host_ci)
         run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{sha[:12]}-{os.urandom(2).hex()}"

@@ -15,6 +15,7 @@ import {
 } from '@/lib/workspace/versions';
 import { groupProgress, parseThreeViews } from '@/lib/workspace/three-view';
 import { imageResults } from '@/lib/workspace/canvas-auto-join';
+import { detailSource } from '@/lib/workspace/task-detail';
 import type { TrackedTask } from '@/store/workspace-store';
 
 const schema = {
@@ -142,6 +143,32 @@ describe('version tiles', () => {
     ]);
     expect(added[1].progress).toBeCloseTo(0.45);
     expect(added[2].failure).toBe('boom');
+  });
+
+  it('does not call the source of a task unknown before the version chain has listed it (#720)', () => {
+    // The tracker knows a task the moment it is submitted; the chain lists it (with its frozen source) on its next
+    // read. Until then the source is not loaded, which is not the same as unknown: no 「来源未知」 flash.
+    const { tiles } = buildVersionTiles({
+      schema, graph, sessionId: 's1',
+      tracked: [tracked({ taskId: 'img4', capability: 'text-to-image', state: 'RUNNING', progress: 30 })],
+    });
+    const running = tiles.find((tile) => tile.taskId === 'img4')!;
+    expect(running.status).toBe('running');
+    expect(running.parents).toEqual([]);
+    expect(primaryParent(running)).toBeNull();
+    // The detail does not claim it was made from nothing either: its source is not loaded yet.
+    const texts = { ...schema, content: { messages: { ...schema.content.messages,
+      'ui.result.detail.no_source': 'none', 'ui.result.detail.unknown_source': 'unknown' } } } as unknown as ProductSchema;
+    expect(detailSource(texts, 'img4', buildVersionTiles({ schema, graph, sessionId: 's1',
+      tracked: [tracked({ taskId: 'img4', capability: 'text-to-image', state: 'RUNNING' })] })).label).toBe('unknown');
+    // Once the chain lists it, the recorded source is the parent, before and after it succeeds.
+    const listed = parseLineage({
+      nodes: [task('img1', 1, [image('img1')]), task('img4', 5, [], { state: 'RUNNING', capability: 'text-to-image' })],
+      edges: [edge('img1', 'img4', 'reference', 'same_bytes')],
+    });
+    const later = buildVersionTiles({ schema, graph: listed, tracked: [tracked({ taskId: 'img4', capability: 'text-to-image', state: 'RUNNING' })], sessionId: 's1' });
+    const tile = later.tiles.find((entry) => entry.taskId === 'img4')!;
+    expect(primaryParent(tile)).toMatchObject({ known: true, key: 'n:img1', link: 'edit' });
   });
 
   it('knows which capability makes which kind of result', () => {

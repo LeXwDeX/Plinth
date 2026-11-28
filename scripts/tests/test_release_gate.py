@@ -262,7 +262,7 @@ class ParsingTests(unittest.TestCase):
                 "| 1 | 合并前 | G1 | `scripts/x.sh` |\n\n## 3. 主表\n\n### 门禁\n\n" + header + row.format("G1", "#86", HEAD8)
                 + "\n### 按功能的行为\n\n" + header + row.format("R-1", "#704、#705", HEAD8)
                 + row.format("R-2", "#699, #691", HEAD8)
-                + "\n### 正式测试环境\n\n" + header + row.format("P1", "#2", HEAD8)
+                + "\n### prod 发布后回归\n\n" + header + row.format("P1", "#2", HEAD8)
                 + "\n## 4. Fake 与真实的已知差异\n\n| 差异 | 状态 | Issue | 记录日期 | 备注 |\n|---|---|---|---|---|\n"
                 + "| 差异甲 | FIXED | #704 | 2026-11-28 | 已回灌 |\n")
         parsed = gate.parse_matrix(text)
@@ -391,9 +391,15 @@ class UnitCITests(unittest.TestCase):
 class PhaseTests(unittest.TestCase):
     """#718: before promotion the PROD rows are not yet verifiable; before the tag they are."""
 
-    def evaluate(self, phase, state="OK"):
-        rows = passing_rows() + [("P-1", "#704", state, "—", "", "PROD-paid")]
+    def evaluate(self, phase, state="OK", layer="prod-paid"):
+        rows = passing_rows() + [("P-1", "#704", state, "—", "", layer)]
         return gate.evaluate(v196_changes([gate.MATRIX_PATH]), matrix(rows), rules(), phase=phase)
+
+    def test_the_prod_prefix_is_matched_case_insensitively(self):
+        for layer in ("prod-readonly", "PROD-paid", "Prod-readonly"):
+            with self.subTest(layer=layer):
+                self.assertEqual(self.evaluate("promote", layer=layer)["status"], "pass")
+        self.assertEqual(self.evaluate("promote", layer="dev-test-fake")["status"], "fail")
 
     def test_promote_does_not_require_current_prod_rows_but_tag_does(self):
         result = self.evaluate("promote")

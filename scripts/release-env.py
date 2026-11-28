@@ -18,7 +18,7 @@ secrets. deploy/environments.example.json is its template.
 An environment with "promote_from" only receives an exact origin/main revision
 that the source environment released successfully (its manifest) AND that has a
 passing acceptance report (L0, L1, L1_agent, related) in a native Issue note.
-Since #707 that report must be "formal_promotion": 2 and name a passing release
+Since #707 that report must be "prod_promotion": 2 and name a passing release
 gate receipt for the same revision (docs/release-gate.md, scripts/release-gate.py).
 The release itself is scripts/release-go-testenv.sh with the environment's
 parameters; nothing about the server flow is duplicated here.
@@ -44,7 +44,7 @@ tokens. The two switches are exclusive.
 
 Release string (#676): every release links a release string into the binary, shown
 next to the brand and as "release" in /api/version (the "version" field stays the
-commit). --release-version names it (the formal-test release that becomes a GitHub
+commit). --release-version names it (the prod release that becomes a GitHub
 Release passes the tag it will be tagged with, e.g. v1.9.5); without it the string is
 `git describe --tags --always` of the released revision (e.g. v1.9.4-12-gfbf5000).
 It travels with the commit: server steps -> GO_RELEASE_VERSION build argument -> ldflags.
@@ -207,9 +207,9 @@ def validate_environment(name, environment, document):
             need(environment.get("promote_from") is None,
                  "dev-test backup scope database cannot be combined with promote_from")
         else:
-            # #66: a full backup keeps every tree; retention is allowed on both test stacks.
-            need(name in ("dev-test", "formal-test"),
-                 "backup retention is only supported for the dev-test and formal-test environments")
+            # #66: a full backup keeps every tree; retention is allowed on dev-test and prod.
+            need(name in ("dev-test", "prod"),
+                 "backup retention is only supported for the dev-test and prod environments")
         need(type(backup.get("keep")) is int and 1 <= backup["keep"] <= 2, "backup keep must be 1-2")
     data = environment.get("data")
     if data is not None:
@@ -497,7 +497,7 @@ def ensure_agent_account(document, name):
     """After a successful release, make sure the Agent's account exists and logs in (#215).
 
     dev-test starts from empty data on every release and gets it recreated; a kept database
-    (formal-test) answers 409 and is only checked. The release itself is already deployed
+    (prod) answers 409 and is only checked. The release itself is already deployed
     when this runs, so a failure here says so instead of looking like a refused release.
     """
     environment = document["environments"][name]
@@ -668,7 +668,7 @@ def main(argv=None):
     entry.add_argument("--revision")
     entry.add_argument("--acceptance-note", type=int)
     entry.add_argument("--release-version",
-                       help="release string shown next to the brand (#676), e.g. v1.9.5 for the formal-test release that "
+                       help="release string shown next to the brand (#676), e.g. v1.9.5 for the prod release that "
                             "will be tagged; default: git describe --tags --always of the released revision")
     entry.add_argument("--live-upstream", action="store_true",
                        help=f"release the ephemeral dev-test stack against real upstreams (needs {LIVE_ACK}=1)")

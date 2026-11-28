@@ -440,6 +440,16 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     expect(triggerBlock(onBlock, 'workflow_dispatch').trim()).toBe('');
   });
 
+  it('skips only pure Markdown pushes and pull requests, the same way for both (#714)', () => {
+    // Pure .md changes are covered by the host CI docs fast path; workflow_dispatch keeps no filter.
+    const on = parseWorkflow(read('.github/workflows/ci.yml')).on as Record<string, Json | null>;
+    expect(Object.keys(on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch']);
+    expect(on.push).toEqual({ branches: ['main'], 'paths-ignore': ['**/*.md'] });
+    expect(on.pull_request).toEqual({ 'paths-ignore': ['**/*.md'] });
+    expect(on.push!['paths-ignore']).toEqual(on.pull_request!['paths-ignore']);
+    expect(on.workflow_dispatch).toBeNull();
+  });
+
   it('keeps the CI security preconditions', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasSafePermissions(text)).toBe(true);

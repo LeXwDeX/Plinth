@@ -1,6 +1,6 @@
 # 部署入口
 
-本文是 Plinth 内部环境部署的入口。用户在仓库根目录说「部署到 <环境>」（例如「部署到正式测试环境」）时，Agent 按本文执行。本项目开源：主机、地址、端口、目录与 Compose 名只写在未纳入 Git 的本地部署文件夹 `deploy/local/`，本文和其他仓库文档只用环境名。密钥只在各环境服务器的 `production/runtime.env`（`0600`）中，不进本地环境文件、仓库、Issue 或报告。
+本文是 Plinth 内部环境部署的入口。用户在仓库根目录说「部署到 <环境>」（例如「部署到 `prod`」）时，Agent 按本文执行。本项目开源：主机、地址、端口、目录与 Compose 名只写在未纳入 Git 的本地部署文件夹 `deploy/local/`，本文和其他仓库文档只用环境名。密钥只在各环境服务器的 `production/runtime.env`（`0600`）中，不进本地环境文件、仓库、Issue 或报告。
 
 自部署（开源用户）不使用本文，见 `README.md` 的 `docker compose` 一条命令部署；外部合作方的统一部署方式与出问题时的录制、诊断包流程见 [合作方部署指南](partner-deployment.md)。
 
@@ -9,9 +9,9 @@
 | 环境名 | 用途 | 接收的 revision | 数据 | 发布后验收 | 付费生成 |
 |---|---|---|---|---|---|
 | `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号；缺省为 fake 上游形态（#219，见下文「fake 上游形态」） | 发布脚本自动跑 L0、L1、L1 Agent 并写机器报告（fake 形态，零费用，见 §4）；L2 等真实模型验收只在用户当次同意后以真实形态发布再跑 | 真实形态与付费验收须当次同意（见 `AGENTS.md`） |
-| `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent（真实形态不自动跑，按 §6 手动执行并留证） | 不做；测试期付费同意授权不适用 |
+| `prod` | 生产环境：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent（真实形态不自动跑，按 §6 手动执行并留证） | 不做；测试期付费同意授权不适用 |
 
-只有上表两个环境可部署（#270）。`legacy-formal` 已下线，环境名不再可用（存档 #74）；环境沿革见 [`history.md`](history.md)。
+只有上表两个环境可部署（#270）。`prod` 即生产机，仓库文档不写具体地址，地址只在本地环境文件。`legacy-formal` 已下线，环境名不再可用（存档 #74）；环境沿革见 [`history.md`](history.md)。
 
 ## 2. 本地环境文件
 
@@ -25,20 +25,55 @@
 | `compose_project` | Compose 项目名；容器为 `<项目>-art-ai-go-1` |
 | `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
 | `protected_paths` | 迁移工具（`backup-go-production.sh create`、`run-go-etl-container.sh`、`finalize-go-production.sh`）绝不能作为目标的目录：发布根之外的绝对路径列表（例如共享主机上旧 Next 项目根），没有就写 `[]`；由 `release-env.py` 发布的环境必填。`release-env.py` 把「`root` + 本列表」用冒号连成 `ART_AI_PROTECTED_PATHS`：`compose-env` 输出它供手工运行，`release` 经服务器段写入 `production/compose.env`。三个迁移工具在未设置 `ART_AI_PROTECTED_PATHS` 时拒绝运行（finalize 在停旧容器之前），确无受保护目录时须显式设为空串（#334） |
-| `backup` | 可选的发布备份策略（#364、#66）：`{"scope": "database", "keep": 2}`（仅 `dev-test`，不得与 `promote_from` 同时出现）表示停机时只备份 `production/data`；`{"scope": "full", "keep": 2}`（`dev-test` 与 `formal-test` 可设，可与 `promote_from` 同时出现）仍备份 `data`、`storage-go`、`web-data`，成功后同样清理。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。`formal-test` 必须写 `{"scope": "full", "keep": 2}`（#66），全量备份成功后只保留最新 2 份；发布备份不含镜像和日志。`scope` 只接受 `database`/`full`，`keep` 为 1–2 |
-| `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`formal-test` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
-| `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
+| `backup` | 可选的发布备份策略（#364、#66）：`{"scope": "database", "keep": 2}`（仅 `dev-test`，不得与 `promote_from` 同时出现）表示停机时只备份 `production/data`；`{"scope": "full", "keep": 1}`（`dev-test` 与 `prod` 可设，可与 `promote_from` 同时出现）仍备份 `data`、`storage-go`、`web-data`，成功后同样清理。正常成功清理最多保留最新 `keep` 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 `keep` 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。`prod` 必须写 `{"scope": "full", "keep": 1}`（#66），全量备份成功后只保留最新 1 份；发布备份不含镜像和日志。`scope` 只接受 `database`/`full`，`keep` 为 1–2 |
+| `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`prod` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
+| `promote_from` | 只能从该环境晋级（`prod` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
 | `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`，另有两个可选键 `MCP_PUBLIC_BIND_IP`、`MCP_PUBLIC_HOST_PORT`，见 §6「外部 MCP 监听」）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
 | `extra_compose_file` | 追加在主 Compose 文件之后的服务器本地覆盖文件（`<root>/production/` 下，例如固定项目网络子网与容器地址）；只用于本栈服务，隔离预检不用它 |
 | `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`npm_registry`（NPM_REGISTRY 构建参数，单个 http(s) 地址，指向内部包缓存）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；缺省 npm 源为公共 registry）；仓库缺省 npm 源为公共 `registry.npmjs.org`（#257：仓库不依赖内部源），内部环境只在本地环境文件里设 `npm_registry` |
 | `source_transfer` | `pipe`（缺省，`git archive` 经 SSH 管道解包）或 `scp`（本地生成 tar，scp 到 `<root>/releases/` 解包后删除） |
 | `managed_by` | 已移除（#74，`legacy-formal` 下线）：环境文件里出现这个字段会被拒绝，并提示删除 |
-| `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `formal-test`（旧字段 `legacy_formal_issue` 随 `legacy-formal` 下线不再使用，可从环境文件删除）；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
+| `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `prod`（旧字段 `legacy_formal_issue` 随 `legacy-formal` 下线不再使用，可从环境文件删除）；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
 
 查看：`python3 scripts/release-env.py list`、`python3 scripts/release-env.py show <环境>`。
 
 ## 3. Agent 工作流
+
+### 五阶段发布流程（#726）
+
+`AGENTS.md`「实施流程」是五阶段的摘要，本小节写各阶段细则，并如实列出尚未实现的部分。本节后面的「部署到开发测试环境」「部署到 `prod`」、§4 与 §5 是现行脚本的合同，阶段 4、5 的新入口落地前照旧执行。
+
+- **阶段 1 需求与方案**：用户与主 agent 确认需求大致方向后，主会话自动派发 `issue-researcher`，调研完成后派发 `requirements-analyst`，两者只读。
+  - 调研只取证、不判断：查重；找出相关的旧 Issue、PR 与提交；列出被新需求取代的旧决策；标出新需求与旧 Issue 要求冲突之处。
+  - 分析读调研结果，评估对系统与产品（用户体验、使用方式）的影响，给出完整方案：必须含「不做或最小改动」选项，按奥卡姆剃刀选最小方案，每个新增项写明它保护什么；用户提出的方案不是最优解时明说分歧，不得悄悄替换。
+  - 主会话把两份输出写成同一 Issue 的两条评论，首行固定为「Issue 调研」「需求分析」，审阅后进入开发。小修（文案、小 UX、纯文档订正）豁免。新增任何限制仍按 `AGENTS.md`「少限制用户」在 Issue 写明保护对象与更轻的替代。
+- **阶段 2 自测开发**：每个 Issue 单独分支、单独 PR，按依赖顺序提；PR 正文写完整，每个 PR 关闭其 Issue。
+  - 改行为前写清预期、边界与验证路径。Schema/共享接口变更检查 Catalog 校验、公开投影、扩展 discovery、兼容 API、前端消费者、fixture/快照与运行时可用性；跨 Provider 链测成功、失败、跨用户、同/异 Provider、格式不兼容及重试/同意路径。
+  - TDD；本机门禁与主机 CI 按 `dev_test.md` §2。纯文档变更走主机 CI 的纯文档轻量通道（#714，判定口径与排除清单见 `dev_test.md`「主机 CI」）。
+  - 合并条件：必需检查 `host-ci/gates` 为 success，且 Codex 对当前 head 的审核已完成、无未解决发现（见下文「Codex 审核」）。有发现则修复并推送，必要时评论 `@codex review` 重审。
+- **阶段 3 `dev-test` 全量回归**：本轮全部 Issue 合并后，按下文「部署到开发测试环境」发布 `dev-test`（全新数据）。
+  - 第一轮 fake：发布脚本自动跑 L0、L1、L1 Agent 并写机器报告（§4），再跑 `docs/regression-matrix.md` 中本次相关的行。fake 没有遗漏就不进第二轮。
+  - 第二轮真实 2D：用真实对话模型驱动 2D 流程，使用真实数据，过程与结果记录在 Issue；`dev-test` 的 2D 真实调用不限量、无需逐次同意（`AGENTS.md`「上游接口与 Fake」）。据此补全 fake：改 fake 代码，补 fake 接口 SOP 文档。SOP 只回答三件事：fake 支持哪些接口、各返回什么、覆盖哪个 Provider 的哪个 API 版本；不写笔记与历史。回灌后复跑 fake 回归。3D 的遗漏只补 fake；真实 3D、`prod` 与带 `--live-upstream` 的发布须当次同意。
+  - 对话模型探测兜底：第二轮的对话模型不通时，不卡在这里。去网关读模型列表，对候选模型各做一次极小的对话探测，优先 DeepSeek、Qwen 等便宜模型，用第一个能通的继续；探测次数与总时长设宽松上限。全部不通则退回 fake，在回归报告标明「真实 2D 回归本次未覆盖」。选用的模型与原因写进报告。
+  - 收尾：对精确 `main` revision 跑一次 GitHub Runner 的完整 CI（`.github/workflows/ci.yml` 三个作业，不按 diff 缩减；自托管 runner 掉线或纯文档合并后推送未触发时，按 `dev_test.md` §2 手动触发）。随后主会话派发 `release-gate`（只读，定义见 `.claude/agents/release-gate.md`，规则见 [`release-gate.md`](release-gate.md)），回执贴到 #2；不通过不进入阶段 4。门禁对本次涉及的 Issue 缺少调研或分析记录只给警告，不拦截。
+- **阶段 4 构建与 `prod` 预准备**：在 `dev-test` 主机构建 `prod` 要用的全部内容（运行镜像与配置），记录镜像 digest 与 revision；测哪个发哪个，送到 `prod` 的必须是记录下的那份 digest（运行镜像不含 fake，见 §5「fake 上游形态」）。`prod` 禁止开发与构建。经用户确认后把镜像与配置送到 `prod` 并做预检，不停止、不重启运行中的服务。
+- **阶段 5 用户确认后重启更新**：先给用户一张确认卡：版本、revision、镜像 digest、风险、预计停机、回退方案。用户同意后才依次执行：配置备份（最多一份）与命名清楚的临时回退副本 → 重启 → `prod` 冒烟（L0 免费；L1 会调用真实对话模型，须当次同意，可在确认卡里一并取得；按 §6 手动执行并留证；付费验收同样须当次同意）→ 验收 → 删除临时回退副本 → `release-gate` 在打 tag 前再过一次 → tag 与 GitHub Release（§5「版本号与 tag」）。失败按 §7 回滚；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
+
+**Codex 审核**：Codex 是装在 GitHub 仓库上的应用，不在本仓库代码里。触发方式：开 PR 供审查、草稿 PR 转为 ready，或在 PR 评论 `@codex review`。它在 PR 评论里留下机器可读的状态标记，包含审核状态、对应的 head SHA 与是否有未解决发现；合并前核对标记中的 SHA 等于 PR 当前 head，旧 head 的审核不算。
+
+**现状与差距**：本次只改文档，下列各项都未实现。
+
+| 项 | 现状 | 状态 |
+|---|---|---|
+| 阶段 4 的预准备入口（dev 主机构建后送 `prod`）与阶段 5 的「用户确认后重启」入口 | `scripts/release-env.py release prod` 在目标主机上构建镜像并一步完成重启（§5），与「`prod` 禁止构建」「确认后才重启」冲突。新入口落地前，`prod` 发布仍走现行脚本，且须用户确认 | 待实现 |
+| 对话模型探测兜底的共用小工具 | 没有；由主会话按阶段 3 的规则手工探测 | 待实现 |
+| Fake 接口 SOP 文档及其生成 | 只有 fake 验证登记表 [`fake-register.md`](fake-register.md)（记 `real`/`constructed`/`gap`），没有按接口回答「支持什么、返回什么、覆盖哪个 API 版本」的 SOP | 待实现 |
+| 门禁对调研与分析记录的警告项 | `scripts/release-gate.py` 与 [`release-gate.md`](release-gate.md) 尚无此项 | 待实现 |
+
+以上各项另开 Issue 跟进。
+
+### 现行脚本流程
 
 前提：要发布的提交已推送到 `origin/main`；本机门禁按 `dev_test.md` §2 通过。
 
@@ -49,10 +84,10 @@
 3. fake 形态下发布脚本接着自动建 Agent 专用账号并跑 §6 的 L0、L1、L1 Agent，报告落在发布根（§4）。真实形态不自动跑：按 §6 手动执行这三层（L1 会调用真实对话模型，须先取得当次同意），再跑本次改动相关的页面、API 与 Agent/生成链路验收。
 4. 全部 PASS 后，在 `acceptance.issue` 写入一条 §4 格式的验收报告 note；记下 note ID。机器报告不用复制到 Issue，晋级时脚本直接读源环境发布根下的那一份。
 
-**部署到正式测试环境（`formal-test`）**
+**部署到 `prod`**
 
 1. 确认目标 revision 在 `dev-test` 已按上面第 1–4 步稳定通过，并取得验收报告 note ID。不满足就停止并告诉用户缺什么，不降级验收。
-2. `python3 scripts/release-env.py release formal-test --acceptance-note <noteID>`；不给 `--revision` 时取 `dev-test` 当前运行的 revision，也可给一个更早的已验收完整 SHA。脚本除 Issue comment 外还核对 `dev-test` 发布根下该 revision 的机器报告（§4），报告缺失时按 §4 的回退规则只核对 comment。
+2. `python3 scripts/release-env.py release prod --acceptance-note <noteID>`；不给 `--revision` 时取 `dev-test` 当前运行的 revision，也可给一个更早的已验收完整 SHA。脚本除 Issue comment 外还核对 `dev-test` 发布根下该 revision 的机器报告（§4），报告缺失时按 §4 的回退规则只核对 comment。
 3. 冒烟（§6），核对 revision。
 4. 在 #270 记录部署 SHA、冒烟结果与异常；不写回本文。
 
@@ -60,17 +95,17 @@
 
 ## 4. 晋级规则与验收报告
 
-开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。`release-env.py` 对有 `promote_from` 的环境强制执行，任一项不满足即拒绝且不联系目标主机：
+开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到 `prod`。`release-env.py` 对有 `promote_from` 的环境强制执行，任一项不满足即拒绝且不联系目标主机：
 
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
 - 源环境发布根下该 revision 的**机器冒烟报告**存在时，其 L0、L1、L1 Agent 三层都是 `status` 为 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`；报告缺失时按下面的回退规则只核对 Issue comment；
 - `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py`、`scripts/tests/test_release_env.py` 覆盖）；
-- 该报告是格式 2（`"formal_promotion": 2`，#707），其 `release_gate.status` 为 `pass`，`release_gate.evidence` 是本仓库某个 Issue comment 的完整 URL（`<forge_url>/issues/<N>#issuecomment-<id>`）；被引用的 comment 属于该 Issue，其中恰有一个发布门禁回执 JSON 块（见下），`release_gate` 为 `1`、`revision` 与候选完整一致、`status` 为 `pass`。门禁规则见 [`docs/release-gate.md`](release-gate.md)。
+- 该报告是格式 2（`"prod_promotion": 2`，#707），其 `release_gate.status` 为 `pass`，`release_gate.evidence` 是本仓库某个 Issue comment 的完整 URL（`<forge_url>/issues/<N>#issuecomment-<id>`）；被引用的 comment 属于该 Issue，其中恰有一个发布门禁回执 JSON 块（见下），`release_gate` 为 `1`、`revision` 与候选完整一致、`status` 为 `pass`。门禁规则见 [`docs/release-gate.md`](release-gate.md)。
 
 ```json
 {
-  "formal_promotion": 2,
+  "prod_promotion": 2,
   "revision": "<完整40位小写SHA>",
   "image_tag": "<dev-test manifest 中对应的精确标签>",
   "checks": {
@@ -91,7 +126,7 @@
 
 `related` 覆盖本次改动涉及的浏览器与 Agent 验收（本次需要 L2 真实模型链路时，只在用户当次同意后按 `scripts/smoke/README.md` 执行并计入，见 `AGENTS.md`「上游接口与 Fake」）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
 
-格式 1（`"formal_promotion": 1`，没有 `release_gate`）是 #707 之前的历史回执：`scripts/release-promotion.py` 仍能解析它，#2 里已有的旧回执不需要补门禁；但 `release-env.py release formal-test` 对每一次新的晋级都要求格式 2，格式 1 报告、缺 `release_gate`、门禁回执的 revision 不一致或 `status` 不是 `pass` 一律拒绝，且不联系目标主机。
+格式 1（`"prod_promotion": 1`，没有 `release_gate`）是 #707 之前的历史回执：`scripts/release-promotion.py` 仍能解析它，#2 里已有的旧回执不需要补门禁；但 `release-env.py release prod` 对每一次新的晋级都要求格式 2，格式 1 报告、缺 `release_gate`、门禁回执的 revision 不一致或 `status` 不是 `pass` 一律拒绝，且不联系目标主机。
 
 ### 机器冒烟报告（`release-env.py` 自动产出，#411）
 
@@ -122,7 +157,7 @@
 - 判定：脚本退出码 0、汇总行 `failed=0`、`skipped=0`、输出无 `SOFT-FAIL` 行且 `passed>0` 才是 `status: "pass"`；`SKIP:`、`SOFT-FAIL:`、`PAID-TASK-ALERT`、非零退出码和缺汇总行都记 `fail`。判定规则与 `scripts/release-promotion.py` 的 `check_passed` 同一份，Issue comment 与机器报告因此口径一致。
 - 落盘与失败：三层都会跑完再写报告；报告写不出去或某层不是 `pass` 时发布命令返回非零，但**发布本身不回滚**（这三层不在自动回滚范围）。按 `AGENTS.md`「发布后冒烟判定与晋级校验」记录证据、恢复已验证版本后再修。
 - 回退：源环境没有该 revision 的报告时（例如 #411 之前发布的版本），晋级只核对 Issue comment，命令会打印一行提示；报告存在即核对，不存在的报告不会当成通过。
-- 真实形态（`formal-test` 与带 `--live-upstream` 的 `dev-test`）不自动跑，也不写报告：L1 会调用真实对话模型，须每次取得当次同意，按 §6 手动执行。
+- 真实形态（`prod` 与带 `--live-upstream` 的 `dev-test`）不自动跑，也不写报告：L1 会调用真实对话模型，须每次取得当次同意，按 §6 手动执行。
 
 ### 保留数据升级演练（#435）
 
@@ -164,7 +199,7 @@
 - 版本串来源：`release-env.py release <环境> --release-version <名称>` 显式给出；不传时取待发布 revision 的 `git describe --tags --always`（形如 `v1.9.4-12-gfbf5000`，即 v1.9.4 之后第 12 个提交）。只允许字母、数字、点、下划线和连字符，最长 64 个字符。
 - 通道与提交哈希相同：`release-env.py` 把它作为 `RELEASE_VERSION` 放进服务器段参数 → `release-server-steps.sh` 以 `--build-arg GO_RELEASE_VERSION` 构建 → `Dockerfile.go-runtime` 用 `-ldflags -X …/internal/app.releaseVersion` 链接进二进制。本地构建不传时为空，界面不显示版本。Compose 构建同样可选：自部署 `docker-compose.yml` 读 `ART_AI_RELEASE_VERSION`，内部 `docker-compose.go-production.yml` 读 `GO_RELEASE_VERSION`，缺省为空。
 
-约定：发布 `formal-test` 时传入的版本串，就是人工 Review 通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
+约定：发布 `prod` 时传入的版本串，就是阶段 5 验收与门禁通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
 
 ```bash
 git tag v1.9.5 <revision>
@@ -178,7 +213,7 @@ gh release create v1.9.5 --title v1.9.5 --verify-tag
 
 `dev-test`（`"data": "ephemeral"`）的发布缺省是 fake 上游形态，所有上游请求打到同一 Compose 项目里的 fake 服务，真实 Provider 零请求、零扣费：
 
-- `release-env.py release dev-test` 向服务器段传 `RELEASE_UPSTREAM_SHAPE=fake`；`--live-upstream` 与 `ART_AI_LIVE_ACK=1` 同时给出才发布真实形态（只给一个即拒绝，且发起前须在当次对话取得用户同意）。其他环境给 `--live-upstream` 即拒绝；`formal-test` 永远是真实形态，不构建也不运行 fake。
+- `release-env.py release dev-test` 向服务器段传 `RELEASE_UPSTREAM_SHAPE=fake`；`--live-upstream` 与 `ART_AI_LIVE_ACK=1` 同时给出才发布真实形态（只给一个即拒绝，且发起前须在当次对话取得用户同意）。其他环境给 `--live-upstream` 即拒绝；`prod` 永远是真实形态，不构建也不运行 fake。
 - 服务器段（`RELEASE_UPSTREAM_SHAPE=fake` 只能与 `RELEASE_DATA_MODE=ephemeral` 同用，否则构建前拒绝）：另以 `Dockerfile.fake-upstream` 构建 `art-ai-go-fake-upstream:<tag>`（运行镜像不含 fake），在 `docker-compose.go-ephemeral.yml` 之后、`extra_compose_file` 之前叠加 `docker-compose.go-fake-upstream.yml`；先 `up -d --no-deps fake-upstream` 并等容器健康，再更新 `art-ai-go`。fake 启动失败或不健康时旧实例不动，失败报告阶段为 `fake-upstream-failed`。
 - 叠加文件的 `environment` 覆盖运行环境文件的同名变量：全部 `*_BASE_URL` 指向 `http://fake-upstream:19000/...`，全部 Provider 与对话模型密钥换成 `fake-test-key`，废弃别名与 `LLM_CONNECTIONS` 清空，并设 `UPSTREAM_SHAPE=fake`、`FAKE_UPSTREAM_ORIGIN=http://fake-upstream:19000`。服务启动时 fail-closed 校验（任一连接未指向 fake、任一密钥不是 `fake-` 密钥、`LLM_CONNECTIONS` 非空即拒绝启动）；`LLM_MODEL` 沿用运行环境文件。
 - 成功后 `production/compose.env` 记 `RELEASE_UPSTREAM_SHAPE=fake|live`，`release-env.py smoke` 据此向脚本设 `ART_AI_UPSTREAM_SHAPE`；fake 镜像只保留本次（非强制 `docker rmi`）。以真实形态发布 ephemeral 栈时，成功后移除本项目遗留的 `fake-upstream` 容器与镜像，失败只警告。
@@ -200,10 +235,10 @@ gh release create v1.9.5 --title v1.9.5 --verify-tag
 
 `dev-test` 只存放测试材料，可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机窗口只把 `production/data` 打包到 `backups/release-<tag>/data.tar`，回滚也只替换该目录。`storage-go` 是只追加的 CAS，`web-data` 只读；候选启动后写入的资产或 Web 文件在数据库回滚后保留，可能成为无引用字节。**这不是完整回滚**：发布失败后的旧服务可能看不到候选新增的 CAS/任务数据，只能按新写入处理，不能删除这些字节来伪造一致。
 
-- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 按 #66 配置 `"backup": {"scope": "full", "keep": 2}`：备份范围不变，健康检查与成功清单写入后按最新 2 份清理更早的已结束发布备份（发布备份不含镜像和日志）。
-- `release-env.py` 在加载环境文件时拒绝：`scope=database` 用于 `promote_from` 或非 `dev-test` 环境；`scope=full` 用于 `dev-test`、`formal-test` 之外的环境；未知 `scope`。`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`（full 可选，设置时须为 1–2），非法组合不产生副作用。
+- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`prod` 按 #66 配置 `"backup": {"scope": "full", "keep": 1}`：备份范围不变，健康检查与成功清单写入后按最新 1 份清理更早的已结束发布备份（发布备份不含镜像和日志）。
+- `release-env.py` 在加载环境文件时拒绝：`scope=database` 用于 `promote_from` 或非 `dev-test` 环境；`scope=full` 用于 `dev-test`、`prod` 之外的环境；未知 `scope`。`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`（full 可选，设置时须为 1–2），非法组合不产生副作用。
 - 备份范围写入 `backups/release-<tag>/scope`（单行 `database` 或 `full`）、成功后的 `production/compose.env`（`RELEASE_BACKUP_SCOPE`、`RELEASE_BACKUP_TARGETS`）和失败报告的 `backup_scope`/`backup_targets`。手工回滚先读这些记录，不要猜归档内容。
-- 只有健康检查与成功清单都写入后，`release-server-steps.sh` 才在设置了 `RELEASE_BACKUP_KEEP` 时调用 `scripts/retain-release-backups.py --apply`：按最新 `keep` 份（当前批准配置为 2）回收更早的已结束发布备份，更早的失败快照也在回收范围内；进行中的快照可临时排除，失败报告和独立诊断日志保留。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
+- 只有健康检查与成功清单都写入后，`release-server-steps.sh` 才在设置了 `RELEASE_BACKUP_KEEP` 时调用 `scripts/retain-release-backups.py --apply`：按最新 `keep` 份（`prod` 当前批准配置为 1）回收更早的已结束发布备份，更早的失败快照也在回收范围内；进行中的快照可临时排除，失败报告和独立诊断日志保留。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
 - `releases/manifest.txt` 是 append-only 成功历史，可包含同一 tag 与同一完整 SHA 的重复行（成功时间戳不同）。retention 保留原始行序与字节摘要，不重写清单；仍要求最后一行匹配当前运行容器，并拒绝同一 tag 对应不同 SHA 的冲突记录。
 - retention 只读取 tag 属于本次候选备份的失败报告；没有对应备份的历史诊断（包括旧正文格式）不再解析，字节保持原样。匹配候选的报告仍校验类型、安全性和正文中的 tag 行，文件名本身不构成完成证明。
 - 清理失败只记警告，不改变已成功发布的结论；helper 不得把部分删除报告为成功。它不处理原始资产、数据库、首次迁移冷备或其他栈的备份。
@@ -213,13 +248,13 @@ gh release create v1.9.5 --title v1.9.5 --verify-tag
 
 ## 6. 运行配置与冒烟
 
-`formal-test` 的 `production/runtime.env`：整份复制 `dev-test` 的 `runtime.env`（含会话密钥、管理员初始化与 Meshy、Tripo、Hyper3D/Rodin 等全部 Provider Key），只改两类值——中转 Key 改为用户提供的中转 Key，`PUBLIC_BASE_URL`/`NEXT_PUBLIC_APP_URL` 改为该环境的 `base_url`。模型中转地址保持原值：中转按域名路由，其域名已解析到 `formal-test` 主机上的中转，改成字面 IP 会被反代拒绝。不重新生成密钥或管理员。服务器之间直接复制（例如 `scp -3`），不经本地落盘、不回显值，权限 `0600`。修改运行配置后只重建本栈的 `art-ai-go` 服务。
+`prod` 的 `production/runtime.env`：整份复制 `dev-test` 的 `runtime.env`（含会话密钥、管理员初始化与 Meshy、Tripo、Hyper3D/Rodin 等全部 Provider Key），只改两类值——中转 Key 改为用户提供的中转 Key，`PUBLIC_BASE_URL`/`NEXT_PUBLIC_APP_URL` 改为该环境的 `base_url`；另设 `LOG_RETENTION_DAYS=14`（`prod` 日志保留 14 天）。模型中转地址保持原值：中转按域名路由，其域名已解析到 `prod` 主机上的中转，改成字面 IP 会被反代拒绝。不重新生成密钥或管理员。服务器之间直接复制（例如 `scp -3`），不经本地落盘、不回显值，权限 `0600`。修改运行配置后只重建本栈的 `art-ai-go` 服务。
 
-运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`formal-test` 已接入 HTTPS 域名（#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
+运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`prod` 已接入 HTTPS 域名（#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
 
-中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `formal-test` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
+中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `prod` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
 
-**日志（#206）**：`GO_LOG_LEVEL=debug` 由发布脚本固定并写入 `production/compose.env`，测试与生产一致且不提供关闭入口。候选实例启动前记录 `production/logs/art-ai.log` 的行数；healthz/readyz 通过后校验本次启动新增的行包含应用写入的 DEBUG 标记（`marker=debug-log-ready`），文件在发布期间滚动时退化为检查末尾。校验失败按发布失败处理：`ephemeral` 走 `ephemeral_rollback`，持久数据走 `rollback_after_update`，与健康检查失败同级。应用在日志配置完成后写入该标记（`cmd/art-ai/main.go`）；日志滚动仍由运行设置 `LOG_FILE_MAX_MEGABYTES`、`LOG_FILE_MAX_FILES`、`LOG_RETENTION_DAYS` 控制。
+**日志（#206）**：`GO_LOG_LEVEL=debug` 由发布脚本固定并写入 `production/compose.env`，测试与生产一致且不提供关闭入口。候选实例启动前记录 `production/logs/art-ai.log` 的行数；healthz/readyz 通过后校验本次启动新增的行包含应用写入的 DEBUG 标记（`marker=debug-log-ready`），文件在发布期间滚动时退化为检查末尾。校验失败按发布失败处理：`ephemeral` 走 `ephemeral_rollback`，持久数据走 `rollback_after_update`，与健康检查失败同级。应用在日志配置完成后写入该标记（`cmd/art-ai/main.go`）；日志滚动仍由运行设置 `LOG_FILE_MAX_MEGABYTES`、`LOG_FILE_MAX_FILES`、`LOG_RETENTION_DAYS` 控制（按大小滚动加按天数清理；默认保留 30 天，`prod` 设 `LOG_RETENTION_DAYS=14`）。
 
 **上游调用脱敏录制（#233）**：默认关闭，发布脚本不设置它。出问题时要给维护者上游的结构证据（用来完善 fake），可以在运行环境文件里打开：`UPSTREAM_CAPTURE_DIR=<容器内的绝对路径>`，可选 `UPSTREAM_CAPTURE_MAX_RECORDS`（记录文件条数上限，默认 2000，范围 1–100000）与 `UPSTREAM_CAPTURE_MAX_MEGABYTES`（总大小上限，默认 64，范围 1–4096）；把宿主机上的一个目录挂载到该路径，然后只重建本栈的 `art-ai-go` 服务。启动时目录不存在则以 0700 创建，已存在则收紧为 0700，之后每次上游调用写一个 0600 文件；容器用非 root 运行时，先让挂载目录归该用户所有。目录不可写、是符号链接、不是目录，或与 `STORAGE_ROOT`、`WEB_ASSETS_ROOT`、`LEGACY_GENERATED_IMAGES_ROOT`、`LOG_DIR` 相同、包含或位于其中，设置的上限无效，进程都拒绝启动，不会"以为在录、其实没录"；没设目录时上限变量被忽略。超过条数或总大小上限就删除最旧的记录，占用有界，重启后先按已有文件套用上限；只有 `*.exchange.json` 会被计数或删除，目录里的其他文件不动；也可以随时手工删除记录文件而不影响运行。写文件失败只记一条告警（首次与每千次），业务请求不受影响。这三个变量由 Product Schema 的运行设置声明（默认 Catalog 已声明）；用 `CATALOG_FILE` 换成不含这三项声明的旧 Catalog 时，变量被忽略，录制不会开启。
 
@@ -323,7 +358,7 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-fre
 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-agent-mode.sh
 ```
 
-`dev-test` 的 fake 形态发布由 `release-env.py release dev-test` 自动跑上面三条（顺序：L0 → L1 → L1 Agent），逐层留日志并写机器报告，位置与字段见 §4；发布命令在报告写不成或任一层不是 `pass` 时返回非零，但发布不回滚。真实形态（`formal-test` 与 `--live-upstream` 的 `dev-test`）仍按上面三条手动执行：L1 在真实形态会调用真实对话模型，须先取得当次同意（`AGENTS.md`「上游接口与 Fake」），同意后同时打开两个开关运行：`ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-free.sh --live`，缺任一开关脚本以退出码 2 拒绝（fake 形态的目标反过来不接受 `--live`）；`smoke-l1-agent-mode.sh` 在真实形态只读、不提交生成，L0 不涉及上游、随时可跑。手动执行时可用 `python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 逐层跑，脚本自己的汇总行就是报告读的那一份；机器报告只由发布入口写，手动跑不覆盖它。
+`dev-test` 的 fake 形态发布由 `release-env.py release dev-test` 自动跑上面三条（顺序：L0 → L1 → L1 Agent），逐层留日志并写机器报告，位置与字段见 §4；发布命令在报告写不成或任一层不是 `pass` 时返回非零，但发布不回滚。真实形态（`prod` 与 `--live-upstream` 的 `dev-test`）仍按上面三条手动执行：L1 在真实形态会调用真实对话模型，须先取得当次同意（`AGENTS.md`「上游接口与 Fake」），同意后同时打开两个开关运行：`ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-free.sh --live`，缺任一开关脚本以退出码 2 拒绝（fake 形态的目标反过来不接受 `--live`）；`smoke-l1-agent-mode.sh` 在真实形态只读、不提交生成，L0 不涉及上游、随时可跑。手动执行时可用 `python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 逐层跑，脚本自己的汇总行就是报告读的那一份；机器报告只由发布入口写，手动跑不覆盖它。
 
 **多个对话模型（#322）**：默认对话模型连接仍是运行环境文件里的 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。要给用户开放更多对话模型，在同一文件加 `LLM_CONNECTIONS=<ID>,<ID>`，并为每个 `<ID>` 显式写 `<ID>_BASE_URL`、`<ID>_API_KEY`、`<ID>_MODEL`（可选 `<ID>_CONTEXT_WINDOW_TOKENS`）；统一网关下每个地址都写同一个网关 URL，不设跨连接的别名或回落。完整规则见 [Provider 配置](provider-configuration.md#多个对话模型连接--multiple-chat-model-connections)。改完只重建本栈的 `art-ai-go` 服务，然后在管理后台「LLM 设置」点「测试连接」核对连通性与读图，再设置默认模型和开放的档位；设置按版本保存在数据库，跨发布保留。
 
@@ -463,7 +498,7 @@ RECOVERY
 
 ## 8. 未定事项
 
-未决：中转是否放行 `formal-test` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`formal-test` 的 Meshy Webhook；去背景等跨主机依赖是否在 `formal-test` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
+未决：中转是否放行 `prod` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`prod` 的 Meshy Webhook；去背景等跨主机依赖是否在 `prod` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
 
 ## 9. dev-test 栈概况
 
@@ -475,16 +510,16 @@ RECOVERY
 - 数据库：`production/data/art-ai.db`
 - CAS：`production/storage-go`
 
-该 Compose 项目只是测试主机上的生产同构项目，不代表正式生产已接管（Next → Go 迁移沿革见 [`history.md`](history.md)）。
+该 Compose 项目只是测试主机上的生产同构项目，不代表 `prod` 已接管（Next → Go 迁移沿革见 [`history.md`](history.md)）。
 这里的旧 Next 容器和旧数据目录停止、封存且不删除；dev-test 的普通发布
 不得重跑 ETL，也不得改写 `production/migration-ready.txt`。
 
-## 10. 正式生产迁移
+## 10. prod 迁移
 
-目标生产运行时是纯 Go 单容器。正式生产尚未迁移；正式停机迁移的唯一入口是
+目标生产运行时是纯 Go 单容器。`prod` 尚未迁移；正式停机迁移的唯一入口是
 [production-migration-runbook.md](production-migration-runbook.md)。Go 运行机制和 dev-test
 测试演练记录见 [README-go.md](../README-go.md)，发布与验收要求见 [dev_ops.md](../dev_ops.md) 和
-[dev_test.md](../dev_test.md)。Agent 不直接访问正式服务器；现场第一步运行只读盘点脚本
+[dev_test.md](../dev_test.md)。Agent 不直接访问 `prod` 服务器；现场第一步运行只读盘点脚本
 `scripts/collect-production-migration-inventory.sh`。
 
 ## 11. 测试主机 CI（#97）
@@ -501,10 +536,10 @@ RECOVERY
 
 ## 内部运维资产（自部署不需要）
 
-以下文件只服务于内网测试/正式栈和历史 Next→Go 迁移（#259），不在自部署路径里，
+以下文件只服务于内网 `dev-test`/`prod` 栈和历史 Next→Go 迁移（#259），不在自部署路径里，
 自部署者可以忽略：
 
-- Compose：`docker-compose.go-production.yml`（`dev-test` 与 `formal-test`）、
+- Compose：`docker-compose.go-production.yml`（`dev-test` 与 `prod`）、
   `docker-compose.go-candidate.yml`（历史候选栈）。
 - 发布与验收：`scripts/release-*`、`scripts/retain-art-ai-images.py`、`scripts/smoke/`、
   `scripts/cutover-go-production.sh`、`scripts/finalize-go-production.sh`、

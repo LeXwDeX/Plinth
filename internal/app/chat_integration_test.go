@@ -192,7 +192,8 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		stored[1]["imageUrls"] == "[]" {
 		t.Fatalf("stored messages = %#v", stored)
 	}
-	// The accepted step carries its estimated credits and who approved it.
+	// The accepted step carries who approved it. The mock image Offering does not bill in credits, so the
+	// step states none (#719); the session's cumulative estimate below still weighs the internal one.
 	var calls []map[string]any
 	if err := json.Unmarshal([]byte(stored[1]["toolCalls"].(string)), &calls); err != nil || len(calls) == 0 {
 		t.Fatalf("tool calls = %v, %v", stored[1]["toolCalls"], err)
@@ -200,8 +201,8 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	if calls[0]["approvalSource"] != "policy" {
 		t.Fatalf("tool call approval source = %v, want policy: %v", calls[0]["approvalSource"], calls[0])
 	}
-	if credits, _ := calls[0]["estimatedCredits"].(float64); credits <= 0 {
-		t.Fatalf("tool call estimated credits = %v", calls[0]["estimatedCredits"])
+	if credits, _ := calls[0]["estimatedCredits"].(float64); credits != 0 {
+		t.Fatalf("tool call of an Offering that does not bill in credits states %v credits", calls[0]["estimatedCredits"])
 	}
 	// The session DTO carries the cumulative estimate and the mode.
 	read := appChatRequest(handler, http.MethodGet, "/api/v1/chat/sessions/"+sessionID+"/approval", "")

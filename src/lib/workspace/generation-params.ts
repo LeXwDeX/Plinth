@@ -14,6 +14,7 @@
 import { offeringParamSchemas, offeringUsesNativePricing, type OfferingParameterWire, type OfferingWire } from '@/lib/agent-offerings';
 import { formatSchemaText, parameterConditionMatches } from '@/lib/product-schema';
 import type { ParamSchema } from '@/lib/providers/types';
+import type { NativeQuote } from '@/lib/pricing';
 
 /** Parameters the conversation or the stage fills; they never appear as settings. */
 const CONVERSATION_SEMANTICS: ReadonlySet<string> = new Set(['prompt', 'reference-image', 'mask']);
@@ -96,7 +97,10 @@ export interface CreditEstimate {
   total: number | null;
   /** The Schema marks the Offering credits_metered; without it no credits are shown at all. */
   metered: boolean;
-  /** Native prices are opaque server-provided previews, never derived from entered values here. */
+  /**
+   * Native prices are opaque server-provided previews, never derived from entered values here: the server's quote
+   * of the saved parameters (#722, so a switch such as texture moves it) or else the Offering's default estimate.
+   */
   nativeDefaultQuote?: OfferingWire['default_native_quote'];
   nativeUpperQuote?: OfferingWire['upper_native_quote'];
 }
@@ -109,10 +113,10 @@ function valueOf(wire: OfferingParameterWire, values: Record<string, unknown>): 
  * Same rule as the server's estimate: the value (>= 1, at most 1000) times the unit price.
  * Only Offerings the Schema marks credits_metered show a price; others have no unit and total null.
  */
-export function estimateCredits(offering: OfferingWire | undefined, entered: Record<string, unknown>): CreditEstimate {
+export function estimateCredits(offering: OfferingWire | undefined, entered: Record<string, unknown>, savedNativeQuote?: NativeQuote): CreditEstimate {
   if (offeringUsesNativePricing(offering)) {
     return { unit: null, count: 1, total: null, metered: false,
-      nativeDefaultQuote: offering?.default_native_quote, nativeUpperQuote: offering?.upper_native_quote };
+      nativeDefaultQuote: savedNativeQuote ?? offering?.default_native_quote, nativeUpperQuote: offering?.upper_native_quote };
   }
   const metered = offering?.credits_metered === true;
   const unit = metered && offering?.estimated_credits !== undefined && offering.estimated_credits > 0 ? offering.estimated_credits : null;

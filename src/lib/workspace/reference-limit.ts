@@ -14,7 +14,7 @@ export interface ReferenceLimit {
  * Whether the Offering the next turn runs takes fewer reference pictures than are attached. The limit is its
  * reference-image parameter's Schema `max_items`; the Agent and a direct request both keep the first pictures, so the
  * composer says so before sending. An Offering that preserves its picture sequence refuses instead of cutting.
- * #86: `multiview` names the multiview model the composer offers for these pictures (its 是不是多个视角 panel); a
+ * #86: `multiview` names the multiview model the composer offers for these pictures (its 用作多视角 entry, #721); a
  * plain send still runs the model above and cuts, so the limit stays and the note names both ways.
  */
 export function referenceLimit(offering: OfferingWire | undefined, pictures: number, multiview = ''): ReferenceLimit | null {

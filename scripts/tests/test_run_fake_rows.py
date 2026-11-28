@@ -34,7 +34,7 @@ SAMPLE = matrix([
     ("B7", "dev-test-fake", "—", "GAP"),
     ("B8", "dev-test-fake", "`node scripts/a.mjs`", "OK"),
     ("U1", "unit", "`python3 -m unittest scripts.tests.x`", "OK"),
-    ("P1", "PROD-paid", "`python3 scripts/live.py --live`", "OK"),
+    ("P1", "prod-paid", "`python3 scripts/live.py --live`", "OK"),
 ])
 
 

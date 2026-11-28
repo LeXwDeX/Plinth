@@ -3,16 +3,16 @@
 # 镜像标签 + 一致性备份）→ 同一 Compose 项目更新唯一 Go 服务 → 健康检查；
 # 健康失败自动回滚到旧镜像标签并留下失败报告。
 #
-# 与正式生产切换的边界（dev_ops.md / README-go.md）：
+# 与 prod 切换（cutover）的边界（dev_ops.md / README-go.md）：
 #   - 普通版本发布走 docker compose 更新本栈 Compose 项目的唯一
 #     art-ai-go 服务；**不重跑 ETL，不改写 migration-ready.txt**；
-#   - 带迁移就绪证明的 cutover takeover 属于正式生产切换入口（由
+#   - 带迁移就绪证明的 cutover takeover 属于 prod 切换入口（由
 #     scripts/finalize-go-production.sh 使用），普通发布不得调用；
 #   - 默认待停机备份 production/data、production/storage-go、production/web-data；
 #     新容器或健康失败时按备份范围恢复并以旧镜像标签重新拉起。仅 dev-test 可设
 #     RELEASE_BACKUP_SCOPE=database（只备份/恢复 data，资产与 web-data 保留），
 #     健康且成功清单写入后按 RELEASE_BACKUP_KEEP（1-2）回收更早的已结束发布备份。
-#     full 范围也可设 RELEASE_BACKUP_KEEP（#66，formal-test 用），同样只在成功路径清理。
+#     full 范围也可设 RELEASE_BACKUP_KEEP（#66，prod 用），同样只在成功路径清理。
 #
 # 用法: bash release-server-steps.sh <tag> <sha> <remote_root>
 #
@@ -533,7 +533,7 @@ fi
 echo "[server] build $TAG${RELEASE_VERSION:+ release=$RELEASE_VERSION}"
 # 构建的 --add-host、GOPROXY 与 NPM_REGISTRY 来自环境文件的 build 设置（#248、#249）；
 # 未设置时 npm 走公共 registry（#257）。
-# 测试/正式栈运行含历史迁移工具的内部镜像目标（#259）；Dockerfile 默认目标是自部署镜像。
+# dev-test 与 prod 栈运行含历史迁移工具的内部镜像目标（#259）；Dockerfile 默认目标是自部署镜像。
 docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --target runtime-with-migration-tools \
   --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \

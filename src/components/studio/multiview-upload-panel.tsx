@@ -23,13 +23,13 @@ export interface MultiviewUploadPanelProps {
   disabled?: boolean;
   /** The view of each picture, aligned with `images`; an empty view leaves that picture out. */
   onConfirm: (choices: string[]) => void;
-  /** The person answered 不是: the composer stops mentioning the multiview way for these pictures (#86). */
+  /** The person pressed 收起: the chat column closes the panel; the 用作多视角 entry stays beside the attachments (#721). */
   onDismiss?: () => void;
 }
 
 /**
- * Asks whether 2-4 attached pictures are views of one object and which view each is; hidden until the pictures
- * change once dismissed. A click on a thumbnail shows that picture large inside the stage area (#87), with its
+ * Marks which view each of 2-4 attached pictures is, so one 3D model is made from them. #721: it is opened by the
+ * composer's 用作多视角 entry, never on its own when pictures are attached; 收起 hides it. A click on a thumbnail shows that picture large inside the stage area (#87), with its
  * chat handle when the session's messages give it one, so the views can be told apart before labelling.
  */
 export function MultiviewUploadPanel({ images, target, lockNote = null, disabled = false, onConfirm, onDismiss }: MultiviewUploadPanelProps) {

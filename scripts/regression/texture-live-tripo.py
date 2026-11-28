@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """#704 「生成纹理」开关的真实上游验证：Tripo H3 v3.1 文生 3D 关纹理一次、默认一次（付费，live-only）。
 
-层：PROD-paid（正式测试环境或 --live-upstream 的 dev-test）。花费：两次 Tripo 文生 3D，v1.9.6 实测报价
+层：prod-paid（prod 或 --live-upstream 的 dev-test）。花费：两次 Tripo 文生 3D，v1.9.6 实测报价
 texture=false 为 60 Tripo 积分、默认 90 Tripo 积分；跑前按当次官方价格与余额核对。每次运行前须在当前对话
 取得用户同意（AGENTS.md「上游接口与 Fake」），并同时给出 --live 与 ART_AI_LIVE_ACK=1，否则退出码 2；
 目标不是真实上游形态（ART_AI_UPSTREAM_SHAPE!=live）时也拒绝。选择卡不自动回答（自动回答曾替人批准额外的 retexture）。

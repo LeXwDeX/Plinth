@@ -2,7 +2,7 @@
 # Hyper3D、OpenAI 兼容对话模型、OpenAI/Gemini/即梦图像与抠图服务。
 # 只由 release-server-steps.sh 在 RELEASE_UPSTREAM_SHAPE=fake（仅 dev-test 全新数据形态）时
 # 构建，并由 docker-compose.go-fake-upstream.yml 作为独立服务运行；运行镜像
-# Dockerfile.go-runtime 不含 fake 上游，formal-test 与自部署从不构建本镜像。
+# Dockerfile.go-runtime 不含 fake 上游，prod 与自部署从不构建本镜像。
 # 构建前缀与 Dockerfile.go-runtime 的 build 阶段一致，可复用其依赖缓存层。
 FROM golang:1.27 AS build
 

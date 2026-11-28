@@ -208,7 +208,8 @@ type Offering struct {
 	// guessed.
 	Knowledge *OfferingKnowledge `json:"knowledge,omitempty"`
 	// CreditsMetered 声明该 Offering 的 Provider 按积分计费；未声明的
-	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）。
+	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）：
+	// 批准卡、结果卡与 Agent 的工具结果都不写积分数（#719）。
 	CreditsMetered bool `json:"credits_metered,omitempty"`
 	// EstimatedCreditsUnitParameter 声明"按数量计费"的数值参数
 	// （如 n / max_images）：预计积分 = estimated_credits × 参数值

@@ -13,12 +13,12 @@ Issues their commits name, the fake / Provider / Catalog areas touched), then ch
      "3. 主表") of the regression matrix (docs/regression-matrix.md) with evidence, each verified
      at the candidate or at an ancestor with no runtime file changed since, and the matrix itself
      changed in the range; or a valid exemption in docs/release-gate.md. Phase "promote" leaves the
-     current verification of the PROD-* rows to the "tag" run;
+     current verification of the prod-* rows to the "tag" run;
   2. fake: a change to the fake, the Providers or the Catalog Offerings comes with a register
      change or a "无新增差异（核对于 <rev> <date>）" line, and no fake/real difference is OPEN.
 
 The matrix and the rules are read from the head revision unless --matrix / --rules name a file.
-The evidence checks (smoke report, #2 receipt, PROD regression links) need GitHub and are left to
+The evidence checks (smoke report, #2 receipt, prod regression links) need GitHub and are left to
 the release-gate Agent (.claude/agents/release-gate.md). Exit 0 = PASS, 1 = FAIL, 2 = usage error.
 
 RELEASE_GATE_STATUS_FILE: a JSON object mapping a revision (full SHA, or a prefix of at least 8
@@ -47,8 +47,9 @@ MAIN_KEY_COLUMNS = ("ID", "来源 Issue", "状态", "最后验证")
 MATRIX_STATES = ("OK", "MANUAL", "GAP", "OBSOLETE")
 PASSING_STATES = ("OK", "MANUAL")
 PHASES = ("promote", "tag")
-# Rows of these layers are verified on formal-test/PROD after the promotion (phase "tag" only).
-POST_PROMOTION_LAYER = "PROD-"
+# Rows of these layers (prod-readonly, prod-paid; matched case-insensitively) are verified on prod
+# after the promotion, so only phase "tag" requires them.
+POST_PROMOTION_LAYER = "prod-"
 UNIT_LAYER = "unit"
 CI_EVIDENCE = "CI"
 CI_CONTEXT = "host-ci/gates"
@@ -65,7 +66,7 @@ NO_NEW_DIFF = re.compile(r"无新增差异[（(]\s*核对于\s*`?([0-9a-f]{8})`?
 AGENT_CHECKS = (
     "候选 revision 在 dev-test 的机器冒烟报告 L0/L1/L1_agent 三层 pass（0 skip、0 soft-fail）",
     "#2 里有该候选 revision 的 dev-test 验收证据评论（L0/L1/L1_agent/related），链接真实指向该 revision",
-    "晋级前（dev-test 回归）与晋级后（formal-test 回归，打 tag 前复核）的回归证据链接存在且对应候选 revision",
+    "晋级前（dev-test 回归）与晋级后（prod 回归，打 tag 前复核）的回归证据链接存在且对应候选 revision",
 )
 
 
@@ -389,6 +390,10 @@ def revision_refs(matrix, head):
     return sorted({row["last"][0] for row in matrix["rows"] if row["last"] and row["last"][0] != head[:8]})
 
 
+def post_promotion(row):
+    return row["layer"].lower().startswith(POST_PROMOTION_LAYER)
+
+
 def cites_ci(row):
     return row["layer"] == UNIT_LAYER and row["evidence"] == CI_EVIDENCE
 
@@ -504,8 +509,8 @@ def evaluate(changes, matrix_text, rules_text, matrix_source=MATRIX_PATH, phase=
             for row in rows:
                 if row["state"] not in PASSING_STATES:
                     problems.append(f"{row['id']} 状态是 {row['state'] or '空'}，不是 OK/MANUAL")
-                if phase == "promote" and row["layer"].startswith(POST_PROMOTION_LAYER):
-                    deferred.append(row["id"])  # verified on formal-test/PROD after the promotion
+                if phase == "promote" and post_promotion(row):
+                    deferred.append(row["id"])  # verified on prod after the promotion
                     continue
                 if row["last"] is None:
                     problems.append(f"{row['id']} 的「最后验证」不是「<revision 前 8 位> <日期>」：{row['last_raw'] or '空'}")
@@ -598,7 +603,7 @@ def main(argv=None):
     parser.add_argument("--matrix", help=f"a regression matrix file (default: {MATRIX_PATH} at --head)")
     parser.add_argument("--rules", help=f"a gate rules file (default: {RULES_PATH} at --head)")
     parser.add_argument("--phase", choices=PHASES, default="tag",
-                        help="promote: before formal-test, PROD-* rows verified later; tag: everything (default)")
+                        help="promote: before prod, prod-* rows verified later; tag: everything (default)")
     parser.add_argument("--repo", default=".", help="the git repository (default: current directory)")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     args = parser.parse_args(argv)

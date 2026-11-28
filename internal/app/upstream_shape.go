@@ -16,7 +16,7 @@ import (
 )
 
 // Upstream shape (#219). A stack runs either against the real upstream
-// Providers ("live", the default and the only shape formal-test uses) or
+// Providers ("live", the default and the only shape prod uses) or
 // against the fake upstream service deployed in the same Compose project
 // ("fake", dev-test's default). The fake shape is opt-in through two runtime
 // settings and fails closed: it refuses to start unless every Provider and chat
