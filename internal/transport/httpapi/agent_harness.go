@@ -634,6 +634,20 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 			}
 			visible[p.Name] = state
 		}
+		// #722: the estimate of the saved parameters, so the settings panel
+		// follows a switch such as texture instead of repeating the
+		// Offering's default_native_quote. Same evaluation as the harness
+		// status (declared defaults under these values, then forced_when);
+		// display only, never execution input. Without native pricing, or
+		// when it cannot be evaluated, nothing is projected and the panel
+		// keeps the Offering's own estimate.
+		if o.NativePricing != nil {
+			if encoded, err := json.Marshal(values); err == nil {
+				if quote, err := o.DefaultNativeQuote(encoded); err == nil && quote != nil {
+					result["native_quote"] = quote
+				}
+			}
+		}
 	}
 	result["parameter_states"] = visible
 	return result

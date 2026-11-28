@@ -15,9 +15,16 @@ export interface AgentHarnessRoutes {
   consent: string;
 }
 
+import { parseNativeQuote, type NativeQuote } from './pricing';
+
 export type AgentParamValues = Record<string, unknown>;
 export interface AgentParameterState { value?: unknown; source: 'default' | 'agent' | 'user'; reason?: string }
-export interface AgentParameterProjection { params: AgentParamValues; parameterStates: Record<string, AgentParameterState> }
+export interface AgentParameterProjection {
+  params: AgentParamValues;
+  parameterStates: Record<string, AgentParameterState>;
+  /** #722: the server's estimate of the saved parameters for a natively priced Offering; absent otherwise. */
+  nativeQuote?: NativeQuote;
+}
 export function parseAgentParameterProjection(payload: Record<string, unknown>): AgentParameterProjection {
   const params = isRecord(payload.params) ? payload.params : {};
   const states = isRecord(payload.parameter_states) ? payload.parameter_states : {};
@@ -30,7 +37,8 @@ export function parseAgentParameterProjection(payload: Record<string, unknown>):
       ...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
     };
   }
-  return { params, parameterStates };
+  const nativeQuote = parseNativeQuote(payload.native_quote);
+  return { params, parameterStates, ...(nativeQuote ? { nativeQuote } : {}) };
 }
 
 export interface AgentConsentProjection {

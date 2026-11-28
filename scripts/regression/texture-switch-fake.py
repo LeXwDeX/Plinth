@@ -16,6 +16,9 @@ Offering 现场从 /api/v1/offerings 选出：文生 3D、图生 3D、多视图 
   G   交付 GLB 的贴图数（textures）：Tripo 默认 3 张、texture=false 0 张（tripo-v3/generation-texture-off-glb，
       constructed，真实只有 PROD 文生 3D 一次观测）；Meshy texture=false 0 张（meshy-openapi-v1/image-to-3d-texture-off-glb，
       constructed）。Meshy 默认的贴图数没有真实依据，只记录 INFO 不断言。
+  E   #722 面板估算（GET /api/v1/agent/params 的 native_quote，面板「默认估算」读的就是它）：原生报价的 Offering
+      新会话里等于 Offering 的 default_native_quote；保存开关 false 后没有 texture* 组件、总额低于默认，并与 P 路径
+      冻结任务的报价总额相同；没有原生报价的 Offering（Meshy 单图）不返回 native_quote。
 
 用法（地址与 Agent 专用账号由 release-env.py 注入）：
   python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/texture-switch-fake.py [--offering <id> ...]
@@ -148,6 +151,14 @@ def one(api, r, oid, offering):
     params_path = f"/api/v1/agent/params?scope={sid}&offering_id={oid}"
     state = (api.json("GET", params_path)[1].get("parameter_states") or {}).get(toggle) or {}
     r.check(f"{oid} S3 默认 parameter_state 为 true", state.get("value") in (True, None), str(state))
+    native = offering.get("price_mode") == "native"
+    default_estimate = (offering.get("default_native_quote") or {}).get("total_amount")
+    opened = api.json("GET", params_path)[1].get("native_quote")
+    if native:
+        r.check(f"{oid} E 新会话面板估算等于默认估算", (opened or {}).get("total_amount") == default_estimate,
+                f"{(opened or {}).get('total_amount')} vs {default_estimate}")
+    else:
+        r.check(f"{oid} E 无原生报价时不返回 native_quote", opened is None, str(opened))
 
     def delivered(label, task, why, textures=None):
         if not task:
@@ -191,6 +202,14 @@ def one(api, r, oid, offering):
     state = (api.json("GET", params_path)[1].get("parameter_states") or {}).get(toggle) or {}
     r.check(f"{oid} P 保存会话参数 200、读回 false/user", status == 200 and state.get("value") is False and state.get("source") == "user",
             f"PUT {status} {state}")
+    estimate = api.json("GET", params_path)[1].get("native_quote")
+    if native:
+        estimate_textures = [c["id"] for c in (estimate or {}).get("components") or [] if "texture" in c["id"]]
+        r.check(f"{oid} E 关纹理后面板估算没有 texture* 组件", bool(estimate) and not estimate_textures, str(estimate_textures))
+        r.check(f"{oid} E 关纹理后面板估算低于默认", bool(estimate) and default_estimate is not None
+                and float(estimate["total_amount"]) < float(default_estimate), f"{(estimate or {}).get('total_amount')} < {default_estimate}")
+    else:
+        r.check(f"{oid} E 关纹理后仍不返回 native_quote", estimate is None, str(estimate))
     advised = next((n for n, x in p.items() if x.get("adjustment_policy") == "advised"), None)
     if advised:
         value = p[advised].get("default")
@@ -208,6 +227,9 @@ def one(api, r, oid, offering):
     roles = delivered("P 会话参数", saved, why, textures=0)
     if saved:
         switched_off("P 会话参数", saved)
+        if native and estimate:
+            r.check(f"{oid} E 面板估算与冻结报价一致", quote_total(saved) == float(estimate["total_amount"]),
+                    f"{estimate['total_amount']} vs {quote_total(saved)}")
         r.check(f"{oid} P 必需产物角色与默认相同", roles == default_roles, f"{roles} vs {default_roles}")
 
 

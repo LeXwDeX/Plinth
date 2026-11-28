@@ -160,6 +160,8 @@ export function useSessionAgentParams(sessionId: string | null, paramSchemas: Pa
     parameterStates,
     values,
     enteredValues: mergeAgentParams(serverParams ?? {}, local),
+    // #722: quoted by the server for what it has saved; an edit still waiting to be saved shows once its save answers.
+    savedNativeQuote: projection?.nativeQuote,
     setValue,
     flush,
     loading: isLoading,

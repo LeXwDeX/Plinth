@@ -61,7 +61,7 @@ function useOfferingParams(sessionId: string | null, offering: OfferingWire | un
       }
       await params.flush();
     },
-    estimate: estimateCredits(offering?.available ? offering : undefined, values),
+    estimate: estimateCredits(offering?.available ? offering : undefined, values, params.savedNativeQuote),
   };
 }
 
