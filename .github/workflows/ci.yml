@@ -9,6 +9,8 @@
 # 该 runner 多项目共用、不是一次性的：每个作业由 actions/checkout 清理工作区后开始（不得关闭 clean），
 # 门禁结果只能依赖仓库内容；不使用自定义密钥。
 # CI 不构建镜像（#257）：运行镜像由发布流程从源码构建。
+# push 与 pull_request 忽略只改 .md 的提交（#714）：纯 .md 变更由主机 CI 轻量通道负责（写同一个 host-ci/gates），
+# Actions 三个作业不在分支保护里；手动运行（workflow_dispatch）不受影响。
 # Action 固定到发布标签对应的完整提交 SHA（注释为标签），升级时一并核对。
 
 name: CI
@@ -16,7 +18,9 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ['**/*.md']
   pull_request:
+    paths-ignore: ['**/*.md']
   workflow_dispatch:
 
 permissions:
