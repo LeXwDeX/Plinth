@@ -153,7 +153,7 @@
 | ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 | 备注 |
 |---|---|---|---|---|---|---|---|---|---|
 | P1 | 版本与健康、L1 子集（Schema、CSP、登录、跨站拒绝、会话与批准接口） | #2 | prod-readonly | `python3 scripts/regression/post-release-readonly.py` | 全部 PASS | OK | f5bc5e10 2026-11-28 | E4 | v1.9.6 跑的是入库前的 11 项版本（全过，结果在运行日志里）；版本检查是入库时新增的 |
-| P2 | L0 浏览器启动检查 | #2 | prod-readonly | `scripts/smoke/smoke-l0-browser-boot.sh` | `PASS=16 FAIL=0 SKIP=0` | OK | f5bc5e10 2026-11-28 | E4 | 经 `release-env.py smoke formal-test` 运行；结果在该轮的运行日志里，评论未单列 |
+| P2 | L0 浏览器启动检查 | #2 | prod-readonly | `scripts/smoke/smoke-l0-browser-boot.sh` | `PASS=16 FAIL=0 SKIP=0` | OK | f5bc5e10 2026-11-28 | E4 | 经 `release-env.py smoke prod` 运行；结果在该轮的运行日志里，评论未单列 |
 | P3 | L1、L1 Agent 全量 | #2 | prod-paid | `scripts/smoke/smoke-l1-free.sh`、`scripts/smoke/smoke-l1-agent-mode.sh` | 同 S2、S3 | MANUAL | — | | 真实形态会调用真实对话模型，每次先取得同意；平时以 P1 代替 |
 | P4 | 迁移后的旧会话能打开、旧卡片正常显示 | #2 | prod-readonly | 人工：打开发布前的会话 | 旧会话、旧选择卡、旧 2D 结果正常显示 | MANUAL | — | | |
 | P5 | 界面抽查（顶栏版本、设置面板生成参数、本次新功能） | #2 | prod-readonly | 人工抽查 | 与 dev-test 验收一致 | MANUAL | — | | |
