@@ -137,13 +137,22 @@
 
 ## 4. Fake 与真实的已知差异
 
-真源是 [`docs/fake-register.md`](fake-register.md)（由 `internal/testutil/fakeupstream/register/register.json` 生成；当前 192 条：real 84、constructed 103、gap 5）。本表只列与上面各行有关、本轮已知的几条：
+真源是 [`docs/fake-register.md`](fake-register.md)（由 `internal/testutil/fakeupstream/register/register.json` 生成；当前 192 条：real 84、constructed 103、gap 5）。登记表里长期存在的 5 条 gap 与本次发布无关，不进下表：`tripo-v3/poll-progress-not-modelled`、`tripo-v3/p-series-face-limit`、`openai-images-v1/generated-picture-pixel-entropy`、`gemini-images-v1/three-view-consistency-late-reject`、`gemini-images-v1/image-to-image-4k-wire`（计划与 Issue 见登记表）。
 
-- `tripo-v3/generation-texture-off-glb`（constructed，#704）：Tripo texture=false（且未开 pbr）时 fake 交付无贴图 GLB（0 texture、0 image、1 material），按 v1.9.6 正式测试环境的 Plinth 侧观测回灌；图生与多视图按文生推定，没有 wire 样本，所以不能标 real。该回灌在 v1.9.6 之后的提交里，部署前的 dev-test 上仍是带贴图 GLB。
-- fake 默认 GLB 的贴图数与真实不同：fake 1 张，Tripo 真实默认 3 张。`texture-switch-fake.py` 因此只记录贴图数、不断言。
-- Meshy `should_texture=false`：fake 仍交付带贴图 GLB，真实交付形态没有观测，登记表没有对应条目。
-- `openai-images-v1/edits-mask-follow`（constructed，#687）：带蒙版编辑的成败条件与失真形态来自真实探针，样本未入库，失真像素是近似。
-- 登记表的 5 条 gap：`tripo-v3/poll-progress-not-modelled`、`tripo-v3/p-series-face-limit`、`openai-images-v1/generated-picture-pixel-entropy`、`gemini-images-v1/three-view-consistency-late-reject`、`gemini-images-v1/image-to-image-4k-wire`。
+发布门禁按下表判定（`docs/release-gate.md` ②）：状态只能是 `OPEN`、`FIXED`、`ACCEPTED`；`OPEN` 行挡发布；`ACCEPTED` 的备注必须写用户在聊天里明确接受的日期。
+
+| 差异 | 状态 | Issue | 记录日期 | 备注 |
+|---|---|---|---|---|
+| `tripo-v3/generation-texture-off-glb`（constructed）：Tripo texture=false（且未开 pbr）时 fake 交付带贴图 GLB，真实交付 0 texture、0 image、1 material | FIXED | #704 | 2026-11-28 | 回灌提交 a5176f3a，登记表条目 `tripo-v3/generation-texture-off-glb`（constructed）；按 v1.9.6 正式测试环境的 Plinth 侧观测，图生与多视图按文档构造 |
+| Tripo 默认 GLB 贴图数：fake 1 张，真实 3 张 | OPEN | #704 | 2026-11-28 | 待用户决定：补 fake 夹具为 3 张贴图，或明确接受（接受须写用户在聊天里同意的日期）。`texture-switch-fake.py` 因此只记录贴图数、不断言 |
+| Meshy 7.1 `should_texture=false`：fake 仍交付带贴图 GLB，真实正式测试环境实测交付 0 贴图 GLB（textures 0 / images 0 / materials 1；v1.9.6，图生 3D，[#2 评论](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783)） | OPEN | #704 | 2026-11-28 | 尚未回灌 |
+| `openai-images-v1/edits-mask-follow`（constructed）：带蒙版编辑的成败条件与失真形态 | FIXED | #687 | 2026-11-28 | 条件与失真形态来自真实探针，fake 已按它实现；样本未入库，失真像素是近似 |
+
+本表只记**本发布周期内发现**的真实与 fake 的差异：每次发布后清空已 `FIXED` 的旧行，或移到下面的「历史」小节；本周期没有发现差异时，表里写一行 `无新增差异（核对于 <候选 revision 前 8 位> <日期>）`。
+
+### 历史
+
+（暂无）
 
 ## 5. 维护规则
 

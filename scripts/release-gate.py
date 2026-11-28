@@ -8,9 +8,10 @@ GitHub or an environment. From base..head it lists the change points (the Issues
 "Issue: #N" trailers, the merged pull requests and the Issues their commits name, the fake /
 Provider / Catalog areas touched), then checks:
 
-  1. coverage: every change point has passing rows in the main table of the regression matrix
-     (docs/regression-matrix.md), verified at the candidate revision with evidence, and the matrix
-     itself changed in the range; or a valid exemption in docs/release-gate.md;
+  1. coverage: every change point has passing rows in the main tables (every table of section
+     "3. 主表") of the regression matrix (docs/regression-matrix.md), verified at the candidate
+     revision with evidence, and the matrix itself changed in the range; or a valid exemption in
+     docs/release-gate.md;
   2. fake: a change to the fake, the Providers or the Catalog Offerings comes with a register
      change or a "无新增差异（核对于 <rev> <date>）" line, and no fake/real difference is OPEN.
 
@@ -33,7 +34,8 @@ FAKE_AREAS = (("fake", "internal/testutil/fakeupstream/"), ("providers", "intern
               ("catalog", "internal/catalog/default_catalog.json"))
 # Only an Issue whose files all sit here (docs, scripts, CI, agent rules) may be exempted.
 NON_RUNTIME_PREFIXES = ("docs/", "scripts/", ".github/", ".claude/")
-MATRIX_COLUMNS = ("ID", "功能 / 行为", "来源 Issue", "验证层", "命令或脚本", "期望", "状态", "最后验证", "证据")
+MAIN_SECTION = "主表"
+MAIN_KEY_COLUMNS = ("ID", "来源 Issue", "状态", "最后验证")
 MATRIX_STATES = ("OK", "MANUAL", "GAP", "OBSOLETE")
 PASSING_STATES = ("OK", "MANUAL")
 DIFF_SECTION = "Fake 与真实的已知差异"
@@ -187,14 +189,17 @@ def empty(cell):
 
 
 def parse_matrix(text):
-    main = next((rows for header, rows in tables(text.splitlines())
-                 if all(column in header for column in MATRIX_COLUMNS)), None)
+    # The main section is split into one table per area, all with the same header; read every one.
+    main = [found for header, found in tables(section_lines(text, MAIN_SECTION) or [])
+            if all(column in header for column in MAIN_KEY_COLUMNS)]
     rows = []
-    for row in main or []:
+    for row in (row for found in main for row in found):
         last = re.fullmatch(r"([0-9a-f]{8})\s+(" + DATE + r")", clean(row["最后验证"]))
+        evidence = row.get("证据", "")
+        # "来源 Issue" may separate numbers with "," or "、"; every #N counts.
         rows.append({"id": clean(row["ID"]), "issues": sorted({int(n) for n in re.findall(r"#(\d+)", row["来源 Issue"])}),
                      "state": clean(row["状态"]), "last": (last[1], last[2]) if last else None,
-                     "last_raw": clean(row["最后验证"]), "evidence": "" if empty(row["证据"]) else clean(row["证据"])})
+                     "last_raw": clean(row["最后验证"]), "evidence": "" if empty(evidence) else clean(evidence)})
     diff_lines = section_lines(text, DIFF_SECTION)
     diff_rows, markers = [], []
     if diff_lines is not None:
@@ -202,7 +207,7 @@ def parse_matrix(text):
         table = next((rows for header, rows in tables(diff_lines) if all(c in header for c in DIFF_COLUMNS)), [])
         diff_rows = [{"difference": clean(row["差异"]), "state": clean(row["状态"]), "note": clean(row["备注"])}
                      for row in table if not NO_NEW_DIFF.search(row["差异"])]
-    return {"main_found": main is not None, "rows": rows, "diff_section": diff_lines is not None,
+    return {"main_found": bool(main), "rows": rows, "diff_section": diff_lines is not None,
             "diff_rows": diff_rows, "no_new_diff": markers}
 
 
@@ -285,7 +290,7 @@ def evaluate(changes, matrix_text, rules_text, matrix_source=MATRIX_PATH):
     if matrix is None:
         reasons.append(f"回归表缺失：{matrix_source}")
     elif not matrix["main_found"]:
-        reasons.append(f"回归表没有主表（列：{'｜'.join(MATRIX_COLUMNS)}）")
+        reasons.append(f"回归表没有主表（「{MAIN_SECTION}」一节下表头含 {'｜'.join(MAIN_KEY_COLUMNS)} 的表）")
     if MATRIX_PATH not in changes["files"]:
         reasons.append(f"回归表 {MATRIX_PATH} 在 {changes['base']}..{head8} 范围内没有被修改")
 

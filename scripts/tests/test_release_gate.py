@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -248,6 +249,33 @@ class ParsingTests(unittest.TestCase):
         parsed = gate.parse_rules((ROOT / gate.RULES_PATH).read_text(encoding="utf-8"))
         self.assertGreaterEqual(parsed["rules_version"], 1)
         self.assertTrue(all(entry["issue"] and entry["reason"] and entry["agreed"] for entry in parsed["exemptions"]))
+
+    def test_every_table_of_the_main_section_is_read(self):
+        header = ("| ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 | 备注 |\n"
+                  "|---|---|---|---|---|---|---|---|---|---|\n")
+        row = "| {0} | 行为 | {1} | unit | `scripts/x.sh` | 通过 | OK | {2} 2026-11-28 | E1 | |\n"
+        text = ("# 回归测试表\n\n## 2. 每次发布必跑\n\n| 顺序 | 时机 | 行 | 命令 |\n|---|---|---|---|\n"
+                "| 1 | 合并前 | G1 | `scripts/x.sh` |\n\n## 3. 主表\n\n### 门禁\n\n" + header + row.format("G1", "#86", HEAD8)
+                + "\n### 按功能的行为\n\n" + header + row.format("R-1", "#704、#705", HEAD8)
+                + row.format("R-2", "#699, #691", HEAD8)
+                + "\n### 正式测试环境\n\n" + header + row.format("P1", "#2", HEAD8)
+                + "\n## 4. Fake 与真实的已知差异\n\n| 差异 | 状态 | Issue | 记录日期 | 备注 |\n|---|---|---|---|---|\n"
+                + "| 差异甲 | FIXED | #704 | 2026-11-28 | 已回灌 |\n")
+        parsed = gate.parse_matrix(text)
+        self.assertTrue(parsed["main_found"])
+        self.assertEqual([row["id"] for row in parsed["rows"]], ["G1", "R-1", "R-2", "P1"])
+        self.assertEqual(parsed["rows"][1]["issues"], [704, 705])
+        self.assertEqual(parsed["rows"][2]["issues"], [691, 699])
+        self.assertEqual([row["state"] for row in parsed["diff_rows"]], ["FIXED"])
+
+    def test_the_committed_matrix_reads_every_main_table(self):
+        text = (ROOT / gate.MATRIX_PATH).read_text(encoding="utf-8")
+        parsed = gate.parse_matrix(text)
+        main = text.split("## 3. 主表", 1)[1].split("\n## 4.", 1)[0]
+        expected = len(re.findall(r"(?m)^\| (?!ID \||---)[^|]+\|", main))
+        self.assertEqual(len(parsed["rows"]), expected)
+        self.assertGreater(expected, 5)
+        self.assertTrue(parsed["diff_rows"], "the difference section must be a table the gate reads")
 
     def test_a_table_inside_a_code_fence_is_not_a_heading_boundary(self):
         text = "## 豁免清单\n\n```\n# not a heading\n```\n\n| Issue | 理由 | 用户同意日期 |\n|---|---|---|\n| #1 | r | 2026-11-28 |\n"
