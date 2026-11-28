@@ -199,3 +199,29 @@ func TestAgentParamsProjectionHasNoNativeQuoteWithoutNativePricing(t *testing.T)
 		t.Fatalf("meshy single image: %+v", saved)
 	}
 }
+
+// The panel shows the component labels in the UI locale, like the approval
+// card's quote, so an English page does not list Chinese charge names.
+func TestAgentParamsProjectionQuoteFollowsTheRequestLocale(t *testing.T) {
+	t.Parallel()
+	server, taskCatalog := newAgentParamsQuoteServer(t)
+	texts, err := catalog.NewTextLocalizer(taskCatalog.Application())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.texts = texts
+	const id = "tripo/tripo-v3.1-full/text-to-3d"
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(id), nil)
+	request = request.WithContext(catalog.WithLocale(request.Context(), "en"))
+	response := httptest.NewRecorder()
+	server.agentParamsGet(response, request, "owner")
+	var result agentParamsQuoteProjection
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.NativeQuote == nil || len(result.NativeQuote.Components) == 0 {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	for _, component := range result.NativeQuote.Components {
+		if serverChineseText.MatchString(component.Label) {
+			t.Fatalf("component %s keeps its Chinese label %q on an English request", component.ID, component.Label)
+		}
+	}
+}
