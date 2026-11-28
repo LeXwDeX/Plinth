@@ -10,7 +10,7 @@
 #   - 健康检查失败 → 自动回滚到上一镜像标签并在服务器留下失败报告；
 #     构建与 preflight 失败则中止（旧实例未动，无需回滚）。
 #   - 边界：普通发布不重跑 ETL、不改写 migration-ready.txt，也不
-#     调用 cutover takeover（那是正式生产切换入口）；见 dev_ops.md 与
+#     调用 cutover takeover（那是 prod 切换入口）；见 dev_ops.md 与
 #     README-go.md「dev-test 后续普通发布」。
 #   - 线上无法在线解决的问题：记录问题（本脚本输出 + 服务器报告文件），
 #     回滚，回到本地修复后再次发布。

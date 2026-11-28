@@ -329,21 +329,21 @@ class EnvironmentRulesTest(unittest.TestCase):
             load(changed(mutate))
 
     @staticmethod
-    def add_formal(environments, **extra):
-        environments["formal-test"] = {
-            "ssh": "root@host-four", "root": "/srv/formal", "base_url": "http://host-four:8080",
-            "compose_project": "formal_test", "single_stack": {"image_keep": 1}, "protected_paths": [], **extra}
+    def add_prod(environments, **extra):
+        environments["prod"] = {
+            "ssh": "root@host-four", "root": "/srv/prod", "base_url": "http://host-four:8080",
+            "compose_project": "prod", "single_stack": {"image_keep": 1}, "protected_paths": [], **extra}
 
-    def test_formal_test_full_backup_retention(self):
-        document = changed(lambda e: self.add_formal(e, backup={"scope": "full", "keep": 2}))
+    def test_prod_full_backup_retention(self):
+        document = changed(lambda e: self.add_prod(e, backup={"scope": "full", "keep": 1}))
         load(document)
-        words = release_env.release_variables(document["environments"]["formal-test"], None)["RELEASE_SERVER_ENV"].split()
+        words = release_env.release_variables(document["environments"]["prod"], None)["RELEASE_SERVER_ENV"].split()
         self.assertIn("RELEASE_BACKUP_SCOPE=full", words)
-        self.assertIn("RELEASE_BACKUP_KEEP=2", words)
+        self.assertIn("RELEASE_BACKUP_KEEP=1", words)
 
-    def test_formal_test_database_backup_is_refused(self):
+    def test_prod_database_backup_is_refused(self):
         with self.assertRaisesRegex(release_env.EnvironmentError_, "dev-test"):
-            load(changed(lambda e: self.add_formal(e, backup={"scope": "database", "keep": 2})))
+            load(changed(lambda e: self.add_prod(e, backup={"scope": "database", "keep": 2})))
 
     def test_dev_test_database_backup_cannot_be_promoted(self):
         def promoted(environments):
@@ -351,16 +351,16 @@ class EnvironmentRulesTest(unittest.TestCase):
         with self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from"):
             load(changed(promoted))
 
-    def test_full_backup_retention_is_limited_to_test_stacks(self):
+    def test_full_backup_retention_is_limited_to_dev_test_and_prod(self):
         def mutate(environments):
             environments["shared-a"]["backup"] = {"scope": "full", "keep": 2}
-        with self.assertRaisesRegex(release_env.EnvironmentError_, "formal-test"):
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "dev-test and prod environments"):
             load(changed(mutate))
 
-    def test_formal_test_full_backup_retention_rejects_bad_keep(self):
+    def test_prod_full_backup_retention_rejects_bad_keep(self):
         for keep in (0, 3):
             with self.subTest(keep=keep), self.assertRaisesRegex(release_env.EnvironmentError_, "keep"):
-                load(changed(lambda e: self.add_formal(e, backup={"scope": "full", "keep": keep})))
+                load(changed(lambda e: self.add_prod(e, backup={"scope": "full", "keep": keep})))
 
     def test_unknown_backup_scope_is_refused(self):
         def mutate(environments):
@@ -469,10 +469,10 @@ class McpListenerLayoutTest(unittest.TestCase):
 
     def test_the_example_environments_file_names_the_optional_keys(self):
         example = json.loads((ROOT / "deploy/environments.example.json").read_text())
-        layout = example["environments"]["formal-test"]["layout"]
+        layout = example["environments"]["prod"]["layout"]
         self.assertIn("MCP_PUBLIC_BIND_IP", layout)
         self.assertIn("MCP_PUBLIC_HOST_PORT", layout)
-        self.assertIn("MCP_PUBLIC_BIND_IP", example["environments"]["formal-test"]["description"])
+        self.assertIn("MCP_PUBLIC_BIND_IP", example["environments"]["prod"]["description"])
         self.assertNotIn("MCP_PUBLIC_BIND_IP", example["environments"]["dev-test"]["layout"])
         self.assertLessEqual(set(layout), set(release_env.LAYOUT_KEYS))
 
@@ -795,9 +795,9 @@ class PostReleaseSmokeTest(unittest.TestCase):
         self.assertFalse([command for command in commands if "smoke-" in command])
         self.assertIn("no machine smoke report", output)
 
-    # A promoted environment: dev-test is the source, formal-test takes its accepted revisions.
-    PROMOTED = {"ssh": "root@host-four", "root": "/srv/formal", "base_url": "http://host-four:8080",
-                "compose_project": "formal_test", "single_stack": {"image_keep": 1}, "protected_paths": [],
+    # A promoted environment: dev-test is the source, prod takes its accepted revisions.
+    PROMOTED = {"ssh": "root@host-four", "root": "/srv/prod", "base_url": "http://host-four:8080",
+                "compose_project": "prod", "single_stack": {"image_keep": 1}, "protected_paths": [],
                 "promote_from": "dev-test"}
     TAG = "aaaaaaa-20261019T010000Z"
     EVIDENCE = "https://forge.example.invalid/owner/project/issues/63#c1"
@@ -808,7 +808,7 @@ class PostReleaseSmokeTest(unittest.TestCase):
                              for name in ("L0", "L1", "L1_agent")}}
 
     def gated_note(self, **gate):
-        note = {"formal_promotion": 2, "revision": self.SHA, "image_tag": self.TAG,
+        note = {"prod_promotion": 2, "revision": self.SHA, "image_tag": self.TAG,
                 "checks": {name: {"status": "pass", "failed": 0, "passed": 1, "evidence": self.EVIDENCE}
                            for name in ("L0", "L1", "L1_agent", "related")},
                 "release_gate": {"status": "pass", "evidence": self.GATE_EVIDENCE}}
@@ -827,9 +827,9 @@ class PostReleaseSmokeTest(unittest.TestCase):
 
     def test_a_format_one_acceptance_report_is_refused_for_a_new_promotion(self):
         note = self.gated_note()
-        note["formal_promotion"] = 1
+        note["prod_promotion"] = 1
         del note["release_gate"]
-        with self.assertRaisesRegex(release_env.EnvironmentError_, "formal_promotion 2"):
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "prod_promotion 2"):
             self.run_promotion(self.GOOD_SMOKE, note=note)
 
     def test_a_missing_failed_or_foreign_gate_record_is_refused_before_any_host_is_read(self):
@@ -860,7 +860,7 @@ class PostReleaseSmokeTest(unittest.TestCase):
         document = copy.deepcopy(BASE)
         document["acceptance"] = {"forge_repo": "owner/project", "issue": 63,
                                   "forge_url": "https://forge.example.invalid/owner/project"}
-        document["environments"]["formal-test"] = dict(self.PROMOTED)
+        document["environments"]["prod"] = dict(self.PROMOTED)
         document = load(document)
         rules = release_env.promotion_rules()
         note = self.gated_note() if note is None else note
@@ -890,7 +890,7 @@ class PostReleaseSmokeTest(unittest.TestCase):
                 mock.patch.object(release_env, "host_file_state", return_value=present), \
                 mock.patch.object(release_env, "run", fake_run), \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            revision = release_env.promotion_revision(document, "formal-test", self.SHA, 5)
+            revision = release_env.promotion_revision(document, "prod", self.SHA, 5)
         if with_calls:
             return revision, commands, output.getvalue(), calls
         return revision, commands, output.getvalue()

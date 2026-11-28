@@ -1,6 +1,6 @@
 # dev-test 冒烟与发布脚本
 
-Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`formal-test` 晋级回执见 #2；`legacy-formal` 已下线，存档 #74）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其「dev-test 主机与镜像保留」一节。
+Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`prod` 晋级回执见 #2；`legacy-formal` 已下线，存档 #74）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其「dev-test 主机与镜像保留」一节。
 
 ## 发布（Agent 本地一键执行，无 CI）
 
@@ -9,11 +9,11 @@ git push origin main                       # 待发布内容先进 main
 python3 scripts/release-env.py release dev-test   # 同步→构建→preflight→备份→Compose 更新→健康（驱动 release-go-testenv.sh）
 ```
 
-- 凭据只在本地，远端命令通过本地 `deploy/local/environments.json` 中该环境的 `ssh` 执行。测试栈发布由 `python3 scripts/release-env.py release dev-test` 驱动 `scripts/release-go-testenv.sh`（`RELEASE_HOST`、`RELEASE_ROOT` 必填，无缺省主机/根）执行；`formal-test` 晋级命令与来源验收 note 格式见 `docs/deployment.md`。
+- 凭据只在本地，远端命令通过本地 `deploy/local/environments.json` 中该环境的 `ssh` 执行。测试栈发布由 `python3 scripts/release-env.py release dev-test` 驱动 `scripts/release-go-testenv.sh`（`RELEASE_HOST`、`RELEASE_ROOT` 必填，无缺省主机/根）执行；`prod` 晋级命令与来源验收 note 格式见 `docs/deployment.md`。
 - `dev-test` 的 fake 形态发布成功后，发布入口自动依次跑本页 L0、L1、L1 Agent 三层，读各脚本自己的 `PASS=/FAIL=/SKIP=` 汇总行与 `SOFT-FAIL` 行，写机器报告 `<root>/production/reports/smoke-<revision>.json` 与每层日志（#411）。任一层不是 `pass`（含 skip、soft-fail、缺汇总行）或报告写不出去时发布命令返回非零，但发布不回滚；判定口径与失败处置见 `AGENTS.md`「发布后冒烟判定与晋级校验」。真实形态不自动跑，按上文表格手动执行并留证。
 - `smoke-l0-browser-boot.sh`、`smoke-l1-free.sh`、`smoke-l1-agent-mode.sh` 对非默认 `BASE` 都要求显式完整 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD`，避免误读测试运行环境凭据。
 - 候选启动或健康检查（healthz/readyz）失败时，按本次备份范围恢复数据并启动发布前实际运行的镜像。标签从原容器读取。失败报告写在服务器 `production/reports/release-failures/<tag>-<stage>.txt`，并带 `backup_scope`/`backup_targets`。
-- 默认备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。仅 `dev-test` 可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机只备份 `production/data`，回滚只替换该目录；候选写入的 `storage-go`/`web-data` 字节保留，可能成为孤儿，因此不是完整回滚。手工回滚先读 `backups/release-<T>/scope`（单行 `database` 或 `full`；旧快照无 scope 且三个归档齐全时按 `full`）。离线故障注入回归：`bash scripts/smoke/test-release-rollback.sh`（含 database scope）以及实际 helper 的单行 scope 夹具（`test-release-stack.sh`）。
+- 默认备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。仅 `dev-test` 可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机只备份 `production/data`，回滚只替换该目录；候选写入的 `storage-go`/`web-data` 字节保留，可能成为孤儿，因此不是完整回滚。`prod` 在环境文件写 `"backup": {"scope": "full", "keep": 1}`：每次发布全量备份，成功路径只保留最新 1 份。手工回滚先读 `backups/release-<T>/scope`（单行 `database` 或 `full`；旧快照无 scope 且三个归档齐全时按 `full`）。离线故障注入回归：`bash scripts/smoke/test-release-rollback.sh`（含 database scope）以及实际 helper 的单行 scope 夹具（`test-release-stack.sh`）。
 - 构建或 preflight 失败直接中止——旧实例未被触碰，无需回滚。
 - 测试栈健康检查与成功清单写入后，自动执行 Plinth 镜像保留：按创建时间保留 `art-ai-go-production` 最新五个不同镜像 ID，额外保护运行镜像、发布前实际运行的回滚镜像，以及发布时传入的测试栈与 `protect_projects` 所列其他 Compose 项目（`--project`/`--protect-project`，名字来自本地环境文件）任意运行或停止容器引用的镜像。发布与清理共用锁。保护项可能使数量超过五个。只用无强制的 `docker rmi <id>`，失败记警告，不改变发布成功结果；镜像工具不删容器、卷、数据库备份或其他仓库镜像。dry-run 见 `dev_ops.md`。
 - database 模式在健康检查与成功清单写入后，再调用 `scripts/retain-release-backups.py --apply`，`keep` 为 1–2（当前配置 2）；正常清理最多保留最新 2 个已结束发布备份，更早失败快照也按最新 2 个回收。进行中快照可临时排除，失败报告与独立诊断日志保留。bootstrap、失败、回滚和预构建路径不清理；清理非零只警告，不改变发布结果。helper 只处理 `backups/release-*`，不碰原始资产、数据库、首次迁移冷备或其他栈备份。保留 database-only 快照可能被使用时，禁止离线 CAS/task 破坏性维护。
@@ -26,7 +26,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 
 ## 上游形态与真实开关（#219）
 
-`dev-test` 缺省以 fake 上游形态发布（`docs/deployment.md`「fake 上游形态」）：所有 Provider 与对话模型连接指向同栈的 fake 服务。脚本默认针对 fake 形态，真实上游需要 `--live` 参数与 `ART_AI_LIVE_ACK=1` 两个开关同时给出，缺省或只给一个即拒绝（退出码 2），每次真实运行前还须在当前对话取得用户同意。例外是 `dev-test` 上的 2D 真实调用（真实对话模型 token、真实 2D 生图）：按 `AGENTS.md`「上游接口与 Fake」不需逐次同意，开跑前后在回复里写明目的与大致用量即可，两个开关照旧要给；3D、`formal-test`、正式生产与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。下文写「须当次同意」的 2D 运行均按此例外处理。判定逻辑在 `upstream_shape.py`：目标形态取 `ART_AI_UPSTREAM_SHAPE`（`release-env.py smoke` 按该环境 `production/compose.env` 的 `RELEASE_UPSTREAM_SHAPE` 设置），否则读 `$ART_AI_SERVER_ROOT/production/compose.env`；读不到按真实形态处理。复制脚本到服务器运行时，`upstream_shape.py`（以及 L1 Agent 用的 `seed-fake-3d-task.py`）须与脚本同目录。
+`dev-test` 缺省以 fake 上游形态发布（`docs/deployment.md`「fake 上游形态」）：所有 Provider 与对话模型连接指向同栈的 fake 服务。脚本默认针对 fake 形态，真实上游需要 `--live` 参数与 `ART_AI_LIVE_ACK=1` 两个开关同时给出，缺省或只给一个即拒绝（退出码 2），每次真实运行前还须在当前对话取得用户同意。例外是 `dev-test` 上的 2D 真实调用（真实对话模型 token、真实 2D 生图）：按 `AGENTS.md`「上游接口与 Fake」不需逐次同意，开跑前后在回复里写明目的与大致用量即可，两个开关照旧要给；3D、`prod` 与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。下文写「须当次同意」的 2D 运行均按此例外处理。判定逻辑在 `upstream_shape.py`：目标形态取 `ART_AI_UPSTREAM_SHAPE`（`release-env.py smoke` 按该环境 `production/compose.env` 的 `RELEASE_UPSTREAM_SHAPE` 设置），否则读 `$ART_AI_SERVER_ROOT/production/compose.env`；读不到按真实形态处理。复制脚本到服务器运行时，`upstream_shape.py`（以及 L1 Agent 用的 `seed-fake-3d-task.py`）须与脚本同目录。
 
 **混合形态（`mixed`，#416）：** `release-env.py release dev-test --live-chat` 发布的栈里生成侧仍是 fake，对话连接指向真实网关（`docker-compose.go-mixed-upstream.yml`、`UPSTREAM_SHAPE=mixed`；见 `dev_test.md`「真实对话 + fake 生成」）。`upstream_shape.py` 把它报成 `mixed`，并按「非 fake」处理：两个门禁都要 `--live` 与 `ART_AI_LIVE_ACK=1`（对话侧是真实付费调用，只给生成会低估成本），`live-only` 的 L2–L5 直接拒绝，因为生成侧不是真的。于是「真实对话 + fake 生成」只能由显式要求真实对话的脚本使用，普通 fake 场景不会误连真实网关。
 
@@ -41,7 +41,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 
 ## 全新数据起点（#28）
 
-`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在 fake 形态下先用 `seed-fake-3d-task.py` 补一个本用户 SUCCEEDED 3D 任务，不再 SKIP；真实形态不补任务，空库上这一段会 SKIP，而 `release-env.py` 把 `skipped>0` 判为 `fail`，SKIP 不算通过，见 `AGENTS.md`「发布后冒烟判定与晋级校验」；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`formal-test` 不适用。
+`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在 fake 形态下先用 `seed-fake-3d-task.py` 补一个本用户 SUCCEEDED 3D 任务，不再 SKIP；真实形态不补任务，空库上这一段会 SKIP，而 `release-env.py` 把 `skipped>0` 判为 `fail`，SKIP 不算通过，见 `AGENTS.md`「发布后冒烟判定与晋级校验」；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`prod` 不适用。
 
 ## 冒烟分层
 

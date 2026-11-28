@@ -142,7 +142,7 @@ Needs `go`. Exit 0 = every selected check passed.
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
 cmd/art-ai: Tripo's native processing only reads source models from public HTTPS
 hosts, and the test binary maps one reserved ".test" host to the loopback fake
-instead of loosening that rule. Nothing here touches dev-test, formal-test or a
+instead of loosening that rule. Nothing here touches dev-test, prod or a
 real upstream. Ports stay away from 18631-18635 (the #62 local stacks); the
 external MCP listener defaults to 19413 (FAKE_STACK_MCP_PORT).
 """

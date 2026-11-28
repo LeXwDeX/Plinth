@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""正式测试环境（PROD）发布后的只读冒烟：L1 子集，免费，不调用任何上游（只走本服务的 API）。
+"""prod 发布后的只读冒烟：L1 子集，免费，不调用任何上游（只走本服务的 API）。
 
-层：PROD-readonly。可对任何环境运行（formal-test、dev-test 都行），不发消息、不生成、不批准任何东西。唯一的写入：
+层：prod-readonly。可对任何环境运行（prod、dev-test 都行），不发消息、不生成、不批准任何东西。唯一的写入：
 在 Agent 专用账号下建一个标题为 regress-l1 的空会话并把它切到严格方式（核对会话接口与批准方式接口可写）；
 另有一次故意被拒的跨站建会话请求。
 
@@ -14,7 +14,7 @@
 v1.9.6 正式测试环境实测 11 项全部通过（版本检查是入库时新增的，此前没有）。
 
 用法（地址与账号由 release-env.py 注入）：
-  python3 scripts/release-env.py smoke formal-test -- python3 scripts/regression/post-release-readonly.py
+  python3 scripts/release-env.py smoke prod -- python3 scripts/regression/post-release-readonly.py
 最后一行 `=== post-release-readonly: PASS=n FAIL=n ===`；有 FAIL 时退出码 1，缺环境变量时退出码 2。
 """
 import json

@@ -19,7 +19,7 @@ spec.loader.exec_module(snapshot)
 SAMPLES = {
     "private network": "http://192." + "168.7.8:13333/",
     "dev host octets": "host 10.0." + "33." + "110",
-    "formal host octets": "x" + "33." + "146" + "y",
+    "prod host octets": "x" + "33." + "146" + "y",
     "domain": "https://git." + "yc" + "game" + ".com/group",
     "organization": "Yun" + "chan".lower() + " Ltd",
     "organization zh": "云" + "蟾" + "游戏",

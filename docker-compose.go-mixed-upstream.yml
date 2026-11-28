@@ -14,7 +14,7 @@
 #   网关——地址、密钥与模型都要有值，地址不能是 FAKE_UPSTREAM_ORIGIN，密钥不能是
 #   fake 密钥——否则拒绝启动，避免“以为在跟真实模型对话、其实打到 fake”或把 fake
 #   密钥发给真实网关。
-# formal-test 与自部署入口从不使用本文件。
+# prod 与自部署入口从不使用本文件。
 services:
   fake-upstream:
     image: art-ai-go-fake-upstream:${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}

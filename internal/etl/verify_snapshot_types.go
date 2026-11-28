@@ -99,7 +99,7 @@ type proofReport struct {
 }
 
 func newProofReport(stamp string) proofReport {
-	r := proofReport{Notice: "本报告不含任何源损失批准；审批权在正式生产负责人。", Format: "art-ai-snapshot-completeness-v1", GeneratedAtUTC: stamp, Decision: "STOP", Evidence: map[string]string{}, Buckets: []proofBucket{}, DiagnosticRollup: []diagnosticRollup{}, ScopeTrees: map[string]string{}, Boundary: "supplied_evidence_and_explicit_trees_only;not_source_loss_authorization"}
+	r := proofReport{Notice: "本报告不含任何源损失批准；审批权在 prod 负责人。", Format: "art-ai-snapshot-completeness-v1", GeneratedAtUTC: stamp, Decision: "STOP", Evidence: map[string]string{}, Buckets: []proofBucket{}, DiagnosticRollup: []diagnosticRollup{}, ScopeTrees: map[string]string{}, Boundary: "supplied_evidence_and_explicit_trees_only;not_source_loss_authorization"}
 	for _, id := range []string{"D1", "D2", "D3", "D4"} {
 		r.Collections = append(r.Collections, proofCriterion{ID: id, Status: "unknown", Reason: "not_checked", Evidence: []string{}})
 	}
