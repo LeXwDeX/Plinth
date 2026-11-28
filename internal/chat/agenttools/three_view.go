@@ -1134,15 +1134,34 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 	// #665: a run the server continues (the same predicate as continuationRun
 	// in createThreeView) says so; the other receipt tells the Agent the views
 	// wait on the card.
+	continuing := grant.BudgetEligible && messages.AgentStartedContinuing != "" &&
+		e.threeViewService != nil && e.threeViewService.ContinuationEnabled()
+	return chat.ToolResult{TaskID: grant.TaskID,
+		AgentContent: threeViewReceipt(messages, task, continuing, run.ID, execution.Step.Spec.Label, approval)}, nil
+}
+
+// threeViewReceipt is the Agent's receipt of a submitted view. A step on an
+// Offering that does not bill in credits uses the Schema's unmetered wording,
+// which carries no estimate (#719), like the approval and result cards.
+func threeViewReceipt(messages catalog.ChatThreeViewMessages, task generation.Task, continuing bool,
+	run, view, approval string) string {
 	template := messages.AgentStarted
-	if grant.BudgetEligible && messages.AgentStartedContinuing != "" &&
-		e.threeViewService != nil && e.threeViewService.ContinuationEnabled() {
+	if continuing && messages.AgentStartedContinuing != "" {
 		template = messages.AgentStartedContinuing
 	}
-	return chat.ToolResult{TaskID: grant.TaskID, AgentContent: strings.NewReplacer(
-		"{run}", run.ID, "{view}", execution.Step.Spec.Label, "{approval}", approval,
+	if task.NativeQuote == nil && !task.Offering.CreditsMetered {
+		unmetered := messages.AgentStartedUnmetered
+		if continuing && messages.AgentStartedContinuingUnmetered != "" {
+			unmetered = messages.AgentStartedContinuingUnmetered
+		}
+		if unmetered != "" {
+			template = unmetered
+		}
+	}
+	return strings.NewReplacer(
+		"{run}", run, "{view}", view, "{approval}", approval,
 		"{credits}", threeViewPriceText(task), "{task}", string(task.ID),
-	).Replace(template)}, nil
+	).Replace(template)
 }
 
 // threeViewImages picks the source picture: handles (and the selection alias)
