@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { HarnessBrowserError } from '@/lib/harness';
-import { ChoiceActionError, choiceActionFailureKey, runChoiceAnswer, type ChoiceActionReason } from './choice-actions';
+import { ChoiceActionError, choiceActionFailureKey, originalWordsBefore, runChoiceAnswer, type ChoiceActionReason } from './choice-actions';
 
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 const english = defaultCatalog.application.localization.bundles.en.messages as Record<string, string>;
@@ -53,6 +53,18 @@ describe('runChoiceAnswer', () => {
     expect(steps.send).not.toHaveBeenCalled();
   });
 
+  // #709: continue_on_canvas resends the person's previous message as a canvas turn, once, instead of the answer words.
+  it('hands what the action prepared to the one send', async () => {
+    const canvas = { type: 'continue_on_canvas' } as const;
+    const steps = run({ apply: vi.fn(async () => ({ canvasTurnText: '把这个角色做成三视图' })) });
+    expect(await runChoiceAnswer(canvas, steps)).toEqual({ status: 'sent' });
+    expect(steps.send).toHaveBeenCalledTimes(1);
+    expect(steps.send).toHaveBeenCalledWith({ canvasTurnText: '把这个角色做成三视图' });
+    const refused = run({ apply: vi.fn(async () => { throw new ChoiceActionError('original_missing'); }) });
+    expect(await runChoiceAnswer(canvas, refused)).toEqual({ status: 'action_failed', failureKey: 'ui.chat.choice.action_original_missing' });
+    expect(refused.send).not.toHaveBeenCalled();
+  });
+
   it('lets an error of the send itself reach the caller, which already words it', async () => {
     const boom = new Error('network');
     await expect(runChoiceAnswer(undefined, run({ send: vi.fn(async () => { throw boom; }) }))).rejects.toBe(boom);
@@ -76,5 +88,22 @@ describe('choiceActionFailureKey', () => {
     expect(choiceActionFailureKey(new HarnessBrowserError('Harness session is not loaded', 0))).toBe('ui.chat.choice.action_failed');
     expect(choiceActionFailureKey(new Error('network'))).toBe('ui.chat.choice.action_failed');
     expect(choiceActionFailureKey('nope')).toBe('ui.chat.choice.action_failed');
+  });
+});
+
+// #709: the words continue_on_canvas sends again are the person's own message the card's reply answered.
+describe('originalWordsBefore', () => {
+  const messagesOf = (...items: Array<[string, 'user' | 'assistant', string]>) => items.map(([id, role, content]) => ({ id, role, content }));
+
+  it('is the user message right before the reply that opened the card', () => {
+    const list = messagesOf(['u1', 'user', '先画一张'], ['a1', 'assistant', '好'], ['u2', 'user', '  开始干活吧。 '], ['a2', 'assistant', '我看到画板上有……']);
+    expect(originalWordsBefore(list, 'a2')).toBe('开始干活吧。');
+    expect(originalWordsBefore(list, 'a1')).toBe('先画一张');
+  });
+
+  it('is empty when the reply is not loaded or no words came before it', () => {
+    expect(originalWordsBefore(messagesOf(['a1', 'assistant', 'hi']), 'a1')).toBe('');
+    expect(originalWordsBefore(messagesOf(['u1', 'user', 'x'], ['a1', 'assistant', 'hi']), 'gone')).toBe('');
+    expect(originalWordsBefore(messagesOf(['u1', 'user', '   '], ['a1', 'assistant', 'hi']), 'a1')).toBe('');
   });
 });

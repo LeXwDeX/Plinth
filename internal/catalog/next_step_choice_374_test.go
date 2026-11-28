@@ -30,7 +30,7 @@ func TestShippedNextStepCardNamesNoTargetTool(t *testing.T) {
 		t.Fatalf("choice.kinds %v declares no next_step", ids)
 	}
 	if kind.ToolName != "" || kind.Argument != "" || kind.OptionSource != "agent" || kind.MinOptions != 2 || kind.MaxOptions != 4 ||
-		!slices.Equal(kind.Actions, []string{catalog.ChoiceActionSwitchOperation, catalog.ChoiceActionClearOperation}) {
+		!slices.Equal(kind.Actions, []string{catalog.ChoiceActionSwitchOperation, catalog.ChoiceActionClearOperation, catalog.ChoiceActionContinueOnCanvas}) {
 		t.Fatalf("next_step = %+v", kind)
 	}
 	for name, text := range map[string]string{"answer_template": kind.AnswerTemplate, "pending_template": kind.PendingTemplate} {

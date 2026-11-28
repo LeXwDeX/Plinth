@@ -45,7 +45,7 @@ import { canvasArtboard } from '@/lib/canvas/artboard';
 import { initialCanvasNodes } from '@/lib/canvas/initial-layer';
 import { artboardContent, exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { chooseClipboardPaste, pasteAnchor } from '@/lib/canvas/clipboard';
-import { flushPendingEdits, localBitmapNodeIds } from '@/lib/canvas/pending-edits';
+import { flushPendingEdits, localBitmapNodeIds, registerBoardSave } from '@/lib/canvas/pending-edits';
 import { exportAndUploadSnapshot, reportSnapshotFailure, saveBoardEdits, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { imageNodePlacement } from '@/lib/canvas/image-placement';
 import { exportBoardFilename } from '@/lib/canvas/export-filename';
@@ -689,14 +689,35 @@ export function WorkspaceCanvasBoard() {
     }
   }, [artboard, loadedSessionID, schema, sessionID, ui.uploadFailed, uploadBlob]);
 
+  // #709: pictures still uploading (a file just dropped or pasted) become layers only when their upload ends.
+  const uploadsInFlight = useRef(new Set<Promise<void>>());
   /** Several pictures at once land in a row, one after another, in the order they were given. */
-  const uploadFiles = useCallback(async (files: File[], options: { at?: { x: number; y: number }; useFrame?: boolean } = {}) => {
-    let previous: UploadRect | null = null;
-    for (const file of files) {
-      const rect = await handleUpload(file, { ...options, previous });
-      if (rect) previous = rect;
-    }
+  const uploadFiles = useCallback((files: File[], options: { at?: { x: number; y: number }; useFrame?: boolean } = {}) => {
+    const upload = (async () => {
+      let previous: UploadRect | null = null;
+      for (const file of files) {
+        const rect = await handleUpload(file, { ...options, previous });
+        if (rect) previous = rect;
+      }
+    })();
+    const inFlight = uploadsInFlight.current;
+    inFlight.add(upload);
+    const settle = () => { inFlight.delete(upload); };
+    upload.then(settle, settle);
+    return upload;
   }, [handleUpload]);
+  // #709: a chat send that is not a canvas turn first lets the board's pending edits reach the server (bounded by
+  // canvas.frontend.send_save_wait_milliseconds, see settleBoardForTurn): uploads still running, then the debounced
+  // node save right away instead of after auto_save_delay_milliseconds. The Agent's fallback reading of the board then
+  // sees the picture dragged in just before Enter. Nothing of the board joins that turn.
+  useEffect(() => {
+    if (!sessionID) return undefined;
+    return registerBoardSave(sessionID, async () => {
+      await Promise.allSettled([...uploadsInFlight.current]);
+      // A board not loaded for this session has nothing of it to save.
+      return flushSave.current.sessionID === sessionID ? flushSave.current.flush() : true;
+    });
+  }, [sessionID]);
 
   const selectedImageNode = useMemo(() => selectedImageLayer(nodes, selectedNodeIds), [nodes, selectedNodeIds]);
   // #87: the floating bar names a picture of the chat by its handle, as the layers panel does.

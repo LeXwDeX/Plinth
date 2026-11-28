@@ -345,6 +345,10 @@ type ServiceConfig struct {
 	// CanvasInputSource is chat.context.canvas_input_source (#266). Empty: the
 	// service accepts no input source.
 	CanvasInputSource string
+	// CanvasLayers is chat.canvas_layers (#709) and Canvas the canvas Port:
+	// with both, a turn that is not a canvas turn freezes the board snapshot.
+	CanvasLayers catalog.ChatCanvasLayersSchema
+	Canvas       CanvasSource
 	// Models names the sessions' chat model and reads its thinking profile
 	// and context window (#322). A zero policy offers no level and no window.
 	Models ModelPolicy
@@ -457,6 +461,8 @@ type Service struct {
 	maximumStyleLockReferences int
 	styleLockSources           map[string]bool
 	canvasInputSource          string
+	canvasLayers               catalog.ChatCanvasLayersSchema
+	canvas                     CanvasSource
 	retiredModels              map[string]catalog.RetiredModelSuccessor
 	model3DUsage               catalog.ChatModel3DUsageSchema
 	image2DUsage               catalog.ChatImage2DUsageSchema
@@ -641,6 +647,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		maximumStyleLockReferences: config.MaximumStyleLockReferences,
 		styleLockSources:           styleLockSourceSet(config.StyleLockSources),
 		canvasInputSource:          config.CanvasInputSource,
+		canvasLayers:               config.CanvasLayers,
+		canvas:                     config.Canvas,
 		retiredModels:              retiredModelIndex(config.RetiredModels),
 		turnPlanConfirmsWorkspace:  config.TurnPlanConfirmsWorkspace,
 		model3DUsage:               config.Model3DUsage,
@@ -1576,6 +1584,9 @@ func (service *Service) startTurnOnce(
 	if err := service.freezeSelectionMask(ctx, command, &command.Options); err != nil {
 		return Message{}, err
 	}
+	// #709: a turn that is not a canvas turn freezes the board snapshot the
+	// fallback tool reads; the board still takes no part in the turn itself.
+	service.freezeCanvasContext(ctx, command, &command.Options)
 	command.Options.Harness, err = service.freezeHarnessSnapshot(ctx, command.OwnerID, command.SessionID, command.Options.Selection)
 	if err != nil {
 		return Message{}, err

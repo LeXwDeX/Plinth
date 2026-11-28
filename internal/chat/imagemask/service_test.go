@@ -76,6 +76,7 @@ func maskService(t *testing.T, inputs *fakeInputs, tasks *fakeTasks) (*imagemask
 	schema := product.Application().Chat
 	service, err := imagemask.New(imagemask.Config{
 		Context:          schema.Context,
+		CanvasLayers:     schema.CanvasLayers,
 		Mask:             schema.ImageMask,
 		Inputs:           inputs,
 		Tasks:            tasks,
@@ -226,5 +227,33 @@ func TestCreateSelectionMaskReadsGeneratedPictureThroughItsTask(t *testing.T) {
 	}
 	if _, _, _, alpha := decoded.At(0, 0).RGBA(); alpha>>8 < 128 {
 		t.Fatal("kept pixel is transparent")
+	}
+}
+
+// #709: an @canvasN board handle names the verified picture of the turn's
+// frozen board snapshot; a board handle the snapshot lacks is refused.
+func TestCreateSelectionMaskTakesABoardHandle709(t *testing.T) {
+	inputs := &fakeInputs{pictures: map[generation.AssetID][]byte{"board": picturePNG(t, 10, 10)}}
+	service, schema := maskService(t, inputs, &fakeTasks{})
+	board := &chat.CanvasContext{Total: 1, Layers: []chat.CanvasLayerContext{{ID: "n1", Type: "image", Handle: "@canvas1",
+		Picture: &chat.Attachment{Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleUpload, AssetID: "board",
+			URL: "/api/assets/board"}}}}
+	call := command(schema, `{"image":"@canvas1","mode":"region","x0":2,"y0":2,"x1":6,"y1":6}`)
+	call.Options.CanvasContext = board
+	result, err := service.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs.uploads) != 1 || len(inputs.opens) != 1 || inputs.opens[0] != "board" {
+		t.Fatalf("board mask: result = %+v opens = %v", result, inputs.opens)
+	}
+	call = command(schema, `{"image":"@canvas9","mode":"region","x0":2,"y0":2,"x1":6,"y1":6}`)
+	call.Options.CanvasContext = board
+	result, err = service.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.NoSubmission || len(inputs.uploads) != 1 || !strings.Contains(result.AgentContent, "@canvas9") {
+		t.Fatalf("unknown board handle = %+v", result)
 	}
 }

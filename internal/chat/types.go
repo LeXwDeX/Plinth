@@ -67,6 +67,11 @@ type TurnOptions struct {
 	// never reads the mutable project rows.
 	ProjectID      string          `json:"ProjectID,omitempty"`
 	ProjectContext *ProjectContext `json:"ProjectContext,omitempty"`
+	// CanvasContext is the workspace board snapshot frozen when a turn that is
+	// not a canvas turn starts (#709): the layers view_canvas reads and
+	// the @canvasN handles it names. Nil on a canvas turn and when the board
+	// reading is off; a turn never reads the mutable board rows.
+	CanvasContext *CanvasContext `json:"CanvasContext,omitempty"`
 	// VisualAnchors is the session's reference-backed identity and style anchor
 	// snapshot frozen when the turn starts (#250). A running turn never reads
 	// the mutable session row, so an anchor edit cannot change a frozen task.

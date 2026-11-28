@@ -353,3 +353,45 @@ describe('#691: a stage request is counted until its send is over', () => {
     expect(agentDialog).not.toMatch(/clearTurnRequest\(\);\s*if \(step === 'drop'\) return;/);
   });
 });
+
+describe('#709: the board is fresh on the server when a turn goes out, and only an explicit click sends it', () => {
+  const board = source('../workspace/workspace-canvas-board.tsx');
+
+  it('waits, bounded by the Schema, for the board saves inside the send lock of a turn that is not a canvas turn', () => {
+    const lock = agentDialog.indexOf('await withSessionSendLock(sendPreparation.current, sessionId');
+    const settle = agentDialog.indexOf('await settleBoardForTurn({');
+    const started = agentDialog.indexOf('startingRef.current = starting;');
+    expect(lock).toBeGreaterThan(0);
+    expect(settle).toBeGreaterThan(lock);
+    expect(settle).toBeLessThan(started);
+    const call = agentDialog.slice(settle, settle + 260);
+    expect(call).toContain('sessionId, inputSource, canvasInputSource: schema.chat.context.canvas_input_source');
+    expect(call).toContain('waitMilliseconds: schema.canvas.frontend.send_save_wait_milliseconds');
+    // The wait is awaited and its outcome ignored: a slow or failed save sends anyway, with no toast or refusal.
+    expect(agentDialog.match(/settleBoardForTurn\(/g)).toHaveLength(1);
+    expect(agentDialog).not.toMatch(/=\s*await settleBoardForTurn/);
+    // The canvas turn keeps its own snapshot path, which flushes the brush as before.
+    expect(agentDialog).toContain('flush: () => flushPendingEdits(sessionId),');
+  });
+
+  it('registers the debounced node save and the uploads still running with the board', () => {
+    expect(board).toContain('return registerBoardSave(sessionID, async () => {');
+    expect(board).toContain('await Promise.allSettled([...uploadsInFlight.current]);');
+    expect(board).toContain("return flushSave.current.sessionID === sessionID ? flushSave.current.flush() : true;");
+  });
+
+  it('sends continue_on_canvas once, as the canvas turn that answers the card, and refuses a plain turn instead', () => {
+    expect(agentDialog).toContain('chosen: (fromBox && boardModeChosenRef.current) || canvasTurnAsked,');
+    expect(agentDialog).toContain('if (canvasTurnAsked && canvasSelection === null) return;');
+    // Only the card's send asks for it; no other path turns a canvas turn on by itself.
+    expect(agentDialog.match(/canvasTurn: true/g)).toHaveLength(1);
+    const start = agentDialog.indexOf('if (applied?.canvasTurnText) {');
+    const block = agentDialog.slice(start, start + 520);
+    expect(start).toBeGreaterThan(0);
+    // No queued selection (undefined), so the snapshot path rasterises the board now; one send, then return.
+    expect(block).toContain('await sendRef.current(applied.canvasTurnText, [], [], undefined, undefined, [], undefined, {');
+    expect(block).toContain('choiceAnswer, canvasTurn: true, onSent: () => { accepted = true; },');
+    expect(block).toMatch(/\}\);\s*return;/);
+    expect(agentDialog).toContain('hasBoard: artboard !== null,');
+  });
+});

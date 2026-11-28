@@ -789,3 +789,36 @@ func TestCropImageRegionsRefusesWhenTheCropsCannotBeShown(t *testing.T) {
 		})
 	}
 }
+
+// #709: an @canvasN board handle names the verified board picture of the
+// turn's frozen snapshot; a board handle the snapshot lacks is refused with the
+// Schema's wording and never falls back to a session handle.
+func TestCropImageRegionsTakesABoardHandle709(t *testing.T) {
+	fixture := newCropToolFixture(t, nil)
+	fixture.tool.canvas = catalog.ChatCanvasLayersSchema{ToolName: "view_canvas", HandlePrefix: "@canvas", LayerLimit: 10,
+		UnknownHandleTemplate: "board handle {handle} unknown, call {tool}"}
+	fixture.inputs.addInputAsset("owner-a", "board_1", "image", "image/png", solidPicture(t, 200, 200))
+	board := &chat.CanvasContext{Total: 1, Layers: []chat.CanvasLayerContext{{ID: "n1", Type: "image", Handle: "@canvas1",
+		Picture: &chat.Attachment{Kind: chat.AttachmentKindImage, Role: "upload", AssetID: "board_1", URL: "/api/assets/board_1"}}}}
+	region := `{"region":{"x":0,"y":0,"width":0.5,"height":0.5}}`
+	command := cropCommand("owner-a", "@canvas1", region)
+	command.Options.CanvasContext = board
+	result, err := fixture.tool.Execute(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := decodeCrop[cropContentResult](t, result.AgentContent)
+	if !content.Success || len(content.Crops) != 1 || content.SourceWidth != 200 {
+		t.Fatalf("board crop = %s", result.AgentContent)
+	}
+	command = cropCommand("owner-a", "@canvas9", region)
+	command.Options.CanvasContext = board
+	result, err = fixture.tool.Execute(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusal := decodeCrop[cropRefusalResult](t, result.AgentContent)
+	if refusal.Success || refusal.Code != cropCodeInvalidArguments || !strings.Contains(refusal.Error, "@canvas9") {
+		t.Fatalf("unknown board handle = %+v", refusal)
+	}
+}

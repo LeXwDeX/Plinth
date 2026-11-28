@@ -511,6 +511,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
 		Preferences:                applicationSchema.Chat.Preferences,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
+		// #709: the board snapshot a turn that is not a canvas turn freezes.
+		CanvasLayers: applicationSchema.Chat.CanvasLayers,
+		Canvas: canvasBoardSource{repository: repository,
+			centerX: applicationSchema.Canvas.Frontend.Artboard.CenterX,
+			centerY: applicationSchema.Canvas.Frontend.Artboard.CenterY},
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
@@ -1121,11 +1126,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		agentReadScope.ProjectReference = repository.ProjectRepository().RegisteredReference
 	}
 	imageReview, err := imagereview.New(imagereview.Config{
-		Context: applicationSchema.Chat.Context,
-		Review:  applicationSchema.Chat.ImageReview,
-		Inputs:  inputAssetService,
-		Tasks:   module,
-		Scope:   agentReadScope,
+		Context:      applicationSchema.Chat.Context,
+		CanvasLayers: applicationSchema.Chat.CanvasLayers,
+		Review:       applicationSchema.Chat.ImageReview,
+		Inputs:       inputAssetService,
+		Tasks:        module,
+		Scope:        agentReadScope,
 		// #282/#284/#287: the delivery checklist judges a picture against the
 		// session's 2D purpose, and names the Offerings that can reach its
 		// minimum resolution from the Catalog.
@@ -1153,6 +1159,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// stores it as the owner's input asset; no upstream call, Task or credits.
 	imageMask, err := imagemask.New(imagemask.Config{
 		Context:          applicationSchema.Chat.Context,
+		CanvasLayers:     applicationSchema.Chat.CanvasLayers,
 		Mask:             applicationSchema.Chat.ImageMask,
 		Inputs:           inputAssetService,
 		Tasks:            module,
@@ -1171,10 +1178,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	var cropToolExecute func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	if strings.TrimSpace(applicationSchema.Chat.ImageCrop.Tool) != "" {
 		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
-			Context:  applicationSchema.Chat.Context,
-			Schema:   applicationSchema.Chat.ImageCrop,
-			Crops:    toolCropService,
-			Localize: texts.Text,
+			Context:      applicationSchema.Chat.Context,
+			CanvasLayers: applicationSchema.Chat.CanvasLayers,
+			Schema:       applicationSchema.Chat.ImageCrop,
+			Crops:        toolCropService,
+			Localize:     texts.Text,
 			// #552: every crop is shown to the person as a reply picture.
 			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		})
@@ -1279,6 +1287,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Context:               applicationSchema.Chat.Context,
 		Skills:                applicationSchema.Chat.Skills,
 		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
+		CanvasLayers:          applicationSchema.Chat.CanvasLayers,
 		Params:                paramsStore,
 		Generate:              toolExecutor,
 		ReadTask:              newSessionAgentTaskReader(module, agentReadScope, applicationSchema.Chat, applicationSchema.Content.Messages, texts),

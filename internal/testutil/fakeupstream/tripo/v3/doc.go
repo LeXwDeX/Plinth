@@ -111,11 +111,15 @@
 // delivers a GLB, and the multiview endpoint is assumed to behave like the other
 // two.
 //
-// Texture off (#704). A generation request with texture=false (and no pbr=true)
-// delivers a GLB with one material and no texture or image, and so does a
-// conversion of its model, like the real v3.1 text task of 2026-11-28 whose
-// model GLB had none (untextured.go). Only the text endpoint was observed, and
-// only from Plinth's side: the exchanges and the bytes were not recorded.
+// Generation textures (#704). A generation request with texture=false (and no
+// pbr=true) delivers a GLB with one material and no texture or image, and so does
+// a conversion of its model, like the real v3.1 text task of 2026-11-28 whose
+// model GLB had none; a request with PBR on (Plinth's default, and the page's)
+// delivers a GLB with three textures and three images in one material (base
+// color, metallic-roughness, normal), and so does a plain conversion of its
+// model, like the same task at the defaults (untextured.go). Only the text
+// endpoint was observed, and only from Plinth's side: the exchanges and the bytes
+// were not recorded, so which maps the three textures are is constructed.
 //
 // Multiview model and its 3MF export (#386). One approved real run of 2026-11-19
 // (evidence-386-multiview-model.candidate.json and evidence-386-convert-3mf.candidate.json,

@@ -92,6 +92,18 @@ func (executor *Executor) resolveImageHandles(command chat.ToolCommand, tokens [
 	// refused with the project copy; it never falls back to a session handle of
 	// the same spelling (#240).
 	for _, token := range tokens {
+		// A board handle is resolved from the board snapshot frozen with the
+		// turn (#709) and is an ordinary reference: no board size, layout or
+		// mask comes with it. A token with the prefix that names no readable
+		// layer is refused with the board copy.
+		canvasPicture, canvasToken, canvasErr := chat.ResolveCanvasHandle(executor.chat.CanvasLayers, command.Options, token)
+		if canvasToken {
+			if canvasErr != nil {
+				return nil, &referenceRefusal{message: executor.localized(command, canvasErr.Error())}
+			}
+			add(canvasPicture.URL)
+			continue
+		}
 		projectURLs, projectToken, valid := executor.projectHandleURLs(command, token)
 		if projectToken {
 			if !valid {

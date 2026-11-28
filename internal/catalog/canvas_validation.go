@@ -304,6 +304,7 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 	}
 	if frontend.FocusDelayMilliseconds <= 0 ||
 		frontend.AutoSaveDelayMilliseconds <= 0 ||
+		frontend.SendSaveWaitMilliseconds <= 0 ||
 		frontend.SavedIndicatorMilliseconds <= 0 ||
 		frontend.ContextMenuBindDelayMilliseconds < 0 ||
 		frontend.NodeGapPixels <= 0 ||

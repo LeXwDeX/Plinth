@@ -2622,6 +2622,9 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID, options.StyleLock))
 	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
+	// #709: one line when the frozen board holds layers on a turn that is not
+	// a canvas turn; the guidance itself lives in the tool's description.
+	sections.add("canvas_layers", orchestrator.canvasPrompt(ctx, options))
 	sections.add("brief", orchestrator.briefPrompt(options))
 	// The project block follows the brief and precedes the session settings;
 	// its guide, conventions and @projectN assets are the frozen snapshot of

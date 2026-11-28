@@ -13,9 +13,9 @@ Offering 现场从 /api/v1/offerings 选出：文生 3D、图生 3D、多视图 
       组件且总额低于默认；必需产物角色与默认相同。
   P   保存会话参数路径（PUT /api/v1/agent/params，与面板相同）：200，读回 value=false、source=user；其他 advised 参数
       仍被 400 拒绝；之后 Agent 的生成同 M 的期望（消息里不带 parameters）。
-  INFO 交付 GLB 的贴图数（images/textures）。fake 与真实的差异见 docs/fake-register.md：默认 GLB 为 1 张贴图（真实 3 张）；
-      Tripo texture=false 的无贴图 GLB 已回灌为 constructed（tripo-v3/generation-texture-off-glb），部署了该 fake 的
-      目标上应为 0；其余 Provider 关闭纹理时 fake 仍交付带贴图 GLB。所以这里只记录、不断言。
+  G   交付 GLB 的贴图数（textures）：Tripo 默认 3 张、texture=false 0 张（tripo-v3/generation-texture-off-glb，
+      constructed，真实只有 PROD 文生 3D 一次观测）；Meshy texture=false 0 张（meshy-openapi-v1/image-to-3d-texture-off-glb，
+      constructed）。Meshy 默认的贴图数没有真实依据，只记录 INFO 不断言。
 
 用法（地址与 Agent 专用账号由 release-env.py 注入）：
   python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/texture-switch-fake.py [--offering <id> ...]
@@ -149,18 +149,21 @@ def one(api, r, oid, offering):
     state = (api.json("GET", params_path)[1].get("parameter_states") or {}).get(toggle) or {}
     r.check(f"{oid} S3 默认 parameter_state 为 true", state.get("value") in (True, None), str(state))
 
-    def delivered(label, task, why):
+    def delivered(label, task, why, textures=None):
         if not task:
             r.check(f"{oid} {label} 建出 3D 任务", False, why)
             return None
         r.check(f"{oid} {label} SUCCEEDED", task.get("state") == "SUCCEEDED", str(task.get("state")))
         count, roles, problems = check_delivery(api, task)
         r.check(f"{oid} {label} 产物字节一致且含 model", count > 0 and not problems and "model" in roles, f"assets={count} roles={roles} {problems[:2]}")
-        log(f"INFO {oid} {label} GLB counts {model_glb(api, task)}")
+        counts = model_glb(api, task)
+        log(f"INFO {oid} {label} GLB counts {counts}")
+        if textures is not None:
+            r.check(f"{oid} {label} G GLB 贴图数为 {textures}", bool(counts) and counts.get("textures") == textures, str(counts))
         return roles
 
     default, why = run3d(api, sid, offering, 1)
-    default_roles = delivered("D 默认", default, why)
+    default_roles = delivered("D 默认", default, why, textures=3 if oid.startswith("tripo/") else None)
     default_total = quote_total(default) if default else None
     if default:
         r.check(f"{oid} D 冻结 {toggle}=true", frozen(default).get(toggle) is True, f"{toggle}={frozen(default).get(toggle)!r}")
@@ -179,7 +182,7 @@ def one(api, r, oid, offering):
             log(f"INFO {oid} {label} Meshy quote total={quote_total(task)} estimated={task.get('estimated_credits')}")
 
     message, why = run3d(api, sid, offering, 2, parameters={toggle: False})
-    roles = delivered("M 消息参数", message, why)
+    roles = delivered("M 消息参数", message, why, textures=0)
     if message:
         switched_off("M 消息参数", message)
         r.check(f"{oid} M 必需产物角色与默认相同", roles == default_roles, f"{roles} vs {default_roles}")
@@ -202,7 +205,7 @@ def one(api, r, oid, offering):
         status, _ = api.json("PUT", params_path, {"params": {advised: other}})
         r.check(f"{oid} P 其他 advised 参数 {advised} 仍返回 400", status == 400, f"HTTP {status}")
     saved, why = run3d(api, sid, offering, 3)
-    roles = delivered("P 会话参数", saved, why)
+    roles = delivered("P 会话参数", saved, why, textures=0)
     if saved:
         switched_off("P 会话参数", saved)
         r.check(f"{oid} P 必需产物角色与默认相同", roles == default_roles, f"{roles} vs {default_roles}")

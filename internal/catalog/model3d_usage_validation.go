@@ -707,7 +707,8 @@ func validateChoiceKindShape(index int, kind ChatChoiceKindSchema, targetless bo
 	}
 	seen := map[string]bool{}
 	for _, action := range kind.Actions {
-		if (action != ChoiceActionSwitchOperation && action != ChoiceActionClearOperation) || seen[action] {
+		if (action != ChoiceActionSwitchOperation && action != ChoiceActionClearOperation &&
+			action != ChoiceActionContinueOnCanvas) || seen[action] {
 			return fmt.Errorf("choice.kinds[%d].actions 含未实现或重复的动作 %q", index, action)
 		}
 		seen[action] = true

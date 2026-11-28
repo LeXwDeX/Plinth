@@ -17,9 +17,14 @@ export type ChoiceState = 'pending' | 'answered' | 'superseded';
 /**
  * What the page does when the person picks an option, before the answer is sent (#374): it saves a function selection
  * through the session's Harness. The server only stores the action; clear_operation empties the selection (every tool is
- * available again) and switch_operation fixes the named function.
+ * available again) and switch_operation fixes the named function. continue_on_canvas (#709) saves nothing: the answer goes
+ * out as the person's previous message again, as a canvas turn (以画板为主, the board snapshot), the one explicit way an
+ * option brings the board in (#644).
  */
-export type ChoiceAction = { type: 'clear_operation' } | { type: 'switch_operation'; operationId: string };
+export type ChoiceAction =
+  | { type: 'clear_operation' }
+  | { type: 'switch_operation'; operationId: string }
+  | { type: 'continue_on_canvas' };
 
 export interface ChoiceOptionModel {
   id: string;
@@ -98,6 +103,7 @@ function parseAction(value: unknown): ChoiceAction | null | undefined {
   if (value === undefined || value === null) return null;
   const item = record(value);
   if (item?.type === 'clear_operation') return { type: 'clear_operation' };
+  if (item?.type === 'continue_on_canvas') return { type: 'continue_on_canvas' };
   if (item?.type === 'switch_operation' && text(item.operation_id)) return { type: 'switch_operation', operationId: text(item.operation_id) };
   return undefined;
 }
@@ -225,6 +231,7 @@ export function choiceSelectionAction(card: ChoiceCardModel, selection: ChoiceSe
  */
 export function choiceActionLabel(schema: ProductSchema, action: ChoiceAction): string {
   if (action.type === 'clear_operation') return schemaText(schema, 'ui.chat.choice.action_clear');
+  if (action.type === 'continue_on_canvas') return schemaText(schema, 'ui.chat.choice.action_continue_on_canvas');
   const operation = schema.chat.harness?.operations.find((item) => item.id === action.operationId)?.label
     ?? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.harness.selection_gone'));
   return formatSchemaText(schemaText(schema, 'ui.chat.choice.action_switch'), { operation });

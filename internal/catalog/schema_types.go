@@ -1844,6 +1844,10 @@ type CanvasFrontendSchema struct {
 	// HandleBadgeMinimumScreenPixels is the shorter on-screen edge a picture layer needs before its chat
 	// handle badge ("img3") is drawn in its top-right corner; smaller layers show none.
 	HandleBadgeMinimumScreenPixels float64 `json:"handle_badge_minimum_screen_pixels"`
+	// SendSaveWaitMilliseconds bounds how long a chat send waits for the board's pending saves
+	// (the debounced node save, unuploaded brush bitmaps) before it goes out anyway (#709): the
+	// server then reads the board as it is on screen. The wait puts nothing of the board into the turn.
+	SendSaveWaitMilliseconds       int     `json:"send_save_wait_milliseconds"`
 	ModelCaptureLongEdgePixels     int     `json:"model_capture_long_edge_pixels"`
 	// ToThreeDLongEdgePixels is the long edge of the board picture handed to an image-to-3D Offering when no
 	// 2D output size names exact pixels (the artboard itself is only max_edge units across).
@@ -3333,6 +3337,10 @@ type ChatSchema struct {
 	// normalized-region crop service's Agent-facing refusal copy. Server side
 	// only; the crop limits join application.asset_list.decompose in #331b.
 	ImageCrop ChatImageCropSchema `json:"image_crop"`
+	// CanvasLayers declares the read-only board reading of #709: the
+	// view_canvas tool, the @canvasN handles of the frozen board
+	// snapshot and the one board context line. Server side only.
+	CanvasLayers ChatCanvasLayersSchema `json:"canvas_layers,omitempty"`
 	// WorkLedger declares the session production ledger (#248): the read-only
 	// projection of the session's public Tasks, the summary it adds to the
 	// system prompt, the get_production_step tool's texts and the style anchor
@@ -3496,8 +3504,8 @@ type ChatChoiceKindSchema struct {
 	MaxOptions int `json:"max_options,omitempty"`
 	// Actions lists what an option of this kind may carry (#374): the page
 	// performs the action when the person picks the option, before it sends
-	// the answer. Only ChoiceActionSwitchOperation and
-	// ChoiceActionClearOperation exist; a kind without Actions accepts none.
+	// the answer. Only ChoiceActionSwitchOperation, ChoiceActionClearOperation
+	// and ChoiceActionContinueOnCanvas exist; a kind without Actions accepts none.
 	Actions []string `json:"actions,omitempty"`
 	// AnswerTemplate and PendingTemplate word a kind that names no target tool
 	// (ToolName empty, #374): its answer is the chosen option as text, not a
@@ -3532,10 +3540,14 @@ type ChatChoiceStepSchema struct {
 // them, through the session's function selection, before it sends the answer:
 // switch_operation fixes the named function operation, clear_operation clears
 // the selection so the session is in free mode again. The server never
-// changes the selection itself.
+// changes the selection itself. continue_on_canvas (#709) changes no
+// selection: the page sends the person's previous message again as a canvas
+// turn (以画板为主, input_source = context.canvas_input_source, the board
+// snapshot), the one explicit way an option brings the board in (#644).
 const (
-	ChoiceActionSwitchOperation = "switch_operation"
-	ChoiceActionClearOperation  = "clear_operation"
+	ChoiceActionSwitchOperation  = "switch_operation"
+	ChoiceActionClearOperation   = "clear_operation"
+	ChoiceActionContinueOnCanvas = "continue_on_canvas"
 )
 
 // ChatConceptDirectionsSchema is application.chat.concept_directions (#242,

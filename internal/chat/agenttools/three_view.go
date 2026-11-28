@@ -1151,6 +1151,25 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, tokens []string) ([]string, string) {
 	policy := chat.NewHandlePolicy(e.context)
 	if len(tokens) > 0 && len(command.Options.ReferenceImageIndices) == 0 {
+		// #709: an @canvasN handle names a picture layer of the board snapshot
+		// frozen with the turn; it is an ordinary source picture.
+		var boardURLs []string
+		named := make([]string, 0, len(tokens))
+		for _, token := range tokens {
+			picture, matched, err := chat.ResolveCanvasHandle(e.canvasLayers, command.Options, token)
+			if !matched {
+				named = append(named, token)
+				continue
+			}
+			if err != nil {
+				return nil, e.texts.Text(command.Options.Locale, err.Error())
+			}
+			boardURLs = append(boardURLs, picture.URL)
+		}
+		if len(named) == 0 {
+			return boardURLs, ""
+		}
+		tokens = named
 		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 		if err != nil || len(resolved) == 0 {
 			handle, reason := tokens[0], "unknown"
@@ -1160,7 +1179,7 @@ func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, toke
 			}
 			return nil, strings.ReplaceAll(chat.HandleRefusalTemplate(e.context, handle, reason), "{handle}", handle)
 		}
-		urls := make([]string, 0, len(resolved))
+		urls := append(make([]string, 0, len(resolved)+len(boardURLs)), boardURLs...)
 		for _, item := range resolved {
 			if item.URL != "" {
 				urls = append(urls, item.URL)
