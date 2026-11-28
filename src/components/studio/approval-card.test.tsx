@@ -265,6 +265,13 @@ describe('approval card', () => {
     expect(render({ ...card(null), capability: 'text-to-image' })).toMatch(/data-testid="studio-approval-kind"[^>]*>2D</);
     expect(render({ ...card(null), capability: 'remesh' })).toMatch(/data-testid="studio-approval-kind"[^>]*>3D</);
   });
+
+  it('calls background removal 2D: a processing step on a picture is not a 3D step (#719)', () => {
+    // 抠图 is declared `processing` like remesh; the Schema's model_processing_capabilities says which of them work on models.
+    expect(render({ ...card(null), capability: 'background-removal', model: 'default', provider: 'matting', providerId: 'matting' }))
+      .toMatch(/data-testid="studio-approval-kind" data-domain="image"[^>]*>2D</);
+    expect(render({ ...card(null), capability: 'remesh' })).toMatch(/data-testid="studio-approval-kind" data-domain="model"[^>]*>3D</);
+  });
 });
 
 it('shows frozen advised adjustments as one compact Agent line without changing the quoted credit total', () => {

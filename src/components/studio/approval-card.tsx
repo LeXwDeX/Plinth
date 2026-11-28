@@ -22,6 +22,7 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { formatNativePrice, formatPriceTotal } from '@/lib/pricing';
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
+import { domainOfCapability } from '@/lib/workspace/versions';
 import { cn } from '@/lib/utils';
 
 export interface ApprovalCardProps {
@@ -117,6 +118,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
     { profile: profileLabel(group.id), count: group.items.length },
   );
   const capability = schema.capabilities.find((item) => item.id === model.capability);
+  // #719: 2D or 3D by what the step makes, as the version strip decides it: a `processing` capability
+  // (抠图) is 3D only when the Schema lists it among runtime.frontend.model_processing_capabilities.
+  const kindDomain = domainOfCapability(schema, model.capability) ?? 'model';
   const { data: offerings, isLoading: offeringsLoading } = useSWR(
     model.capability ? ['approval-card-offerings', schema.revision, model.capability] : null,
     () => fetchCapabilityOfferings(schema, model.capability),
@@ -242,8 +246,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         {capability ? (
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.kind')}</dt>
-            <dd className="font-medium" data-testid="studio-approval-kind" data-domain={capability.domain}>
-              {schemaText(schema, capability.domain === 'image' ? 'ui.studio.picker.image.prefix' : 'ui.studio.picker.model.prefix')}
+            <dd className="font-medium" data-testid="studio-approval-kind" data-domain={kindDomain}>
+              {schemaText(schema, kindDomain === 'image' ? 'ui.studio.picker.image.prefix' : 'ui.studio.picker.model.prefix')}
             </dd>
           </>
         ) : null}
