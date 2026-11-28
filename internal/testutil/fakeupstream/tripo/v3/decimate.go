@@ -182,6 +182,11 @@ func (t *task) artifact(name string) (fakeupstream.File, error) {
 	if t.isDecimate() && name == "model.glb" {
 		return fakeupstream.LowPolyModelFile(t.decimateTriangles())
 	}
+	// A generation with texture off, and a conversion of its model, deliver a GLB
+	// without textures (untextured.go).
+	if t.deliversUntexturedGLB() && path.Ext(name) == ".glb" {
+		return fakeupstream.ModelFile("glb:untextured")
+	}
 	// A conversion that names its textures or its origin writes them (convert.go).
 	if spec, built := t.convertedModelSpec(); built {
 		switch path.Ext(name) {

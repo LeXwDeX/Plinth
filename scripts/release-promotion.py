@@ -5,9 +5,13 @@ An environment with "promote_from" (formal-test) only receives an exact origin/m
 its source environment (dev-test) released successfully AND that has a passing acceptance report
 in a native GitHub Issue comment. This module holds the pure checks; release-env.py drives them.
 
-The acceptance comment must contain exactly one JSON fenced report with "formal_promotion": 1,
-the full revision, the source image tag and four passing checks (L0, L1, L1_agent, related), each
+The acceptance comment must contain exactly one JSON fenced report with "formal_promotion", the
+full revision, the source image tag and four passing checks (L0, L1, L1_agent, related), each
 with evidence under the project URL. Skipped or soft-failed checks never count.
+
+Since #707 a new promotion needs "formal_promotion": 2 with a "release_gate" record: status pass
+and the URL of an Issue comment of this project that holds exactly one release gate receipt
+(written by the release-gate Agent, docs/release-gate.md) for the same full revision.
 
 Since #411 the same passing rule also applies to the machine-written smoke report that
 release-env.py leaves under the source environment's release root (smoke_report_path): the three
@@ -28,6 +32,11 @@ SMOKE_VERSION = 1
 # The layers release-env.py runs after a successful release; "related" is not among them.
 SMOKE_CHECKS = ("L0", "L1", "L1_agent")
 CHECK_NAMES = ("L0", "L1", "L1_agent", "related")
+# #707: format 2 adds a "release_gate" reference to a passing gate receipt. Format 1 notes written
+# before it still parse, but release-env.py requires format 2 for every new promotion.
+PROMOTION_FORMATS = (1, 2)
+GATED_FORMAT = 2
+GATE_RECEIPT_FORMAT = 1
 
 
 class ReleaseError(Exception):
@@ -95,8 +104,11 @@ def acceptance_from_note(body, revision, forge):
     if len(candidates) != 1:
         raise ReleaseError("one native formal_promotion acceptance report is required")
     report = candidates[0]
-    if type(report.get("formal_promotion")) is not int or report["formal_promotion"] != 1 or report.get("revision") != revision:
+    if (type(report.get("formal_promotion")) is not int or report["formal_promotion"] not in PROMOTION_FORMATS
+            or report.get("revision") != revision):
         raise ReleaseError("acceptance revision does not match the promotion")
+    if report["formal_promotion"] >= GATED_FORMAT:
+        gate_reference(report, forge)
     validate_tag(report.get("image_tag"))
     checks = report.get("checks", {})
     if not isinstance(checks, dict): raise ReleaseError("acceptance checks must be an object")
@@ -109,6 +121,46 @@ def acceptance_from_note(body, revision, forge):
         if not isinstance(evidence, str) or not evidence.startswith(forge + "/"):
             raise ReleaseError("native project evidence is required for every acceptance check")
     return report
+
+
+def gate_reference(report, forge):
+    """The (issue, comment id) of the release gate receipt a format-2 acceptance report points at (#707)."""
+    gate = report.get("release_gate") if isinstance(report, dict) else None
+    if (type(report.get("formal_promotion")) is not int or report["formal_promotion"] != GATED_FORMAT
+            or not isinstance(gate, dict)):
+        raise ReleaseError("a formal_promotion 2 report with a release_gate record is required")
+    if gate.get("status") != "pass":
+        raise ReleaseError("the release_gate record is not a pass")
+    evidence = gate.get("evidence")
+    match = (re.fullmatch(re.escape(forge) + r"/issues/([0-9]+)#issuecomment-([0-9]+)", evidence)
+             if isinstance(evidence, str) and forge else None)
+    if not match:
+        raise ReleaseError("the release_gate evidence must be an Issue comment URL of this project")
+    return int(match[1]), int(match[2])
+
+
+def gate_receipt_from_note(body, revision):
+    """The one release gate receipt in the gate comment; it must pass for exactly this revision."""
+    validate_revision(revision)
+    candidates = []
+    for block in re.findall(r"```json\s*\n(.*?)\n```", body, re.S):
+        try:
+            receipt = json.loads(block)
+        except ValueError:
+            raise ReleaseError("release gate receipt JSON is invalid") from None
+        # A format-2 acceptance report also names release_gate; it is not a receipt.
+        if isinstance(receipt, dict) and "release_gate" in receipt and "formal_promotion" not in receipt:
+            candidates.append(receipt)
+    if len(candidates) != 1:
+        raise ReleaseError("one release_gate receipt is required in the gate comment")
+    receipt = candidates[0]
+    if type(receipt.get("release_gate")) is not int or receipt["release_gate"] != GATE_RECEIPT_FORMAT:
+        raise ReleaseError("the release_gate receipt has an unknown format")
+    if receipt.get("revision") != revision:
+        raise ReleaseError("the release_gate receipt is for another revision")
+    if receipt.get("status") != "pass":
+        raise ReleaseError("the release_gate receipt is not a pass")
+    return receipt
 
 
 def smoke_checks_from_report(text, revision):

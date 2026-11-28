@@ -18,6 +18,8 @@ secrets. deploy/environments.example.json is its template.
 An environment with "promote_from" only receives an exact origin/main revision
 that the source environment released successfully (its manifest) AND that has a
 passing acceptance report (L0, L1, L1_agent, related) in a native Issue note.
+Since #707 that report must be "formal_promotion": 2 and name a passing release
+gate receipt for the same revision (docs/release-gate.md, scripts/release-gate.py).
 The release itself is scripts/release-go-testenv.sh with the environment's
 parameters; nothing about the server flow is duplicated here.
 
@@ -311,9 +313,19 @@ def promotion_revision(document, name, revision, note_id):
         note = promotion.read_acceptance_comment(acceptance["forge_repo"], acceptance["issue"], note_id)
     except promotion.ReleaseError as error:
         raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
-    manifest = run("ssh", source["ssh"], f"cat {source['root']}/releases/manifest.txt")
     try:
         report = promotion.acceptance_from_note(note.get("body", ""), revision, acceptance["forge_url"])
+        # #707: every new promotion carries a format-2 report naming a passing release gate receipt.
+        gate_issue, gate_comment = promotion.gate_reference(report, acceptance["forge_url"])
+    except promotion.ReleaseError as error:
+        raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
+    try:
+        gate = promotion.read_acceptance_comment(acceptance["forge_repo"], gate_issue, gate_comment)
+        promotion.gate_receipt_from_note(gate.get("body", ""), revision)
+    except promotion.ReleaseError as error:
+        raise EnvironmentError_(f"release gate refused: {error}") from None
+    manifest = run("ssh", source["ssh"], f"cat {source['root']}/releases/manifest.txt")
+    try:
         promotion.validate_manifest(manifest, revision, report["image_tag"])
     except promotion.ReleaseError as error:
         raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None

@@ -18,16 +18,16 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 27 | 23 | 2 | 52 | 2026-11-25 |
+| `tripo/v3` | 27 | 24 | 2 | 53 | 2026-11-25 |
 | `openai/v1` | 5 | 15 | 0 | 20 | 2026-11-25 |
-| `meshy/openapi-v1` | 25 | 23 | 0 | 48 | 2026-11-25 |
+| `meshy/openapi-v1` | 25 | 24 | 0 | 49 | 2026-11-25 |
 | `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 4 | 8 | 1 | 13 | 2026-11-25 |
 | `gemini/images-v1` | 2 | 4 | 2 | 8 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 5 | 0 | 7 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 84 | 102 | 5 | 191 | 2026-11-25 |
+| 合计 | 84 | 104 | 5 | 193 | 2026-11-25 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -202,6 +202,14 @@
 - 依据：dev-test 真实运行观测（文生与图生）（#294，2026-11-12）
 - 核对日期：2026-11-12
 - 没有真实样本的原因：真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；multiview-to-model 未观测，按同系列推定
+
+#### `tripo-v3/generation-texture-off-glb` · artifact-shape · constructed
+
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /models/convert`
+- 行为：生成请求 texture=false（且未开 pbr）时，生成任务及其模型转换（如 GLTF 导出）交付的 GLB 都是无贴图夹具：0 个 texture、0 个 image、1 个 material（untextured.go）；texture 为 true 或缺省时仍交付原有带贴图 GLB（1 张贴图，真实为 3 张）。image-to-model、multiview-to-model 按文生推定；pbr=true 且 texture=false 按 Plinth 计价视为有纹理；无贴图源的 FBX/OBJ/USDZ/3MF 转换、绑骨与减面仍是带贴图夹具。
+- 依据：v1.9.6 发布后正式测试环境真实回归的 Plinth 侧观测（tripo/tripo-v3.1-full/text-to-3d，texture 关与默认各一次）（#704，2026-11-28，revision f5bc5e10；计数与报价入库为 internal/testutil/fakeupstream/tripo/v3/testdata/observation-704-texture-off.json）
+- 核对日期：2026-11-28
+- 没有真实样本的原因：只有 Plinth 侧观测（冻结输入、native_quote、交付 GLB 的 texture/image/material 计数）入库；原始 HTTP 请求与响应未作为脱敏 wire 样本录制，GLB 字节未入库，无法按登记表规则引用 candidate 样本标 real；image-to-model、multiview-to-model 与 pbr 组合未观测
 
 #### `tripo-v3/image-to-model-h-shape` · response-shape · real
 
@@ -1054,6 +1062,14 @@
 - 端点：`POST /animations`
 - 行为：fake 持有 2026-11-25 官方动作库（GET /animations/library）的 rig_type 表（678 个 biped、127 个 quadruped）；action_id 或 action_ids 中有动作的 rig_type 与骨骼（rigging 请求的 animation_type，缺省 biped）不符时答 400，点名第一个不符的动作。quadruped 动作用在 biped 骨骼上的文案为真实观测：“Animation 1055 is a quadruped animal animation and cannot be applied to this character. Pick an animation made for this character's rig.”（单个 action_id 与 action_ids [0, 1055] 同文）。biped 动作用在 quadruped 骨骼上的文案按同一格式构造，未观测；动作库未列出的 id 不拒绝（未建模）。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation-rig-type-2026-11-25.candidate.json`（2026-11-25，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v1/image-to-3d-texture-off-glb` · artifact-shape · constructed
+
+- 端点：`POST /image-to-3d`、`POST /multi-image-to-3d`
+- 行为：image-to-3d、multi-image-to-3d 请求 should_texture=false 时，生成任务交付的 GLB 是无贴图夹具：0 个 texture、0 个 image、1 个 material（core/untextured.go）；should_texture 为 true 或缺省时仍交付原有带贴图 GLB。multi-image-to-3d（含 enable_pbr=true）按单图推定；无贴图任务的 FBX/USDZ/3MF 以及对它的 remesh、convert、绑骨与 retexture 仍是带贴图夹具。
+- 依据：v1.9.6 发布后正式测试环境真实回归的 Plinth 侧观测（meshy/meshy-7.1/image-to-3d，界面保存的会话参数 should_texture=false、enable_pbr=false，交付 GLB 计数 textures 0 / images 0 / materials 1）（#704，2026-11-28，revision f5bc5e10，https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783；计数入库为 internal/testutil/fakeupstream/meshy/openapi-v1/testdata/observation-704-texture-off.json）
+- 核对日期：2026-11-28
+- 没有真实样本的原因：只有 Plinth 侧观测（冻结输入与交付 GLB 的 texture/image/material 计数）入库；原始 HTTP 请求与响应未作为脱敏 wire 样本录制，GLB 字节未入库，无法按登记表规则引用 candidate 样本标 real；multi-image-to-3d 与 Meshy 默认开纹理的对照未观测
 
 ### `meshy/openapi-v2`
 

@@ -773,7 +773,8 @@ class PostReleaseSmokeTest(unittest.TestCase):
                              for name in ("L0", "L1", "L1_agent")}}
         _, commands, _ = self.run_promotion(report)
         rules = release_env.promotion_rules()
-        self.assertIn(f"cat /srv/dev-test/{rules.smoke_report_path(self.SHA)}", commands)
+        self.assertTrue([command for command in commands
+                         if command.endswith(f"cat /srv/dev-test/{rules.smoke_report_path(self.SHA)}")])
 
     def test_a_promotion_refuses_a_source_report_that_is_not_passing(self):
         for report in ({"schema": "plinth.smoke-report", "version": 1, "revision": self.SHA,
@@ -801,7 +802,60 @@ class PostReleaseSmokeTest(unittest.TestCase):
     TAG = "aaaaaaa-20261019T010000Z"
     EVIDENCE = "https://forge.example.invalid/owner/project/issues/63#c1"
 
-    def run_promotion(self, smoke_report, present=True):
+    GATE_EVIDENCE = "https://forge.example.invalid/owner/project/issues/63#issuecomment-9"
+    GOOD_SMOKE = {"schema": "plinth.smoke-report", "version": 1, "revision": "a" * 40,
+                  "checks": {name: {"status": "pass", "passed": 3, "failed": 0, "skipped": 0, "soft_failed": 0}
+                             for name in ("L0", "L1", "L1_agent")}}
+
+    def gated_note(self, **gate):
+        note = {"formal_promotion": 2, "revision": self.SHA, "image_tag": self.TAG,
+                "checks": {name: {"status": "pass", "failed": 0, "passed": 1, "evidence": self.EVIDENCE}
+                           for name in ("L0", "L1", "L1_agent", "related")},
+                "release_gate": {"status": "pass", "evidence": self.GATE_EVIDENCE}}
+        note["release_gate"].update(gate)
+        return note
+
+    def gate_receipt(self, **changes):
+        receipt = {"release_gate": 1, "revision": self.SHA, "status": "pass", "rules_version": 1,
+                   "base": "v1.9.5", "changed_issues": [704], "checked_at": "2026-11-28"}
+        receipt.update(changes)
+        return receipt
+
+    def test_a_promotion_reads_the_gate_receipt_named_by_the_acceptance_report(self):
+        _, _, _, calls = self.run_promotion(self.GOOD_SMOKE, with_calls=True)
+        self.assertEqual(calls, [("owner/project", 63, 5), ("owner/project", 63, 9)])
+
+    def test_a_format_one_acceptance_report_is_refused_for_a_new_promotion(self):
+        note = self.gated_note()
+        note["formal_promotion"] = 1
+        del note["release_gate"]
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "formal_promotion 2"):
+            self.run_promotion(self.GOOD_SMOKE, note=note)
+
+    def test_a_missing_failed_or_foreign_gate_record_is_refused_before_any_host_is_read(self):
+        notes = []
+        note = self.gated_note(); del note["release_gate"]; notes.append(note)
+        notes.append(self.gated_note(status="fail"))
+        notes.append(self.gated_note(evidence="https://example.com/owner/project/issues/63#issuecomment-9"))
+        for note in notes:
+            with self.subTest(gate=note.get("release_gate")):
+                commands = []
+                with self.assertRaisesRegex(release_env.EnvironmentError_, "acceptance refused"):
+                    self.run_promotion(self.GOOD_SMOKE, note=note, commands=commands)
+                self.assertFalse([command for command in commands if "manifest" in command or "smoke-" in command])
+
+    def test_a_gate_receipt_for_another_revision_or_not_passing_is_refused(self):
+        for receipt in (self.gate_receipt(revision="b" * 40), self.gate_receipt(status="fail"),
+                        self.gate_receipt(release_gate=2), None):
+            with self.subTest(receipt=receipt):
+                commands = []
+                with self.assertRaisesRegex(release_env.EnvironmentError_, "release gate refused"):
+                    self.run_promotion(self.GOOD_SMOKE, receipt=receipt, commands=commands)
+                self.assertFalse([command for command in commands if "manifest" in command or "smoke-" in command])
+                self.assertFalse([command for command in commands if "host-four" in command])
+
+    def run_promotion(self, smoke_report, present=True, note=None, receipt="default", commands=None,
+                      with_calls=False):
         """Drive promotion_revision with the source side stubbed; return (revision, commands, output)."""
         document = copy.deepcopy(BASE)
         document["acceptance"] = {"forge_repo": "owner/project", "issue": 63,
@@ -809,13 +863,13 @@ class PostReleaseSmokeTest(unittest.TestCase):
         document["environments"]["formal-test"] = dict(self.PROMOTED)
         document = load(document)
         rules = release_env.promotion_rules()
-        note = {"formal_promotion": 1, "revision": self.SHA, "image_tag": self.TAG,
-                "checks": {name: {"status": "pass", "failed": 0, "passed": 1, "evidence": self.EVIDENCE}
-                           for name in ("L0", "L1", "L1_agent", "related")}}
-        commands = []
+        note = self.gated_note() if note is None else note
+        receipt = self.gate_receipt() if receipt == "default" else receipt
+        commands = [] if commands is None else commands
+        calls = []
 
         def fake_run(*args, input=None, timeout=120):
-            command = args[-1]
+            command = " ".join(str(arg) for arg in args)
             commands.append(command)
             if command.endswith("manifest.txt"):
                 return f"{self.TAG} {self.SHA} 2026-11-19T01:00:00Z\n"
@@ -823,15 +877,22 @@ class PostReleaseSmokeTest(unittest.TestCase):
                 return json.dumps(smoke_report) if smoke_report is not None else ""
             return ""
 
+        def fake_comment(repo, issue, comment_id):
+            calls.append((repo, issue, comment_id))
+            if comment_id == 5:
+                return {"body": "```json\n" + json.dumps(note) + "\n```"}
+            return {"body": "门禁回执\n```json\n" + json.dumps(receipt) + "\n```" if receipt else "无回执"}
+
         output = io.StringIO()
         with mock.patch.object(release_env, "promotion_rules", return_value=rules), \
-                mock.patch.object(rules, "read_acceptance_comment",
-                                  return_value={"body": "```json\n" + json.dumps(note) + "\n```"}), \
+                mock.patch.object(rules, "read_acceptance_comment", side_effect=fake_comment), \
                 mock.patch.object(release_env, "running_revision", return_value=self.SHA), \
                 mock.patch.object(release_env, "host_file_state", return_value=present), \
                 mock.patch.object(release_env, "run", fake_run), \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             revision = release_env.promotion_revision(document, "formal-test", self.SHA, 5)
+        if with_calls:
+            return revision, commands, output.getvalue(), calls
         return revision, commands, output.getvalue()
 
 

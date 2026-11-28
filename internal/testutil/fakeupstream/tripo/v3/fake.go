@@ -348,6 +348,9 @@ type task struct {
 	// sourceTriangles is the triangle count of that task's model when it is not
 	// the plain fixture (a decimation), 0 otherwise.
 	sourceTriangles int
+	// sourceUntextured reports that task to be a generation with texture off
+	// (untextured.go).
+	sourceUntextured bool
 	// importedID is the id the official API gives the model a conversion fetched
 	// from a URL: the poll names it original_model_id, a new id every time
 	// (observed 2026-11-16, #305).
@@ -883,6 +886,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			}
 			if from != nil {
 				t.sourceFidelity, t.sourceTriangles = from.fidelity(), from.modelTriangles()
+				t.sourceUntextured = from.generatesUntextured()
 			}
 			if strings.HasPrefix(source, "file_") {
 				// An uploaded model is imported like a URL: the poll names a new
