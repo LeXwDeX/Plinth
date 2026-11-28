@@ -65,11 +65,12 @@
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
 - 源环境发布根下该 revision 的**机器冒烟报告**存在时，其 L0、L1、L1 Agent 三层都是 `status` 为 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`；报告缺失时按下面的回退规则只核对 Issue comment；
-- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py`、`scripts/tests/test_release_env.py` 覆盖）：
+- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py`、`scripts/tests/test_release_env.py` 覆盖）；
+- 该报告是格式 2（`"formal_promotion": 2`，#707），其 `release_gate.status` 为 `pass`，`release_gate.evidence` 是本仓库某个 Issue comment 的完整 URL（`<forge_url>/issues/<N>#issuecomment-<id>`）；被引用的 comment 属于该 Issue，其中恰有一个发布门禁回执 JSON 块（见下），`release_gate` 为 `1`、`revision` 与候选完整一致、`status` 为 `pass`。门禁规则见 [`docs/release-gate.md`](release-gate.md)。
 
 ```json
 {
-  "formal_promotion": 1,
+  "formal_promotion": 2,
   "revision": "<完整40位小写SHA>",
   "image_tag": "<dev-test manifest 中对应的精确标签>",
   "checks": {
@@ -77,11 +78,20 @@
     "L1": {"status": "pass", "failed": 0, "passed": 1, "skipped": 0, "soft_failed": 0, "evidence": "<…>"},
     "L1_agent": {"status": "pass", "failed": 0, "passed": 1, "skipped": 0, "soft_failed": 0, "evidence": "<…>"},
     "related": {"status": "pass", "failed": 0, "passed": 1, "skipped": 0, "soft_failed": 0, "evidence": "<本次相关浏览器/Agent 验收 note URL>"}
-  }
+  },
+  "release_gate": {"status": "pass", "evidence": "<门禁回执所在 Issue comment 的完整 URL>"}
 }
 ```
 
+门禁回执由门禁 Agent（`.claude/agents/release-gate.md`）在门禁通过时输出，由人或主会话贴到 #2 的评论里：
+
+```json
+{"release_gate": 1, "revision": "<完整40位小写SHA>", "status": "pass", "rules_version": 1, "base": "<上一个 tag>", "changed_issues": [704, 705], "checked_at": "<UTC 日期>"}
+```
+
 `related` 覆盖本次改动涉及的浏览器与 Agent 验收（含按 `scripts/smoke/README.md` 需要的 L2 真实模型链路）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
+
+格式 1（`"formal_promotion": 1`，没有 `release_gate`）是 #707 之前的历史回执：`scripts/release-promotion.py` 仍能解析它，#2 里已有的旧回执不需要补门禁；但 `release-env.py release formal-test` 对每一次新的晋级都要求格式 2，格式 1 报告、缺 `release_gate`、门禁回执的 revision 不一致或 `status` 不是 `pass` 一律拒绝，且不联系目标主机。
 
 ### 机器冒烟报告（`release-env.py` 自动产出，#411）
 

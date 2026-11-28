@@ -33,7 +33,7 @@ scripts/smoke/README.md              # 分层口径
 scripts/upgrade-drill.py             # 晋级前保留数据升级演练（候选镜像 + 存量数据库副本，只读冒烟）
 ```
 
-晋级校验（`promote_from`，#411）：`release formal-test --acceptance-note <ID>` 除 Issue comment 外，还读 `dev-test` 发布根下该 revision 的机器冒烟报告（`<root>/production/reports/smoke-<revision>.json`），三层必须都是 `pass`；报告缺失时按 `docs/deployment.md` §4 回退到只核对 comment，命令会打印提示。机器报告只由发布入口写，不手工编辑。
+晋级校验（`promote_from`，#411）：`release formal-test --acceptance-note <ID>` 除 Issue comment 外，还读 `dev-test` 发布根下该 revision 的机器冒烟报告（`<root>/production/reports/smoke-<revision>.json`），三层必须都是 `pass`；报告缺失时按 `docs/deployment.md` §4 回退到只核对 comment，命令会打印提示。机器报告只由发布入口写，不手工编辑。#707 起验收报告必须是格式 2 并带 `release_gate`（指向 #2 里门禁 Agent 回执的 comment URL），门禁回执缺失、revision 不一致或不是 `pass` 即拒绝，规则见 `docs/release-gate.md`。
 
 保留数据升级演练（#435）：`formal-test` 保留数据，迁移第一次作用于存量行就发生在晋级发布现场，发布 preflight 只在空目录启动候选镜像、覆盖不到。晋级前用候选镜像对一份存量数据库副本跑演练：
 

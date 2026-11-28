@@ -76,8 +76,9 @@ __pycache__/
 # Skill 数据 pipeline 中间产物
 tmp/
 
-# coding-tools
-.claude/
+# coding-tools（项目子 Agent 定义 .claude/agents/ 纳入 Git，#707）
+/.claude/*
+!/.claude/agents/
 .codex/
 .opencode/
 

@@ -40,6 +40,8 @@ host=$1; shift
 command=$*
 printf 'ssh %s %s\n' "$host" "$command" >>"$MOCK_TRACE"
 case "$command" in
+  # No machine smoke report (#411) on the mock host: promotions fall back to the acceptance note.
+  'test -f '*) exit 1 ;;
   *'tar -x -C '*' -f '*) ;;
   *'tar -x -C '*) shasum -a 256 | cut -d' ' -f1 >>"$MOCK_TRACE" ;;
   *'docker inspect -f'*) printf '%s\n' "$MOCK_RUNNING" ;;
@@ -61,7 +63,11 @@ MOCK
 cat >"$WORK/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >>"$MOCK_TRACE"
-cat "$MOCK_NOTE"
+# Comment 99 is the release gate receipt the acceptance report points at (#707).
+case "$*" in
+  *issues/comments/99) cat "$MOCK_GATE" ;;
+  *) cat "$MOCK_NOTE" ;;
+esac
 MOCK
 cat >"$WORK/bin/date" <<'MOCK'
 #!/usr/bin/env bash
@@ -69,7 +75,7 @@ echo 20261020T010203Z
 MOCK
 chmod +x "$WORK/bin/"*
 mkdir -p "$WORK/tmp"
-export PATH="$WORK/bin:$PATH" MOCK_TRACE="$WORK/trace" MOCK_NOTE="$WORK/note.json" TMPDIR="$WORK/tmp"
+export PATH="$WORK/bin:$PATH" MOCK_TRACE="$WORK/trace" MOCK_NOTE="$WORK/note.json" MOCK_GATE="$WORK/gate.json" TMPDIR="$WORK/tmp"
 ARCHIVE_SHA=$(git -C "$WORK/repo" archive origin/main | shasum -a 256 | cut -d' ' -f1)
 SHORT=${SECOND:0:7}
 # The entry has no host or root of its own (#249); dev-test is a placeholder here.
@@ -130,16 +136,22 @@ cat >"$ART_AI_ENVIRONMENTS_FILE" <<EOF
                              "GO_PROD_DB_DIR": "/srv/formal/production/data",
                              "GO_LEGACY_INPUT_ASSETS_DIR": "/srv/formal/production/legacy-assets"}}}}
 EOF
-note() { # $1=revision $2=image tag $3=L1_agent status
-  python3 - "$1" "$2" "$3" "$FORGE" >"$MOCK_NOTE" <<'PY'
+note() { # $1=revision $2=image tag $3=L1_agent status [$4=report format] [$5=gate revision] [$6=gate status]
+  python3 - "$1" "$2" "$3" "$FORGE" "${4:-2}" "${5:-$1}" "${6:-pass}" "$MOCK_GATE" >"$MOCK_NOTE" <<'PY'
 import json, sys
-revision, tag, agent, forge = sys.argv[1:]
+revision, tag, agent, forge, version, gate_revision, gate_status, gate_file = sys.argv[1:]
 check = lambda status: {"status": status, "failed": 0, "passed": 3, "skipped": 0, "soft_failed": 0,
                         "evidence": forge + "/issues/7#issuecomment-1"}
-report = {"formal_promotion": 1, "revision": revision, "image_tag": tag,
+report = {"formal_promotion": int(version), "revision": revision, "image_tag": tag,
           "checks": {"L0": check("pass"), "L1": check("pass"), "L1_agent": check(agent), "related": check("pass")}}
-print(json.dumps({"body": "accepted\n```json\n" + json.dumps(report) + "\n```\n",
-                  "issue_url": "https://api.forge.example.invalid/repos/owner/project/issues/7"}))
+if report["formal_promotion"] == 2:
+    report["release_gate"] = {"status": "pass", "evidence": forge + "/issues/7#issuecomment-99"}
+issue = "https://api.forge.example.invalid/repos/owner/project/issues/7"
+receipt = {"release_gate": 1, "revision": gate_revision, "status": gate_status, "rules_version": 1,
+           "base": "v0", "changed_issues": [1], "checked_at": "2026-11-28"}
+with open(gate_file, "w") as handle:
+    json.dump({"body": "gate\n```json\n" + json.dumps(receipt) + "\n```\n", "issue_url": issue}, handle)
+print(json.dumps({"body": "accepted\n```json\n" + json.dumps(report) + "\n```\n", "issue_url": issue}))
 PY
 }
 TAG2="$SHORT-20261019T000000Z"
@@ -167,17 +179,20 @@ echo "PASS env/dev-test-equals-plain-entry"
 note "$SECOND" "$TAG2" pass
 : >"$MOCK_TRACE"
 (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test --acceptance-note 11) >"$WORK/formal.log"
+PROMOTED_VERSION=$(git -C "$WORK/repo" describe --tags --always "$SECOND")
 cat >"$WORK/expected" <<EOF
 ssh $DEFAULT_HOST docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' dev_project-art-ai-go-1
 gh api repos/owner/project/issues/comments/11
+gh api repos/owner/project/issues/comments/99
 ssh $DEFAULT_HOST cat $DEFAULT_ROOT/releases/manifest.txt
+ssh $DEFAULT_HOST test -f $DEFAULT_ROOT/production/reports/smoke-$SECOND.json
 ssh root@formal.example.invalid mv /srv/formal/app /srv/formal/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p /srv/formal/app /srv/formal/releases
 scp -q archive:$ARCHIVE_SHA root@formal.example.invalid:/srv/formal/releases/source-$SHORT-20261020T010203Z.tar
 ssh root@formal.example.invalid tar -x -C /srv/formal/app -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar && rm -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar
 ssh root@formal.example.invalid mkdir -p /srv/formal/tmp && chmod 0711 /srv/formal/tmp
 scp -q $SCRIPTS/release-server-steps.sh root@formal.example.invalid:/srv/formal/tmp/art-ai-release-steps.sh
 scp -q $SCRIPTS/retain-art-ai-images.py root@formal.example.invalid:/srv/formal/tmp/art-ai-retain-images.py
-ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RETENTION_SCRIPT=/srv/formal/tmp/art-ai-retain-images.py bash /srv/formal/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
+ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RELEASE_VERSION=$PROMOTED_VERSION RETENTION_SCRIPT=/srv/formal/tmp/art-ai-retain-images.py bash /srv/formal/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
 ssh root@formal.example.invalid cd /srv/formal && ls -1d app.prev-[0-9]*T[0-9]*Z 2>/dev/null | sort | head -n -1 | xargs -r rm -rf --
 EOF
 diff -u "$WORK/expected" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "formal-test release commands differ"
@@ -219,6 +234,14 @@ note "$UNPUBLISHED" "$TAG2" pass
 export MOCK_MANIFEST="$TAG2 $UNPUBLISHED 2026-10-19T00:00:00Z"
 refuse "revision not on origin/main" "is not on origin/main" --revision "$UNPUBLISHED" --acceptance-note 13
 refuse "malformed revision" "40-character" --revision abc --acceptance-note 13
+export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
+# #707: a new promotion needs a format-2 report whose release gate receipt passes for the revision.
+note "$SECOND" "$TAG2" pass 1
+refuse "format-1 report without a release gate" "formal_promotion 2" --acceptance-note 13
+note "$SECOND" "$TAG2" pass 2 "$FIRST"
+refuse "release gate receipt for another revision" "release gate refused: .*another revision" --acceptance-note 13
+note "$SECOND" "$TAG2" pass 2 "$SECOND" fail
+refuse "release gate receipt not passing" "release gate refused: .*not a pass" --acceptance-note 13
 export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 note "$SECOND" "$TAG2" pass
 export MOCK_SERVER_FAIL=1

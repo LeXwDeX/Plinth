@@ -105,8 +105,9 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及上游的验收使用 fake 场景。L2、L5 等真实模型或付费验收不再每次发布必跑，只在用户当次同意后执行（见「上游接口与 Fake」），结果回灌 fake。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent 并写机器报告，判定口径见「发布后冒烟判定与晋级校验」；真实形态仍按 `docs/deployment.md` §6 手动执行。
 6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
 7. **最终 GitHub Runner 验证**：本轮所有问题在自建 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub Runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。GitHub Runner 指 `.github/workflows/ci.yml` 的三个作业：推送 `main` 时由自托管 runner 运行；自托管 runner 掉线时，按 `dev_test.md` §2「自托管 runner」手动触发该工作流，由 GitHub 托管 runner 完成，两者都算。
-8. **晋级到 `formal-test` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到正式测试环境，交由人工 Review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；前三项由 `release-env.py` 读 `dev-test` 发布根下的机器报告核对，验收报告以本仓库原生 Issue comment 记录，脚本同时核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
-9. **Tag 与 GitHub Release**：人工 Review 确认 `formal-test` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；Review 未通过时修复后从第 1 步重走。
+8. **过发布门禁**：晋级前按 `docs/release-gate.md` 调用门禁 Agent（`.claude/agents/release-gate.md`，内含 `scripts/release-gate.py`）核对回归覆盖、fake 回灌与验收证据；门禁不通过不得晋级，通过的回执贴到 #2，打 tag 前再过一次。
+9. **晋级到 `formal-test` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到正式测试环境，交由人工 Review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；前三项由 `release-env.py` 读 `dev-test` 发布根下的机器报告核对，验收报告以本仓库原生 Issue comment 记录，脚本同时核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
+10. **Tag 与 GitHub Release**：人工 Review 确认 `formal-test` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；Review 未通过时修复后从第 1 步重走。
 
 纯文档或 AGENTS 规则修改且不影响运行产物时，只做第 1–3 步并校验文档，不必重建运行镜像或发布。
 
@@ -116,6 +117,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - **按公开交付契约验收**：Provider 返回 `SUCCEEDED`、模型能打开、服务健康或局部测试通过，不等于公开任务完整交付成功。按 `docs/architecture.md` 核对必需产物槽位、实际字节、资产状态及鉴权交付。不得用放松安全校验、把必需产物改成可选、盲目付费重试或仅增大超时来掩盖原因；契约变更须有独立依据并遵循既有授权与验收规则。
 - **自动化门禁**：`dev_test.md` §2 是本地与 CI 自动化门禁的唯一真源；按最终 diff 和影响链运行，合并前的 CI 门禁按其「交付硬门禁」执行。前端构建使用 pnpm；Go 验证使用 go 命令。不要把远端 CI 当本机可复现问题的首次测试环境。需要干净环境复现门禁时，用 `python3 scripts/host-ci/run.py <sha|HEAD>` 在 `dev-test` 主机的一次性容器里对精确提交跑同一套门禁，规则见 `dev_test.md` §2「主机 CI」。
 - **验收数据**：`dev-test` 的每次冒烟与相关验收都从全新数据开始，按真实用户流程创建自己的会话与数据（例如 #25：全新数据 → 模拟用户沟通 → Agent 先 2D 后 3D，真实请求），不依赖历史任务或会话；验收账号见「环境与运维」的「Agent 测试开发账号」（#28）。
+- **回归测试表与门禁**：验证前先读 `docs/regression-matrix.md`，只跑其中「每次发布必跑」与本次改动相关的行，不再凭记忆重新遍历；验证后更新对应行。发布前门禁 Agent 必须通过（见 `docs/release-gate.md`）；带着已知 fake 差异不得发布。
 - **付费验收**：真实模型/付费验收只在用户当次同意后进行；是否需要按 Issue 范围与 `scripts/smoke/README.md` 判定，并以下达任务的用户最新指示为准。活动中某条「停止/暂停付费验收」的阶段性记录不构成长期规则。发起前核对当前官方协议、价格与余额，只做小额单次请求，绝不重放已消费的 intent。
   - 真实模型或付费验收每次都须先在当前对话取得用户同意（见「上游接口与 Fake」）；同意后，Agent 可在 `dev-test` 以「人」的身份代为点击/调用产品内的同意批准，产品的批准规则见 `docs/product.md`。
   - 以上只适用于 `dev-test`；`formal-test`、正式生产，以及超出测试授权范围的生成，须单独取得用户授权。
@@ -166,6 +168,9 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - `docs/v3-architecture/README.md`：冻结输入、执行授权、Scene、RenderManifest 和 SkillRun 的设计与源码状态；目录内“待验收”记录不能当作当前部署事实。
 - `docs/go-architecture.md`、`docs/provider-schema-architecture.md`：Go/Provider 分层及公开任务和私有子作业的历史基线；引用“当前”表述前先对照现行源码。
 - `docs/acceptance-1.0.md`：开源 1.0 功能验收清单与全新机器部署验收步骤；逐项结果记在 #1，不写回该文档。
+- `docs/release-gate.md`：发布门禁：规则、豁免、变更记录；门禁 Agent 定义在 `.claude/agents/release-gate.md`。
+- `docs/regression-matrix.md`：回归测试表：每个功能与行为一行，验证前先读、验证后更新，改行为的 PR 必须同步更新对应行。
+- `docs/fake-register.md`：Fake 验证登记表；真实与 fake 的差异必须回灌并登记。
 - `docs/specgit-project-integration.md`：SpecGit 项目集成。
 - `docs/history.md`：规则与环境的历史背景、编号对照；只作追溯，不是现行要求。
 - `internal/AGENTS.md`：Go 子树独有边界；若其指针因本文重写而过期，同步修正。

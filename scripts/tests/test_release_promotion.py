@@ -88,6 +88,72 @@ class PromotionRuleTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), "release command failed: false")
 
 
+GATE_EVIDENCE = FORGE + "/issues/2#issuecomment-456"
+
+
+def gated_acceptance():
+    report = acceptance()
+    report["formal_promotion"] = 2
+    report["release_gate"] = {"status": "pass", "evidence": GATE_EVIDENCE}
+    return report
+
+
+def gate_receipt(**changes):
+    receipt = {"release_gate": 1, "revision": SHA, "status": "pass", "rules_version": 1,
+               "base": "v1.9.5", "changed_issues": [704], "checked_at": "2026-11-28"}
+    receipt.update(changes)
+    return receipt
+
+
+class ReleaseGateReferenceTests(unittest.TestCase):
+    """#707: a format-2 acceptance report points at a passing release gate receipt for the revision."""
+
+    def test_format_two_carries_a_passing_gate_reference(self):
+        report = gated_acceptance()
+        self.assertEqual(promotion.acceptance_from_note(note(report), SHA, FORGE), report)
+        self.assertEqual(promotion.gate_reference(report, FORGE), (2, 456))
+
+    def test_format_one_still_reads_but_has_no_gate_reference(self):
+        report = acceptance()
+        self.assertEqual(promotion.acceptance_from_note(note(report), SHA, FORGE), report)
+        with self.assertRaises(promotion.ReleaseError):
+            promotion.gate_reference(report, FORGE)
+
+    def test_format_two_without_or_with_a_bad_gate_record_is_refused(self):
+        cases = []
+        report = gated_acceptance(); del report["release_gate"]; cases.append(report)
+        report = gated_acceptance(); report["release_gate"] = "pass"; cases.append(report)
+        for status in ("fail", "PASS", None):
+            report = gated_acceptance(); report["release_gate"]["status"] = status; cases.append(report)
+        for evidence in (None, "", "https://example.com/issues/2#issuecomment-1", FORGE + "/issues/2",
+                         FORGE + "/pull/2#issuecomment-1", FORGE + "/issues/2#issuecomment-1 extra"):
+            report = gated_acceptance(); report["release_gate"]["evidence"] = evidence; cases.append(report)
+        report = gated_acceptance(); report["formal_promotion"] = 3; cases.append(report)
+        for report in cases:
+            with self.subTest(report=report.get("release_gate"), version=report["formal_promotion"]):
+                with self.assertRaises(promotion.ReleaseError):
+                    promotion.acceptance_from_note(note(report), SHA, FORGE)
+                with self.assertRaises(promotion.ReleaseError):
+                    promotion.gate_reference(report, FORGE)
+
+    def test_the_gate_comment_holds_one_passing_receipt_for_the_exact_revision(self):
+        receipt = gate_receipt()
+        self.assertEqual(promotion.gate_receipt_from_note("门禁通过\n" + note(receipt), SHA), receipt)
+        # The acceptance report itself names release_gate; it is not a receipt.
+        self.assertEqual(promotion.gate_receipt_from_note(note(gated_acceptance()) + "\n" + note(receipt), SHA),
+                         receipt)
+
+    def test_a_missing_doubled_mismatched_or_failing_receipt_is_refused(self):
+        bodies = ["", "no json", note(gated_acceptance()), note(gate_receipt()) + "\n" + note(gate_receipt()),
+                  "```json\n{broken}\n```", note(gate_receipt(revision="b" * 40)),
+                  note(gate_receipt(revision=SHA[:8])), note(gate_receipt(status="fail")),
+                  note(gate_receipt(status=None)), note(gate_receipt(release_gate=2)),
+                  note(gate_receipt(release_gate=True)), note(gate_receipt(release_gate="1"))]
+        for body in bodies:
+            with self.subTest(body=body[:60]), self.assertRaises(promotion.ReleaseError):
+                promotion.gate_receipt_from_note(body, SHA)
+
+
 def smoke_report(**changes):
     report = {"schema": promotion.SMOKE_SCHEMA, "version": promotion.SMOKE_VERSION, "environment": "dev-test",
               "revision": SHA, "upstream_shape": "fake", "started_at": "2026-11-22T00:00:00Z",
