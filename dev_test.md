@@ -9,7 +9,7 @@
 
 **产品平台**：本项目仅面向 PC。新增工作区 UI 验收覆盖 Chromium/WebKit 的桌面视口，默认使用 1366×768、1440×900、1920×1080，并检查鼠标、键盘及缩小的 PC 浏览器窗口。历史移动验收记录保留，不作为新功能的目标设备矩阵。浏览器全新上下文、禁用缓存和同源资源检查继续必做。
 - 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。`legacy-formal` 已下线，不是可部署环境（存档 #74）。
-- 部署按环境名进行，入口 `docs/deployment.md`（目标在本地 `deploy/local/environments.json`）。`formal-test`（正式测试环境，#270）只经 `scripts/release-env.py release formal-test --acceptance-note <noteID>` 接收已在 `dev-test` 发布成功且 L0、L1、L1 Agent 与相关验收全部 PASS 的精确 `main` revision；晋级后用 `release-env.py smoke formal-test -- <冒烟脚本>` 跑 L0、L1、L1 Agent 并核对容器 OCI revision。不做付费生成。
+- 部署按环境名进行，入口 `docs/deployment.md`（目标在本地 `deploy/local/environments.json`）。`formal-test`（正式测试环境，#270）只经 `scripts/release-env.py release formal-test --acceptance-note <noteID>` 接收已在 `dev-test` 发布成功且 L0、L1、L1 Agent 与相关验收全部 PASS 的精确 `main` revision；晋级后用 `release-env.py smoke formal-test -- <冒烟脚本>` 跑 L0、L1、L1 Agent 并核对容器 OCI revision。真实付费生成须当次取得用户同意（`AGENTS.md`「验收要求」）。
 - LLM、OpenAI/Gemini 生图与对话的测试接线以 `production/runtime.env`
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
   网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`），不使用同机代理测试端口或历史 llms-proxy 端口。
@@ -57,7 +57,7 @@ CI 作业分组：`frontend`（第 1–4 项，只装一次依赖）、`go check
 
 **浏览器最低版本由第 2、3 项守住（#387）。** 最低版本写在 `package.json` 的 `browserslist`（Chrome / Edge 111、Firefox 128、Safari 16.4）；`tsconfig.json` 的 ES `lib` 固定为该版本能运行的最新库（`es2023`），第 2 项因此会拒绝超出版本的 ES 内置 API；较新的 Web API 表、`browserslist` 与构建目标、`lib` 和低版本提示文案的一致性，以及提示脚本 `public/browser-support.js` 的行为由 `src/__tests__/browser-support.test.ts`、`src/__tests__/browser-support-guard.test.ts` 随第 3 项检查。不新增门禁项。
 
-本机门禁对第 6 项（及 `--race` 时的第 7 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（单台 runner 上 `httpapi` 包 race 贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
+本机门禁对第 6 项（及 `--race` 时的第 7 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败。CI 的 race 作业以作业级 `GOFLAGS=-timeout=60m` 放宽（单台 runner 上 `httpapi` 包 race 贴近 10 分钟上限）；`-timeout=30m` 只是本机门禁的参数。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
 部分 Generation、Agent 工具和 HTTP 集成测试通过 `internal/adapters/sqlite/sqlitetest.Open` 创建独立数据库：该 helper 在每个测试进程内共享一个惰性构建的真实迁移模板库，关闭连接并确认没有 WAL 后缓存其字节，只为不存在的目标文件复制。每次仍调用真实 `sqlite.Open` 检查迁移版本与 checksum；已有数据库原样打开，重启、恢复和篡改场景不覆盖原文件。SQLite 迁移测试继续直接执行真实迁移，不使用该模板。此优化只减少重复 fixture 初始化，不减少测试集合、断言或 race 检测，也不改变 runner 上限。
 
@@ -150,7 +150,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - 官方示例须脱敏并记录出处与版本；真实响应 fixture 须经审查、脱敏，并标记端点、API/模型版本、采集日期和适用范围。未知结果、不支持的能力及越权请求用负控覆盖；负控不得通过重放真实付费请求制造样本。Fixture 是离线测试资料，不证明当前上游仍返回相同内容。
 - 将这些离线契约测试纳入现有 `go test -count=1 ./...` 与 `CGO_ENABLED=1 go test -race -count=1 ./...`；它们随现有门禁运行（普通测试在本地，race 在 CI），不新增平行门禁清单，也不把 CI 改为联网或逐次付费调用。本文规定应覆盖的方法，不代表目前每个上游端点都已有此类测试；实际覆盖范围和缺口须以关联 Issue/MR 的源码与测试核查结果为准。
 - 已提交的真实 wire 样本（`*.candidate.json`）另有两项离线检查，同样随现有 `go test` 运行，不新增门禁项：`internal/testutil/wirefixture` 的 `TestWireCoverageMatrix` 校验由 Catalog 和样本生成的覆盖矩阵 `testdata/wire-coverage.generated.json`（样本或 Catalog 变化后用 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 重新生成并随同提交，不手改），`TestCommittedWireCorpusHasNoPrivateData` 重扫样本、meta、policy 与矩阵的隐私。真实采集必须在干净工作树进行。缺真实样本的 Offering 在矩阵里列为 `missing`，不用合成数据填充；规则与限制见 `docs/architecture.md`「Wire 黄金样本、覆盖矩阵与全栈离线回放」。
-- `dev-test` 测试栈的真实付费验收仍按既有授权和 §11 流程执行，并核对实际请求体、精确 revision、必需产物及鉴权交付/UI；正式栈只运行免费 L0/L1，付费生成须用户明确决定。上游 `service_unavailable` 等失败不能据此排除本地请求错误；先独立复核该端点官方合同和实际请求证据，再定位原因。不得用盲目重试、放宽断言或修改 mock 期望来掩盖失败。
+- `dev-test` 测试栈的真实付费验收按 `AGENTS.md`「验收要求」的付费验收规则（2D 例外见「上游接口与 Fake」）和 §11 流程执行，并核对实际请求体、精确 revision、必需产物及鉴权交付/UI；正式栈只运行免费 L0/L1，付费生成须当次取得用户同意。上游 `service_unavailable` 等失败不能据此排除本地请求错误；先独立复核该端点官方合同和实际请求证据，再定位原因。不得用盲目重试、放宽断言或修改 mock 期望来掩盖失败。
 
 - Fake 上游（#96）的离线检查同样随 `go test -count=1 ./...` 与 race 运行，不新增门禁项，因此已在本节的本地与 CI 门禁里：`internal/testutil/fakeupstream` 下各版本的 `TestDriftFakeResponsesMatchTheRealSamples`（fake 响应的字段集合与类型必须与该版本最新真实样本一致）、`TestEndpointTableIsCompleteAndHonest`、`TestAlignmentReportIsCommittedAndClean`（对齐报告无未说明差异）、每个故障场景的回归测试、产物字节的 Plinth 交付检查，以及 `TestProductionBinariesDoNotLinkAnyTestutilPackage` / `TestOnlyTestToolingImportsTestutil` / `TestRuntimeImageBuildsOnlyListedCommands`（`internal/testutil` 下任何包都不进发布二进制和镜像，也不被生产包导入）。用法见下节「Fake 上游自检」。
 
@@ -235,7 +235,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 ## 3. 部署与回归流程
 0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 专用账号由 `release-env.py release dev-test` 在发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（#215，见 AGENTS.md「环境与运维」），随后同一命令自动跑 L0、L1、L1 Agent 并写机器报告（#411，见 AGENTS.md「发布后冒烟判定与晋级校验」）；数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
 1. 本地代码修改完成；
-2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
+2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，本地十项加 race 共 11 项），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变
    镜像标签；生产不得部署只存在于功能分支或未提交工作区的源码。交付 `dev-test` 前，在最终待发布 `main` 的同一精确 SHA 上运行本机 `python3 scripts/verify-local.py --race`，并取得完整 GitHub Actions CI 或上节允许的主机自检证据；旧 SHA、缺项或有 skip 的结果不算；
 4. `dev-test` 测试栈的普通 Go 发布不得重跑 ETL、不得改写
@@ -245,16 +245,16 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
    --source-commit <main-sha> --no-build` 做隔离预检，再用
    `docker-compose.go-production.yml` 和 dev-test 的 Compose 项目名（环境文件 `compose_project`）更新
    唯一 Go 服务；严禁使用 `deploy.sh` 或 `--remove-orphans`；
-5. 更新前记录旧镜像标签并创建一致性备份；新容器未能健康启动时恢复旧
+5. 更新前记录旧镜像标签（`dev-test` 为 `"data": "ephemeral"`，不创建发布备份，见第 0 步）；新容器未能健康启动时恢复旧
    镜像标签。正式生产的首次迁移另按
    `docs/production-migration-runbook.md` 执行，失败时必须恢复旧 Next；
 6. 部署后执行与本次改动相关的无扣费端到端验收；`dev-test` 的 fake 形态发布由
    `release-env.py` 在发布成功后自动跑 L0、L1、L1 Agent 并写机器报告（#411，判定口径见
    AGENTS.md「发布后冒烟判定与晋级校验」），真实形态与 `formal-test` 仍按
-   `docs/deployment.md` §6 手动执行；`dev-test` 测试栈的少量真实
-   Provider 生成验收已有 `AGENTS.md` 常设授权，按模型和资产链留证，
+   `docs/deployment.md` §6 手动执行；`dev-test` 测试栈的真实
+   Provider 生成验收按 `AGENTS.md`「验收要求」的付费验收规则执行（2D 例外见「上游接口与 Fake」，其余须当次同意），按模型和资产链留证，
    测试操作者代点同意仅是测试期操作授权；产品的批准规则见 `docs/product.md`；
-   `formal-test` 不做付费生成；写 Key、付费生成、导入数据及 nginx/域名变更须用户明确决定；
+   `formal-test` 的真实付费生成须当次取得用户同意；写 Key、导入数据及 nginx/域名变更须用户明确决定；
 7. 若依赖服务异常，先修复依赖服务并重新部署，再继续验收。LLM/生图依赖
    走 llms 正式服务器网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；不得使用历史 llms-proxy 端口），不限制客户端与
    模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-max`（2026-11-16 起，`formal-test` 相同，#309；网关当前解析为 qwen4-max，普通文本加图片多模态，Agent 不发送音频或视频）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（网关自 2026-11-19 起解析为 gpt-6.2-astra，此前记为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high；网关上它在 chat/completions 不能带函数工具，所以走 Responses 协议，Agent 回合可用，见下）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`，profile 声明 `wire_api: responses` 的模型（`gpt-astra`）走 `responses`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-max` 命中通用 `qwen` profile（`enable_thinking=true`，思考档位只有 `xhigh` 一档；未声明上下文窗口，自动压缩按消息条数阈值触发），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`；另声明 `omit_temperature` 与 `wire_api: responses`，#401）；其他中国大陆模型仍用官方最高档；上游
@@ -286,7 +286,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
   `internal/providers`、`internal/adapters`、`internal/transport`、
   `internal/app`，扫描范围为 `internal/generation` 包目录当前 `*.go`
   （不含 `_test.go`，当前无子包）；它只证明直接 import 隔离，不证明不存在
-  间接依赖或标识符级 Provider/格式分支。边界语义与当前/目标差异见
+  间接依赖或标识符级 Provider/格式分支。边界语义见
   `docs/provider-schema-architecture.md`。§2 门禁命令不变。
 
 ## 5. 分层设计要求验收
@@ -495,9 +495,9 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 - `dev-test` 主机上的候选验收结束后必须确认旧测试端口健康且旧测试容器没有被重启。
 
 ## 12. 通过口径
-- §2 的 10 项自动化门禁全部通过；
-- 涉及 Go 候选时，Go 门禁与 11.4 的候选验收全部通过；
-- 发布含同意挂起改造的版本时，11.3 的挂起验收全部通过；
+- §2 的 11 项自动化门禁全部通过；
+- 涉及 Go 候选时，Go 门禁与 11.5 的候选验收全部通过；
+- 发布含同意挂起改造的版本时，11.4 的挂起验收全部通过；
 - 发布含会话批准方式、Agent 3D 工具、格式补齐/ZIP、设定摘要、选定、版本链或重试的版本时，`scripts/smoke/smoke-l1-agent-mode.sh` 全部通过（零费用，设 `EXPECT_SHA`）；该脚本在已获取的有界候选集内检查最新 applicable 3D 任务的 `formats` 契约（自有会话；能力列表取自 Schema `model_delivery.capabilities`，每能力每页 100，最多检查 500 个去重候选，不保证全局最新或穷尽）：`formats` 必须是 Schema 7 种格式 ID 的精确集合、无重复、每项 `id`/`status` 为字符串；缺失、类型错误、格式清单读取失败都立即 FAIL，不静默换任务。`applicable`/`archive_available` 缺失或非布尔也 FAIL。`archive_available=false` 时 archive 必须返回 413/`too_large`（409/empty 或其他拒绝仍 FAIL，不视为可用归档），并在同一有界候选内另找 `archive_available=true` 的既有任务完成真实 ZIP 200/206、README 与字节检查（超过 `ARCHIVE_MAX_BYTES` 时按 `read-archive.sh` 契约做首项部分检查）；找不到可用归档、错误 413 code、或 `archive_available=true` 却返回 413 都 FAIL。只有完全没有自有 SUCCEEDED 3D 任务才 SKIP。离线契约：`python3 scripts/smoke/test-agent-mode-archive.py`（其中 `read-archive.sh` 为控制流 stub；真实 ZIP 解析由 `test-archive-check.py` 覆盖）；
 - 部署后依赖服务验证通过；
 - 本文档中与本次改动相关的验收项全部通过；

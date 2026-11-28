@@ -20,7 +20,9 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 `/api/version` 不带上游形态，所以 fake 专用脚本按 `ART_AI_UPSTREAM_SHAPE` 判定（与 `scripts/acceptance/release-1-9-*.mjs`
 相同）：不是 `fake` 或给了 `--live` 时退出码 2，不会发起任何生成。真实/付费脚本走 `scripts/smoke/l5_common.py` 的闸门：
 缺 `--live` 或 `ART_AI_LIVE_ACK=1` 时退出码 2，形态不符（`live-only` 要求 `live`，`chat-live` 要求 `mixed` 或 `live`）也拒绝；
-它们把 `AGENT_TEST_*` 交给 l5_common 当登录账号。每次真实运行前须在当前对话取得用户同意（AGENTS.md「上游接口与 Fake」）。
+它们把 `AGENT_TEST_*` 交给 l5_common 当登录账号。每次真实运行前须在当前对话取得用户同意（AGENTS.md「上游接口与 Fake」）；
+例外是 `dev-test` 上的 2D 真实调用（真实对话模型 token、真实 2D 生图），按该节不需逐次同意，开跑前后在回复里写明目的与大致用量，
+两个开关照旧要给；3D、`formal-test`、正式生产与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。
 
 ## 脚本
 

@@ -26,7 +26,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 
 ## 上游形态与真实开关（#219）
 
-`dev-test` 缺省以 fake 上游形态发布（`docs/deployment.md`「fake 上游形态」）：所有 Provider 与对话模型连接指向同栈的 fake 服务。脚本默认针对 fake 形态，真实上游需要 `--live` 参数与 `ART_AI_LIVE_ACK=1` 两个开关同时给出，缺省或只给一个即拒绝（退出码 2），每次真实运行前还须在当前对话取得用户同意。判定逻辑在 `upstream_shape.py`：目标形态取 `ART_AI_UPSTREAM_SHAPE`（`release-env.py smoke` 按该环境 `production/compose.env` 的 `RELEASE_UPSTREAM_SHAPE` 设置），否则读 `$ART_AI_SERVER_ROOT/production/compose.env`；读不到按真实形态处理。复制脚本到服务器运行时，`upstream_shape.py`（以及 L1 Agent 用的 `seed-fake-3d-task.py`）须与脚本同目录。
+`dev-test` 缺省以 fake 上游形态发布（`docs/deployment.md`「fake 上游形态」）：所有 Provider 与对话模型连接指向同栈的 fake 服务。脚本默认针对 fake 形态，真实上游需要 `--live` 参数与 `ART_AI_LIVE_ACK=1` 两个开关同时给出，缺省或只给一个即拒绝（退出码 2），每次真实运行前还须在当前对话取得用户同意。例外是 `dev-test` 上的 2D 真实调用（真实对话模型 token、真实 2D 生图）：按 `AGENTS.md`「上游接口与 Fake」不需逐次同意，开跑前后在回复里写明目的与大致用量即可，两个开关照旧要给；3D、`formal-test`、正式生产与带 `--live-upstream` 的发布（含 3D 通道）仍须当次同意。下文写「须当次同意」的 2D 运行均按此例外处理。判定逻辑在 `upstream_shape.py`：目标形态取 `ART_AI_UPSTREAM_SHAPE`（`release-env.py smoke` 按该环境 `production/compose.env` 的 `RELEASE_UPSTREAM_SHAPE` 设置），否则读 `$ART_AI_SERVER_ROOT/production/compose.env`；读不到按真实形态处理。复制脚本到服务器运行时，`upstream_shape.py`（以及 L1 Agent 用的 `seed-fake-3d-task.py`）须与脚本同目录。
 
 **混合形态（`mixed`，#416）：** `release-env.py release dev-test --live-chat` 发布的栈里生成侧仍是 fake，对话连接指向真实网关（`docker-compose.go-mixed-upstream.yml`、`UPSTREAM_SHAPE=mixed`；见 `dev_test.md`「真实对话 + fake 生成」）。`upstream_shape.py` 把它报成 `mixed`，并按「非 fake」处理：两个门禁都要 `--live` 与 `ART_AI_LIVE_ACK=1`（对话侧是真实付费调用，只给生成会低估成本），`live-only` 的 L2–L5 直接拒绝，因为生成侧不是真的。于是「真实对话 + fake 生成」只能由显式要求真实对话的脚本使用，普通 fake 场景不会误连真实网关。
 
@@ -41,7 +41,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 
 ## 全新数据起点（#28）
 
-`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在空库上走其文档化的 SKIP 路径；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`formal-test` 不适用。
+`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在 fake 形态下先用 `seed-fake-3d-task.py` 补一个本用户 SUCCEEDED 3D 任务，不再 SKIP；真实形态不补任务，空库上这一段会 SKIP，而 `release-env.py` 把 `skipped>0` 判为 `fail`，SKIP 不算通过，见 `AGENTS.md`「发布后冒烟判定与晋级校验」；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`formal-test` 不适用。
 
 ## 冒烟分层
 
@@ -197,7 +197,7 @@ Rodin 还有几项只能直连上游探测，由对齐工具 `cmd/fake-upstream-
 `smoke-live-chat-three-view-route.py` 复测 #688：角色图只放在会话画板上（上传后作为场景对象放置，不进对话），手选三视图 Skill 后发「把这个角色的三视图图片都生成出来。」（非画板轮）。断言 Agent 先调用 `find_history_images` / `list_project_assets` 查看，回复指向画板路径（「以画板为主」或 `@画布`），不先让用户描述角色，也不发起三视图；随后发一个画板轮（`inputSource: canvas`，画板快照作为 selection，与浏览器一致）「看画板」，断言调用 `create_three_view`、正面停在批准卡上，脚本拒绝这张卡。每一轮都输出工具调用摘要（工具名与截短的参数）。图片默认用标准库画一个简单人形，可用 `--image PATH` 换成真实角色图。
 
 - **只对 dev-test 的混合形态运行**：须是 `release-env.py release dev-test --live-chat` 发布的栈（形态 `mixed`），fake 与真实形态都拒绝；`RELEASE_ENV` 必须是 `dev-test`，本机有 `deploy/local/environments.json` 时 `BASE` 还须等于其中 dev-test 的 `base_url`；必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`。缺任一条退出 2。
-- **成本**：只有两轮真实对话模型的 token；生成侧是 fake，会话用严格方式且批准卡被拒绝，不出图、不计费。每次运行前仍须在当前对话取得用户同意。
+- **成本**：只有两轮真实对话模型的 token；生成侧是 fake，会话用严格方式且批准卡被拒绝，不出图、不计费。这属于 `dev-test` 上的 2D 真实调用，按 `AGENTS.md`「上游接口与 Fake」不需逐次同意，开跑前后在回复里写明目的与大致用量。
 - **用法**：`ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-live-chat-three-view-route.py --live [--image PATH] [--report DIR]`。退出码：0 = 无 FAIL（SKIP 不算通过），1 = 有 FAIL，2 = 拒绝运行。
 - 脚本只做过语法检查，尚未对混合形态实跑；判定用的回复措辞（「以画板为主」「@画布」、是否先要求描述角色）是启发式检查，FAIL 时以输出的回复与工具调用摘要人工复核。
 
@@ -206,7 +206,7 @@ Rodin 还有几项只能直连上游探测，由对齐工具 `cmd/fake-upstream-
 `smoke-l5-2d-direct.py`、`smoke-l5-matting.py`、`matting-probe.py` 不经 Agent：每个任务用公开任务接口（`POST /api/v1/tasks/prepare`、`/grants`、`/tasks`）原生提交，各步骤至多发一次，观察 Task 并核对公开交付。共用 `l5_direct.py`（门禁、图片构造、私有目录、一次性提交、证据脱敏）与 `l5_common.py` 的登录和客户端。它们与上面的 L5 脚本不同的地方是门禁：用 `upstream_shape.py` 的 `fake-default`。
 
 - **fake 形态**（`ART_AI_UPSTREAM_SHAPE=fake`，`release-env.py smoke` 在 fake 形态的 dev-test 上会设置）：直接运行，零费用，不接受 `--live`（给了也拒绝，退出码 2）。
-- **真实或混合形态**：必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，缺一退出 2，未知形态按真实处理；每次真实运行前须在当前对话取得用户同意（`AGENTS.md`「上游接口与 Fake」）。三个脚本都不在 `smoke-l5-all.sh` 里。
+- **真实或混合形态**：必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，缺一退出 2，未知形态按真实处理；每次真实运行前须在当前对话取得用户同意（`AGENTS.md`「上游接口与 Fake」；`dev-test` 上的 2D 真实调用例外，见上文「上游形态与真实开关」）。三个脚本都不在 `smoke-l5-all.sh` 里。
 - **fake 与真实的判定差别**（混合形态的生成侧与抠图服务也是 fake，按 fake 判定，但门禁仍要求两个开关）：fake 还没建模的行为（固定小图尺寸与固定 JPEG、抠图返回不透明白底 64x64、没有 `/openapi.json`、只有部分参数界）在 fake 形态只记为 INFO（输出 `INFO (not modelled by the fake yet)`，并写入证据的 `info`），不算通过；同一偏差在真实形态记为 FAIL。这样脚本本身能在 fake 栈上验收，又不会把 fake 缺口当成通过。
 
 ```
@@ -312,7 +312,7 @@ python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-fak
 3. #299 单张 2048×2048 `gpu_oom`：Task FAILED，`failure.class` 为 `upstream_unavailable`、`retryable` 为 `false`、`detail` 等于 `failure.upstream_unavailable`（各 Provider 共用的一句），无交付、无 `notices`，服务的原话（显存、`BIREFNET_PROCESS_RES`、`SDMATTE_PROCESS_RES`、图片尺寸）不出现在公开投影里（#299：失败文案按分类取，服务原话没有公开通道）。
 4. 对照：不带标记的两张图 SUCCEEDED，交付 2 张，没有 `notices`。
 
-本地处理（#538）不接任何上游：`python3 scripts/smoke/smoke-fake-stack.py --only model-convert,model-parts` 用脚本自己生成的 GLB 夹具，经公开 API 跑 `local/static-glb/to-gltf` → `local/static-gltf/to-glb`（往返后三角面、节点名、网格数不变）、`local/model-parts/split`（按节点与按连通块，每个部件各一个 GLB，清单点名每个部件；拆分与合并只读同会话的 Task 输出，夹具先经转换变成 Task 输出）与 `local/model-parts/merge`（三角面为来源之和），并断言非 GLB 与单模型合并在建任务前被拒；两个场景在门禁子集里，登记一致性由 `scripts/tests/test_fake_stack_local_processing.py` 守。真实一轮要补的抠图脚本（`smoke-l5-matting.py` 与只读探针 `matting-probe.py`，含一次 `GET /openapi.json` 取得 `internal/testutil/fakeupstream/matting/api-v1/testdata/openapi.snapshot.json`）尚未编写；快照不存在时对应 Go 测试 skip 并写明 PENDING CAPTURE。
+本地处理（#538）不接任何上游：`python3 scripts/smoke/smoke-fake-stack.py --only model-convert,model-parts` 用脚本自己生成的 GLB 夹具，经公开 API 跑 `local/static-glb/to-gltf` → `local/static-gltf/to-glb`（往返后三角面、节点名、网格数不变）、`local/model-parts/split`（按节点与按连通块，每个部件各一个 GLB，清单点名每个部件；拆分与合并只读同会话的 Task 输出，夹具先经转换变成 Task 输出）与 `local/model-parts/merge`（三角面为来源之和），并断言非 GLB 与单模型合并在建任务前被拒；两个场景在门禁子集里，登记一致性由 `scripts/tests/test_fake_stack_local_processing.py` 守。真实一轮用的抠图脚本 `smoke-l5-matting.py` 与只读探针 `matting-probe.py` 已在本目录（见上文「直连 L5」），但探针一次 `GET /openapi.json` 取得的 `internal/testutil/fakeupstream/matting/api-v1/testdata/openapi.snapshot.json` 尚未入库；快照不存在时对应 Go 测试按设计 skip 并写明 PENDING CAPTURE。
 
 同样的检查是本机整栈冒烟的 `matting-faults` 场景：`python3 scripts/smoke/smoke-fake-stack.py --only matting-faults`（不带 `--only` 的全量运行包含它，单跑含构建缓存命中时本机约十秒；不在 `verify-local.py` 的门禁子集里，fake 与 Adapter 的契约由 `go test` 守）。脚本和场景共用 `fake_faults.py`；复制脚本到别处运行时，`fake_faults.py` 与 `upstream_shape.py` 须与脚本同目录。离线单测：`python3 -m unittest scripts/tests/test_fake_faults.py`（图片、Schema 句子、每条断言的反例、`run()` 的提交顺序与批准、脚本对非 fake 目标的拒绝，以及与 Go 源码里标记和故障词的一致性）。
 

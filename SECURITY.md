@@ -28,7 +28,7 @@
 
 ## 支持范围
 
-在 1.0 之前只修复最新的 `main`。1.0 发布后，安全修复针对最新的正式版本。
+安全修复针对最新的正式版本（最新的 GitHub Release）与 `main`；更早的版本不再单独修复，请升级到最新正式版本。
 
 部署时的安全配置（HTTPS、反向代理、会话密钥、对外监听）见
 [docs/self-deploy-security.md](docs/self-deploy-security.md)。第三方 Provider 自身的漏洞请直接报告给对应厂商。
@@ -69,8 +69,8 @@ use redacted examples where needed.
 
 ## Supported versions
 
-Before 1.0, only the latest `main` receives fixes. After 1.0, security fixes target the
-latest release.
+Security fixes target the latest release (the latest GitHub Release) and `main`. Older
+versions do not receive separate fixes; please upgrade to the latest release.
 
 Security settings for a deployment (HTTPS, reverse proxy, session secret, listening
 address) are described in [docs/self-deploy-security.md](docs/self-deploy-security.md) (in

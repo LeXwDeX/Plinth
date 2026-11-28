@@ -229,7 +229,7 @@ Agent LLM 只用 OpenAI chat completions 兼容 API，模型必须能读图。�
 
 | ID | 模式 | 验证方式 | 预期结果 | 关联 |
 |---|---|---|---|---|
-| REL-01 | — | 在 GitHub 公开仓库开一个测试 PR | `.github/workflows/ci.yml` 的三个门禁作业（`frontend`、`go check`、`go test race`）全部运行并通过；分支保护要求它们通过。CI 不构建镜像（#257） | #257 |
+| REL-01 | — | 在 GitHub 公开仓库开一个测试 PR | `.github/workflows/ci.yml` 的三个门禁作业（`frontend`、`go check`、`go test race`）全部运行并通过；分支保护只要求主机 CI 提交状态 `host-ci/gates`（`scripts/host-ci/run.py` 回写），这三个作业不阻塞开发期合并，只在晋级 `formal-test` 前对精确的 `main` revision 必须全绿（见 `dev_test.md` §2「分支保护与分工」）。CI 不构建镜像（#257） | #257 |
 | REL-02 | — | （2026-10-27 取消：不再有内部仓库镜像，GitHub 是唯一仓库） | — | 存档 #60 |
 | REL-03 | — | 只读 README（中、英各一次）完成 DEP 组 | 不需要 README 之外的信息；中英文内容一致 | #258 |
 | REL-04 | — | 检查 `LICENSE`、`CONTRIBUTING.md`、`SECURITY.md` 与依赖许可证清单 | MIT（2026-10-21 用户决定，不需要 `NOTICE`）；依赖许可证无冲突；需要决定的随仓素材已处理（见 #258） | #258 |
