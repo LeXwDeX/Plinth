@@ -76,7 +76,7 @@ export type BoardSettle = 'idle' | 'canvas_turn' | 'saved' | 'failed' | 'timed_o
 /**
  * #709: before a turn that is not a canvas turn, wait (at most `waitMilliseconds`, canvas.frontend.send_save_wait_milliseconds)
  * until the board's pending edits are on the server: first the brush's local bitmaps, then the debounced node save. The
- * Agent's fallback reading of the board (list_canvas_layers) then sees what is on screen, a picture dragged in just before
+ * Agent's fallback reading of the board (view_canvas) then sees what is on screen, a picture dragged in just before
  * Enter included. This only keeps the server's board fresh: the turn carries nothing of the board (no snapshot, no input
  * source, no selection), so it is not a hidden canvas turn (#644). A slow or failed save never holds the turn back: the
  * caller sends anyway, without a dialog or a refusal (#700). A canvas turn is left alone: its own snapshot path flushes

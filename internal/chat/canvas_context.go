@@ -253,6 +253,10 @@ func (service *Service) freezeCanvasContext(ctx context.Context, command StartTu
 				item.InConversation = inConversation(history, command.Options.Selection, picture)
 			}
 		}
+		// The Agent's own results land on the board after the person's last
+		// message too; a picture already in the conversation is not something
+		// the person just put there.
+		item.AddedAfterLastTurn = item.AddedAfterLastTurn && !item.InConversation
 		if !item.InConversation {
 			frozen.OffConversation++
 		}

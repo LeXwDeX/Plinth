@@ -204,9 +204,10 @@ func TestFreezeCanvasContextMarksNewAndConversationLayers709(t *testing.T) {
 	lastTurn := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
 	source := &boardOf709{owner: "u1", session: "s1", board: CanvasBoard{Width: 800, Height: 600, FrameX: 200, FrameY: 100,
 		Layers: []CanvasBoardLayer{
-			// The picture the conversation already holds as @img1.
+			// The picture the conversation already holds as @img1: the Agent's own result, placed on the
+			// board after the last message, is still not "new" (the person did not put it there).
 			{ID: "old", Type: "image", ZIndex: 1, X: 200, Y: 100, Width: 100, Height: 100,
-				ImageURL: "/api/assets/in_old", CreatedAt: lastTurn.Add(-time.Hour)},
+				ImageURL: "/api/assets/in_old", CreatedAt: lastTurn.Add(30 * time.Second)},
 			// Put on the board after the last message, outside the frame and rotated.
 			{ID: "new", Type: "image", ZIndex: 3, X: 1100, Y: 100, Width: 100, Height: 100,
 				ImageURL: "/api/assets/in_new", CreatedAt: lastTurn.Add(time.Minute), Transformed: ptrBool709(true)},
