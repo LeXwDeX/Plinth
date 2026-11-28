@@ -40,6 +40,41 @@
 
 ## 3. Agent 工作流
 
+### 五阶段发布流程（#726）
+
+`AGENTS.md`「实施流程」是五阶段的摘要，本小节写各阶段细则，并如实列出尚未实现的部分。本节后面的「部署到开发测试环境」「部署到 `prod`」、§4 与 §5 是现行脚本的合同，阶段 4、5 的新入口落地前照旧执行。
+
+- **阶段 1 需求与方案**：用户与主 agent 确认需求大致方向后，主会话自动派发 `issue-researcher`，调研完成后派发 `requirements-analyst`，两者只读。
+  - 调研只取证、不判断：查重；找出相关的旧 Issue、PR 与提交；列出被新需求取代的旧决策；标出新需求与旧 Issue 要求冲突之处。
+  - 分析读调研结果，评估对系统与产品（用户体验、使用方式）的影响，给出完整方案：必须含「不做或最小改动」选项，按奥卡姆剃刀选最小方案，每个新增项写明它保护什么；用户提出的方案不是最优解时明说分歧，不得悄悄替换。
+  - 主会话把两份输出写成同一 Issue 的两条评论，首行固定为「Issue 调研」「需求分析」，审阅后进入开发。小修（文案、小 UX、纯文档订正）豁免。新增任何限制仍按 `AGENTS.md`「少限制用户」在 Issue 写明保护对象与更轻的替代。
+- **阶段 2 自测开发**：每个 Issue 单独分支、单独 PR，按依赖顺序提；PR 正文写完整，每个 PR 关闭其 Issue。
+  - 改行为前写清预期、边界与验证路径。Schema/共享接口变更检查 Catalog 校验、公开投影、扩展 discovery、兼容 API、前端消费者、fixture/快照与运行时可用性；跨 Provider 链测成功、失败、跨用户、同/异 Provider、格式不兼容及重试/同意路径。
+  - TDD；本机门禁与主机 CI 按 `dev_test.md` §2。纯文档变更走主机 CI 的纯文档轻量通道（#714，判定口径与排除清单见 `dev_test.md`「主机 CI」）。
+  - 合并条件：必需检查 `host-ci/gates` 为 success，且 Codex 对当前 head 的审核已完成、无未解决发现（见下文「Codex 审核」）。有发现则修复并推送，必要时评论 `@codex review` 重审。
+- **阶段 3 `dev-test` 全量回归**：本轮全部 Issue 合并后，按下文「部署到开发测试环境」发布 `dev-test`（全新数据）。
+  - 第一轮 fake：发布脚本自动跑 L0、L1、L1 Agent 并写机器报告（§4），再跑 `docs/regression-matrix.md` 中本次相关的行。fake 没有遗漏就不进第二轮。
+  - 第二轮真实 2D：用真实对话模型驱动 2D 流程，使用真实数据，过程与结果记录在 Issue；`dev-test` 的 2D 真实调用不限量、无需逐次同意（`AGENTS.md`「上游接口与 Fake」）。据此补全 fake：改 fake 代码，补 fake 接口 SOP 文档。SOP 只回答三件事：fake 支持哪些接口、各返回什么、覆盖哪个 Provider 的哪个 API 版本；不写笔记与历史。回灌后复跑 fake 回归。3D 的遗漏只补 fake；真实 3D、`prod` 与带 `--live-upstream` 的发布须当次同意。
+  - 对话模型探测兜底：第二轮的对话模型不通时，不卡在这里。去网关读模型列表，对候选模型各做一次极小的对话探测，优先 DeepSeek、Qwen 等便宜模型，用第一个能通的继续；探测次数与总时长设宽松上限。全部不通则退回 fake，在回归报告标明「真实 2D 回归本次未覆盖」。选用的模型与原因写进报告。
+  - 收尾：对精确 `main` revision 跑一次 GitHub Runner 的完整 CI（`.github/workflows/ci.yml` 三个作业，不按 diff 缩减；自托管 runner 掉线或纯文档合并后推送未触发时，按 `dev_test.md` §2 手动触发）。随后主会话派发 `release-gate`（只读，定义见 `.claude/agents/release-gate.md`，规则见 [`release-gate.md`](release-gate.md)），回执贴到 #2；不通过不进入阶段 4。门禁对本次涉及的 Issue 缺少调研或分析记录只给警告，不拦截。
+- **阶段 4 构建与 `prod` 预准备**：在 `dev-test` 主机构建 `prod` 要用的全部内容（运行镜像与配置），记录镜像 digest 与 revision；测哪个发哪个，送到 `prod` 的必须是记录下的那份 digest（运行镜像不含 fake，见 §5「fake 上游形态」）。`prod` 禁止开发与构建。经用户确认后把镜像与配置送到 `prod` 并做预检，不停止、不重启运行中的服务。
+- **阶段 5 用户确认后重启更新**：先给用户一张确认卡：版本、revision、镜像 digest、风险、预计停机、回退方案。用户同意后才依次执行：配置备份（最多一份）与命名清楚的临时回退副本 → 重启 → `prod` 冒烟（L0 免费；L1 会调用真实对话模型，须当次同意，可在确认卡里一并取得；按 §6 手动执行并留证；付费验收同样须当次同意）→ 验收 → 删除临时回退副本 → `release-gate` 在打 tag 前再过一次 → tag 与 GitHub Release（§5「版本号与 tag」）。失败按 §7 回滚；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
+
+**Codex 审核**：Codex 是装在 GitHub 仓库上的应用，不在本仓库代码里。触发方式：开 PR 供审查、草稿 PR 转为 ready，或在 PR 评论 `@codex review`。它在 PR 评论里留下机器可读的状态标记，包含审核状态、对应的 head SHA 与是否有未解决发现；合并前核对标记中的 SHA 等于 PR 当前 head，旧 head 的审核不算。
+
+**现状与差距**：本次只改文档，下列各项都未实现。
+
+| 项 | 现状 | 状态 |
+|---|---|---|
+| 阶段 4 的预准备入口（dev 主机构建后送 `prod`）与阶段 5 的「用户确认后重启」入口 | `scripts/release-env.py release prod` 在目标主机上构建镜像并一步完成重启（§5），与「`prod` 禁止构建」「确认后才重启」冲突。新入口落地前，`prod` 发布仍走现行脚本，且须用户确认 | 待实现 |
+| 对话模型探测兜底的共用小工具 | 没有；由主会话按阶段 3 的规则手工探测 | 待实现 |
+| Fake 接口 SOP 文档及其生成 | 只有 fake 验证登记表 [`fake-register.md`](fake-register.md)（记 `real`/`constructed`/`gap`），没有按接口回答「支持什么、返回什么、覆盖哪个 API 版本」的 SOP | 待实现 |
+| 门禁对调研与分析记录的警告项 | `scripts/release-gate.py` 与 [`release-gate.md`](release-gate.md) 尚无此项 | 待实现 |
+
+以上各项另开 Issue 跟进。
+
+### 现行脚本流程
+
 前提：要发布的提交已推送到 `origin/main`；本机门禁按 `dev_test.md` §2 通过。
 
 **部署到开发测试环境（`dev-test`）**
@@ -164,7 +199,7 @@
 - 版本串来源：`release-env.py release <环境> --release-version <名称>` 显式给出；不传时取待发布 revision 的 `git describe --tags --always`（形如 `v1.9.4-12-gfbf5000`，即 v1.9.4 之后第 12 个提交）。只允许字母、数字、点、下划线和连字符，最长 64 个字符。
 - 通道与提交哈希相同：`release-env.py` 把它作为 `RELEASE_VERSION` 放进服务器段参数 → `release-server-steps.sh` 以 `--build-arg GO_RELEASE_VERSION` 构建 → `Dockerfile.go-runtime` 用 `-ldflags -X …/internal/app.releaseVersion` 链接进二进制。本地构建不传时为空，界面不显示版本。Compose 构建同样可选：自部署 `docker-compose.yml` 读 `ART_AI_RELEASE_VERSION`，内部 `docker-compose.go-production.yml` 读 `GO_RELEASE_VERSION`，缺省为空。
 
-约定：发布 `prod` 时传入的版本串，就是人工 Review 通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
+约定：发布 `prod` 时传入的版本串，就是阶段 5 验收与门禁通过后打 tag 和建 GitHub Release 的名字。例如以 `--release-version v1.9.5` 发布后，对同一 revision 执行：
 
 ```bash
 git tag v1.9.5 <revision>

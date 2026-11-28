@@ -84,7 +84,7 @@ CI 作业分组：`frontend`（第 1–4 项，只装一次依赖）、`go check
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
 - **CI 与内部验收的分工**：三个门禁作业按上表的路由在自托管 runner 或 GitHub 托管的 `ubuntu-latest` 上运行。只改 `.md` 文件的推送与 PR 不触发这三个作业（#714）：纯 `.md` 变更由主机 CI 的纯文档轻量通道负责（见下文「主机 CI」），Actions 三个作业本就不在分支保护里；含任何非 `.md` 文件的变更照常触发，手动运行不受影响。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`prod`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护与分工**：`main` 只要求主机 CI 提交状态 `host-ci/gates` 通过才能合并：开发期的合并以主机 CI 为准。这个状态有两种来源，都由 `scripts/host-ci/run.py` 写出：含任何非文档文件的提交跑完整门禁；按下文「主机 CI」口径判定为纯文档的提交走纯文档轻量通道，只做公开快照扫描与 `git diff --check`，状态描述以「纯文档轻量通道，未跑完整门禁」开头，可与完整门禁的结果区分（#714）。GitHub Actions 的三个作业对含非 `.md` 文件的推送与 PR 照常运行但不阻塞开发期合并，只在晋级 `prod` 前对精确的 `main` revision 作为最终完整验证必须全绿（`AGENTS.md`「实施流程」第 7 步）；这次验证在自托管 runner 上完成，或在它掉线时按下文手动回退到托管 runner 完成，两者都算。
+- **分支保护与分工**：`main` 只要求主机 CI 提交状态 `host-ci/gates` 通过才能合并：开发期的合并以主机 CI 为准。这个状态有两种来源，都由 `scripts/host-ci/run.py` 写出：含任何非文档文件的提交跑完整门禁；按下文「主机 CI」口径判定为纯文档的提交走纯文档轻量通道，只做公开快照扫描与 `git diff --check`，状态描述以「纯文档轻量通道，未跑完整门禁」开头，可与完整门禁的结果区分（#714）。GitHub Actions 的三个作业对含非 `.md` 文件的推送与 PR 照常运行但不阻塞开发期合并，只在阶段 3 收尾（进入 `prod` 预准备前）对精确的 `main` revision 作为最终完整验证必须全绿（`AGENTS.md`「实施流程」阶段 3）；这次验证在自托管 runner 上完成，或在它掉线时按下文手动回退到托管 runner 完成，两者都算。
 - **自托管 runner（#685，推翻原「不做 GitHub self-hosted runner」的决定）**：维护者在自己的常开机器上注册了一台仓库级 runner，不按 GitHub 托管分钟计费，费用不作为路由的考虑因素。标签 `azure-f16` 沿用旧名，只是一个自定义标签，与 Azure 无关（runner 已不是 Azure 按需机器）。三条规则：
   1. **范围**：只有推送到 `main` 与同仓库分支的 PR（`github.event.pull_request.head.repo.full_name == github.repository`）走自托管；fork PR 与手动运行一律走托管 `ubuntu-latest`。外部贡献者的 PR 不触发自托管：它们最终由维护者审阅合并，fork 的代码不进自建机器。剩下的风险是同仓库分支的 PR 也能改工作流，所以自托管等价于信任所有有写权限的人；合并前须审查工作流改动。
   2. **掉线时手动回退**：自托管 runner 掉线时，作业会一直排队（GitHub 对没有 runner 接单的作业约 24 小时后取消）。这时先取消排队中的运行，再在目标分支上手动运行本工作流（`workflow_dispatch`，不需要输入参数），由托管 runner 完成完整验证。晋级前的目标是精确的 `main` revision：`main` 没有前进时直接在 `main` 上手动运行；已经前进时，把该精确 SHA 推成临时分支 `ci-verify-<SHA 前 8 位>`，在这个分支上手动运行（推送其他分支不触发本工作流，手动运行走托管），用完删除该分支。不在 PR 上为此改路由。
@@ -112,7 +112,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
   - **做什么**：纯文档时不读环境文件、不打 bundle、不上传、不起容器、不连主机，只在本机对该精确提交跑两项检查：`python3 scripts/make-public-snapshot.py check --rev <sha>`（导出该提交的跟踪文件再扫，含本地环境禁用值）与 `git diff --check <合并基点> <sha>`。两项都通过写 `host-ci/gates` 的 `success`，任一失败写 `failure`；描述以「纯文档轻量通道，未跑完整门禁」开头。结果同样写到 `build/host-ci/<run id>/result.json`（`mode: docs`，记录合并基点、文件清单和两项检查的输出与耗时），退出码 0 通过、1 失败；`--no-status` 与 `--target-url` 照常生效。
   - **不做什么**：不跑 `verify-local.py` 的任何门禁、不做外链检查、不核对工具链，资源阈值与超时也不因此放宽（完整门禁路径不变）。守卫扫描只认测试源码里的字面量：测试通过拼接目录名、变量或非测试代码间接读取的文档识别不到，怀疑某份文档会影响测试时，用 `--no-docs-fast-path` 强制完整门禁。
   - **`--no-docs-fast-path`**：对任何提交都跳过判定，直接跑完整门禁。
-  - **与 GitHub Actions 的关系**：Actions 的 `paths-ignore: ['**/*.md']` 只看是否全是 `.md`，不区分上面的清单；Actions 本就不在分支保护里，判定以主机 CI 为准。`main` 上一次纯文档合并之后，推送不再触发 Actions，晋级前「对精确 `main` revision 跑 GitHub Runner」（`AGENTS.md`「实施流程」第 7 步）须手动 `workflow_dispatch`（`paths-ignore` 不影响手动运行）。`--workflows` 重放（act）对 `paths-ignore` 的行为未验证。
+  - **与 GitHub Actions 的关系**：Actions 的 `paths-ignore: ['**/*.md']` 只看是否全是 `.md`，不区分上面的清单；Actions 本就不在分支保护里，判定以主机 CI 为准。`main` 上一次纯文档合并之后，推送不再触发 Actions，阶段 3 收尾「对精确 `main` revision 跑 GitHub Runner」（`AGENTS.md`「实施流程」阶段 3）须手动 `workflow_dispatch`（`paths-ignore` 不影响手动运行）。`--workflows` 重放（act）对 `paths-ignore` 的行为未验证。
 - **与本机门禁的关系**：门禁集合和顺序仍只由本节「自动化门禁项」和 `scripts/verify-local.py` 决定，容器里运行的就是它，不另立清单、不改命令。本机 `verify-local.py` 与 Git hooks 照常执行，主机 CI 不替代 pre-push，也不让本机 `--race` 免跑。结果只称“主机 CI 结果”，不写成 GitHub Actions 的成功。
 - **镜像 `Dockerfile.ci`**：Node 22 与 Go 1.27（两个基础镜像按摘要固定）、pnpm 取 `package.json` 的 `packageManager`，并把 pnpm store 与 Go 模块缓存预取进镜像，所以容器可以 `--network none`。构建只访问公共来源（Docker Hub、`registry.npmjs.org`、`proxy.golang.org`），不依赖内网，任何有 Docker 和公网的 runner 都能直接构建。`verify-local.py` 不需要浏览器，镜像不含 Playwright 浏览器。在测试主机上标签是 `plinth-ci:<12 位 hash>`，hash 由 `Dockerfile.ci`、`scripts/host-ci/entry.sh` 和被测提交的 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`go.mod`、`go.sum` 决定；这些不变就复用已有镜像，不重建，变化时才联网构建一次（几分钟）。入口在每次运行时再核对容器里的 Node、Go、pnpm 与 `.github/workflows/ci.yml`/`package.json` 一致，不一致即失败（退出 22）；将来 CI 的版本声明搬家时，这条核对要随之改读新的位置。`python3 scripts/host-ci/run.py <sha> --print-image-tag` 只打印标签。
 - **容器**：`--network none`、4 CPU、10 GiB 内存且 swap 等于内存（即无 swap）、非 root（UID 10001）、移除全部 capability、`no-new-privileges`、只读根文件系统；不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket。挂载只有：只读的 `source.bundle`，可写的绑定目录 `/scratch`（HOME、Go 构建缓存、pnpm store 副本）和 `/out`（结果），以及两个 tmpfs：`/work`（容器内从 bundle 新检出，上限 6 GiB）和 `/tmp`（4 GiB）。两个 tmpfs 的占用计入 10 GiB 内存上限。`/work` 和 `/tmp` 不能是绑定挂载：`internal/testutil/wirefixture` 的测试会拒绝位于非根绑定挂载下的工作树或证据目录。“源码只读”指输入 bundle 只读；门禁必须能写 `node_modules` 和构建产物，所以 `/work` 可写，入口在检出后和结束时都核对 HEAD、tree、工作区干净与 `source_identity` 未变，变了即失败（退出 21）。`docker create` 之后，主机再按 `docker inspect` 核对上述参数（网络、内存、swap、CPU、只读根、用户、capability、挂载），与请求不符就不启动。
@@ -211,7 +211,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地十项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
 - 开发阶段以主机 CI 为准：交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 须先过本机初检，再在 `dev-test` 主机 `<发布根>/ci` 的一次性 Docker 容器里通过完整主机 CI（`host-ci/gates` success），并在 PR 或 Issue 记录实际结果。GitHub runner 配置较低，不作开发期验证依据。
-- 晋级 `prod` 前，本轮所有问题已在主机 CI 与 `dev-test` 解决后，待晋级的精确 `main` SHA 须再有一次完整的 GitHub Actions `CI` 运行（全部测试与门禁，不按 diff 缩减）且所有作业 success；之后发布 `prod` 交人工 review，review 通过才打 tag 并发布 GitHub Release。
+- 进入 `prod` 预准备（阶段 4）前，本轮所有问题已在主机 CI 与 `dev-test` 解决后，待晋级的精确 `main` SHA 须再有一次完整的 GitHub Actions `CI` 运行（全部测试与门禁，不按 diff 缩减）且所有作业 success；之后按 `AGENTS.md`「实施流程」阶段 4、5 预准备并经用户确认更新 `prod`，验收与门禁通过才打 tag 并发布 GitHub Release。
 - 作业因代码原因失败时不得放行；主机 CI 不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。L5 真实能力回归（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`）会产生真实费用，不再每次发布必跑，只在用户当次同意后运行，验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果，真实结果回灌 fake（`AGENTS.md`「上游接口与 Fake」）。CI 只作门禁，不承担部署。
 
@@ -238,6 +238,13 @@ Hook 安装默认只预览：`python3 scripts/install-local-verification-hook.py
 SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-hooks.py`（#242），规则与上述门禁安装器一致：默认预览，`--apply` 原子替换并保留其他字节与模式，未知/损坏块拒绝改写，`--uninstall` 只移除本区块；另有只读 `--status`、`--mode warn|enforce` 与 `--init-worktrees`。回归为 `python3 -m unittest scripts/tests/test_install_specgit_required_hooks.py`。上线顺序与对已有工作树的影响见 `docs/specgit-project-integration.md`「所有分支与工作树强制初始化」。
 
 ## 3. 部署与回归流程
+
+本节步骤是五阶段流程中阶段 2、3 的执行细节；摘要见 `AGENTS.md`「实施流程」，细则与未实现部分见 `docs/deployment.md`「五阶段发布流程」，这里只对齐三点：
+
+- **合并条件**：必需检查 `host-ci/gates` 成功，且 GitHub 上的 Codex 应用对当前 head 的审核已完成、无未解决发现（PR 转 ready 时自动审核，或评论 `@codex review`）。
+- **回归顺序**：全部 Issue 合并后发布 `dev-test`，先跑 fake 一轮（自动 L0、L1、L1 Agent 加 `docs/regression-matrix.md` 本次相关行）；fake 有遗漏才跑真实 2D 一轮，补全 fake 后复跑 fake 回归；3D 只补 fake，真实 3D 须当次同意。
+- **模型探测兜底**：真实 2D 一轮的对话模型不通时，从网关模型列表里便宜优先做极小的对话探测，用第一个能通的；全部不通则退回 fake，报告标明「真实 2D 回归本次未覆盖」，并写明选用的模型与原因。
+
 0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 专用账号由 `release-env.py release dev-test` 在发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（#215，见 AGENTS.md「环境与运维」），随后同一命令自动跑 L0、L1、L1 Agent 并写机器报告（#411，见 AGENTS.md「发布后冒烟判定与晋级校验」）；数据由测试流程按真实用户流程自己创建；`prod` 不适用。
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，本地十项加 race 共 11 项），完成独立审核；

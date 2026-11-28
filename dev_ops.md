@@ -4,7 +4,7 @@
 
 ## Agent 全自动发布协议
 
-本节脚本与 `production/` 报告路径只适用于 `dev-test`（开发测试环境）；L2 等真实模型验收不是每次发布的义务，只在用户当次同意后执行（`AGENTS.md`「实施流程」第 5 步）。部署按环境名（`dev-test`、`prod`）进行，入口为 [`docs/deployment.md`](docs/deployment.md)；`prod` 只接收 `dev-test` 全部稳定通过（含 Agent 测试）的 revision。`legacy-formal` 已下线，不是可部署环境（存档 #74）。
+本节脚本与 `production/` 报告路径只适用于 `dev-test`（开发测试环境）；L2 等真实模型验收不是每次发布的义务，只在用户当次同意后执行（`AGENTS.md`「实施流程」阶段 3）。部署按环境名（`dev-test`、`prod`）进行，入口为 [`docs/deployment.md`](docs/deployment.md)；`prod` 只接收 `dev-test` 全部稳定通过（含 Agent 测试）的 revision。`legacy-formal` 已下线，不是可部署环境（存档 #74）。
 
 容量检查分阶段执行，不是在停服前一次完成。构建前或停服前的检查失败时旧服务不变。停服后的备份及候选启动前检查失败时，脚本先恢复旧镜像，再恢复并检查旧服务。恢复失败时服务保持停止，原备份保留并写报告。检查按设备比较 `df` 与 `statvfs` 可用值，并为 Docker 构建、TMPDIR、归档、回滚展开和恢复暂存分别估算需求；每个目标文件系统在扣除估算需求后至少留 1 GiB 和 4,096 个 inode。未知或不支持的容量数据失败关闭。
 容量检查是瞬时测量，不预留空间，也不能阻止共用主机的并发写入。恢复报告不可写不能阻止恢复尝试。健康请求的连接超时为 3 秒，总超时为 5 秒。成功清单使用同目录临时文件原子替换。
@@ -12,11 +12,11 @@
 
 发布原则：
 
-1. **不做 CI 发布**：CI 原则上只做集成测试；发布由 Agent 在本地驱动脚本完成；`dev-test` 的发布无需人类干预（`AGENTS.md`「环境与运维」的 dev-test 常设授权），`prod` 按 `AGENTS.md`「实施流程」第 9 步晋级。
+1. **不做 CI 发布**：CI 原则上只做集成测试；发布由 Agent 在本地驱动脚本完成；`dev-test` 的发布无需人类干预（`AGENTS.md`「环境与运维」的 dev-test 常设授权），`prod` 按 `AGENTS.md`「实施流程」阶段 4、5 更新（预准备与用户确认）。
 2. **失败协议**：候选启动或健康检查失败时，脚本先按本次备份范围恢复数据，再启动发布前实际运行的镜像（`database` 范围只恢复 `production/data`，候选写入的 `storage-go`/`web-data` 字节保留，不是完整回滚）。镜像标签从原容器读取。失败报告留服务器 `production/reports/release-failures/`，其中写明 `backup_scope` 与 `backup_targets`；Agent 在关联 GitHub Issue 中记录问题、证据、修复与重试结论，再回本地修复并重试。构建/preflight 失败直接中止，旧实例未动。
 3. **部署凭据全在本地**（SSH 目标与发布根只在本地 `deploy/local/environments.json`），不进任何远端系统。
 4. **各栈单实例**：`dev-test` 与 `prod` 分别只运行一个 `art-ai-go` 服务。
-5. **测试栈冒烟该做的全做**：L0/L1 每次测试发布后必跑；L2 真实模型链路（含一次小额生成）不再每次发布必跑，只在用户当次同意后执行（`AGENTS.md`「实施流程」第 5 步与「上游接口与 Fake」）。`prod` 只运行免费 L0/L1/L1 Agent。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent（建号之后，按此顺序），逐层读脚本自己的 `PASS=/FAIL=/SKIP=` 汇总行并写机器报告到 `<root>/production/reports/smoke-<revision>.json`（每层日志在同名目录下，`0600`），判定口径与失败处置见 `AGENTS.md`「发布后冒烟判定与晋级校验」；任一层不是 `pass` 或报告写不出去时发布命令返回非零，但发布不回滚。真实形态不自动跑，也不写报告：L1 会调用真实对话模型，须按 `docs/deployment.md` §6 取得当次同意后手动执行。
+5. **测试栈冒烟该做的全做**：L0/L1 每次测试发布后必跑；L2 真实模型链路（含一次小额生成）不再每次发布必跑，只在用户当次同意后执行（`AGENTS.md`「实施流程」阶段 3 与「上游接口与 Fake」）。`prod` 只运行免费 L0/L1/L1 Agent。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent（建号之后，按此顺序），逐层读脚本自己的 `PASS=/FAIL=/SKIP=` 汇总行并写机器报告到 `<root>/production/reports/smoke-<revision>.json`（每层日志在同名目录下，`0600`），判定口径与失败处置见 `AGENTS.md`「发布后冒烟判定与晋级校验」；任一层不是 `pass` 或报告写不出去时发布命令返回非零，但发布不回滚。真实形态不自动跑，也不写报告：L1 会调用真实对话模型，须按 `docs/deployment.md` §6 取得当次同意后手动执行。
 6. **LLM 噪声在脚本代码中兜底/重试**（consent 未出现自动重发一次消息再等），不靠人工判定。
 7. **冒烟不清理测试数据**；`dev-test` 每次发布本身从全新数据开始（`data: ephemeral`，见 `docs/deployment.md`）。
 
