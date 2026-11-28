@@ -130,6 +130,9 @@ func (s *Service) SessionPage(ctx context.Context, owner, session, cursor string
 	if err != nil {
 		return Graph{}, err
 	}
+	if index.derivedFrom, err = s.loadDerivations(ctx, owner, index, inputs); err != nil {
+		return Graph{}, err
+	}
 	index.modelUploads, err = s.loadNativeModelInputs(ctx, owner, index.references)
 	if err != nil {
 		return Graph{}, err
