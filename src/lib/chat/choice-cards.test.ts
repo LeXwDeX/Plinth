@@ -152,6 +152,16 @@ describe('choice cards (#321)', () => {
       expect(parseChoiceCards({ choices: [{ ...direction, options: [{ id: 'x', label: 'x', action: { type: 'reboot_server' } }] }] })).toEqual([]);
     });
 
+    it('reads continue_on_canvas and words it from the Schema (#709)', () => {
+      const card = parseChoiceCards({ choices: [{ ...direction, options: [
+        { id: 'board', label: '以画板为主继续', action: { type: 'continue_on_canvas' } },
+        direction.options[2],
+      ] }] })[0];
+      expect(card.options[0].action).toEqual({ type: 'continue_on_canvas' });
+      expect(choiceSelectionAction(card, { optionId: 'board' })).toEqual({ type: 'continue_on_canvas' });
+      expect(choiceActionLabel(schema, { type: 'continue_on_canvas' })).toBe(messages['ui.chat.choice.action_continue_on_canvas']);
+    });
+
     it('finds the action of the option a selection picks, and none for an actionless option or an unknown id', () => {
       const card = parsed();
       expect(choiceSelectionAction(card, { optionId: 'clear_and_draw' })).toEqual({ type: 'clear_operation' });

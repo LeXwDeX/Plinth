@@ -55,6 +55,7 @@ const canvasSchema: CanvasProductSchema = {
   frontend: {
     focus_delay_milliseconds: 100,
     auto_save_delay_milliseconds: 1500,
+    send_save_wait_milliseconds: 2000,
     saved_indicator_milliseconds: 2000,
     context_menu_bind_delay_milliseconds: 0,
     permission_redirect_path: '/tasks',

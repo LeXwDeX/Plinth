@@ -73,7 +73,7 @@ import { useReferenceSize } from '@/hooks/use-reference-size';
 import { canvasSnapshotClaim } from '@/lib/canvas/current-object';
 import { boardInputSource, boardMode } from '@/lib/chat/board-mode';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
-import { flushPendingEdits } from '@/lib/canvas/pending-edits';
+import { flushPendingEdits, settleBoardForTurn } from '@/lib/canvas/pending-edits';
 import { inpaintGeometry, paintSubmittedMask } from '@/lib/canvas/inpaint-export';
 import { exportAndUploadSnapshot, reportSnapshotFailure, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { uploadWorkspaceInputAsset, uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
@@ -89,7 +89,7 @@ import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, latestReplies, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
-import { runChoiceAnswer } from '@/lib/chat/choice-actions';
+import { originalWordsBefore, runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
@@ -1076,7 +1076,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; domainModels?: Record<string, string>; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string }; idempotencyKey?: string; queuedId?: string; canvasTurn?: boolean },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1146,8 +1146,11 @@ export function ChatColumn() {
       const withMask = maskStrokesNow > 0 && artboard !== null;
       // The toggle belongs to the box: a stage action, a card answer or a replayed round never picks it up.
       const fromBox = reuseImages === undefined && queuedSelection === undefined && !choiceAnswer;
+      // #709: the card option 以画板为主继续 (continue_on_canvas) is the person's explicit click: that one answer goes out
+      // as a canvas turn. No other path asks for one.
+      const canvasTurnAsked = extra?.canvasTurn === true;
       const boardTurn = boardMode({
-        chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,
+        chosen: (fromBox && boardModeChosenRef.current) || canvasTurnAsked, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,
       }).on;
       if (!queuedSelection && boardTurn && artboard) {
         try {
@@ -1172,6 +1175,8 @@ export function ChatColumn() {
         }
         if (!isCurrentSessionScope(scope)) return;
       }
+      // A canvas turn the card asked for never goes out as a plain turn (no board frame, or a queued selection).
+      if (canvasTurnAsked && canvasSelection === null) return;
       // #244: the mask is painted on the same artboard at the same delivery pixels, so a stroke lands on the
       // same pixel of the snapshot and of the mask. Upload it as an input asset; the server measures and freezes it.
       let selectionMask = extra?.selectionMask;
@@ -1335,6 +1340,15 @@ export function ChatColumn() {
             if (isCurrentSessionScope(scope)) toast.error(schemaText(schema, 'ui.workspace.harness.save_failed'));
             return;
           }
+          // #709: a turn that is not a canvas turn waits, at most canvas.frontend.send_save_wait_milliseconds, for the
+          // board's pending saves (a picture dragged in just before Enter, brush bitmaps still uploading), so the Agent's
+          // fallback reading of the board sees what is on screen. It only keeps the server's board fresh: this turn still
+          // carries no snapshot, no input source and no board selection (#644), and a slow or failed save sends anyway,
+          // without a dialog (#700). A canvas turn already flushed the brush on its snapshot path above.
+          await settleBoardForTurn({
+            sessionId, inputSource, canvasInputSource: schema.chat.context.canvas_input_source,
+            waitMilliseconds: schema.canvas.frontend.send_save_wait_milliseconds,
+          });
           if (!isCurrentSessionScope(scope) || useWorkspaceStore.getState().modelByDomain[domain] !== selectedModel ||
               useChatStore.getState().streamingBuffers[sessionId] || startingRef.current?.sessionId === sessionId) return;
           // #103/#239: the session's explicit 2D and 3D locks are written before the
@@ -2122,17 +2136,37 @@ export function ChatColumn() {
       // #374: an option with an action saves the function selection first and the answer goes out only once it is
       // saved. A selection that cannot be saved (a revision conflict included) says so on the card, sends nothing and
       // leaves the card answerable. The Harness is read at the moment of the save, not as of this callback's render.
+      const choiceAnswer = selection.useDefault
+        ? { choiceId: card.id, useDefault: true as const }
+        : { choiceId: card.id, optionId: selection.optionId };
       const outcome = await runChoiceAnswer(choiceSelectionAction(card, selection), {
         apply: (action) => applyChoiceAction(action, {
           schema,
           harness: { selection: sessionHarnessRef.current.view?.selection ?? null, save: sessionHarnessRef.current.save },
+          // #709: continue_on_canvas reads the board frame and the person's own words the card answers.
+          canvas: {
+            hasBoard: artboard !== null,
+            originalWords: scope.sessionId
+              ? originalWordsBefore(useChatStore.getState().messagesBySession[scope.sessionId] ?? [], card.assistantMessageId)
+              : '',
+            openBoardMode: () => {
+              setBoardModeChosen(true);
+              window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
+            },
+          },
         }),
         stillHere: () => isCurrentSessionScope(scope),
-        send: async () => {
+        send: async (applied) => {
+          if (applied?.canvasTurnText) {
+            // #709: the person's previous words again, as the canvas turn that answers the card (one send, the snapshot
+            // path of a 以画板为主 turn; no queued selection, so the board is rasterised now).
+            await sendRef.current(applied.canvasTurnText, [], [], undefined, undefined, [], undefined, {
+              choiceAnswer, canvasTurn: true, onSent: () => { accepted = true; },
+            });
+            return;
+          }
           await sendRef.current(text, [], [], undefined, [], [], undefined, {
-            choiceAnswer: selection.useDefault
-              ? { choiceId: card.id, useDefault: true }
-              : { choiceId: card.id, optionId: selection.optionId },
+            choiceAnswer,
             onSent: () => { accepted = true; },
           });
         },
@@ -2148,7 +2182,7 @@ export function ChatColumn() {
       setAnsweringChoice(null);
       void refreshChoices();
     }
-  }, [answeringChoice, refreshChoices, schema, uploading]);
+  }, [answeringChoice, artboard, refreshChoices, schema, setBoardModeChosen, uploading]);
   useEffect(() => {
     if (!heldChoice) return;
     const release = heldChoiceRelease({
