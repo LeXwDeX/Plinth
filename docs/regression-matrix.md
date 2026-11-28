@@ -40,7 +40,7 @@
 | 覆盖面 | 行 | 说明 |
 |---|---|---|
 | 2D（fake） | S3、R-702a、R-681a、R-693a、B3 | L1 Agent 冒烟；三种批准方式下 2D 授权与执行；点击矩阵（Agent 2D 结果入画板）；三视图/四视图续跑（图生图）；浏览器里三视图同一回合出完 |
-| 3D（fake） | R-704b、R-704i、R-722-3、R-702a | 全部带纹理开关的文生/图生/多视图 3D Offering 与报价（`texture-switch-fake.py` 一次运行覆盖三行）；R-702a 的 `chain` 段走 Meshy 文生 3D → 图生 3D → remesh → rigging → 格式转换 |
+| 3D（fake） | S3、R-704b、R-704i、R-722-3、R-702a | S3 的 L1 Agent 冒烟覆盖 Agent 3D 工具的批准方式、3D 交付格式与已有 fake 3D 任务的只读验收；全部带纹理开关的文生/图生/多视图 3D Offering 与报价（`texture-switch-fake.py` 一次运行覆盖三行）；R-702a 的 `chain` 段走 Meshy 文生 3D → 图生 3D → remesh → rigging → 格式转换 |
 | 真实补漏 | R-709-4、R-704e、R-704f、R-705-10 | 真实对话模型的画板兜底（`dev-test-live-chat`）；真实 Tripo/Meshy 3D 报价与 GLB（`prod-paid`）；升级演练（存量库副本，`prod-readonly`）。真实 2D 生成暂无可用行（R-699d 仍是 `GAP`），是已知缺口 |
 
 ## 3. 主表
