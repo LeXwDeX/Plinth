@@ -149,4 +149,34 @@ describe('applyChoiceAction', () => {
     await expect(applyChoiceAction(switchTo, { schema, harness: target, offerings: async () => [service()] })).rejects.toBe(conflict);
     expect(target.save).toHaveBeenCalledTimes(2);
   });
+
+  // #709: continue_on_canvas changes no function selection; it hands the person's previous words to a canvas turn.
+  describe('continue_on_canvas', () => {
+    const canvasAction = { type: 'continue_on_canvas' } as const;
+    const canvas = (patch: Partial<{ hasBoard: boolean; originalWords: string }> = {}) => ({
+      hasBoard: true, originalWords: '把这个角色做成三视图', openBoardMode: vi.fn(), ...patch,
+    });
+
+    it('returns the previous words for the canvas turn and saves no selection, even before the Harness loaded', async () => {
+      const target = harness(null);
+      const board = canvas();
+      await expect(applyChoiceAction(canvasAction, { schema, harness: target, canvas: board }))
+        .resolves.toEqual({ canvasTurnText: '把这个角色做成三视图' });
+      expect(target.save).not.toHaveBeenCalled();
+      expect(board.openBoardMode).not.toHaveBeenCalled();
+    });
+
+    it('refuses without a board frame, so nothing is sent as a plain turn', async () => {
+      const board = canvas({ hasBoard: false });
+      expect(await reasonOf(applyChoiceAction(canvasAction, { schema, harness: harness(), canvas: board }))).toBe('board_unavailable');
+      expect(await reasonOf(applyChoiceAction(canvasAction, { schema, harness: harness() }))).toBe('board_unavailable');
+      expect(board.openBoardMode).not.toHaveBeenCalled();
+    });
+
+    it('opens 以画板为主 when the previous words are gone, so typing and sending is the one step left', async () => {
+      const board = canvas({ originalWords: '' });
+      expect(await reasonOf(applyChoiceAction(canvasAction, { schema, harness: harness(), canvas: board }))).toBe('original_missing');
+      expect(board.openBoardMode).toHaveBeenCalledTimes(1);
+    });
+  });
 });

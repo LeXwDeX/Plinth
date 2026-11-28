@@ -1379,6 +1379,11 @@ export interface CanvasProductSchema {
   frontend: {
     focus_delay_milliseconds: number;
     auto_save_delay_milliseconds: number;
+    /**
+     * #709: the longest a chat send waits for the board's pending saves (debounced node save, unuploaded brush
+     * bitmaps) before it goes out anyway. Only keeps the server's board fresh; nothing of the board joins the turn.
+     */
+    send_save_wait_milliseconds: number;
     saved_indicator_milliseconds: number;
     context_menu_bind_delay_milliseconds: number;
     permission_redirect_path: string;

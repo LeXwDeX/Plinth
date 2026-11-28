@@ -699,6 +699,13 @@ func (service *Service) choiceOptionAction(
 			return nil, "clear_operation takes no operation_id"
 		}
 		return &ChoiceAction{Type: action.Type}, ""
+	case catalog.ChoiceActionContinueOnCanvas:
+		// #709: the page sends the person's previous message again as a
+		// canvas turn; there is no function to name.
+		if operationID != "" {
+			return nil, "continue_on_canvas takes no operation_id"
+		}
+		return &ChoiceAction{Type: action.Type}, ""
 	case catalog.ChoiceActionSwitchOperation:
 		targets := SwitchableHarnessOperations(service.harnessOperations, command.Options.Harness)
 		ids := make([]string, 0, len(targets))

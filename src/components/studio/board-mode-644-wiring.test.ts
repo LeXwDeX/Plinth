@@ -15,7 +15,7 @@ describe('the board is the turn input only on a canvas turn', () => {
     expect(chat).not.toContain('currentObjectSource(');
     const send = chat.slice(chat.indexOf('let canvasSelection: ChatAttachmentClaim[] | null = null;'), chat.indexOf('const stageSelection ='));
     expect(send).toContain('const fromBox = reuseImages === undefined && queuedSelection === undefined && !choiceAnswer;');
-    expect(send).toContain('chosen: fromBox && boardModeChosenRef.current, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,');
+    expect(send).toContain('chosen: (fromBox && boardModeChosenRef.current) || canvasTurnAsked, artboard: artboard !== null, maskSteps: maskStrokesNow, namesBoard,');
     expect(send).toContain('if (!queuedSelection && boardTurn && artboard) {');
   });
 

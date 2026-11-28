@@ -58,10 +58,14 @@ describe('a choice option with an action (#374)', () => {
   it('runs the action before the answer goes out, and sends nothing when it fails', () => {
     const run = answer.indexOf('runChoiceAnswer(choiceSelectionAction(card, selection), {');
     expect(run).toBeGreaterThan(0);
-    // The only send of the answer is the step `runChoiceAnswer` runs after the action.
-    expect(answer.match(/await sendRef\.current\(/g)).toHaveLength(1);
-    expect(run).toBeLessThan(answer.indexOf('await sendRef.current('));
-    expect(answer).toMatch(/apply: \(action\) => applyChoiceAction\(action, \{\s*schema,\s*harness: \{ selection: sessionHarnessRef\.current\.view\?\.selection \?\? null, save: sessionHarnessRef\.current\.save \},\s*\}\),/);
+    // The only send of the answer is the step `runChoiceAnswer` runs after the action: the answer words, or (#709,
+    // continue_on_canvas) the previous words as the canvas turn, one or the other.
+    expect(answer.match(/await sendRef\.current\(/g)).toHaveLength(2);
+    const sendStep = answer.indexOf('send: async (applied) => {');
+    expect(run).toBeLessThan(sendStep);
+    expect(sendStep).toBeLessThan(answer.indexOf('await sendRef.current('));
+    expect(answer).toMatch(/if \(applied\?\.canvasTurnText\) \{[\s\S]*?await sendRef\.current\(applied\.canvasTurnText,[\s\S]*?\}\);\s*return;\s*\}\s*await sendRef\.current\(text,/);
+    expect(answer).toMatch(/apply: \(action\) => applyChoiceAction\(action, \{\s*schema,\s*harness: \{ selection: sessionHarnessRef\.current\.view\?\.selection \?\? null, save: sessionHarnessRef\.current\.save \},\s*\/\/ #709[^\n]*\n\s*canvas: \{/);
     expect(answer).toContain('stillHere: () => isCurrentSessionScope(scope),');
     // A failed action is worded on the card in its own Schema words; the existing "not sent" words stay for a send that failed.
     expect(answer).toMatch(/if \(outcome\.status === 'action_failed'\) \{\s*setChoiceError\(\{ cardId: card\.id, text: schemaText\(schema, outcome\.failureKey\) \}\);/);
