@@ -243,7 +243,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 
 - **合并条件**：必需检查 `host-ci/gates` 成功，且 GitHub 上的 Codex 应用对当前 head 的审核已完成、无未解决发现（PR 转 ready 时自动审核，或评论 `@codex review`）。
 - **回归顺序**：全部 Issue 合并后发布 `dev-test`，先跑 fake 一轮（自动 L0、L1、L1 Agent 加 `docs/regression-matrix.md` 本次相关行）；fake 有遗漏才跑真实 2D 一轮，补全 fake 后复跑 fake 回归；3D 只补 fake，真实 3D 须当次同意。
-- **模型探测兜底**：真实 2D 一轮的对话模型不通时，从网关模型列表里便宜优先做极小的对话探测，用第一个能通的；全部不通则退回 fake，报告标明「真实 2D 回归本次未覆盖」，并写明选用的模型与原因。
+- **模型探测兜底**：真实 2D 一轮的对话模型不通时，从网关当前模型列表里按该测试路线对应的模型系列做极小的对话探测，用第一个能通的；全部不通则退回 fake，并记为测试缺口「真实 2D 回归本次未覆盖」，须补测，补齐前不进入阶段 4；写明选用的模型与原因。
 
 0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 专用账号由 `release-env.py release dev-test` 在发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（#215，见 AGENTS.md「环境与运维」），随后同一命令自动跑 L0、L1、L1 Agent 并写机器报告（#411，见 AGENTS.md「发布后冒烟判定与晋级校验」）；数据由测试流程按真实用户流程自己创建；`prod` 不适用。
 1. 本地代码修改完成；

@@ -47,7 +47,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 
 1. **需求与方案**：需求方向与用户确认后，主会话自动派发 `issue-researcher`（只取证不判断：查重，列相关旧 Issue、PR、提交与被取代的旧决策，标出与旧要求的冲突），再派发 `requirements-analyst`（分析系统与产品体验影响，给含「不做或最小改动」的完整方案，按奥卡姆剃刀取最小并写明每个新增项保护什么；用户方案非最优时明说分歧，不悄悄替换）。两份输出写成同一 Issue 的评论（首行「Issue 调研」「需求分析」），审阅后开发；小修（文案、小 UX、纯文档订正）豁免，新增限制仍守「少限制用户」。
 2. **自测开发**：每个 Issue 单独开发、单独 PR，按依赖顺序提，PR 正文写完整并关闭对应 Issue。改行为前写清预期、边界和验证路径（Schema/共享接口与跨 Provider 链的检查面见部署文档）；TDD，按 `dev_test.md` §2 跑本机门禁与主机 CI，纯文档走轻量通道。PR 转 ready 时 GitHub 的 Codex 应用自动审核（或评论 `@codex review`）。**合并条件**：`host-ci/gates` 成功，且 Codex 对当前 head 的审核已完成、无未解决发现；有发现则修复推送，必要时再请求审核。
-3. **`dev-test` 全量回归**：全部 Issue 合并后用 `release-env.py release dev-test` 发布 `origin/main`（全新数据）并核对 revision。第一轮 fake：自动 L0、L1、L1 Agent（判定见下节）加 `docs/regression-matrix.md` 本次相关行；fake 有遗漏才跑第二轮真实 2D（真实数据，留记录），补全 fake 后复跑 fake 回归；3D 只补 fake，真实 3D 须当次同意。对话模型不通时按部署文档探测兜底，全不通则退回 fake，报告标明「真实 2D 回归本次未覆盖」。收尾对精确 `main` revision 跑一次 GitHub Runner 完整 CI（掉线时按 `dev_test.md` §2 手动触发），再派 `release-gate`，回执贴 #2，通过才进阶段 4。
+3. **`dev-test` 全量回归**：全部 Issue 合并后用 `release-env.py release dev-test` 发布 `origin/main`（全新数据）并核对 revision。第一轮 fake：自动 L0、L1、L1 Agent（判定见下节）加 `docs/regression-matrix.md` 本次相关行；fake 有遗漏才跑第二轮真实 2D（真实数据留记录），补全 fake 后复跑 fake；3D 只补 fake，真实 3D 须当次同意。对话模型不通时按部署文档探测兜底，全不通则退回 fake，记为测试缺口，须补测，补齐前不进阶段 4。收尾对精确 `main` revision 跑一次 GitHub Runner 完整 CI（掉线时按 `dev_test.md` §2 手动触发），再派 `release-gate`，回执贴 #2，通过才进阶段 4。
 4. **构建与 `prod` 预准备**：在 `dev-test` 主机构建全部内容（镜像与配置），记录镜像 digest 与 revision，测哪个发哪个；`prod` 禁止开发与构建。镜像与配置送到 `prod` 预检，不动运行中的服务。
 5. **用户确认后重启更新**：出确认卡（版本、revision、镜像 digest、风险、预计停机、回退方案），同意后依次：配置备份（最多一份）与命名清楚的临时回退副本（验收后即删）、重启、`prod` 冒烟（L0 免费；L1 调用真实对话模型，须当次同意，可在确认卡里一并取得）、验收、`release-gate` 再过一次、tag 与 GitHub Release。失败按部署协议回滚；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
 
