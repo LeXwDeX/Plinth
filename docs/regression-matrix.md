@@ -127,7 +127,10 @@
 | R-709-6 | 非画板轮发送前等画板保存（拖入文件上传、画笔位图、防抖节点保存），上限 `canvas.frontend.send_save_wait_milliseconds`，超时或失败照常发送，不带画板内容；画板轮与没有画板时不等待 | #709 | unit | `src/lib/canvas/pending-edits.test.ts` | 单测通过 | OK | — | | 接线见 `src/components/studio/chat-column-wiring.test.ts` |
 | R-705-1 | 批准卡「预计消耗」显示「/」、余额读不到；抠图批准卡类型显示「3D」 | #705 | dev-test-fake | — | 卡上的预计消耗与余额与结果卡一致；抠图显示为 2D | GAP | — | | 未修；要补 fake 复现与界面断言 |
 | R-705-2 | `ResizeObserver` 良性事件不再当 ERROR 上报（真实 Error 仍上报） | #705 | unit | `src/lib/client-error-report.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |
-| R-705-3 | 图生图后版本条多出「上传」节点、血缘不直接指向来源版本 | #705 | dev-test-fake | — | 不多出上传节点，血缘指向来源版本 | GAP | — | | 未修；要补 fake 复现 |
+| R-705-3 | 图生图后版本条多出「上传」节点、血缘不直接指向来源版本 | #705、#720 | unit | `go test ./internal/lineage/ ./internal/adapters/sqlite/ -run 720` | 单测通过 | OK | — | | 已由 #720 修复，覆盖见 R-720-1…R-720-3 |
+| R-720-1 | 图生图冻结的参考图副本（聊天解析器把任务图复制成 `asset_type=image` 的输入资产）连到来源版本：只在早于该任务、且不是任务自己的版本里按相同字节找来源（fake 同尺寸同字节时结果与参考图相同也不再歧义）；与多个更早版本字节相同时为未知、不显示成「上传」节点；输入压缩（#276）产生的派生副本按派生记录回到来源（任务图为 `recorded`，聊天副本再按字节，用户上传仍是原上传的一个节点） | #720 | unit | `go test ./internal/lineage/ -run 720` | 单测通过（`Session` 与分页 `SessionPage` 都断言） | OK | — | | 字节相同的多个更早版本仍无法区分（fake 每次同尺寸同字节，图生图第二次的血缘在 fake 上是「来源未知」）；精确记录副本来源未做 |
+| R-720-2 | 真实 sqlite 行：派生副本（`derived_from_asset_id`）→ 聊天副本 → 版本 1，没有上传节点；他人读不到 | #720 | unit | `go test ./internal/adapters/sqlite/ -run 720` | 单测通过 | OK | — | | |
+| R-720-3 | 只有任务跟踪器知道、版本链还没列出的进行中任务，不再显示「来源未知」连线，详情也不说「没有来源」；版本链列出后显示冻结的来源 | #720 | unit | `src/lib/workspace/versions.test.ts` | 单测通过 | OK | — | | 界面未在 dev-test 上看过 |
 | R-705-4 | 附 2 张图时弹「多个视角」询问条 | #705、#721 | dev-test-fake | — | 按 #721 降级为不打断：附件旁「用作多视角」入口 | GAP | — | | 已由 #721 修复，覆盖改见 R-721-1（单测）与 R-721-2（浏览器，待补） |
 | R-705-5 | 1000px 顶栏项目名不被压住；全部产出按 Esc 先清勾选再关面板 | #705 | unit | `src/components/studio/project-switcher.test.tsx`、`src/lib/workspace/output-groups.test.ts`、`src/components/studio/stage-wiring.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | 1000px 时项目名收缩到 0 宽（已知小问题） |
 | R-705-6 | 蒙版里不按 Shift 画新选框时保留之前的画笔笔画 | #705 | unit | `src/store/mask-store.test.ts` | 单测通过 | OK | f5bc5e10 2026-11-28 | E2 | |

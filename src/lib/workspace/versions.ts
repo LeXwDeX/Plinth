@@ -78,6 +78,11 @@ export interface VersionTile {
   /** The group's views as the server projects them (all of them, finished or not); empty for an ordinary version. */
   views: VersionView[];
   parents: VersionParent[];
+  /**
+   * #720: only the task tracker knows this task so far; the version chain has not read its frozen source yet. Its
+   * parents are empty without meaning "made from nothing", and the strip draws no 「来源未知」 connector for it.
+   */
+  sourcePending?: boolean;
   failure: string;
   origin: VersionOrigin;
   /** "inpaint" for a masked edit; empty otherwise. */
@@ -293,6 +298,8 @@ export function buildVersionTiles({ schema, graph, tracked, sessionId, threeView
 
   // Tasks still in flight or failed live only in the tracker: the lineage
   // describes succeeded work.
+  // #720: a task only the tracker knows has a source the chain has not read yet. That is not an unknown source:
+  // its tile names no parent (no 「来源未知」 connector) until the chain lists it with its frozen source.
   for (const task of tracked) {
     // Started from a version's Formats tab before the chain lists it: already a conversion of that version.
     if (task.formatOf && !byTask.has(task.taskId)) {
@@ -327,12 +334,11 @@ export function buildVersionTiles({ schema, graph, tracked, sessionId, threeView
     const key = `t:${task.taskId}`;
     tiles.push(blankTile({
       key, taskId: task.taskId, taskIds: [task.taskId], domain, status, state: task.state, progress, capability: task.capability, failure,
-      createdAt: task.startedAt ? new Date(task.startedAt).toISOString() : '',
-      parents: [{ key: '', known: false, kind: 'source_task', evidence: 'unknown', link: 'unknown', step: task.capability }],
+      createdAt: task.startedAt ? new Date(task.startedAt).toISOString() : '', sourcePending: true,
     }));
     byTask.set(task.taskId, key);
   }
-  for (const tile of tiles) if (tile.status !== 'ready' && tile.parents.length === 0) {
+  for (const tile of tiles) if (tile.status !== 'ready' && tile.parents.length === 0 && !tile.sourcePending) {
     tile.parents.push({ key: '', known: false, kind: 'source_task', evidence: 'unknown', link: 'unknown', step: tile.capability });
   }
   return { tiles: numberTiles(tiles), byTask, byCapture, fileTaskParents };
