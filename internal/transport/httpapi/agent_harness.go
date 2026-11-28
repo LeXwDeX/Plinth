@@ -64,7 +64,7 @@ func (s *Server) agentParamsGet(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	key := agentparams.ScopeKey(string(owner), scope)
-	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id")))
+	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id"), requestLocale(request)))
 }
 
 func (s *Server) agentParamsPut(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
@@ -110,7 +110,7 @@ func (s *Server) agentParamsPut(writer http.ResponseWriter, request *http.Reques
 	} else {
 		s.agentParams.SetUser(key, body.Params)
 	}
-	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id")))
+	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id"), requestLocale(request)))
 }
 
 func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
@@ -597,7 +597,7 @@ func agentParamsOrNew(store *agentparams.Store) *agentparams.Store {
 	return store
 }
 
-func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
+func (s *Server) projectAgentParameters(key, offeringID, locale string) map[string]any {
 	stored := s.agentParams.GetOffering(key, offeringID)
 	if offeringID == "" {
 		return map[string]any{"params": stored}
@@ -633,6 +633,21 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 				values[p.Name] = raw
 			}
 			visible[p.Name] = state
+		}
+		// #722: the estimate of the saved parameters, so the settings panel
+		// follows a switch such as texture instead of repeating the
+		// Offering's default_native_quote. Same evaluation as the harness
+		// status (declared defaults under these values, then forced_when);
+		// display only, never execution input. Without native pricing, or
+		// when it cannot be evaluated, nothing is projected and the panel
+		// keeps the Offering's own estimate. Component labels follow the
+		// request locale like the approval card's quote.
+		if o.NativePricing != nil {
+			if encoded, err := json.Marshal(values); err == nil {
+				if quote, err := o.DefaultNativeQuote(encoded); err == nil && quote != nil {
+					result["native_quote"] = s.quoteIn(locale, o, quote)
+				}
+			}
 		}
 	}
 	result["parameter_states"] = visible
