@@ -29,7 +29,8 @@ var (
 
 // ModelFile returns the fixed bytes of a model container: "glb", "gltf",
 // "fbx", "obj" (OBJ ZIP), "stl", "usdz", "3mf", "3mf:tripo" (the 3MF package
-// Tripo's conversion writes), "glb:untextured" (the GLB with no texture) or the
+// Tripo's conversion writes), "glb:untextured" (the GLB with no texture), "glb:pbr"
+// (the GLB with the base color, metallic-roughness and normal textures) or the
 // texture "png". They are
 // written by the same format writers Mock generation uses (providers/mock/modelfiles),
 // so Plinth's delivery checks accept them.
