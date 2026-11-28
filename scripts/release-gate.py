@@ -14,6 +14,8 @@ Issues their commits name, the fake / Provider / Catalog areas touched), then ch
      at the candidate or at an ancestor with no runtime file changed since, and the matrix itself
      changed in the range; or a valid exemption in docs/release-gate.md. Phase "promote" leaves the
      current verification of the prod-* rows to the "tag" run;
+  1b. coverage list (#738): section "2.1 发布覆盖清单" names rows for 2D（fake）, 3D（fake） and
+     真实补漏; every one of them passes the row checks of 1 on every release, whatever changed;
   2. fake: a change to the fake, the Providers or the Catalog Offerings comes with a register
      change or a "无新增差异（核对于 <rev> <date>）" line, and no fake/real difference is OPEN.
 
@@ -54,6 +56,10 @@ UNIT_LAYER = "unit"
 CI_EVIDENCE = "CI"
 CI_CONTEXT = "host-ci/gates"
 STATUS_FILE_VARIABLE = "RELEASE_GATE_STATUS_FILE"
+# The release coverage list (#738): rows checked on every release, whatever changed.
+COVERAGE_SECTION = "发布覆盖清单"
+COVERAGE_COLUMNS = ("覆盖面", "行", "说明")
+COVERAGE_AREAS = ("2D（fake）", "3D（fake）", "真实补漏")
 DIFF_SECTION = "Fake 与真实的已知差异"
 DIFF_COLUMNS = ("差异", "状态", "Issue", "记录日期", "备注")
 DIFF_STATES = ("OPEN", "FIXED", "ACCEPTED")
@@ -317,8 +323,15 @@ def parse_matrix(text):
         table = next((rows for header, rows in tables(diff_lines) if all(c in header for c in DIFF_COLUMNS)), [])
         diff_rows = [{"difference": clean(row["差异"]), "state": clean(row["状态"]), "note": clean(row["备注"])}
                      for row in table if not NO_NEW_DIFF.search(row["差异"])]
+    coverage_lines = section_lines(text, COVERAGE_SECTION)
+    coverage_list = None
+    if coverage_lines is not None:
+        table = next((rows for header, rows in tables(coverage_lines) if all(c in header for c in COVERAGE_COLUMNS)), [])
+        coverage_list = [{"area": clean(row["覆盖面"]).replace("(", "（").replace(")", "）"),
+                          "ids": [clean(part) for part in re.split(r"[、,，]", row["行"]) if not empty(part)]}
+                         for row in table]
     return {"main_found": bool(main), "rows": rows, "diff_section": diff_lines is not None,
-            "diff_rows": diff_rows, "no_new_diff": markers}
+            "diff_rows": diff_rows, "no_new_diff": markers, "coverage_list": coverage_list}
 
 
 def parse_rules(text):
@@ -447,6 +460,58 @@ def ci_problem(row, head, revisions, ci):
     return None
 
 
+def row_problems(row, phase, head, revisions, ci):
+    """(problems, deferred) of one main row: state, a current "最后验证" and evidence (#707, #718)."""
+    problems = []
+    if row["state"] not in PASSING_STATES:
+        problems.append(f"{row['id']} 状态是 {row['state'] or '空'}，不是 OK/MANUAL")
+    if phase == "promote" and post_promotion(row):
+        return problems, True  # verified on prod after the promotion
+    if row["last"] is None:
+        problems.append(f"{row['id']} 的「最后验证」不是「<revision 前 8 位> <日期>」：{row['last_raw'] or '空'}")
+    else:
+        problem = stale(row, head, revisions)
+        if not problem and cites_ci(row):
+            problem = ci_problem(row, head, revisions, ci)
+        if problem:
+            problems.append(problem)
+    if not row["evidence"]:
+        problems.append(f"{row['id']} 的「证据」为空")
+    return problems, False
+
+
+def coverage_areas(matrix, phase, head, revisions, ci):
+    """The release coverage list (#738): every area has rows, and each row passes as a change point would.
+    Returns (per-area summary, problems that are not tied to one row)."""
+    if matrix["coverage_list"] is None:
+        return [], [f"回归表缺少「{COVERAGE_SECTION}」一节（覆盖面：{'、'.join(COVERAGE_AREAS)}）"]
+    general, by_area = [], {}
+    for entry in matrix["coverage_list"]:
+        if entry["area"] not in COVERAGE_AREAS:
+            general.append(f"{COVERAGE_SECTION}里的覆盖面「{entry['area']}」不是 {'、'.join(COVERAGE_AREAS)}之一")
+            continue
+        by_area.setdefault(entry["area"], []).extend(rid for rid in entry["ids"]
+                                                     if rid not in by_area.get(entry["area"], []))
+    rows = {row["id"]: row for row in matrix["rows"]}
+    summary = []
+    for area in COVERAGE_AREAS:
+        item = {"area": area, "rows": by_area.get(area, []), "passed": [], "deferred": [], "failed": []}
+        if not item["rows"]:
+            general.append(f"{COVERAGE_SECTION}缺少覆盖面「{area}」或它没有行")
+        for rid in item["rows"]:
+            row = rows.get(rid)
+            problems, deferred = (([f"{rid} 不在主表"], False) if row is None
+                                  else row_problems(row, phase, head, revisions, ci))
+            if problems:
+                item["failed"].append({"id": rid, "problems": problems})
+            elif deferred:
+                item["deferred"].append(rid)
+            else:
+                item["passed"].append(rid)
+        summary.append(item)
+    return summary, general
+
+
 def evaluate(changes, matrix_text, rules_text, matrix_source=MATRIX_PATH, phase="tag", revisions=None, ci=None):
     """The gate decision from plain data: changes (see collect), the matrix and rules texts or None,
     the phase, what inspect_revisions found for the rows' revisions and the CI states (ci_states)."""
@@ -507,28 +572,24 @@ def evaluate(changes, matrix_text, rules_text, matrix_source=MATRIX_PATH, phase=
             if not rows:
                 problems.append("回归表主表没有「来源 Issue」含它的有效行")
             for row in rows:
-                if row["state"] not in PASSING_STATES:
-                    problems.append(f"{row['id']} 状态是 {row['state'] or '空'}，不是 OK/MANUAL")
-                if phase == "promote" and post_promotion(row):
-                    deferred.append(row["id"])  # verified on prod after the promotion
-                    continue
-                if row["last"] is None:
-                    problems.append(f"{row['id']} 的「最后验证」不是「<revision 前 8 位> <日期>」：{row['last_raw'] or '空'}")
-                else:
-                    problem = stale(row, changes["head"], revisions)
-                    if problem:
-                        problems.append(problem)
-                    elif cites_ci(row):
-                        problem = ci_problem(row, changes["head"], revisions, ci)
-                        if problem:
-                            problems.append(problem)
-                if not row["evidence"]:
-                    problems.append(f"{row['id']} 的「证据」为空")
+                found, later = row_problems(row, phase, changes["head"], revisions, ci)
+                problems.extend(found)
+                if later:
+                    deferred.append(row["id"])
             if matrix["main_found"]:
                 for problem in problems:
                     reasons.append(f"#{number}：{problem}")
         coverage.append({"issue": number, "result": "fail" if problems else "ok", "rows": ids, "deferred": deferred,
                          "problems": problems})
+
+    # #738: the coverage list is checked on every release, not only for the changed Issues.
+    release_areas = []
+    if matrix is not None and matrix["main_found"]:
+        release_areas, general = coverage_areas(matrix, phase, changes["head"], revisions, ci)
+        reasons.extend(general)
+        for item in release_areas:
+            for failed in item["failed"]:
+                reasons.extend(f"覆盖面「{item['area']}」：{problem}" for problem in failed["problems"])
 
     areas = changed_areas(changes["files"])
     register = sorted(path for path in REGISTER_PATHS if path in changes["files"])
@@ -559,7 +620,7 @@ def evaluate(changes, matrix_text, rules_text, matrix_source=MATRIX_PATH, phase=
                               for n, p in sorted(points.items())],
             "pull_requests": [{"pr": n, "issues": issues} for n, issues in sorted(prs.items())],
             "untracked_commits": [commit["sha"][:8] for commit in untracked],
-            "areas": areas, "coverage": coverage, "fake": fake, "exemptions": exemptions,
+            "areas": areas, "coverage": coverage, "coverage_areas": release_areas, "fake": fake, "exemptions": exemptions,
             "agent_checks": list(AGENT_CHECKS), "reasons": reasons}
 
 
@@ -579,6 +640,13 @@ def render(result):
         deferred = f"；晋级后验证 {', '.join(item['deferred'])}" if item.get("deferred") else ""
         lines.append(f"  #{item['issue']}  {item['result'].upper()}{rows}{deferred}")
         lines.extend(f"      - {problem}" for problem in item["problems"])
+    lines.append(f"发布覆盖清单（{COVERAGE_SECTION}，每次发布都核对）：")
+    for item in result["coverage_areas"]:
+        deferred = f"，晋级后验证 {len(item['deferred'])}（{', '.join(item['deferred'])}）" if item["deferred"] else ""
+        lines.append(f"  {item['area']}  {len(item['rows'])} 行，通过 {len(item['passed'])}{deferred}，"
+                     f"未通过 {len(item['failed'])}")
+        for failed in item["failed"]:
+            lines.append(f"      - {failed['id']}：{'；'.join(failed['problems'])}")
     fake = result["fake"]
     lines.append(f"fake 检查：登记表改动 {', '.join(fake['register_changed']) or '无'}；"
                  f"无新增差异核对行 {', '.join(fake['no_new_diff']) or '无'}")

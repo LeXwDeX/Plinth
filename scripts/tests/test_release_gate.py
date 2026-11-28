@@ -46,8 +46,17 @@ def v196_changes(extra_files=()):
             "pr_commits": {706: [item["sha"] for item in commits[:6]]}, "files": files}
 
 
+DEFAULT_AREAS = (("2D（fake）", "R-001"), ("3D（fake）", "R-002"), ("真实补漏", "R-003"))
+
+
+def areas(entries=DEFAULT_AREAS):
+    """A release coverage list section (#738); entries are (area, row IDs)."""
+    return ("\n### 2.1 发布覆盖清单（门禁硬检查）\n\n| 覆盖面 | 行 | 说明 |\n|---|---|---|\n"
+            + "".join(f"| {area} | {ids} | 说明 |\n" for area, ids in entries))
+
+
 def matrix(rows, diffs="| 无新增差异（核对于 {head8} 2026-11-28） | — | — | 2026-11-28 | — |", head8=HEAD8,
-           defects=""):
+           defects="", coverage=None):
     """A sample matrix; a row is (id, issues, state, last, evidence[, layer]) with layer L1 by default."""
     header = ("| ID | 功能 / 行为 | 来源 Issue | 验证层 | 命令或脚本 | 期望 | 状态 | 最后验证 | 证据 |\n"
               "|---|---|---|---|---|---|---|---|---|\n")
@@ -56,7 +65,7 @@ def matrix(rows, diffs="| 无新增差异（核对于 {head8} 2026-11-28） | �
     return ("# 回归测试表\n\n## 主表\n\n" + header + body
             + "\n## 每次发布必跑\n\n- R-001\n\n## Fake 与真实的已知差异\n\n"
             + "| 差异 | 状态 | Issue | 记录日期 | 备注 |\n|---|---|---|---|---|\n"
-            + diffs.format(head8=head8) + "\n" + defects)
+            + diffs.format(head8=head8) + "\n" + defects + (areas() if coverage is None else coverage))
 
 
 RULES = """# 发布门禁
@@ -432,6 +441,85 @@ class DefectSectionTests(unittest.TestCase):
         self.assertEqual(gate.evaluate(v196_changes([gate.MATRIX_PATH]), text, rules())["status"], "pass")
 
 
+class CoverageAreaTests(unittest.TestCase):
+    """#738: 2D (fake), 3D (fake) and real-gap rows are checked on every release, whatever changed."""
+
+    def evaluate(self, rows=None, coverage=None, phase="tag", changes=None, revisions=None, ci=None):
+        text = matrix(passing_rows() if rows is None else rows, coverage=coverage)
+        return gate.evaluate(changes or v196_changes([gate.MATRIX_PATH]), text, rules(), phase=phase,
+                             revisions=revisions, ci=ci)
+
+    def area(self, result, name):
+        return next(item for item in result["coverage_areas"] if item["area"] == name)
+
+    def test_every_area_with_current_rows_passes_and_is_summarised(self):
+        rows = passing_rows() + [("R-010", "#600", "OK", f"{HEAD8} 2026-11-28", "评论链接")]
+        result = self.evaluate(rows, areas([("2D（fake）", "R-001、R-010"), ("3D（fake）", "R-002"),
+                                            ("真实补漏", "R-003")]))
+        self.assertEqual(result["status"], "pass", result["reasons"])
+        self.assertEqual([item["area"] for item in result["coverage_areas"]], list(gate.COVERAGE_AREAS))
+        self.assertEqual(self.area(result, "2D（fake）"),
+                         {"area": "2D（fake）", "rows": ["R-001", "R-010"], "passed": ["R-001", "R-010"],
+                          "deferred": [], "failed": []})
+
+    def test_rows_outside_the_changed_issues_are_still_checked(self):
+        rows = passing_rows() + [("R-010", "#600", "OK", f"{OLD8} 2026-11-20", "评论链接")]
+        result = self.evaluate(rows, areas([("2D（fake）", "R-001、R-010"), ("3D（fake）", "R-002"),
+                                            ("真实补漏", "R-003")]))
+        self.assertEqual(result["status"], "fail")
+        self.assertNotIn(600, result["changed_issues"])
+        self.assertIn(f"覆盖面「2D（fake）」：R-010 最后验证于 {OLD8}，无法解析为本仓库的提交", "\n".join(result["reasons"]))
+        self.assertEqual([item["id"] for item in self.area(result, "2D（fake）")["failed"]], ["R-010"])
+
+    def test_gap_obsolete_empty_evidence_and_unknown_rows_fail(self):
+        rows = passing_rows() + [("R-011", "#600", "GAP", "—", ""), ("R-012", "#600", "OBSOLETE", "—", ""),
+                                 ("R-013", "#600", "OK", f"{HEAD8} 2026-11-28", "—")]
+        result = self.evaluate(rows, areas([("2D（fake）", "R-001, R-011"), ("3D（fake）", "R-002、R-012"),
+                                            ("真实补漏", "R-003、R-013、R-099")]))
+        reasons = "\n".join(result["reasons"])
+        self.assertEqual(result["status"], "fail")
+        for expected in ("覆盖面「2D（fake）」：R-011 状态是 GAP", "覆盖面「3D（fake）」：R-012 状态是 OBSOLETE",
+                         "覆盖面「真实补漏」：R-013 的「证据」为空", "覆盖面「真实补漏」：R-099 不在主表"):
+            self.assertIn(expected, reasons)
+
+    def test_a_missing_section_area_or_an_unknown_area_fails(self):
+        result = self.evaluate(coverage="")
+        self.assertIn("回归表缺少「发布覆盖清单」一节", "\n".join(result["reasons"]))
+        result = self.evaluate(coverage=areas(DEFAULT_AREAS[:2]))
+        self.assertIn("发布覆盖清单缺少覆盖面「真实补漏」或它没有行", result["reasons"])
+        result = self.evaluate(coverage=areas(DEFAULT_AREAS + (("真实 2D", "R-001"),)))
+        self.assertIn("发布覆盖清单里的覆盖面「真实 2D」不是 2D（fake）、3D（fake）、真实补漏之一", result["reasons"])
+        result = self.evaluate(coverage=areas([("2D（fake）", "—"), *DEFAULT_AREAS[1:]]))
+        self.assertIn("发布覆盖清单缺少覆盖面「2D（fake）」或它没有行", result["reasons"])
+
+    def test_promote_defers_prod_rows_and_tag_requires_them(self):
+        rows = passing_rows() + [("P-9", "#600", "OK", "—", "", "prod-paid")]
+        coverage = areas([("2D（fake）", "R-001"), ("3D（fake）", "R-002"), ("真实补漏", "R-003、P-9")])
+        result = self.evaluate(rows, coverage, phase="promote")
+        self.assertEqual(result["status"], "pass", result["reasons"])
+        self.assertEqual(self.area(result, "真实补漏")["deferred"], ["P-9"])
+        result = self.evaluate(rows, coverage, phase="tag")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("覆盖面「真实补漏」：P-9 的「最后验证」不是", "\n".join(result["reasons"]))
+
+    def test_unit_rows_may_cite_ci(self):
+        rows = passing_rows() + [("U-1", "#600", "OK", f"{HEAD8} 2026-11-28", "CI", "unit")]
+        coverage = areas([("2D（fake）", "R-001、U-1"), *DEFAULT_AREAS[1:]])
+        self.assertEqual(self.evaluate(rows, coverage, ci={HEAD: {"state": "success", "error": None}})["status"], "pass")
+        result = self.evaluate(rows, coverage, ci={HEAD: {"state": "failure", "error": None}})
+        self.assertIn("覆盖面「2D（fake）」：U-1 的证据是 CI", "\n".join(result["reasons"]))
+
+    def test_the_list_parses_separators_and_the_committed_list_names_main_rows(self):
+        parsed = gate.parse_matrix(matrix(passing_rows(), coverage=areas([("2D（fake）", "R-001、R-002, R-003"),
+                                                                         *DEFAULT_AREAS[1:]])))
+        self.assertEqual(parsed["coverage_list"][0], {"area": "2D（fake）", "ids": ["R-001", "R-002", "R-003"]})
+        committed = gate.parse_matrix((ROOT / gate.MATRIX_PATH).read_text(encoding="utf-8"))
+        ids = {row["id"] for row in committed["rows"]}
+        self.assertEqual(sorted({entry["area"] for entry in committed["coverage_list"]}), sorted(gate.COVERAGE_AREAS))
+        for entry in committed["coverage_list"]:
+            self.assertTrue(entry["ids"] and set(entry["ids"]) <= ids, entry)
+
+
 class GitCollectionTests(unittest.TestCase):
     """collect() on a throwaway repository: trailers, a merged pull request and the diff."""
 
@@ -487,7 +575,8 @@ class GitCollectionTests(unittest.TestCase):
             self.git(repo, "commit", "-q", "-m", "feat: a\n\nIssue: #12")
             code = self.git(repo, "rev-parse", "HEAD")
             row = ("CI", "unit")
-            self.write(repo, gate.MATRIX_PATH, matrix([("R-12", "#12", "OK", f"{code[:8]} 2026-11-28", *row)]))
+            self.write(repo, gate.MATRIX_PATH, matrix([("R-12", "#12", "OK", f"{code[:8]} 2026-11-28", *row)],
+                                                      coverage=areas([(a, "R-12") for a, _ in DEFAULT_AREAS])))
             self.write(repo, gate.RULES_PATH, rules())
             self.git(repo, "commit", "-q", "-m", "docs: 回归表\n\nIssue: #12")
             head = self.git(repo, "rev-parse", "HEAD")

@@ -4,7 +4,8 @@ The main table (section 3) points at scripts and tests by repository path; every
 status must be one of OK, MANUAL, GAP, OBSOLETE, a GAP row must say what is missing, and the "every release"
 list (section 2) may only name rows and scripts the main table carries. Known defects sit in their own section
 (5, outside the release gate, #718): header 缺陷 | Issue | 记录日期 | 备注, a note on every row, Issue cells made
-of #N references only, and no defect still in the main table. AGENTS.md must point at the table so a new session
+of #N references only, and no defect still in the main table. The release coverage list (2.1, #738) names the
+three areas 2D（fake）, 3D（fake）, 真实补漏 once each, with main table rows that exist and are not OBSOLETE. AGENTS.md must point at the table so a new session
 finds it. The fake gate of scripts/regression/lib.py is checked offline here too.
 """
 import importlib.util
@@ -20,6 +21,9 @@ COLUMNS = ["ID", "功能 / 行为", "来源 Issue", "验证层", "命令或脚�
 PATH = re.compile(r"(?<![\w/.-])(?:\./)?((?:scripts|docs|internal|src|web|\.github)/[\w./-]*[\w-])")
 VERIFIED = re.compile(r"^(—|[0-9a-f]{8} \d{4}-\d{2}-\d{2})$")
 DEFECT_HEADING = "5. 已知缺陷（不进门禁）"
+COVERAGE_HEADING = "2.1 发布覆盖清单（门禁硬检查）"
+COVERAGE_COLUMNS = ["覆盖面", "行", "说明"]
+COVERAGE_AREAS = ["2D（fake）", "3D（fake）", "真实补漏"]
 DEFECT_COLUMNS = ["缺陷", "Issue", "记录日期", "备注"]
 ISSUES = re.compile(r"^#\d+(\s*[、,]\s*#\d+)*$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -64,7 +68,7 @@ def problems(text, root):
     rows = table_rows(main)
     if not rows:
         return ["no main table rows under section 3"]
-    ids, main_paths = set(), set()
+    ids, main_paths, states = set(), set(), {}
     for header, row in rows:
         if header != COLUMNS:
             found.append(f"unexpected header {header}")
@@ -77,6 +81,7 @@ def problems(text, root):
         if rid in ids:
             found.append(f"{rid}: duplicate ID")
         ids.add(rid)
+        states[rid] = entry["状态"]
         if entry["状态"] not in STATUSES:
             found.append(f"{rid}: status {entry['状态']!r} not in {sorted(STATUSES)}")
         if entry["状态"] == "GAP" and not entry["备注"]:
@@ -89,6 +94,7 @@ def problems(text, root):
                     found.append(f"{rid}: {path} does not exist")
         main_paths.update(code_paths(entry["命令或脚本"]))
     found.extend(defect_problems(text, ids))
+    found.extend(coverage_problems(text, states))
     for header, row in table_rows(must):
         entry = dict(zip(header, row))
         for rid in re.findall(r"\b[A-Z]-?[\w-]*\d\b", entry.get("行", "")):
@@ -97,6 +103,37 @@ def problems(text, root):
         for path in code_paths(entry.get("命令", "")):
             if path not in main_paths:
                 found.append(f"every-release script {path} is not a command in the main table")
+    return found
+
+
+def coverage_problems(text, states):
+    """The release coverage list (#738): fixed header, each area once, rows in the main table and not OBSOLETE."""
+    match = re.search(rf"^### {re.escape(COVERAGE_HEADING)}\s*$(.*?)(?=^##)", text, re.M | re.S)
+    if not match:
+        return [f"no section '### {COVERAGE_HEADING}'"]
+    found, seen = [], []
+    for header, row in table_rows(match.group(1)):
+        if header != COVERAGE_COLUMNS:
+            found.append(f"coverage table header {header}, want {COVERAGE_COLUMNS}")
+            continue
+        entry = dict(zip(COVERAGE_COLUMNS, row))
+        area = entry["覆盖面"]
+        if area not in COVERAGE_AREAS:
+            found.append(f"coverage area {area!r} is not one of {COVERAGE_AREAS}")
+        elif area in seen:
+            found.append(f"coverage area {area} listed twice")
+        seen.append(area)
+        rids = [part.strip() for part in re.split(r"[、,]", entry.get("行", "")) if part.strip() not in ("", "—")]
+        if not rids:
+            found.append(f"coverage area {area} has no rows")
+        for rid in rids:
+            if rid not in states:
+                found.append(f"coverage area {area}: row {rid} is not in the main table")
+            elif states[rid] == "OBSOLETE":
+                found.append(f"coverage area {area}: row {rid} is OBSOLETE")
+    for area in COVERAGE_AREAS:
+        if area not in seen:
+            found.append(f"coverage area {area} is missing")
     return found
 
 
@@ -153,6 +190,21 @@ class RegressionMatrixTests(unittest.TestCase):
                        "A2: GAP row without a note", "A2: 9 cells", "every-release row Z9",
                        "every-release script scripts/regression/lib.py", f"no section '## {DEFECT_HEADING}'"):
             self.assertIn(needle, found)
+
+    def test_the_coverage_list_is_checked(self):
+        self.assertIn(f"### {COVERAGE_HEADING}", self.text)
+        states = {"R-1": "OK", "R-2": "MANUAL", "R-3": "OBSOLETE", "R-4": "GAP"}
+        good = (f"## 2. 每次发布必跑\n\n### {COVERAGE_HEADING}\n\n| 覆盖面 | 行 | 说明 |\n|---|---|---|\n"
+                "| 2D（fake） | R-1、R-2 | a |\n| 3D（fake） | R-2 | b |\n| 真实补漏 | R-1 | c |\n\n## 3. 主表\n")
+        self.assertEqual(coverage_problems(good, states), [])
+        bad = (f"## 2. 每次发布必跑\n\n### {COVERAGE_HEADING}\n\n| 覆盖面 | 行 | 说明 |\n|---|---|---|\n"
+               "| 2D（fake） | R-3, R-9 | a |\n| 2D（fake） | R-1 | a |\n| 真实 2D | R-1 | x |\n| 真实补漏 | — | c |\n"
+               "\n| 面 | 行 |\n|---|---|\n| 3D（fake） | R-1 |\n\n## 3. 主表\n")
+        found = "\n".join(coverage_problems(bad, states))
+        for needle in ("row R-3 is OBSOLETE", "row R-9 is not in the main table", "2D（fake） listed twice",
+                       "'真实 2D' is not one of", "真实补漏 has no rows", "coverage table header", "3D（fake） is missing"):
+            self.assertIn(needle, found)
+        self.assertIn(f"no section '### {COVERAGE_HEADING}'", coverage_problems("## 3. 主表\n", states))
 
     def test_the_defect_section_is_checked(self):
         # #725 fixed the four defects first recorded here; an empty table is valid.
