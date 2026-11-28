@@ -15,7 +15,7 @@
 
 **命令与环境**：对已部署环境的脚本一律经 `scripts/release-env.py smoke <环境>` 注入 `BASE` 与账号，表里为简洁只写脚本本身；fake 专用脚本在目标不是 fake 形态时拒绝运行，真实上游脚本要 `--live` 加 `ART_AI_LIVE_ACK=1`（`scripts/regression/README.md`）。
 
-证据链接：E1 = [#2 评论：dev-test L0/L1/L1 Agent](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077479)，E2 = [#2 评论：dev-test 相关验收](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077876)，E3 = [#2 评论：dev-test 验收报告](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228078324)，E4 = [#705 评论：正式测试环境发布后回归](https://github.com/LeXwDeX/Plinth/issues/705#issuecomment-7232418886)，E5 = [#2 评论：正式测试环境生成纹理开关全量真实验证](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783)。
+证据链接：E1 = [#2 评论：dev-test L0/L1/L1 Agent](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077479)，E2 = [#2 评论：dev-test 相关验收](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228077876)，E3 = [#2 评论：dev-test 验收报告](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7228078324)，E4 = [#705 评论：正式测试环境发布后回归](https://github.com/LeXwDeX/Plinth/issues/705#issuecomment-7232418886)，E5 = [#2 评论：正式测试环境生成纹理开关全量真实验证](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7233999783)，E6 = [#2 评论：dev-test 生成纹理开关全 Offering fake 覆盖](https://github.com/LeXwDeX/Plinth/issues/2#issuecomment-7234115201)。
 
 ## 2. 每次发布必跑
 
@@ -108,7 +108,7 @@
 | R-704c | Tripo texture=false 的报价组件（60，无纹理项）与默认报价（90） | #704 | unit | `internal/catalog/tripo_texture_off_quote_704_test.go` | `go test` 通过 | OK | — | | 来自 a5176f3a 的回灌，尚未发布 |
 | R-704d | fake 的 Tripo texture=false 交付无贴图 GLB（0 texture、0 image、1 material） | #704 | unit | `internal/testutil/fakeupstream/tripo/v3/untextured_704_test.go`、`internal/providers/tripo/texture_off_704_test.go` | `go test` 通过 | OK | — | | 登记 constructed，见第 4 节；尚未发布 |
 | R-704h | fake 的 Meshy `should_texture=false` 交付无贴图 GLB（0 texture、0 image、1 material；图生与多视图），true 或缺省仍有贴图；Adapter 发 `should_texture=false` 且不带 `enable_pbr` | #704 | unit | `internal/testutil/fakeupstream/meshy/openapi-v1/untextured_704_test.go`、`internal/providers/meshy/texture_off_704_test.go` | `go test` 通过 | OK | — | | 登记 constructed（`meshy-openapi-v1/image-to-3d-texture-off-glb`），见第 4 节；尚未发布 |
-| R-704i | 「生成纹理」开关的 fake 全 Offering 回归 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 Offering 的任务全部 PASS | OK | — | | v1.9.6 当时（f5bc5e10，2026-11-28）跑过：9 个 Offering、27 个任务全部通过；没有记录结果的 Issue 评论，所以不填最后验证 |
+| R-704i | 「生成纹理」开关的 fake 全 Offering 回归 | #704 | dev-test-fake | `python3 scripts/regression/texture-switch-fake.py` | 全部 Offering 的任务全部 PASS | OK | f5bc5e10 2026-11-28 | E6 | v1.9.6 当时（入库前的临时脚本）9 个 Offering、27 个任务全部通过，逐项结果见 E6；入库后的脚本尚未运行 |
 | R-704e | 真实：Tripo 文生 3D texture=false 报价 60、GLB 无贴图；默认报价 90、GLB 3 张贴图 | #704 | PROD-paid | `python3 scripts/regression/texture-live-tripo.py --live` | 11 项 PASS | OK | f5bc5e10 2026-11-28 | E4、E5 | 付费，每次先取得同意；不自动回答选择卡；E5 记的是入库前的同内容临时版本 |
 | R-704f | 真实：开关存成会话参数（Tripo 文生、Tripo 图生、Meshy 7.1 图生） | #704 | PROD-paid | `python3 scripts/regression/texture-live-session-param.py --live` | 三个场景冻结开关为 false、报价无纹理组件、GLB 无贴图 | OK | f5bc5e10 2026-11-28 | E5 | 三个场景全部通过（15/0）：Tripo 文生报价 60、Tripo 图生报价 70，均无纹理组件；Meshy 无 native_quote；三者 GLB 均为 0 texture、0 image、1 material。E5 记的是入库前的同内容临时版本，只在 2D 起始图那一步回答选择卡 |
 | R-704g | 设置面板的「默认估算」随开关联动 | #704、#705 | dev-test-fake | — | 关纹理后面板估算与实际报价一致 | GAP | — | | 产品尚未实现（面板固定显示默认估算 90），已定放到后面的版本；实现时补浏览器断言 |
