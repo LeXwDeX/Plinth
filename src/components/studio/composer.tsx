@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type TextareaHTMLAttributes } from 'react';
-import { Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Maximize2, Paintbrush, Send, Square, Zap } from 'lucide-react';
+import { Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Layers, Maximize2, Paintbrush, Send, Square, Zap } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { HarnessSummary } from '@/components/workspace/harness-summary';
@@ -94,6 +94,18 @@ export interface ComposerStyleLock {
   onOpen: () => void;
 }
 
+/**
+ * #721: the 用作多视角 entry beside the attached pictures. It asks nothing: pressing it opens (or closes) the panel
+ * that marks each picture's view and makes one 3D model from them with `model`; a plain send is not affected.
+ */
+export interface ComposerMultiview {
+  /** The multiview model the views would be made with. */
+  model: string;
+  /** The views panel is open for the pictures attached now. */
+  open: boolean;
+  onToggle: () => void;
+}
+
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
@@ -150,6 +162,8 @@ export interface ComposerProps {
   styleLock?: ComposerStyleLock | null;
   /** #644: the 以画板为主 toggle; null when the session has no board to send. */
   boardMode?: ComposerBoardMode | null;
+  /** #721: the 用作多视角 entry; null unless 2–4 pictures are attached and a multiview model can use them. */
+  multiview?: ComposerMultiview | null;
 }
 
 /** Flat [x0, y0, x1, y1, ...] as the points of an SVG polyline. */
@@ -169,7 +183,7 @@ export function Composer({
   value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, onDeselectChip, mask = null, branch = null,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
-  styleLock = null, boardMode = null,
+  styleLock = null, boardMode = null, multiview = null,
 }: ComposerProps) {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
@@ -681,6 +695,25 @@ export function Composer({
               />
             );
           })}
+          {multiview ? (
+            // #721: a button beside the cards instead of a question above the box; nothing happens until it is pressed.
+            <HintTooltip name={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.entry_hint'), { model: multiview.model })}>
+              <Action
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={multiview.open}
+                aria-label={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.entry_hint'), { model: multiview.model })}
+                disabled={disabled}
+                onClick={multiview.onToggle}
+                data-testid="composer-multiview-entry"
+                className={cn('gap-1 self-center px-1.5 text-xs', multiview.open ? 'bg-primary/15 text-primary' : 'text-muted-foreground')}
+              >
+                <Layers aria-hidden className="size-3.5" />
+                {schemaText(schema, 'ui.studio.multiview_upload.entry')}
+              </Action>
+            </HintTooltip>
+          ) : null}
         </div>
         ) : null}
       </div>

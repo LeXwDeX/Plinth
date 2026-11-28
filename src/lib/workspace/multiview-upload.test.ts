@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { OfferingParameterWire, OfferingWire } from '@/lib/agent-offerings';
-import { assetFromURL, buildMultiviewRequest, chosenViewLabels, defaultViewChoices, multiviewLockNote, multiviewOffering, validViewChoices } from '@/lib/workspace/multiview-upload';
+import { assetFromURL, buildMultiviewRequest, chosenViewLabels, defaultViewChoices, multiviewEntryOffered, multiviewLockNote, multiviewOffering, validViewChoices } from '@/lib/workspace/multiview-upload';
 
 const routes = { asset_item: '/api/v1/assets/{assetID}', task_asset: '/api/v1/tasks/{taskID}/assets/{assetID}' };
 const views = [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' }];
@@ -17,6 +17,18 @@ const single = offering('single', [{ name: 'reference_assets', label: 'r', type:
 const named = (modelId: string, modelName: string, parameters: OfferingParameterWire[], available = true): OfferingWire => (
   { ...offering(modelId, parameters, available), model_name: modelName } as OfferingWire
 );
+
+// #721: the 用作多视角 entry shows for 2–4 attached pictures with a multiview model and outside editing; never for one.
+describe('multiviewEntryOffered', () => {
+  const target = { offering: multi('tripo-h3'), views, minPictures: 2, maxPictures: 4 };
+  it('offers the entry for two to four pictures', () => {
+    expect([0, 1, 2, 3, 4, 5].map((count) => multiviewEntryOffered(target, count, false))).toEqual([false, false, true, true, true, false]);
+  });
+  it('does not offer it without a multiview model or while editing a sent message', () => {
+    expect(multiviewEntryOffered(null, 2, false)).toBe(false);
+    expect(multiviewEntryOffered(target, 2, true)).toBe(false);
+  });
+});
 
 describe('multiviewOffering', () => {
   it('detects by the reference-views semantic only, among available offerings', () => {
