@@ -113,7 +113,8 @@ export function detailSource(schema: ProductSchema, taskId: string, versions: Ve
   const key = versions.byTask.get(taskId);
   const tile = key ? versions.tiles.find((entry) => entry.key === key) : undefined;
   const parents = tile?.parents ?? versions.fileTaskParents.get(taskId);
-  if (parents && parents.length === 0) return { label: schemaText(schema, 'ui.result.detail.no_source'), parentKey: '' };
+  // A task the chain has not listed yet (#720) has a source that is not loaded, not "no source".
+  if (parents && parents.length === 0 && !tile?.sourcePending) return { label: schemaText(schema, 'ui.result.detail.no_source'), parentKey: '' };
   const parent = primaryParent({ parents: parents ?? [] });
   const source = parent?.known ? versions.tiles.find((entry) => entry.key === parent.key && entry.status === 'ready') : undefined;
   return source ? { label: formatSchemaText(schemaText(schema, 'ui.result.detail.made_from'), { parent: versionLabel(schema, source, source.domain) }), parentKey: source.key }

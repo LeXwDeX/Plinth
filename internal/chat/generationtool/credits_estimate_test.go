@@ -11,7 +11,7 @@ import (
 func TestSuccessReportsEstimatedCreditsByMeteringState(t *testing.T) {
 	tool := catalog.ChatToolSchema{ResultFields: catalog.ChatToolResultFields{
 		Success: "success", TaskID: "task_id", ImageURLs: "image_urls",
-		EstimatedCredits: "estimated_credits",
+		EstimatedCredits: "estimated_credits", ExtraCredits: "extra_credits",
 	}}
 	for _, tc := range []struct {
 		name      string
@@ -23,12 +23,18 @@ func TestSuccessReportsEstimatedCreditsByMeteringState(t *testing.T) {
 		{name: "positive estimate", info: stepInfo{Credits: 7, CreditsMetered: true}, wantValue: 7, wantKey: true},
 		{name: "unmetered zero", info: stepInfo{Credits: 0}},
 		{name: "unmetered negative", info: stepInfo{Credits: -1}},
+		// #719: an Offering that does not bill in credits never states its internal estimate.
+		{name: "unmetered positive", info: stepInfo{Credits: 6}},
+		{name: "unmetered extra", info: stepInfo{Credits: 6, ExtraCredits: 2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := (&Executor{}).success(tool, "task-a", nil, tc.info)
 			var content map[string]any
 			if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
 				t.Fatalf("decode success result JSON: %v", err)
+			}
+			if _, extra := content[tool.ResultFields.ExtraCredits]; extra && !tc.info.CreditsMetered {
+				t.Fatalf("unmetered step states extra credits: %s", result.AgentContent)
 			}
 			credits, ok := content[tool.ResultFields.EstimatedCredits]
 			if ok != tc.wantKey || (ok && credits != tc.wantValue) {

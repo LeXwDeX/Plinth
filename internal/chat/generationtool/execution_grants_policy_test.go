@@ -139,14 +139,16 @@ func TestAgentToolBudgetModeImageStepSubmitsWithoutSuspending(t *testing.T) {
 	if result.Suspend || gateway.submitCount != 1 {
 		t.Fatalf("budget image step waited: %+v submits=%d", result, gateway.submitCount)
 	}
-	if len(observed) == 0 || observed[0].ApprovalSource != "policy" || observed[0].EstimatedCredits != 7 {
+	// The fixture Offering does not bill in credits, so no credits are stated (#719;
+	// TestAgentToolStatesCreditsOnlyForCreditsMeteredOfferings covers both kinds).
+	if len(observed) == 0 || observed[0].ApprovalSource != "policy" || observed[0].EstimatedCredits != 0 {
 		t.Fatalf("observation = %+v", observed)
 	}
 	var content map[string]any
 	if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
 		t.Fatalf("agent content %q: %v", result.AgentContent, err)
 	}
-	if content["estimated_credits"] != float64(7) || content["approval"] != "policy" {
+	if _, stated := content["estimated_credits"]; stated || content["approval"] != "policy" {
 		t.Fatalf("result fields = %v", content)
 	}
 }

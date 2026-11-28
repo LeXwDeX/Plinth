@@ -2104,6 +2104,22 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 		(!strings.Contains(hint, "{value}") || !strings.Contains(hint, "{run}")) {
 		return errors.New("three_view.messages.group_task_named 必须包含 {value} 与 {run}")
 	}
+	for name, text := range map[string]string{
+		"agent_started_unmetered":            messages.AgentStartedUnmetered,
+		"agent_started_continuing_unmetered": messages.AgentStartedContinuingUnmetered,
+	} {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if strings.Contains(text, "{credits}") {
+			return fmt.Errorf("three_view.messages.%s 不得包含 {credits}", name)
+		}
+		for _, field := range []string{"{run}", "{view}", "{approval}", "{task}"} {
+			if !strings.Contains(text, field) {
+				return fmt.Errorf("three_view.messages.%s 必须包含 %s", name, field)
+			}
+		}
+	}
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)

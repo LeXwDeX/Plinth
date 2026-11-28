@@ -22,6 +22,7 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { formatNativePrice, formatPriceTotal } from '@/lib/pricing';
 import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
+import { domainOfCapability } from '@/lib/workspace/versions';
 import { cn } from '@/lib/utils';
 
 export interface ApprovalCardProps {
@@ -117,6 +118,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
     { profile: profileLabel(group.id), count: group.items.length },
   );
   const capability = schema.capabilities.find((item) => item.id === model.capability);
+  // #719: 2D or 3D by what the step makes, as the version strip decides it: a `processing` capability
+  // (抠图) is 3D only when the Schema lists it among runtime.frontend.model_processing_capabilities.
+  const kindDomain = domainOfCapability(schema, model.capability) ?? 'model';
   const { data: offerings, isLoading: offeringsLoading } = useSWR(
     model.capability ? ['approval-card-offerings', schema.revision, model.capability] : null,
     () => fetchCapabilityOfferings(schema, model.capability),
@@ -137,14 +141,17 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       actual: adjustedText(item, item.value),
     },
   );
-  // Credits follow the Offering's credits_metered: a provider that does not bill in credits shows "/".
+  // Credits follow the Offering's credits_metered: a provider that does not bill in credits says so in the
+  // Schema's words (#719), as the result card and the Agent state no credits for it either.
   // While the Offering list is still being read, the credit cells hold a neutral placeholder instead
-  // of a number that may turn into "/" (or the reverse); a failed read falls back to the server's number.
+  // of a number that may turn into that wording (or the reverse); a failed read falls back to the server's number.
   const creditsPending = offeringsLoading === true;
   const showCredits = !creditsPending && approvalShowsCredits(offerings, model);
+  const unmetered = !creditsPending && !showCredits;
   const creditsCell = (credits: number | null | undefined, line?: string): string => {
     if (creditsPending) return schemaText(schema, 'ui.loading');
-    if (!showCredits || credits == null) return NO_CREDITS;
+    if (unmetered) return schemaText(schema, 'ui.studio.approval.card.credits_unmetered');
+    if (credits == null) return NO_CREDITS;
     return line ?? schemaCountMessage(schema, 'ui.studio.approval.card.credits_about', credits, { credits });
   };
   const expired = model.status === 'expired' || remainingValidity(model.expiresAt, now).unit === 'expired';
@@ -242,8 +249,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         {capability ? (
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.kind')}</dt>
-            <dd className="font-medium" data-testid="studio-approval-kind" data-domain={capability.domain}>
-              {schemaText(schema, capability.domain === 'image' ? 'ui.studio.picker.image.prefix' : 'ui.studio.picker.model.prefix')}
+            <dd className="font-medium" data-testid="studio-approval-kind" data-domain={kindDomain}>
+              {schemaText(schema, kindDomain === 'image' ? 'ui.studio.picker.image.prefix' : 'ui.studio.picker.model.prefix')}
             </dd>
           </>
         ) : null}
@@ -273,7 +280,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           <><dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: schemaText(schema, 'ui.pricing.unknown') })}</dt><dd>
             <UnavailableNotice testId="studio-approval-native-price-unknown" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.approval.price_unknown'))} detail={schemaText(schema, 'ui.studio.approval.card.price_unknown_detail')} />
           </dd></>
-        ) : extra && (model.credits != null || !showCredits) ? (
+        ) : extra && model.credits != null && !unmetered ? (
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.credits_base')}</dt>
             <dd className="tabular-nums" data-testid="studio-approval-base-credits">{creditsCell(extra.baseCredits)}</dd>
@@ -288,7 +295,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             <dd className="font-medium tabular-nums" data-testid="studio-approval-credits">{creditsCell(model.credits)}</dd>
           </>
         ) : null}
-        {!expired && (account || names.providerName) ? (
+        {/* #719: a provider that does not bill in credits has no credit balance to show. */}
+        {!expired && !(unmetered && !nativePricing) && (account || names.providerName) ? (
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.balance')}</dt>
             <dd className={cn('tabular-nums', short && 'text-warning')} data-testid="studio-approval-balance">

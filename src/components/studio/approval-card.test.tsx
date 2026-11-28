@@ -46,6 +46,8 @@ function englishApplication() {
   } as unknown as typeof defaultCatalog.application;
 }
 
+const formatBalanceUnknown = (provider: string) => messages['ui.studio.approval.card.balance_unknown'].replace('{provider}', provider);
+
 const offering = (providerId: string, modelId: string, metered: boolean) => ({
   provider_id: providerId, model_id: modelId, provider_name: providerId, model_name: modelId, credits_metered: metered,
 });
@@ -175,21 +177,37 @@ describe('approval card', () => {
     }
   });
 
-  it('shows "/" for base, extra and total credits of a provider that does not bill in credits, and still has both buttons', () => {
+  it('says the step is not billed in credits, once, for a provider that does not bill in credits, and still has both buttons (#719)', () => {
     swr.offerings = [offering('other', 'm2', false)];
     const html = render({ ...card({ credits: 30, baseCredits: 20, label: '附加导出格式', items: ['FBX'] }), provider: 'other', providerId: 'other', model: 'm2' });
-    expect(html).toMatch(/data-testid="studio-approval-base-credits"[^>]*>\/</);
-    expect(html).toMatch(/data-testid="studio-approval-extra-credits"[^>]*>\/</);
-    expect(html).toMatch(/data-testid="studio-approval-credits"[^>]*>\/</);
-    expect(html).not.toMatch(/约 \d+ 积分/);
+    expect(html).toMatch(new RegExp(`data-testid="studio-approval-credits"[^>]*>${messages['ui.studio.approval.card.credits_unmetered']}<`));
+    expect(html).not.toContain('studio-approval-base-credits');
+    expect(html).not.toContain('studio-approval-extra-credits');
+    expect(html).not.toMatch(/>\/</);
+    expect(html).not.toMatch(/\d+ 积分/);
     expect(html).toContain('data-testid="studio-approval-approve"');
     expect(html).toContain('data-testid="studio-approval-deny"');
   });
 
-  it('shows "/" on the plain card of a provider that does not bill in credits, even without a number', () => {
+  it('says the same on the plain card of a provider that does not bill in credits, even without a number (#719)', () => {
     swr.offerings = [offering('other', 'm2', false)];
-    const html = render({ ...card(null), credits: null, provider: 'other', providerId: 'other', model: 'm2' });
-    expect(html).toMatch(/data-testid="studio-approval-credits"[^>]*>\/</);
+    const html = render({ ...card(null), credits: 6, provider: 'other', providerId: 'other', model: 'm2' });
+    expect(html).toMatch(new RegExp(`data-testid="studio-approval-credits"[^>]*>${messages['ui.studio.approval.card.credits_unmetered']}<`));
+    expect(render({ ...card(null), credits: null, provider: 'other', providerId: 'other', model: 'm2' }))
+      .toMatch(new RegExp(`data-testid="studio-approval-credits"[^>]*>${messages['ui.studio.approval.card.credits_unmetered']}<`));
+  });
+
+  it('has no balance row for a provider that does not bill in credits, and keeps it for one that does (#719)', () => {
+    swr.offerings = [offering('openai', 'gpt-image-2', false)];
+    const unmetered = render({ ...card(null), capability: 'image-to-image', credits: 6, provider: 'openai', providerId: 'openai', model: 'gpt-image-2' });
+    expect(unmetered).not.toContain('studio-approval-balance');
+    expect(unmetered).not.toContain(messages['ui.studio.approval.card.balance_unknown'].replace('{provider} ', ''));
+    swr.offerings = [offering('meshy', 'nano-banana-2', true)];
+    const metered = render({ ...card(null), capability: 'image-to-image', credits: 6, provider: 'meshy', providerId: 'meshy', model: 'nano-banana-2' });
+    expect(metered).toMatch(/data-testid="studio-approval-credits"[^>]*>约 6 积分</);
+    // No balance was read (the hook returns no accounts): a provider that bills in credits still says so.
+    expect(metered).toContain('data-testid="studio-approval-balance"');
+    expect(metered).toContain(formatBalanceUnknown('meshy'));
   });
 
   it('holds a neutral placeholder in every credit cell while the Offering list is still being read', () => {
@@ -264,6 +282,13 @@ describe('approval card', () => {
     expect(render(card(null))).toMatch(/data-testid="studio-approval-kind"[^>]*>3D</);
     expect(render({ ...card(null), capability: 'text-to-image' })).toMatch(/data-testid="studio-approval-kind"[^>]*>2D</);
     expect(render({ ...card(null), capability: 'remesh' })).toMatch(/data-testid="studio-approval-kind"[^>]*>3D</);
+  });
+
+  it('calls background removal 2D: a processing step on a picture is not a 3D step (#719)', () => {
+    // 抠图 is declared `processing` like remesh; the Schema's model_processing_capabilities says which of them work on models.
+    expect(render({ ...card(null), capability: 'background-removal', model: 'default', provider: 'matting', providerId: 'matting' }))
+      .toMatch(/data-testid="studio-approval-kind" data-domain="image"[^>]*>2D</);
+    expect(render({ ...card(null), capability: 'remesh' })).toMatch(/data-testid="studio-approval-kind" data-domain="model"[^>]*>3D</);
   });
 });
 

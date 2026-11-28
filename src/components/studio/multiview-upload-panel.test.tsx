@@ -62,7 +62,7 @@ describe('dismissing the multiview question keeps the hook order (#387)', () => 
     const view = render(panel(images));
     expect(view.getByTestId('studio-multiview-upload')).toBeTruthy();
 
-    // "不是": the panel returns null on the next render. Returning before the store hooks ran made React throw
+    // "收起" (#721; "不是" before): the panel returns null on the next render. Returning before the store hooks ran made React throw
     // #300 ("Rendered fewer hooks than expected") and the chat region fell back to its error boundary.
     fireEvent.click(view.getByTestId('studio-multiview-upload-dismiss'));
     expect(caught.map((error) => error.message)).toEqual([]);

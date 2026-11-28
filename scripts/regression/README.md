@@ -36,6 +36,7 @@ v1.9.5、v1.9.6 两轮发布回归里调通的临时脚本，入库时合并整�
 | `texture-live-tripo.py` | prod-paid | 付费：两次 Tripo 文生 3D（v1.9.6 实测 60 与 90 Tripo 积分） | #704 真实：关纹理报价 60、GLB 无贴图；默认 90、GLB 有贴图 |
 | `texture-live-session-param.py` | prod-paid | 付费：Tripo 文生、Tripo 图生、Meshy 7.1 图生各一次与两张 2D 源图 | #704 真实：开关存成会话参数时三种 Offering 的冻结输入、报价与 GLB |
 | `board-agent.py` | dev-test-live-chat | 只耗对话 token（5 轮），生成卡全部拒绝 | #688 图只在画板上时 Agent 是否注意到画板 |
+| `style-transfer-live.py` | dev-test-live-chat（`--real-2d` 时要求 `--live-upstream` 形态） | 每个场景两到三轮对话加一次 2D 生成（mixed 形态下 2D 是 fake，live 形态下是真实 2D）；只批准 2D 批准卡，3D 等其余一律拒绝 | #699/#723 画风迁移：风格图无全身先出比例卡、答完只提交一次 2D 生成；有全身不出卡、直接提交 |
 | `post-release-readonly.py` | prod-readonly | 免费，不调上游 | 发布后只读冒烟：版本、健康、Schema、CSP、登录、跨站拒绝、会话与批准接口 |
 
 `lib.py`、`lib.mjs` 是共用的登录、会话、批准、任务、三视图与 PNG/GLB 小工具；fake 闸门函数 `fake_refusal()` /
@@ -51,6 +52,9 @@ python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/text
 
 # 发布后只读（任何环境）
 python3 scripts/release-env.py smoke prod -- python3 scripts/regression/post-release-readonly.py
+
+# dev-test 的 --live-chat 混合形态（真实对话、fake 生成；--real-2d 要求 --live-upstream 形态）
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/regression/style-transfer-live.py --live --repeat 3
 
 # 真实上游：先在对话里取得当次同意
 ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke prod -- python3 scripts/regression/texture-live-tripo.py --live

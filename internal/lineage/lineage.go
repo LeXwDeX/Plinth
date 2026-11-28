@@ -100,6 +100,17 @@ type InputAssets interface {
 	LoadInputAssets(context.Context, generation.OwnerID, []generation.AssetID) (map[generation.AssetID]generation.InputAsset, error)
 }
 
+// InputDerivations reads how an owner's input asset was re-encoded to fit an
+// Offering (#276): the fitted copy a frozen input names stands for the asset
+// it was made from (#720). An InputAssets without it follows no derivation.
+type InputDerivations interface {
+	InputAssetDerivation(context.Context, generation.OwnerID, generation.AssetID) (generation.InputAssetDerivation, bool, error)
+}
+
+// maxDerivationDepth bounds a chain of fitted copies; the fitter makes one
+// copy of a source, so a longer chain is not followed further.
+const maxDerivationDepth = 4
+
 // Config bounds the work of one projection.
 type Config struct {
 	// MaxTasks is the most tasks of a session that are read.
@@ -326,6 +337,9 @@ func (s *Service) Session(ctx context.Context, owner, session string) (Graph, er
 	if err != nil {
 		return Graph{}, err
 	}
+	if builder.derivedFrom, err = s.loadDerivations(ctx, owner, builder, pending); err != nil {
+		return Graph{}, err
+	}
 	builder.modelUploads, err = s.loadNativeModelInputs(ctx, owner, builder.references)
 	if err != nil {
 		return Graph{}, err
@@ -424,6 +438,65 @@ func (s *Service) readTasks(ctx context.Context, owner, session string) ([]gener
 	}
 }
 
+// loadDerivations follows the fitted copies among inputs to the assets they
+// were made from (#720), loading each source the builder does not know yet
+// into inputs, so a copy resolves like its source: a session Task's asset
+// (recorded), a screenshot, bytes of one earlier version or an upload. Every
+// read is scoped to the owner; a source of another owner is not followed.
+func (s *Service) loadDerivations(ctx context.Context, owner string, b *builder, inputs map[generation.AssetID]generation.InputAsset) (map[string]string, error) {
+	derivations, ok := s.inputs.(InputDerivations)
+	if !ok || len(inputs) == 0 {
+		return nil, nil
+	}
+	result := map[string]string{}
+	frontier := make([]generation.AssetID, 0, len(inputs))
+	for id, asset := range inputs {
+		// A Task result is never a fitted copy; only input assets are.
+		if asset.TaskID == "" {
+			frontier = append(frontier, id)
+		}
+	}
+	sort.Slice(frontier, func(i, j int) bool { return frontier[i] < frontier[j] })
+	for depth := 0; depth < maxDerivationDepth && len(frontier) > 0; depth++ {
+		var next []generation.AssetID
+		for _, id := range frontier {
+			derivation, found, err := derivations.InputAssetDerivation(ctx, generation.OwnerID(owner), id)
+			if err != nil {
+				return nil, err
+			}
+			source := derivation.SourceAssetID
+			if !found || source == "" || source == id {
+				continue
+			}
+			if _, known := b.assetTask[string(source)]; known {
+				result[string(id)] = string(source)
+				continue
+			}
+			if _, known := b.captureBy[string(source)]; known {
+				result[string(id)] = string(source)
+				continue
+			}
+			if _, loaded := inputs[source]; !loaded {
+				found, err := s.loadInputs(ctx, owner, []generation.AssetID{source})
+				if err != nil {
+					return nil, err
+				}
+				asset, ok := found[source]
+				if !ok {
+					continue // not the owner's, or gone: the copy stays itself
+				}
+				inputs[source] = asset
+				if asset.TaskID == "" {
+					next = append(next, source)
+				}
+			}
+			result[string(id)] = string(source)
+		}
+		frontier = next
+	}
+	return result, nil
+}
+
 func (s *Service) loadInputs(ctx context.Context, owner string, ids []generation.AssetID) (map[generation.AssetID]generation.InputAsset, error) {
 	result := make(map[generation.AssetID]generation.InputAsset, len(ids))
 	for start := 0; start < len(ids); start += inputBatch {
@@ -445,9 +518,11 @@ func (s *Service) loadInputs(ctx context.Context, owner string, ids []generation
 type reference struct {
 	uploadedModel bool
 	child         string
-	kind          string
-	taskID        string
-	assetID       string
+	// childCreated is when the child was made; a source is older (#720).
+	childCreated time.Time
+	kind         string
+	taskID       string
+	assetID      string
 }
 
 type builder struct {
@@ -465,7 +540,9 @@ type builder struct {
 	unknown         map[string]string // key -> unknown node ID
 	captures        map[string]string // capture ID -> capture node ID
 	uploads         map[string]string // input asset ID -> upload node ID
-	records         []capture.Record
+	// derivedFrom maps a fitted input copy to the asset it was made from (#720).
+	derivedFrom map[string]string
+	records     []capture.Record
 	// crops are the session's crops (#587); each becomes an upload node.
 	crops       []SessionCrop
 	conversions ConversionRule
@@ -543,19 +620,19 @@ func taskReferences(task generation.Task) []reference {
 		case "task":
 			var id string
 			if json.Unmarshal(raw, &id) == nil && id != "" {
-				result = append(result, reference{child: string(task.ID), kind: EdgeSourceTask, taskID: id})
+				result = append(result, reference{child: string(task.ID), childCreated: task.CreatedAt, kind: EdgeSourceTask, taskID: id})
 			}
 		case "asset":
 			var id string
 			if json.Unmarshal(raw, &id) == nil && id != "" {
-				result = append(result, reference{child: string(task.ID), kind: assetEdgeKind(role, isSource), assetID: id, uploadedModel: isSource && role == schema.SemanticSourceAsset && parameter.UploadedModel != nil})
+				result = append(result, reference{child: string(task.ID), childCreated: task.CreatedAt, kind: assetEdgeKind(role, isSource), assetID: id, uploadedModel: isSource && role == schema.SemanticSourceAsset && parameter.UploadedModel != nil})
 			}
 		case "asset-array":
 			var ids []string
 			if json.Unmarshal(raw, &ids) == nil {
 				for _, id := range ids {
 					if id != "" {
-						result = append(result, reference{child: string(task.ID), kind: assetEdgeKind(role, isSource), assetID: id})
+						result = append(result, reference{child: string(task.ID), childCreated: task.CreatedAt, kind: assetEdgeKind(role, isSource), assetID: id})
 					}
 				}
 			}
@@ -609,7 +686,7 @@ func (b *builder) addCrops(crops []SessionCrop) {
 		if source == "" || source == string(crop.Asset.ID) {
 			continue
 		}
-		b.references = append(b.references, reference{child: uploadNodeID(string(crop.Asset.ID)), kind: EdgeSourceAsset, assetID: source})
+		b.references = append(b.references, reference{child: uploadNodeID(string(crop.Asset.ID)), childCreated: crop.Asset.CreatedAt, kind: EdgeSourceAsset, assetID: source})
 	}
 }
 
@@ -744,6 +821,8 @@ func (b *builder) link(reference reference, inputs map[generation.AssetID]genera
 			b.addEdge(Edge{From: b.uploadNode(source, "model"), To: child, Kind: reference.kind, Evidence: EvidenceRecorded, AssetID: reference.assetID})
 			return
 		}
+		// A fitted copy stands for what it was made from (#720).
+		reference.assetID = b.origin(reference.assetID)
 		if parent, ok := b.assetTask[reference.assetID]; ok {
 			b.addEdge(Edge{From: parent, To: child, Kind: reference.kind, Evidence: EvidenceRecorded, AssetID: reference.assetID})
 			return
@@ -759,20 +838,56 @@ func (b *builder) link(reference reference, inputs map[generation.AssetID]genera
 			b.addEdge(Edge{From: b.unknownNode("capture:" + record.ID), To: child, Kind: EdgeCapture, Evidence: EvidenceUnknown, CaptureID: record.ID})
 			return
 		}
-		if input, ok := inputs[generation.AssetID(reference.assetID)]; ok {
-			if matches := b.hashTasks[strings.ToLower(input.SHA256)]; input.SHA256 != "" && len(matches) == 1 {
+		generated := false
+		if input, ok := inputs[generation.AssetID(reference.assetID)]; ok && input.SHA256 != "" {
+			matches := b.sourceTasks(input.SHA256, reference)
+			if len(matches) == 1 {
 				if asset, ok := b.sameBytesAsset(matches[0], input.SHA256); ok {
 					b.addEdge(Edge{From: matches[0], To: child, Kind: reference.kind, Evidence: EvidenceSameBytes, AssetID: asset})
 					return
 				}
 			}
+			// Bytes of a version of this session are a copy of generated work,
+			// never the person's upload, even when the version is ambiguous (#720).
+			generated = len(matches) > 0
 		}
-		if input, ok := inputs[generation.AssetID(reference.assetID)]; ok && isUpload(input) {
+		if input, ok := inputs[generation.AssetID(reference.assetID)]; ok && !generated && isUpload(input) {
 			b.addEdge(Edge{From: b.uploadNode(input, "image"), To: child, Kind: reference.kind, Evidence: EvidenceRecorded, AssetID: reference.assetID})
 			return
 		}
 		b.addEdge(Edge{From: b.unknownNode("asset:" + reference.assetID), To: child, Kind: reference.kind, Evidence: EvidenceUnknown})
 	}
+}
+
+// origin is the asset a frozen input stands for: itself, or the source of the
+// fitted copy it names, followed through at most maxDerivationDepth copies.
+func (b *builder) origin(id string) string {
+	for range maxDerivationDepth {
+		source, ok := b.derivedFrom[id]
+		if !ok || source == "" || source == id {
+			return id
+		}
+		id = source
+	}
+	return id
+}
+
+// sourceTasks lists the session Tasks having an asset with these bytes that
+// can be the reference's source: made before the child, and not the child
+// itself. A result with the bytes of its own input (the fake answers one size
+// with one picture) is not a second candidate (#720).
+func (b *builder) sourceTasks(hash string, reference reference) []string {
+	var result []string
+	for _, id := range b.hashTasks[strings.ToLower(hash)] {
+		if id == reference.child {
+			continue
+		}
+		if !reference.childCreated.IsZero() && !b.byTask[id].CreatedAt.Before(reference.childCreated) {
+			continue
+		}
+		result = append(result, id)
+	}
+	return result
 }
 
 // isUpload tells a picture the person uploaded from an output of some task:

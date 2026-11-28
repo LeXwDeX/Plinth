@@ -1227,3 +1227,27 @@ func TestWorkLedgerDoesNotAttributeSelfChecksToUnknownTokens(t *testing.T) {
 		}
 	}
 }
+
+// #719: the work ledger the Agent reads states a step's credits only for an
+// Offering that bills in credits, as the approval and result cards do.
+func TestWorkLedgerStatesCreditsOnlyForCreditsMeteredOfferings(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		metered bool
+		want    int
+	}{{name: "metered", metered: true, want: 12}, {name: "unmetered", metered: false, want: 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "a cat", "a cat")
+			task.Offering.CreditsMetered = tc.metered
+			messages := []chat.Message{{Role: "configured-assistant", ToolCalls: []chat.ToolCall{workCall("call-1", "task-1", "a cat", "")}}}
+			fixture := newLedgerFixture(t, nil, []generation.Task{task}, messages)
+			ledger, err := fixture.service.WorkLedger(context.Background(), "owner-a", fixture.session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ledger.Steps) != 1 || ledger.Steps[0].EstimatedCredits != tc.want {
+				t.Fatalf("steps = %+v; want credits %d", ledger.Steps, tc.want)
+			}
+		})
+	}
+}

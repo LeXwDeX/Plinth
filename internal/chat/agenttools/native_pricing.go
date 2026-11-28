@@ -7,7 +7,8 @@ import (
 )
 
 func legacyThreeViewCredits(t generation.Task) int {
-	if t.NativeQuote != nil {
+	// #719: an Offering that does not bill in credits states none to the result card.
+	if t.NativeQuote != nil || !t.Offering.CreditsMetered {
 		return 0
 	}
 	return t.Offering.EstimateTotalCredits(t.Input)
