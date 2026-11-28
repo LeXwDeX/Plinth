@@ -200,7 +200,7 @@ type Config struct {
 	// Project is application.project (#240): the list_project_assets copy,
 	// handle prefix and list bound. Nil leaves the tool unavailable.
 	Project *catalog.ProjectSchema
-	// CanvasLayers is chat.canvas_layers (#709): the list_canvas_layers copy
+	// CanvasLayers is chat.canvas_layers (#709): the view_canvas copy
 	// and the @canvasN prefix create_three_view reads. Zero leaves the tool
 	// unavailable.
 	CanvasLayers catalog.ChatCanvasLayersSchema
@@ -546,8 +546,8 @@ func (e *Executor) execute(
 		return e.writeVisualAnchor(ctx, command)
 	case ToolListProjectAssets:
 		return e.listProjectAssets(ctx, command), nil
-	case ToolListCanvasLayers:
-		return e.listCanvasLayers(ctx, command), nil
+	case ToolViewCanvas:
+		return e.viewCanvas(ctx, command), nil
 	case ToolProposeProductionPlan:
 		if e.proposePlan == nil {
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil

@@ -6,7 +6,7 @@ import (
 )
 
 // ChatCanvasLayersSchema declares the read-only board reading of #709: the
-// list_canvas_layers tool, the @canvasN handles of the board snapshot frozen
+// view_canvas tool, the @canvasN handles of the board snapshot frozen
 // with a turn that is not a canvas turn, the one context line that says the
 // board holds layers, and every text the Agent reads about the board. Server
 // side only; the browser never reads it.
@@ -16,7 +16,7 @@ import (
 // refuses on a canvas turn, on a turn that already carries pictures and on a
 // second call of the same reply.
 type ChatCanvasLayersSchema struct {
-	// ToolName is the declared control tool (list_canvas_layers). Empty turns
+	// ToolName is the declared control tool (view_canvas). Empty turns
 	// the board reading off: no snapshot is frozen and no line is added.
 	ToolName string `json:"tool_name,omitempty"`
 	// HandlePrefix is the board layer handle prefix ("@canvas"). Each readable
@@ -57,6 +57,17 @@ type ChatCanvasLayersSchema struct {
 	// SummaryTemplate ({layers} {pictures}) is the one-line summary kept with
 	// the tool call.
 	SummaryTemplate string `json:"summary_template,omitempty"`
+	// PreviewReason is the code the listing returns with "preview": null: the
+	// flattened board preview is step 2 of #709 and is not available yet.
+	PreviewReason string `json:"preview_reason,omitempty"`
+	// PreviewNote tells the Agent there is no flattened preview in this
+	// listing and how to look at a single layer instead.
+	PreviewNote string `json:"preview_note,omitempty"`
+	// ContinueOnCanvasLabel is the label of the choice-card option that turns
+	// the next turn into a canvas turn ("continue on the board"); the tool
+	// description asks for it whenever the board holds several layers or any
+	// annotation.
+	ContinueOnCanvasLabel string `json:"continue_on_canvas_label,omitempty"`
 }
 
 // Enabled reports whether the Schema declares the board reading.
@@ -99,30 +110,36 @@ func validateCanvasLayers(schema ChatSchema) error {
 		return fmt.Errorf("chat.canvas_layers.layer_limit 须在 1..200、text_characters 须在 0..2000")
 	}
 	required := map[string][]string{
-		"context_template":        {"{count}", "{tool}"},
-		"empty_message":           nil,
-		"canvas_turn_message":     nil,
-		"turn_material_message":   nil,
-		"repeated_call_message":   nil,
-		"truncated_template":      {"{shown}", "{total}"},
-		"unreadable_note":         nil,
-		"result_note":             nil,
-		"unknown_handle_template": {"{handle}", "{tool}"},
-		"source_note_template":    {"{handles}"},
-		"summary_template":        {"{layers}", "{pictures}"},
+		"context_template":         {"{count}", "{tool}"},
+		"empty_message":            nil,
+		"canvas_turn_message":      nil,
+		"turn_material_message":    nil,
+		"repeated_call_message":    nil,
+		"truncated_template":       {"{shown}", "{total}"},
+		"unreadable_note":          nil,
+		"result_note":              nil,
+		"unknown_handle_template":  {"{handle}", "{tool}"},
+		"source_note_template":     {"{handles}"},
+		"summary_template":         {"{layers}", "{pictures}"},
+		"preview_reason":           nil,
+		"preview_note":             nil,
+		"continue_on_canvas_label": nil,
 	}
 	texts := map[string]string{
-		"context_template":        board.ContextTemplate,
-		"empty_message":           board.EmptyMessage,
-		"canvas_turn_message":     board.CanvasTurnMessage,
-		"turn_material_message":   board.TurnMaterialMessage,
-		"repeated_call_message":   board.RepeatedCallMessage,
-		"truncated_template":      board.TruncatedTemplate,
-		"unreadable_note":         board.UnreadableNote,
-		"result_note":             board.ResultNote,
-		"unknown_handle_template": board.UnknownHandleTemplate,
-		"source_note_template":    board.SourceNoteTemplate,
-		"summary_template":        board.SummaryTemplate,
+		"context_template":         board.ContextTemplate,
+		"empty_message":            board.EmptyMessage,
+		"canvas_turn_message":      board.CanvasTurnMessage,
+		"turn_material_message":    board.TurnMaterialMessage,
+		"repeated_call_message":    board.RepeatedCallMessage,
+		"truncated_template":       board.TruncatedTemplate,
+		"unreadable_note":          board.UnreadableNote,
+		"result_note":              board.ResultNote,
+		"unknown_handle_template":  board.UnknownHandleTemplate,
+		"source_note_template":     board.SourceNoteTemplate,
+		"summary_template":         board.SummaryTemplate,
+		"preview_reason":           board.PreviewReason,
+		"preview_note":             board.PreviewNote,
+		"continue_on_canvas_label": board.ContinueOnCanvasLabel,
 	}
 	for name, placeholders := range required {
 		text := texts[name]

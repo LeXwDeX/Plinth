@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -19,7 +20,12 @@ type CanvasBoard struct {
 	Revision  int64
 	Width     int
 	Height    int
-	Layers    []CanvasBoardLayer
+	// FrameX and FrameY are the top-left corner of the canvas frame in world
+	// coordinates (the Schema's artboard centre minus half the size). They
+	// are read only when Width and Height are set.
+	FrameX float64
+	FrameY float64
+	Layers []CanvasBoardLayer
 }
 
 // CanvasBoardLayer is one saved board node, as stored.
@@ -39,6 +45,11 @@ type CanvasBoardLayer struct {
 	ImageURL  string
 	TaskID    string
 	CaptureID string
+	// CreatedAt is when the server first stored the node (kept across saves).
+	CreatedAt time.Time
+	// Transformed says the node data carries a crop, a rotation or an
+	// opacity other than 1; nil when the data says nothing about it.
+	Transformed *bool
 }
 
 // CanvasSource is the canvas Port of #709, assembled by internal/app over the
@@ -55,12 +66,17 @@ type CanvasSource interface {
 // layer of the board; Layers holds at most the Schema's layer limit, top layer
 // first.
 type CanvasContext struct {
-	ProjectID string               `json:"project_id,omitempty"`
-	Revision  int64                `json:"revision,omitempty"`
-	Width     int                  `json:"width,omitempty"`
-	Height    int                  `json:"height,omitempty"`
-	Total     int                  `json:"total"`
-	Layers    []CanvasLayerContext `json:"layers,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	Revision  int64  `json:"revision,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Total     int    `json:"total"`
+	// OffConversation counts the layers that are not already in the
+	// conversation: a picture that is also an attachment or selection of the
+	// session is left out, every annotation (text, shape, pencil, frame) and
+	// every picture that is not counts. The board line uses only this count.
+	OffConversation int                  `json:"off_conversation"`
+	Layers          []CanvasLayerContext `json:"layers,omitempty"`
 }
 
 // CanvasLayerContext is one frozen board layer. Picture is the verified
@@ -83,6 +99,16 @@ type CanvasLayerContext struct {
 	Picture   *Attachment `json:"picture,omitempty"`
 	// Unreadable marks a picture layer whose picture did not verify.
 	Unreadable bool `json:"unreadable,omitempty"`
+	// InConversation marks a picture that is already an attachment or a
+	// selection of this session.
+	InConversation bool `json:"in_conversation,omitempty"`
+	// AddedAfterLastTurn marks a layer stored after the session's previous
+	// user message (every layer of a session without one).
+	AddedAfterLastTurn bool `json:"added_after_last_turn,omitempty"`
+	// InFrame says whether the layer meets the canvas frame; nil when the
+	// board has no frame size yet. Transformed is the node's own claim.
+	InFrame     *bool `json:"in_frame,omitempty"`
+	Transformed *bool `json:"transformed,omitempty"`
 }
 
 // canvasImageLayer is the saved node type of a picture layer.
@@ -129,6 +155,31 @@ func ResolveCanvasHandle(schema catalog.ChatCanvasLayersSchema, options TurnOpti
 	return ResolvedAttachment{Attachment: picture, URL: picture.URL}, true, nil
 }
 
+// ResolveImageTokens resolves picture tokens for a read-only tool: an
+// @canvasN board handle from the frozen snapshot (#709), any other token with
+// the session handle policy, in the order named.
+func ResolveImageTokens(policy HandlePolicy, board catalog.ChatCanvasLayersSchema, command ToolCommand,
+	tokens []string) ([]ResolvedAttachment, error) {
+	var result []ResolvedAttachment
+	for _, token := range tokens {
+		picture, matched, err := ResolveCanvasHandle(board, command.Options, token)
+		if matched {
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, picture)
+			continue
+		}
+		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
+			[]string{token}, AttachmentKindImage)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, resolved...)
+	}
+	return result, nil
+}
+
 // CanvasHandleError refuses an @canvasN handle the turn's snapshot does not
 // hold; Message is the Schema's wording.
 type CanvasHandleError struct {
@@ -163,10 +214,14 @@ func (service *Service) freezeCanvasContext(ctx context.Context, command StartTu
 	frozen.ProjectID, frozen.Revision = board.ProjectID, board.Revision
 	frozen.Width, frozen.Height = board.Width, board.Height
 	frozen.Total = len(board.Layers)
+	history, since := service.canvasHistory(ctx, command)
 	layers := append([]CanvasBoardLayer(nil), board.Layers...)
 	// Top layer first: the frontend draws a higher z-index above.
 	sort.SliceStable(layers, func(left, right int) bool { return layers[left].ZIndex > layers[right].ZIndex })
 	if len(layers) > schema.LayerLimit {
+		// Layers past the bound are not verified; they count as not in the
+		// conversation.
+		frozen.OffConversation = len(layers) - schema.LayerLimit
 		layers = layers[:schema.LayerLimit]
 	}
 	pictures := 0
@@ -174,9 +229,16 @@ func (service *Service) freezeCanvasContext(ctx context.Context, command StartTu
 		item := CanvasLayerContext{
 			ID: layer.ID, Type: layer.Type, X: layer.X, Y: layer.Y, Width: layer.Width, Height: layer.Height,
 			ZIndex: layer.ZIndex, Visible: layer.Visible, Locked: layer.Locked,
-			Name:      boundedRunes(layer.Name, schema.TextCharacters),
-			Text:      boundedRunes(layer.Text, schema.TextCharacters),
-			ShapeType: boundedRunes(layer.ShapeType, 32),
+			Name:               boundedRunes(layer.Name, schema.TextCharacters),
+			Text:               boundedRunes(layer.Text, schema.TextCharacters),
+			ShapeType:          boundedRunes(layer.ShapeType, 32),
+			AddedAfterLastTurn: since.IsZero() || layer.CreatedAt.After(since),
+			Transformed:        layer.Transformed,
+		}
+		if board.Width > 0 && board.Height > 0 {
+			inFrame := layer.X < board.FrameX+float64(board.Width) && layer.X+layer.Width > board.FrameX &&
+				layer.Y < board.FrameY+float64(board.Height) && layer.Y+layer.Height > board.FrameY
+			item.InFrame = &inFrame
 		}
 		if layer.Type == canvasImageLayer {
 			picture, verifyErr := service.attachments.VerifyAttachment(ctx, command.OwnerID, command.SessionID,
@@ -188,11 +250,53 @@ func (service *Service) freezeCanvasContext(ctx context.Context, command StartTu
 				picture.ImageSlot, picture.Handle = 0, ""
 				item.Picture = &picture
 				item.Handle = schema.HandlePrefix + strconv.Itoa(pictures)
+				item.InConversation = inConversation(history, command.Options.Selection, picture)
 			}
+		}
+		if !item.InConversation {
+			frozen.OffConversation++
 		}
 		frozen.Layers = append(frozen.Layers, item)
 	}
 	options.CanvasContext = frozen
+}
+
+// canvasHistory reads the session's stored messages and the time of its
+// previous user message (zero when there is none). The current message is
+// not stored yet when the snapshot is frozen.
+func (service *Service) canvasHistory(ctx context.Context, command StartTurn) ([]Message, time.Time) {
+	if service.repository == nil {
+		return nil, time.Time{}
+	}
+	history, err := service.repository.ListMessages(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return nil, time.Time{}
+	}
+	var since time.Time
+	for _, message := range history {
+		if message.Role == service.userRole && message.CreatedAt.After(since) {
+			since = message.CreatedAt
+		}
+	}
+	return history, since
+}
+
+// inConversation reports whether a verified board picture is already an
+// attachment of the session or a selection of this turn.
+func inConversation(history []Message, selection []Attachment, picture Attachment) bool {
+	for _, attachment := range selection {
+		if SameObject(attachment, picture) {
+			return true
+		}
+	}
+	for _, message := range history {
+		for _, attachment := range message.Attachments {
+			if SameObject(attachment, picture) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // boundedRunes keeps at most limit runes of a client text (0 keeps none).
@@ -220,6 +324,14 @@ func cloneCanvasContext(context *CanvasContext) *CanvasContext {
 		if layer.Picture != nil {
 			picture := *layer.Picture
 			cloned.Layers[index].Picture = &picture
+		}
+		if layer.InFrame != nil {
+			inFrame := *layer.InFrame
+			cloned.Layers[index].InFrame = &inFrame
+		}
+		if layer.Transformed != nil {
+			transformed := *layer.Transformed
+			cloned.Layers[index].Transformed = &transformed
 		}
 	}
 	return &cloned
@@ -252,9 +364,9 @@ func CanvasTurnHasMaterial(command ToolCommand, userRole string) bool {
 func (orchestrator *Orchestrator) canvasPrompt(ctx context.Context, options TurnOptions) string {
 	schema := orchestrator.schema.CanvasLayers
 	board := options.CanvasContext
-	if !schema.Enabled() || board == nil || board.Total == 0 || options.InputSource != "" {
+	if !schema.Enabled() || board == nil || board.OffConversation == 0 || options.InputSource != "" {
 		return ""
 	}
-	return strings.NewReplacer("{count}", strconv.Itoa(board.Total), "{tool}", schema.ToolName).
+	return strings.NewReplacer("{count}", strconv.Itoa(board.OffConversation), "{tool}", schema.ToolName).
 		Replace(orchestrator.text(ctx, schema.ContextTemplate))
 }

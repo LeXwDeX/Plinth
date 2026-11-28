@@ -3334,7 +3334,7 @@ type ChatSchema struct {
 	// only; the crop limits join application.asset_list.decompose in #331b.
 	ImageCrop ChatImageCropSchema `json:"image_crop"`
 	// CanvasLayers declares the read-only board reading of #709: the
-	// list_canvas_layers tool, the @canvasN handles of the frozen board
+	// view_canvas tool, the @canvasN handles of the frozen board
 	// snapshot and the one board context line. Server side only.
 	CanvasLayers ChatCanvasLayersSchema `json:"canvas_layers,omitempty"`
 	// WorkLedger declares the session production ledger (#248): the read-only

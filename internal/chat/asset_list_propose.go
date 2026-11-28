@@ -225,13 +225,14 @@ func (service *Service) resolveAssetListReferences(command ToolCommand, handles 
 		}
 		imageHandle := false
 		if service.handles.Enabled() {
-			if _, _, ok := service.handles.Parse(handle); ok || service.handles.IsSelectionAlias(handle) {
+			if _, _, ok := service.handles.Parse(handle); ok || service.handles.IsSelectionAlias(handle) ||
+				IsCanvasHandle(service.canvasLayers, handle) {
 				imageHandle = true
 			}
 		}
 		if imageHandle {
-			resolved, err := service.handles.ResolveHandles(command.ReferenceHistory(),
-				command.Options.Selection, []string{handle}, AttachmentKindImage)
+			// #709: an @canvasN board handle names a verified board picture.
+			resolved, err := ResolveImageTokens(service.handles, service.canvasLayers, command, []string{handle})
 			if err != nil || len(resolved) == 0 {
 				return nil, false
 			}

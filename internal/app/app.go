@@ -513,7 +513,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// #709: the board snapshot a turn that is not a canvas turn freezes.
 		CanvasLayers: applicationSchema.Chat.CanvasLayers,
-		Canvas:       canvasBoardSource{repository: repository},
+		Canvas: canvasBoardSource{repository: repository,
+			centerX: applicationSchema.Canvas.Frontend.Artboard.CenterX,
+			centerY: applicationSchema.Canvas.Frontend.Artboard.CenterY},
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
@@ -1157,6 +1159,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// stores it as the owner's input asset; no upstream call, Task or credits.
 	imageMask, err := imagemask.New(imagemask.Config{
 		Context:          applicationSchema.Chat.Context,
+		CanvasLayers:     applicationSchema.Chat.CanvasLayers,
 		Mask:             applicationSchema.Chat.ImageMask,
 		Inputs:           inputAssetService,
 		Tasks:            module,
@@ -1175,10 +1178,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	var cropToolExecute func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	if strings.TrimSpace(applicationSchema.Chat.ImageCrop.Tool) != "" {
 		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
-			Context:  applicationSchema.Chat.Context,
-			Schema:   applicationSchema.Chat.ImageCrop,
-			Crops:    toolCropService,
-			Localize: texts.Text,
+			Context:      applicationSchema.Chat.Context,
+			CanvasLayers: applicationSchema.Chat.CanvasLayers,
+			Schema:       applicationSchema.Chat.ImageCrop,
+			Crops:        toolCropService,
+			Localize:     texts.Text,
 			// #552: every crop is shown to the person as a reply picture.
 			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		})

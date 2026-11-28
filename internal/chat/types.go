@@ -68,7 +68,7 @@ type TurnOptions struct {
 	ProjectID      string          `json:"ProjectID,omitempty"`
 	ProjectContext *ProjectContext `json:"ProjectContext,omitempty"`
 	// CanvasContext is the workspace board snapshot frozen when a turn that is
-	// not a canvas turn starts (#709): the layers list_canvas_layers reads and
+	// not a canvas turn starts (#709): the layers view_canvas reads and
 	// the @canvasN handles it names. Nil on a canvas turn and when the board
 	// reading is off; a turn never reads the mutable board rows.
 	CanvasContext *CanvasContext `json:"CanvasContext,omitempty"`

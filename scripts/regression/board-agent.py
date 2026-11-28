@@ -10,7 +10,7 @@
 放上画板：POST /api/canvas/projects {sessionId} 取得会话的画布项目，PUT /api/canvas/projects/<项目>/nodes 写入一个图片图层）：
   S1「直接开始干活吧。」 S2「把这个角色做成三视图。」 S3「把它转成 3D 模型。」 S4「帮我优化一下这张图，让线条更干净。」
   S5 对照：S2 的同一句以画板轮发送（inputSource canvas 加画板快照作为选区）。
-期望（#709）：S1 先调用 list_canvas_layers，再出选择卡或在回复里提到画板；S2–S4 调用 list_canvas_layers 并发起对应的
+期望（#709）：S1 先调用 view_canvas，再出选择卡或在回复里提到画板；S2–S4 调用 view_canvas 并发起对应的
 生成工具（严格方式下停在批准卡，脚本一律拒绝）；S5 作为显式画板轮是对照，判定不变。每个场景打印工具调用、批准卡数、
 任务数与回复摘要（INFO）；真实模型的回答会波动，结论以多次运行为准。
 同类的固定两轮场景见 scripts/smoke/smoke-live-chat-three-view-route.py。
@@ -39,7 +39,7 @@ CASES = (
     ("S5 control: same ask as a canvas turn", "把这个角色做成三视图。", True, ()),
 )
 BOARD = re.compile(r"画板|画布|@画板|@画布|以画板为主|board", re.IGNORECASE)
-LOOK = "list_canvas_layers"
+LOOK = "view_canvas"
 CHOICE = "ask_choice"
 
 

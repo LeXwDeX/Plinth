@@ -34,7 +34,9 @@ type TaskAssetGateway interface {
 }
 
 type Config struct {
-	Context          catalog.ChatContextSchema
+	Context catalog.ChatContextSchema
+	// CanvasLayers lets the tool read an @canvasN board handle (#709).
+	CanvasLayers     catalog.ChatCanvasLayersSchema
 	Mask             catalog.ChatImageMaskSchema
 	Inputs           InputAssetGateway
 	Tasks            TaskAssetGateway
@@ -44,6 +46,7 @@ type Config struct {
 
 type Service struct {
 	context          catalog.ChatContextSchema
+	canvas           catalog.ChatCanvasLayersSchema
 	mask             catalog.ChatImageMaskSchema
 	inputs           InputAssetGateway
 	tasks            TaskAssetGateway
@@ -58,6 +61,7 @@ func New(config Config) (*Service, error) {
 	}
 	return &Service{
 		context:          config.Context,
+		canvas:           config.CanvasLayers,
 		mask:             config.Mask,
 		inputs:           config.Inputs,
 		tasks:            config.Tasks,
@@ -86,9 +90,12 @@ func (service *Service) Execute(ctx context.Context, command chat.ToolCommand) (
 		return service.refusal(strings.ReplaceAll(service.context.UnknownHandleTemplate, "{handle}", parsed.Image)), nil
 	}
 	policy := chat.NewHandlePolicy(service.context)
-	resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
-		[]string{parsed.Image}, chat.AttachmentKindImage)
+	resolved, err := chat.ResolveImageTokens(policy, service.canvas, command, []string{parsed.Image})
 	if err != nil {
+		var board *chat.CanvasHandleError
+		if errors.As(err, &board) {
+			return service.refusal(board.Message), nil
+		}
 		var unknown *chat.UnknownHandleError
 		if errors.As(err, &unknown) {
 			template := service.context.UnknownHandleTemplate

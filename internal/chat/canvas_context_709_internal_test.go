@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
@@ -162,15 +163,16 @@ func TestResolveCanvasHandleUsesOnlyTheFrozenSnapshot709(t *testing.T) {
 func TestCanvasPromptLineOnlyOutsideACanvasTurn709(t *testing.T) {
 	schema := canvasLayersSchema709(t)
 	orchestrator := &Orchestrator{schema: schema}
-	board := &CanvasContext{Total: 3}
+	board := &CanvasContext{Total: 5, OffConversation: 3}
 	line := orchestrator.canvasPrompt(context.Background(), TurnOptions{CanvasContext: board})
-	if !strings.Contains(line, "3") || !strings.Contains(line, schema.CanvasLayers.ToolName) {
-		t.Fatalf("board line = %q", line)
+	if !strings.Contains(line, "3") || strings.Contains(line, "5") || !strings.Contains(line, schema.CanvasLayers.ToolName) {
+		t.Fatalf("the board line counts only the layers the conversation lacks: %q", line)
 	}
 	for name, options := range map[string]TurnOptions{
-		"canvas turn": {CanvasContext: board, InputSource: "canvas"},
-		"empty board": {CanvasContext: &CanvasContext{}},
-		"no snapshot": {},
+		"canvas turn":             {CanvasContext: board, InputSource: "canvas"},
+		"empty board":             {CanvasContext: &CanvasContext{}},
+		"all in the conversation": {CanvasContext: &CanvasContext{Total: 2}},
+		"no snapshot":             {},
 	} {
 		if line := orchestrator.canvasPrompt(context.Background(), options); line != "" {
 			t.Fatalf("%s adds no board line: %q", name, line)
@@ -187,3 +189,79 @@ func TestCanvasContextSurvivesTheStoredTurn709(t *testing.T) {
 		t.Fatalf("the stored snapshot replaces the request's and is copied: %+v", options.CanvasContext)
 	}
 }
+
+// history709 is a repository whose only read is the session's stored messages.
+type history709 struct {
+	Repository
+	messages []Message
+}
+
+func (repository history709) ListMessages(context.Context, string, string) ([]Message, error) {
+	return repository.messages, nil
+}
+
+func TestFreezeCanvasContextMarksNewAndConversationLayers709(t *testing.T) {
+	lastTurn := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
+	source := &boardOf709{owner: "u1", session: "s1", board: CanvasBoard{Width: 800, Height: 600, FrameX: 200, FrameY: 100,
+		Layers: []CanvasBoardLayer{
+			// The picture the conversation already holds as @img1.
+			{ID: "old", Type: "image", ZIndex: 1, X: 200, Y: 100, Width: 100, Height: 100,
+				ImageURL: "/api/assets/in_old", CreatedAt: lastTurn.Add(-time.Hour)},
+			// Put on the board after the last message, outside the frame and rotated.
+			{ID: "new", Type: "image", ZIndex: 3, X: 1100, Y: 100, Width: 100, Height: 100,
+				ImageURL: "/api/assets/in_new", CreatedAt: lastTurn.Add(time.Minute), Transformed: ptrBool709(true)},
+			// An annotation always counts, even an old one.
+			{ID: "note", Type: "text", ZIndex: 2, X: 250, Y: 150, Width: 50, Height: 20, Text: "改成红色",
+				CreatedAt: lastTurn.Add(-time.Hour)},
+		}}}
+	service := boardService709(t, source, "u1")
+	service.userRole = "user"
+	service.repository = history709{messages: []Message{
+		{Role: "user", CreatedAt: lastTurn.Add(-2 * time.Hour)},
+		{Role: "assistant", CreatedAt: lastTurn.Add(2 * time.Hour),
+			Attachments: []Attachment{{Kind: AttachmentKindImage, AssetID: "in_old", URL: "/api/assets/in_old", Handle: "@img1"}}},
+		{Role: "user", CreatedAt: lastTurn},
+	}}
+	options := TurnOptions{}
+	service.freezeCanvasContext(context.Background(), StartTurn{OwnerID: "u1", SessionID: "s1"}, &options)
+	board := options.CanvasContext
+	if board == nil || board.Total != 3 || board.OffConversation != 2 {
+		t.Fatalf("the conversation picture is not counted: %+v", board)
+	}
+	layers := map[string]CanvasLayerContext{}
+	for _, layer := range board.Layers {
+		layers[layer.ID] = layer
+	}
+	if old := layers["old"]; !old.InConversation || old.AddedAfterLastTurn || old.InFrame == nil || !*old.InFrame || old.Transformed != nil {
+		t.Fatalf("old layer = %+v", old)
+	}
+	if fresh := layers["new"]; fresh.InConversation || !fresh.AddedAfterLastTurn || fresh.InFrame == nil || *fresh.InFrame ||
+		fresh.Transformed == nil || !*fresh.Transformed {
+		t.Fatalf("new layer = %+v", fresh)
+	}
+	if note := layers["note"]; note.InConversation || note.AddedAfterLastTurn || note.InFrame == nil || !*note.InFrame {
+		t.Fatalf("note layer = %+v", note)
+	}
+
+	// Only the conversation's own picture on the board: no board line.
+	source.board.Layers = source.board.Layers[:1]
+	options = TurnOptions{}
+	service.freezeCanvasContext(context.Background(), StartTurn{OwnerID: "u1", SessionID: "s1"}, &options)
+	if options.CanvasContext.OffConversation != 0 {
+		t.Fatalf("off conversation = %d", options.CanvasContext.OffConversation)
+	}
+	orchestrator := &Orchestrator{schema: canvasLayersSchema709(t)}
+	if line := orchestrator.canvasPrompt(context.Background(), options); line != "" {
+		t.Fatalf("a board holding only conversation pictures adds no line: %q", line)
+	}
+
+	// A session without an earlier user message: every layer is new.
+	service.repository = history709{}
+	options = TurnOptions{}
+	service.freezeCanvasContext(context.Background(), StartTurn{OwnerID: "u1", SessionID: "s1"}, &options)
+	if !options.CanvasContext.Layers[0].AddedAfterLastTurn || options.CanvasContext.Layers[0].InFrame == nil {
+		t.Fatalf("first turn layer = %+v", options.CanvasContext.Layers[0])
+	}
+}
+
+func ptrBool709(value bool) *bool { return &value }

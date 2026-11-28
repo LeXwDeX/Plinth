@@ -9,17 +9,21 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
-// ToolListCanvasLayers lists the workspace board's layers as a last-resort
+// ToolViewCanvas lists the workspace board's layers as a last-resort
 // source of material (#709). It is read only: it lists the board snapshot
 // frozen with the turn and never reads the mutable board, sets an input
 // source, returns a flattened picture or changes anything.
-const ToolListCanvasLayers = "list_canvas_layers"
+const ToolViewCanvas = "view_canvas"
 
-// listCanvasLayers answers list_canvas_layers from the turn's board snapshot.
+// canvasPictureLayer is the saved node type of a picture layer; every other
+// type (text, shape, pencil, frame) is an annotation.
+const canvasPictureLayer = "image"
+
+// viewCanvas answers view_canvas from the turn's board snapshot.
 // The server closes the fallback itself instead of leaving it to the prompt:
 // a canvas turn already carries the board, a turn with attached or selected
 // pictures has material, and one reply looks at the board once.
-func (e *Executor) listCanvasLayers(_ context.Context, command chat.ToolCommand) chat.ToolResult {
+func (e *Executor) viewCanvas(_ context.Context, command chat.ToolCommand) chat.ToolResult {
 	schema := e.canvasLayers
 	if !schema.Enabled() {
 		return chat.ToolResult{Error: "canvas layers unavailable", NoSubmission: true}
@@ -48,12 +52,24 @@ func (e *Executor) listCanvasLayers(_ context.Context, command chat.ToolCommand)
 	}
 	history := command.ReferenceHistory()
 	layers := make([]map[string]any, 0, len(board.Layers))
-	pictures := 0
+	pictures, annotations := 0, 0
 	for _, layer := range board.Layers {
 		item := map[string]any{
 			"id": layer.ID, "type": layer.Type,
 			"x": layer.X, "y": layer.Y, "width": layer.Width, "height": layer.Height,
 			"z_index": layer.ZIndex, "visible": layer.Visible, "locked": layer.Locked,
+			"added_after_last_turn": layer.AddedAfterLastTurn,
+		}
+		if layer.Type != canvasPictureLayer {
+			annotations++
+		}
+		if layer.InFrame != nil {
+			item["in_frame"] = *layer.InFrame
+		}
+		// Absent when the saved node says nothing about crop, rotation or
+		// opacity: the browser leaves neutral values out.
+		if layer.Transformed != nil {
+			item["transformed"] = *layer.Transformed
 		}
 		if layer.Name != "" {
 			item["name"] = layer.Name
@@ -70,9 +86,11 @@ func (e *Executor) listCanvasLayers(_ context.Context, command chat.ToolCommand)
 			item["handle"] = layer.Handle
 			item["source"] = layer.Picture.Role
 			// The same picture may already be a handle of the conversation.
-			if same := sessionHandleOf(history, *layer.Picture); same != "" {
+			same := sessionHandleOf(history, *layer.Picture)
+			if same != "" {
 				item["same_as"] = same
 			}
+			item["in_conversation"] = layer.InConversation || same != ""
 		case layer.Unreadable:
 			item["note"] = e.texts.Text(command.Options.Locale, schema.UnreadableNote)
 		}
@@ -82,6 +100,16 @@ func (e *Executor) listCanvasLayers(_ context.Context, command chat.ToolCommand)
 		"layers": layers,
 		"total":  board.Total,
 		"note":   e.texts.Text(command.Options.Locale, schema.ResultNote),
+		// The flattened board preview is step 2 of #709: the key is kept so
+		// the result shape does not change when it lands.
+		"preview":        nil,
+		"preview_reason": schema.PreviewReason,
+		"preview_note":   e.texts.Text(command.Options.Locale, schema.PreviewNote),
+	}
+	// Several layers or any annotation: the choice card must offer to go on
+	// with the board as this turn's input.
+	if board.Total > 1 || annotations > 0 {
+		payload["continue_on_canvas_label"] = e.texts.Text(command.Options.Locale, schema.ContinueOnCanvasLabel)
 	}
 	if board.Width > 0 && board.Height > 0 {
 		payload["board"] = map[string]int{"width": board.Width, "height": board.Height}

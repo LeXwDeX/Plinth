@@ -49,7 +49,9 @@ type CropRegionsService interface {
 // .asset_item): every crop is shown to the person as a picture of the reply
 // by that URL (#552).
 type CropToolConfig struct {
-	Context        catalog.ChatContextSchema
+	Context catalog.ChatContextSchema
+	// CanvasLayers lets the tool read an @canvasN board handle (#709).
+	CanvasLayers   catalog.ChatCanvasLayersSchema
 	Schema         catalog.ChatImageCropSchema
 	Crops          CropRegionsService
 	AssetItemRoute string
@@ -66,6 +68,7 @@ type CropToolConfig struct {
 // step, writes a self-check or returns picture bytes.
 type CropTool struct {
 	context        catalog.ChatContextSchema
+	canvas         catalog.ChatCanvasLayersSchema
 	schema         catalog.ChatImageCropSchema
 	crops          CropRegionsService
 	assetItemRoute string
@@ -85,6 +88,7 @@ func NewCropTool(config CropToolConfig) (*CropTool, error) {
 	}
 	return &CropTool{
 		context:        config.Context,
+		canvas:         config.CanvasLayers,
 		schema:         config.Schema,
 		crops:          config.Crops,
 		assetItemRoute: strings.TrimSpace(config.AssetItemRoute),
@@ -260,10 +264,13 @@ func (tool *CropTool) source(command chat.ToolCommand, image string) (generation
 	policy := chat.NewHandlePolicy(tool.context)
 	if policy.Enabled() {
 		_, _, isHandle := policy.Parse(image)
-		if isHandle || policy.IsSelectionAlias(image) {
-			resolved, err := policy.ResolveHandles(command.ReferenceHistory(),
-				command.Options.Selection, []string{image}, chat.AttachmentKindImage)
+		if isHandle || policy.IsSelectionAlias(image) || chat.IsCanvasHandle(tool.canvas, image) {
+			resolved, err := chat.ResolveImageTokens(policy, tool.canvas, command, []string{image})
 			if err != nil {
+				var board *chat.CanvasHandleError
+				if errors.As(err, &board) {
+					return "", board.Message, cropCodeInvalidArguments
+				}
 				var unknown *chat.UnknownHandleError
 				if errors.As(err, &unknown) {
 					reason := "this session has no object with that handle"
