@@ -1,8 +1,8 @@
 # Provider 与 Product Schema 边界
 
-源码基线为主线 `5bb885e453c0b7951bcd47fe9e3cb26089954020`；新版本的精确提交和部署验收以发布回执为准。
+本文随主线演进，以当前源码为准；各节标注的 #N 表示该规则落地时的状态，部署验收以发布回执为准。
 
-本文只维护该源码基线的边界。宏观依赖和逐层职责见 [架构总览](architecture.md)。特征化、提案及整改过程不在仓库内，只保留在内部 Git 历史中（原历史档案与 `docs/provider-schema-implementation-plan.md`）；其中旧行号、ACCEPT、待办和“当前”均有时点，不是运行验收。
+本文只维护 Provider 与 Product Schema 的边界。宏观依赖和逐层职责见 [架构总览](architecture.md)。特征化、提案及整改过程不在仓库内，只保留在内部 Git 历史中（原历史档案与 `docs/provider-schema-implementation-plan.md`）；其中旧行号、ACCEPT、待办和“当前”均有时点，不是运行验收。
 
 ## Meshy 官方合同基线（#329）
 
@@ -214,7 +214,7 @@ Complete/Quick Cap 的 revision `2026-10-21.185.2` 在 `source_task` 声明 `sam
 
 ## 1. 公开任务与私有子作业
 
-`internal/generation` 是公开 Task/Attempt 生命周期的唯一写入者。格式转换作为独立公开 Offering 时，也是普通 Generation Task。
+`internal/generation` 是公开 Task/Attempt 生命周期的唯一写入者（离线 ETL 迁移导入除外，见 `docs/architecture.md` §2）。格式转换作为独立公开 Offering 时，也是普通 Generation Task。
 
 **3D 舞台只读 GLB。** 旧 `tripo/tripo-v3.1/format-conversion` 仍为 `enabled: false`，其六种命名目标与生成时已有导出重叠；不能据目标名 GLTF 推断实际字节一定为 JSON，已知上游结果也可能是 GLB。新入口只覆盖静态 GLB↔自包含 glTF 的免费本地转换，以及原生上传 GLB→STL 的独立收费步骤。舞台仍只预览 `model/gltf-binary`；其他格式以真实 MIME、变体和本地文件供下载，没有 GLB 时显示既有“暂不支持预览”文案。旧 Adapter 与显式启用的契约 fixture 保留。
 

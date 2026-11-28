@@ -5,15 +5,15 @@
 ## 仓库与 CI
 
 - 主仓库在 GitHub：<https://github.com/LeXwDeX/Plinth>。Issue 与 Pull Request 都在这里提交。
-- 维护者另有一个内网镜像，只从 GitHub 单向同步（GitHub → 镜像），不接受直接提交。
+- 这是唯一的仓库，不存在第二个可推送的仓库；代码、Issue、PR 与 CI 都在这里。
 - 每个 PR 在 GitHub Actions（`.github/workflows/ci.yml`）上跑公共门禁，共三个作业：`frontend`
-  （类型检查、单元测试、构建、外链检查）、`go check`（`go vet`、`go build`、公开快照扫描）与
-  `go test race`。CI 不构建镜像（#257），只用公共依赖源，不需要任何密钥。
+  （lint、类型检查、单元测试、构建、外链检查）、`go check`（`go vet`、`go build`、公开快照扫描、
+  `scripts/tests` 脚本单测、fake 上游整栈冒烟）与 `go test race`。CI 不构建镜像（#257），只用公共依赖源，不需要任何密钥。
 - 零 Key 的 Mock 自部署冒烟（`scripts/smoke/smoke-public-mock.sh`）不是公共 CI 作业；需要时按
   README「Docker Compose 自部署」在本机运行。改了 README 的部署步骤、`docker-compose.yml` 或
   `.env.example` 时，同步检查该脚本。
 - 真实 Provider 付费验收等较重的测试由维护者在内部测试环境执行，不是外部 PR 的
-  合并条件。分工细节见 `dev_test.md` §2「CI 分工」。
+  合并条件。分工细节见 `dev_test.md` §2「CI：GitHub Actions（#257）」里的「CI 与内部验收的分工」。
 
 ## 开发环境
 
@@ -82,7 +82,9 @@ fake 上游整栈冒烟的稳定子集 `python3 scripts/smoke/smoke-fake-stack.p
   等，例如 `fix(i18n): ...`、`ci: ...`。中文或英文均可，摘要说明改了什么。
 - 一个 PR 只做一件可以独立验证的事；在描述里写清动机、改动、验证方法和结果
   （例如 `verify-local.py` 的输出）以及未验证的部分，并关联对应 Issue。
-- PR 需要 CI 全部通过，并经维护者审查后合并。
+- 外部贡献者的 PR 需要 CI 全部通过，并经维护者审查后合并；维护者自己的交付按 `AGENTS.md`
+  「Git 与协作」的 Git 交付授权执行。
+- Issue 与 PR 的语言：外部贡献者可以用英文；维护者的记录用中文。
 
 ## 许可证
 
@@ -96,18 +98,19 @@ Apache-2.0，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。提交贡献即表示
 
 - The main repository is on GitHub: <https://github.com/LeXwDeX/Plinth>. Open issues and pull
   requests there.
-- The maintainers keep an internal mirror that is synced one way from GitHub (GitHub →
-  mirror) and accepts no direct commits.
+- This is the only repository; there is no second repository to push to. Code, issues, pull
+  requests and CI all live here.
 - Every PR runs the public checks on GitHub Actions (`.github/workflows/ci.yml`) in three jobs:
-  `frontend` (type check, unit tests, build, external-link check), `go check` (`go vet`,
-  `go build`, public-tree scan) and `go test race`. CI does not build images (#257). They use
+  `frontend` (lint, type check, unit tests, build, external-link check), `go check` (`go vet`,
+  `go build`, public-tree scan, `scripts/tests` unit tests, fake-upstream stack smoke) and
+  `go test race`. CI does not build images (#257). They use
   public package sources only and need no secrets.
 - The zero-key Mock self-deploy smoke (`scripts/smoke/smoke-public-mock.sh`) is not a public CI
   job; run it locally after following the README "Self-deploy with Docker Compose" steps when
   needed. When you change the README deployment steps, `docker-compose.yml` or `.env.example`,
   check that script too.
 - Heavier testing, such as paid acceptance against real Providers, is run by the maintainers
-  in internal test environments and is not a merge requirement for external PRs. The split is described in `dev_test.md` §2 (in Chinese).
+  in internal test environments and is not a merge requirement for external PRs. The split is described in `dev_test.md` §2, "CI：GitHub Actions（#257）", item "CI 与内部验收的分工" (in Chinese).
 
 ## Development setup
 
@@ -188,7 +191,11 @@ check.
 - Keep one independently verifiable change per PR. In the description, give the motivation,
   the change, how you verified it and the result (for example the `verify-local.py`
   output), what is not verified, and the related issue.
-- A PR is merged after all CI checks pass and a maintainer has reviewed it.
+- A PR from an external contributor is merged after all CI checks pass and a maintainer has
+  reviewed it; the maintainers' own delivery follows the Git delivery authorization in
+  `AGENTS.md` ("Git 与协作").
+- Language of issues and pull requests: external contributors may write in English; the
+  maintainers' records are in Chinese.
 
 ## License
 

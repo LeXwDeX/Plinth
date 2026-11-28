@@ -279,7 +279,7 @@ ssh <dev-test 的 ssh> 'python3 - --dry-run --root <root> --rollback-image art-a
   < scripts/retain-art-ai-images.py
 ```
 
-该命令只输出 `KEEP` / `WOULD REMOVE`，不改写服务器文件。服务器已有同版 helper 时也可直接运行 `python3 <root>/app/scripts/retain-art-ai-images.py --dry-run --root <root> --rollback-image art-ai-go-production:<上一运行标签>`。完整边界和离线验证见 `dev_ops.md`「dev-test 主机两栈边界与镜像保留」。
+该命令只输出 `KEEP` / `WOULD REMOVE`，不改写服务器文件。服务器已有同版 helper 时也可直接运行 `python3 <root>/app/scripts/retain-art-ai-images.py --dry-run --root <root> --rollback-image art-ai-go-production:<上一运行标签>`。完整边界和离线验证见 `dev_ops.md`「dev-test 主机与镜像保留」。
 
 Go 原生表的结构升级只允许使用
 `internal/adapters/sqlite/migrations/` 中只追加、带 SHA-256 校验的版本化

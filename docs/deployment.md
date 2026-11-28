@@ -89,7 +89,7 @@
 {"release_gate": 1, "revision": "<完整40位小写SHA>", "status": "pass", "rules_version": 1, "base": "<上一个 tag>", "changed_issues": [704, 705], "checked_at": "<UTC 日期>"}
 ```
 
-`related` 覆盖本次改动涉及的浏览器与 Agent 验收（含按 `scripts/smoke/README.md` 需要的 L2 真实模型链路）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
+`related` 覆盖本次改动涉及的浏览器与 Agent 验收（本次需要 L2 真实模型链路时，只在用户当次同意后按 `scripts/smoke/README.md` 执行并计入，见 `AGENTS.md`「上游接口与 Fake」）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
 
 格式 1（`"formal_promotion": 1`，没有 `release_gate`）是 #707 之前的历史回执：`scripts/release-promotion.py` 仍能解析它，#2 里已有的旧回执不需要补门禁；但 `release-env.py release formal-test` 对每一次新的晋级都要求格式 2，格式 1 报告、缺 `release_gate`、门禁回执的 revision 不一致或 `status` 不是 `pass` 一律拒绝，且不联系目标主机。
 
@@ -155,7 +155,7 @@
 
 与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy`、`npm_registry` 与 `add_hosts` 只改变 `docker build` 参数，未设 `npm_registry` 时 npm 源为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
 
-`dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
+`dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；`image_keep`、`keep_source_snapshots` 只属于 `single_stack`，`dev-test` 不设，`release-env.py` 因而不传 `RELEASE_IMAGE_KEEP` 与 `RELEASE_KEEP_SOURCE_SNAPSHOTS`，镜像保留按 `retain-art-ai-images.py` 的缺省保留最新 5 个不同镜像 ID（另加上述受保护镜像），`app.prev-*` 源码快照不自动清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
 
 ### 版本号与 tag（#676）
 
@@ -323,7 +323,7 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-fre
 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-agent-mode.sh
 ```
 
-`dev-test` 的 fake 形态发布由 `release-env.py release dev-test` 自动跑上面三条（顺序：L0 → L1 → L1 Agent），逐层留日志并写机器报告，位置与字段见 §4；发布命令在报告写不成或任一层不是 `pass` 时返回非零，但发布不回滚。真实形态（`formal-test` 与 `--live-upstream` 的 `dev-test`）仍按上面三条手动执行：L1 在真实形态会调用真实对话模型，须先取得当次同意（`AGENTS.md`「上游接口与 Fake」），L0 不涉及上游、随时可跑。手动执行时可用 `python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 逐层跑，脚本自己的汇总行就是报告读的那一份；机器报告只由发布入口写，手动跑不覆盖它。
+`dev-test` 的 fake 形态发布由 `release-env.py release dev-test` 自动跑上面三条（顺序：L0 → L1 → L1 Agent），逐层留日志并写机器报告，位置与字段见 §4；发布命令在报告写不成或任一层不是 `pass` 时返回非零，但发布不回滚。真实形态（`formal-test` 与 `--live-upstream` 的 `dev-test`）仍按上面三条手动执行：L1 在真实形态会调用真实对话模型，须先取得当次同意（`AGENTS.md`「上游接口与 Fake」），同意后同时打开两个开关运行：`ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-free.sh --live`，缺任一开关脚本以退出码 2 拒绝（fake 形态的目标反过来不接受 `--live`）；`smoke-l1-agent-mode.sh` 在真实形态只读、不提交生成，L0 不涉及上游、随时可跑。手动执行时可用 `python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 逐层跑，脚本自己的汇总行就是报告读的那一份；机器报告只由发布入口写，手动跑不覆盖它。
 
 **多个对话模型（#322）**：默认对话模型连接仍是运行环境文件里的 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。要给用户开放更多对话模型，在同一文件加 `LLM_CONNECTIONS=<ID>,<ID>`，并为每个 `<ID>` 显式写 `<ID>_BASE_URL`、`<ID>_API_KEY`、`<ID>_MODEL`（可选 `<ID>_CONTEXT_WINDOW_TOKENS`）；统一网关下每个地址都写同一个网关 URL，不设跨连接的别名或回落。完整规则见 [Provider 配置](provider-configuration.md#多个对话模型连接--multiple-chat-model-connections)。改完只重建本栈的 `art-ai-go` 服务，然后在管理后台「LLM 设置」点「测试连接」核对连通性与读图，再设置默认模型和开放的档位；设置按版本保存在数据库，跨发布保留。
 
@@ -491,7 +491,7 @@ RECOVERY
 
 `dev-test` 主机上另有一个专用于门禁的 CI 目录和一次性容器，用法与规则见 [`dev_test.md`](../dev_test.md)「主机 CI」。这里只记运维事实，主机与路径只在本地环境文件里：
 
-- **入口**：`python3 scripts/host-ci/run.py <sha|HEAD>`，目标主机取环境 `dev-test` 的 `ssh`；CI 目录取该条目的可选字段 `"host_ci": {"dir": "<绝对路径>"}`（模板见 `deploy/environments.example.json`），缺省 `/var/lib/plinth-ci`。它必须与任何环境的 `root` 和 `protected_paths` 分开，`run.py` 会拒绝重叠。`release-env.py` 不读这个字段。
+- **入口**：`python3 scripts/host-ci/run.py <sha|HEAD>`，目标主机取环境 `dev-test` 的 `ssh`；CI 目录取该条目的可选字段 `"host_ci": {"dir": "<绝对路径>"}`（模板见 `deploy/environments.example.json`），缺省 `/var/lib/plinth-ci`。它必须与同一主机上任何环境的 `root` 和 `protected_paths` 分开，`run.py` 会拒绝重叠；唯一例外是 `dev-test` 自己发布根下的 `<root>/ci`（只允许在项目目录内写入的主机用），发布步骤不触碰该目录，但它仍不得与 `protected_paths` 重叠。`release-env.py` 不读这个字段。
 - **目录**：`<CI 目录>/.lock`（槽位 0）、`.lock-<k>`（槽位 k，仅在 `slots` > 1 时用到）、`.maint.lock`（构建与保留的短时维护锁）、`run/<run id>/`（本次 bundle 与工作目录，结束即删）、`results/<run id>/`（结果 JSON、容器日志、重试证据，保留最近 10 次）。
 - **对象**：容器带标签 `plinth.host-ci=1`、`plinth.host-ci.run=<run id>`、`plinth.host-ci.slot=<k>`，名称 `plinth-ci-<run id>-aN`；镜像名 `plinth-ci:<12 位 hash>`，保留最新 2 个。与 Plinth 栈和同机其他业务的 Compose 项目、容器、卷、镜像互不相干；它们不在这套清理的范围内。
 - **开跑条件**：`MemAvailable` ≥ 11 GiB（容器上限 10 GiB 加 1 GiB 余量，可配置）加上其他正在运行的 host-ci 容器还可能占用的余量，CI 目录与 Docker 根目录所在磁盘各 ≥ 10 GiB 空闲。同机其他业务忙时可能不满足，此时工具以退出码 70 停下，不会强行启动；这不是故障，等资源恢复后重跑。运行期间宿主 `MemAvailable` 若跌破 2 GiB 下限，工具会杀掉自己的容器并以退出码 70、状态 `host_memory_low` 结束（该保护用于避免共用主机出现主机级 OOM，见 `docs/history.md`）。并行槽位默认 1，`slots` 调大（最多 4）是显式选择，只应在已记录的 `memory_peak_bytes` 和主机剩余内存足以同时容纳多个运行时才这样做。
